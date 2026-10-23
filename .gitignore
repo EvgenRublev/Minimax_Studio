@@ -35,6 +35,9 @@ next-env.d.ts
 # logs
 *.log
 
+# installer cache (скачанные архивы установщика)
+/.install-cache/
+
 # ComfyUI portable install (copied separately, huge)
 /ComfyUI-Easy-Install
 
