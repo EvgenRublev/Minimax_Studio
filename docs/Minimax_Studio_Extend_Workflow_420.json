@@ -1,0 +1,1482 @@
+{
+  "17": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Duration (seconds)"
+    }
+  },
+  "101": {
+    "inputs": {
+      "image": "Айтек.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference 1"
+    }
+  },
+  "46:30": {
+    "inputs": {
+      "unet_name": "minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Загрузить модель диффузии"
+    }
+  },
+  "46:15": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Загрузить CLIP"
+    }
+  },
+  "46:3": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE (video)"
+    }
+  },
+  "46:4": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE (audio)"
+    }
+  },
+  "46:43": {
+    "inputs": {
+      "head_chunks": 4,
+      "model": [
+        "46:30",
+        0
+      ]
+    },
+    "class_type": "MiniMaxLowVRAMAttention",
+    "_meta": {
+      "title": "Low VRAM Attention"
+    }
+  },
+  "46:40": {
+    "inputs": {
+      "chunks": 2,
+      "seq_threshold": 4096,
+      "model": [
+        "46:43",
+        0
+      ]
+    },
+    "class_type": "MiniMaxChunkFeedForward",
+    "_meta": {
+      "title": "Chunk FeedForward"
+    }
+  },
+  "46:36": {
+    "inputs": {
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "46:40",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Загрузчик LoRA (Turbo)"
+    }
+  },
+  "46:38": {
+    "inputs": {
+      "shift_video": 12,
+      "shift_audio": 3,
+      "model": [
+        "46:36",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3SigmaShift",
+    "_meta": {
+      "title": "Sigma Shift"
+    }
+  },
+  "46:37": {
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "46:38",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "Attention Backend"
+    }
+  },
+  "46:18a": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSampler клипов (euler)"
+    }
+  },
+  "46:19": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Frames Calculation"
+    }
+  },
+  "extpv": {
+    "inputs": {
+      "model": [
+        "46:37",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ],
+      "tiny_vae": "taeh3.safetensors",
+      "max_resolution": 1024,
+      "jpeg_quality": 80,
+      "suppress_default_preview": true,
+      "preview_frames": [
+        "46:19",
+        1
+      ],
+      "preview_fps": 6
+    },
+    "class_type": "ModelPreviewOverrideKJ",
+    "_meta": {
+      "title": "Model Preview Override"
+    }
+  },
+  "extv_load": {
+    "inputs": {
+      "video": "1791679788003-14a5006a-Minimax_Studio_00003-audio.mp4",
+      "force_rate": 24,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Загрузить видео (источник, 24 fps)"
+    }
+  },
+  "extv_cnt": {
+    "inputs": {
+      "image": [
+        "extv_load",
+        0
+      ]
+    },
+    "class_type": "GetImageSizeAndCount",
+    "_meta": {
+      "title": "Кадров в исходнике"
+    }
+  },
+  "extv_tailn": {
+    "inputs": {
+      "value": 56
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Хвост (кадры)"
+    }
+  },
+  "extv_tailidx": {
+    "inputs": {
+      "expression": "max(0, a - b)",
+      "values.a": [
+        "extv_cnt",
+        3
+      ],
+      "values.b": [
+        "extv_tailn",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Индекс хвоста"
+    }
+  },
+  "extv_tail": {
+    "inputs": {
+      "image": [
+        "extv_load",
+        0
+      ],
+      "batch_index": [
+        "extv_tailidx",
+        1
+      ],
+      "length": 56
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Хвост исходника"
+    }
+  },
+  "extv_tres": {
+    "inputs": {
+      "image": [
+        "extv_tail",
+        0
+      ],
+      "width": 1120,
+      "height": 480,
+      "upscale_method": "lanczos",
+      "keep_proportion": "stretch",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu"
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Хвост → 1120×480 (канва Extender)"
+    }
+  },
+  "extv_fres": {
+    "inputs": {
+      "image": [
+        "extv_load",
+        0
+      ],
+      "width": 1120,
+      "height": 480,
+      "upscale_method": "lanczos",
+      "keep_proportion": "stretch",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu"
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Исходник-реф → 1120×480 (весь клин)"
+    }
+  },
+  "extv_tenc": {
+    "inputs": {
+      "pixels": [
+        "extv_tres",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE-кодирование хвоста (видео)"
+    }
+  },
+  "extv_asl_seed": {
+    "inputs": {
+      "audio": [
+        "extv_load",
+        2
+      ],
+      "start_seconds": -2.3333
+    },
+    "class_type": "MiniMaxH3AudioSliceFrom",
+    "_meta": {
+      "title": "Аудио-хвост 2.33 с"
+    }
+  },
+  "extv_taenc": {
+    "inputs": {
+      "audio": [
+        "extv_asl_seed",
+        0
+      ],
+      "vae": [
+        "46:4",
+        0
+      ]
+    },
+    "class_type": "VAEEncodeAudio",
+    "_meta": {
+      "title": "VAE-кодирование аудио"
+    }
+  },
+  "extv_seed": {
+    "inputs": {
+      "video_latent": [
+        "extv_tenc",
+        0
+      ],
+      "audio_latent": [
+        "extv_taenc",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "AV-латент хвоста (seed)"
+    }
+  },
+  "ext_srcload": {
+    "inputs": {
+      "latent": "latents/Minimax_Studio_00003_.latent"
+    },
+    "class_type": "MiniMaxStudioLoadAVLatent",
+    "_meta": {
+      "title": "Латент исходника (первозданный)"
+    }
+  },
+  "ext_srclsep": {
+    "inputs": {
+      "av_latent": [
+        "ext_srcload",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Разделение латента исходника"
+    }
+  },
+  "extv_ssep": {
+    "inputs": {
+      "av_latent": [
+        "extv_seed",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Разделение латента хвоста"
+    }
+  },
+  "ext_cond_0": {
+    "inputs": {
+      "prompt": "[Video Continuation] A direct, seamless continuation of <Video 1> starting precisely from its final frame. The camera movement, subject position, clothing, and environment maintain identical continuity without cuts or jumps.\n\n[Audio Continuation] The stereo sound design and ambient audio flow seamlessly forward, preserving the exact vocal timbre, speaking rhythm and background track dynamics without interruption or re-triggering. The character continues speaking and moving naturally as the timeline progresses.\n\n[Shot 1]\nTarget video is a seamless continuation of <Video 1>. First frame of [Shot 1] is the last frame of <Video 1>.\n\n<Video 1> The guy <Picture 1> shifts his gaze into the distance and continues smoking. You are continuing the reference video <Video 1>: keep the exact same scene, location, environment, lighting and time of day as shown in <Video 1>; the same characters with the same appearance and clothing. Continue exactly the same camera angle, framing and camera movement as the reference video; keep the same subject position and shot. Do not change the location, do not introduce a new setting or new characters, do not cut to a new shot.",
+      "width": 1120,
+      "height": 480,
+      "length": 192,
+      "ref_image_size": "max",
+      "clip": [
+        "46:15",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ],
+      "audio_vae": [
+        "46:4",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "101",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "extv_fres",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "Conditioning клип 1 (192 кадров)"
+    }
+  },
+  "ext_empty_0": {
+    "inputs": {
+      "width": 1120,
+      "height": 480,
+      "length": 192
+    },
+    "class_type": "EmptyMiniMaxH3LatentAV",
+    "_meta": {
+      "title": "Пустой AV-латент клип 1"
+    }
+  },
+  "ext_esep_0": {
+    "inputs": {
+      "av_latent": [
+        "ext_empty_0",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Separate пустого латента 1"
+    }
+  },
+  "ext_vold_0": {
+    "inputs": {
+      "samples": [
+        "extv_ssep",
+        0
+      ],
+      "dim": "t",
+      "index": -17,
+      "amount": 17
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Хвост прошлого (видео) 1: 17 ток."
+    }
+  },
+  "ext_vcat_0": {
+    "inputs": {
+      "samples1": [
+        "ext_vold_0",
+        0
+      ],
+      "samples2": [
+        "ext_esep_0",
+        0
+      ],
+      "dim": "t"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Concat видео 1"
+    }
+  },
+  "ext_mb_0": {
+    "inputs": {
+      "width": 70,
+      "height": 30,
+      "batch_size": 17,
+      "color": 0
+    },
+    "class_type": "EmptyImage",
+    "_meta": {
+      "title": "Маска: чёрная 17"
+    }
+  },
+  "ext_mw_0": {
+    "inputs": {
+      "width": 70,
+      "height": 30,
+      "batch_size": 40,
+      "color": 16777215
+    },
+    "class_type": "EmptyImage",
+    "_meta": {
+      "title": "Маска: белая 40"
+    }
+  },
+  "ext_mbat_0": {
+    "inputs": {
+      "inputcount": 2,
+      "image_1": [
+        "ext_mb_0",
+        0
+      ],
+      "image_2": [
+        "ext_mw_0",
+        0
+      ]
+    },
+    "class_type": "ImageBatchMulti",
+    "_meta": {
+      "title": "Маска видео 1"
+    }
+  },
+  "ext_vmask_0": {
+    "inputs": {
+      "image": [
+        "ext_mbat_0",
+        0
+      ],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "ImageToMask 1"
+    }
+  },
+  "ext_vset_0": {
+    "inputs": {
+      "samples": [
+        "ext_vtrim_0",
+        0
+      ],
+      "mask": [
+        "ext_vmask_0",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Noise mask видео 1"
+    }
+  },
+  "ext_vtrim_0": {
+    "inputs": {
+      "samples": [
+        "ext_vcat_0",
+        0
+      ],
+      "dim": "t",
+      "index": 0,
+      "amount": 57
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Trim видео 1 → 57 ток."
+    }
+  },
+  "ext_aold_0": {
+    "inputs": {
+      "samples": [
+        "extv_ssep",
+        1
+      ],
+      "dim": "x",
+      "index": -93,
+      "amount": 93
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Хвост прошлого (аудио) 1: 93"
+    }
+  },
+  "ext_acat_0": {
+    "inputs": {
+      "samples1": [
+        "ext_aold_0",
+        0
+      ],
+      "samples2": [
+        "ext_esep_0",
+        1
+      ],
+      "dim": "x"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Concat аудио 1"
+    }
+  },
+  "ext_amb_0": {
+    "inputs": {
+      "value": 0,
+      "width": 320,
+      "height": 2
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "Аудио-маска: чёрная канва 320"
+    }
+  },
+  "ext_amw_0": {
+    "inputs": {
+      "value": 1,
+      "width": 227,
+      "height": 2
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "Аудио-маска: белая 227"
+    }
+  },
+  "ext_amask_0": {
+    "inputs": {
+      "destination": [
+        "ext_amb_0",
+        0
+      ],
+      "source": [
+        "ext_amw_0",
+        0
+      ],
+      "x": 93,
+      "y": 0,
+      "operation": "add"
+    },
+    "class_type": "MaskComposite",
+    "_meta": {
+      "title": "Аудио-маска 1: 93 чёрных + 227 белых"
+    }
+  },
+  "ext_aset_0": {
+    "inputs": {
+      "samples": [
+        "ext_atrim_0",
+        0
+      ],
+      "mask": [
+        "ext_amask_0",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Noise mask аудио 1"
+    }
+  },
+  "ext_atrim_0": {
+    "inputs": {
+      "samples": [
+        "ext_acat_0",
+        0
+      ],
+      "dim": "x",
+      "index": 0,
+      "amount": 320
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Trim аудио 1 → 320"
+    }
+  },
+  "ext_join_0": {
+    "inputs": {
+      "video_latent": [
+        "ext_vset_0",
+        0
+      ],
+      "audio_latent": [
+        "ext_aset_0",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "AV-латент клип 1"
+    }
+  },
+  "ext_sched_0": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 4,
+      "denoise": 1,
+      "model": [
+        "46:30",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "Scheduler клип 1"
+    }
+  },
+  "ext_g_0": {
+    "inputs": {
+      "model": [
+        "extpv",
+        0
+      ],
+      "conditioning": [
+        "ext_cond_0",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Guider клип 1"
+    }
+  },
+  "ext_samp_0": {
+    "inputs": {
+      "noise": [
+        "ext_noise_0",
+        0
+      ],
+      "guider": [
+        "ext_g_0",
+        0
+      ],
+      "sampler": [
+        "46:18a",
+        0
+      ],
+      "sigmas": [
+        "ext_sched_0",
+        0
+      ],
+      "latent_image": [
+        "ext_join_0",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "Сэмплер клип 1 (latent masking)"
+    }
+  },
+  "ext_noise_0": {
+    "inputs": {
+      "noise_seed": 346345556
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "Шум клип 1"
+    }
+  },
+  "ext_ssep_0": {
+    "inputs": {
+      "av_latent": [
+        "ext_samp_0",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Separate выхода 1"
+    }
+  },
+  "ext_decv_0": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decode Video (клип 1)"
+    }
+  },
+  "ext_sl_0": {
+    "inputs": {
+      "images": [
+        "ext_decv_0",
+        0
+      ],
+      "start_index": 39,
+      "num_frames": 4096
+    },
+    "class_type": "GetImageRangeFromBatch",
+    "_meta": {
+      "title": "Срез окна: от 39 (шов 17 кадров)"
+    }
+  },
+  "ext_deca_0": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        1
+      ],
+      "vae": [
+        "46:4",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "Decode Audio (клип 1)"
+    }
+  },
+  "ext_asl_0": {
+    "inputs": {
+      "audio": [
+        "ext_deca_0",
+        0
+      ],
+      "start_seconds": 1.625
+    },
+    "class_type": "MiniMaxH3AudioSliceFrom",
+    "_meta": {
+      "title": "Аудио клипа: от 1.63 с (шов)"
+    }
+  },
+  "ext_out_0": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "Minimax_Studio_extclip_0",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 12,
+      "trim_to_audio": false,
+      "save_metadata": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "ext_sl_0",
+        0
+      ],
+      "audio": [
+        "ext_asl_0",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine клип 1"
+    }
+  },
+  "ext_cond_1": {
+    "inputs": {
+      "prompt": "<Video 1> The guy <Picture 1> keeps smoking slowly into the distance and continues smoking. You are continuing the reference video <Video 1>: keep the exact same scene, location, environment, lighting and time of day as shown in <Video 1>; the same characters with the same appearance and clothing. Continue exactly the same camera angle, framing and camera movement as the reference video; keep the same subject position and shot. Do not change the location, do not introduce a new setting or new characters, do not cut to a new shot.",
+      "width": 1120,
+      "height": 480,
+      "length": 192,
+      "ref_image_size": "max",
+      "clip": [
+        "46:15",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ],
+      "audio_vae": [
+        "46:4",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "101",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "extv_fres",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "Conditioning клип 2 (192 кадров)"
+    }
+  },
+  "ext_empty_1": {
+    "inputs": {
+      "width": 1120,
+      "height": 480,
+      "length": 192
+    },
+    "class_type": "EmptyMiniMaxH3LatentAV",
+    "_meta": {
+      "title": "Пустой AV-латент клип 2"
+    }
+  },
+  "ext_esep_1": {
+    "inputs": {
+      "av_latent": [
+        "ext_empty_1",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Separate пустого латента 2"
+    }
+  },
+  "ext_vold_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        0
+      ],
+      "dim": "t",
+      "index": -17,
+      "amount": 17
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Хвост прошлого (видео) 2: 17 ток."
+    }
+  },
+  "ext_vcat_1": {
+    "inputs": {
+      "samples1": [
+        "ext_vold_1",
+        0
+      ],
+      "samples2": [
+        "ext_esep_1",
+        0
+      ],
+      "dim": "t"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Concat видео 2"
+    }
+  },
+  "ext_mb_1": {
+    "inputs": {
+      "width": 70,
+      "height": 30,
+      "batch_size": 17,
+      "color": 0
+    },
+    "class_type": "EmptyImage",
+    "_meta": {
+      "title": "Маска: чёрная 17"
+    }
+  },
+  "ext_mw_1": {
+    "inputs": {
+      "width": 70,
+      "height": 30,
+      "batch_size": 40,
+      "color": 16777215
+    },
+    "class_type": "EmptyImage",
+    "_meta": {
+      "title": "Маска: белая 40"
+    }
+  },
+  "ext_mbat_1": {
+    "inputs": {
+      "inputcount": 2,
+      "image_1": [
+        "ext_mb_1",
+        0
+      ],
+      "image_2": [
+        "ext_mw_1",
+        0
+      ]
+    },
+    "class_type": "ImageBatchMulti",
+    "_meta": {
+      "title": "Маска видео 2"
+    }
+  },
+  "ext_vmask_1": {
+    "inputs": {
+      "image": [
+        "ext_mbat_1",
+        0
+      ],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "ImageToMask 2"
+    }
+  },
+  "ext_vset_1": {
+    "inputs": {
+      "samples": [
+        "ext_vtrim_1",
+        0
+      ],
+      "mask": [
+        "ext_vmask_1",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Noise mask видео 2"
+    }
+  },
+  "ext_vtrim_1": {
+    "inputs": {
+      "samples": [
+        "ext_vcat_1",
+        0
+      ],
+      "dim": "t",
+      "index": 0,
+      "amount": 57
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Trim видео 2 → 57 ток."
+    }
+  },
+  "ext_aold_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        1
+      ],
+      "dim": "x",
+      "index": -93,
+      "amount": 93
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Хвост прошлого (аудио) 2: 93"
+    }
+  },
+  "ext_acat_1": {
+    "inputs": {
+      "samples1": [
+        "ext_aold_1",
+        0
+      ],
+      "samples2": [
+        "ext_esep_1",
+        1
+      ],
+      "dim": "x"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Concat аудио 2"
+    }
+  },
+  "ext_amb_1": {
+    "inputs": {
+      "value": 0,
+      "width": 320,
+      "height": 2
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "Аудио-маска: чёрная канва 320"
+    }
+  },
+  "ext_amw_1": {
+    "inputs": {
+      "value": 1,
+      "width": 227,
+      "height": 2
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "Аудио-маска: белая 227"
+    }
+  },
+  "ext_amask_1": {
+    "inputs": {
+      "destination": [
+        "ext_amb_1",
+        0
+      ],
+      "source": [
+        "ext_amw_1",
+        0
+      ],
+      "x": 93,
+      "y": 0,
+      "operation": "add"
+    },
+    "class_type": "MaskComposite",
+    "_meta": {
+      "title": "Аудио-маска 2: 93 чёрных + 227 белых"
+    }
+  },
+  "ext_aset_1": {
+    "inputs": {
+      "samples": [
+        "ext_atrim_1",
+        0
+      ],
+      "mask": [
+        "ext_amask_1",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Noise mask аудио 2"
+    }
+  },
+  "ext_atrim_1": {
+    "inputs": {
+      "samples": [
+        "ext_acat_1",
+        0
+      ],
+      "dim": "x",
+      "index": 0,
+      "amount": 320
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Trim аудио 2 → 320"
+    }
+  },
+  "ext_join_1": {
+    "inputs": {
+      "video_latent": [
+        "ext_vset_1",
+        0
+      ],
+      "audio_latent": [
+        "ext_aset_1",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "AV-латент клип 2"
+    }
+  },
+  "ext_sched_1": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 4,
+      "denoise": 1,
+      "model": [
+        "46:30",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "Scheduler клип 2"
+    }
+  },
+  "ext_g_1": {
+    "inputs": {
+      "model": [
+        "extpv",
+        0
+      ],
+      "conditioning": [
+        "ext_cond_1",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Guider клип 2"
+    }
+  },
+  "ext_samp_1": {
+    "inputs": {
+      "noise": [
+        "ext_noise_1",
+        0
+      ],
+      "guider": [
+        "ext_g_1",
+        0
+      ],
+      "sampler": [
+        "46:18a",
+        0
+      ],
+      "sigmas": [
+        "ext_sched_1",
+        0
+      ],
+      "latent_image": [
+        "ext_join_1",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "Сэмплер клип 2 (latent masking)"
+    }
+  },
+  "ext_noise_1": {
+    "inputs": {
+      "noise_seed": 346345557
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "Шум клип 2"
+    }
+  },
+  "ext_ssep_1": {
+    "inputs": {
+      "av_latent": [
+        "ext_samp_1",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Separate выхода 2"
+    }
+  },
+  "ext_decv_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_1",
+        0
+      ],
+      "vae": [
+        "46:3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decode Video (клип 2)"
+    }
+  },
+  "ext_sl_1": {
+    "inputs": {
+      "images": [
+        "ext_decv_1",
+        0
+      ],
+      "start_index": 56,
+      "num_frames": 4096
+    },
+    "class_type": "GetImageRangeFromBatch",
+    "_meta": {
+      "title": "Срез preserved-головы (56 кадров)"
+    }
+  },
+  "ext_deca_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_1",
+        1
+      ],
+      "vae": [
+        "46:4",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "Decode Audio (клип 2)"
+    }
+  },
+  "ext_asl_1": {
+    "inputs": {
+      "audio": [
+        "ext_deca_1",
+        0
+      ],
+      "start_seconds": 2.3333
+    },
+    "class_type": "MiniMaxH3AudioSliceFrom",
+    "_meta": {
+      "title": "Аудио клипа: от 2.33 с"
+    }
+  },
+  "ext_out_1": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "Minimax_Studio_extclip_1",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 12,
+      "trim_to_audio": false,
+      "save_metadata": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "ext_sl_1",
+        0
+      ],
+      "audio": [
+        "ext_asl_1",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine клип 2"
+    }
+  },
+  "ext_ljsrc_v": {
+    "inputs": {
+      "samples": [
+        "ext_srclsep",
+        0
+      ],
+      "dim": "t",
+      "index": 0,
+      "amount": 32
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: исходник[:107] (видео)"
+    }
+  },
+  "ext_ljsrc_a": {
+    "inputs": {
+      "samples": [
+        "ext_srclsep",
+        1
+      ],
+      "dim": "x",
+      "index": 0,
+      "amount": 178
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: исходник[:107] (аудио)"
+    }
+  },
+  "ext_ljc_v_0": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        0
+      ],
+      "dim": "t",
+      "index": 12,
+      "amount": 4096
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: клип 1[от 39 кадра] (видео)"
+    }
+  },
+  "ext_ljc_a_0": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_0",
+        1
+      ],
+      "dim": "x",
+      "index": 65,
+      "amount": 4096
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: клип 1 (аудио)"
+    }
+  },
+  "ext_lj_v_0": {
+    "inputs": {
+      "samples1": [
+        "ext_ljsrc_v",
+        0
+      ],
+      "samples2": [
+        "ext_ljc_v_0",
+        0
+      ],
+      "dim": "t"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Итог: конкат видео ← клип 1"
+    }
+  },
+  "ext_lj_a_0": {
+    "inputs": {
+      "samples1": [
+        "ext_ljsrc_a",
+        0
+      ],
+      "samples2": [
+        "ext_ljc_a_0",
+        0
+      ],
+      "dim": "x"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Итог: конкат аудио ← клип 1"
+    }
+  },
+  "ext_ljc_v_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_1",
+        0
+      ],
+      "dim": "t",
+      "index": 17,
+      "amount": 4096
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: клип 2[от 56 кадра] (видео)"
+    }
+  },
+  "ext_ljc_a_1": {
+    "inputs": {
+      "samples": [
+        "ext_ssep_1",
+        1
+      ],
+      "dim": "x",
+      "index": 93,
+      "amount": 4096
+    },
+    "class_type": "LatentCut",
+    "_meta": {
+      "title": "Итог: клип 2 (аудио)"
+    }
+  },
+  "ext_lj_v_1": {
+    "inputs": {
+      "samples1": [
+        "ext_lj_v_0",
+        0
+      ],
+      "samples2": [
+        "ext_ljc_v_1",
+        0
+      ],
+      "dim": "t"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Итог: конкат видео ← клип 2"
+    }
+  },
+  "ext_lj_a_1": {
+    "inputs": {
+      "samples1": [
+        "ext_lj_a_0",
+        0
+      ],
+      "samples2": [
+        "ext_ljc_a_1",
+        0
+      ],
+      "dim": "x"
+    },
+    "class_type": "LatentConcat",
+    "_meta": {
+      "title": "Итог: конкат аудио ← клип 2"
+    }
+  },
+  "ext_ljoin": {
+    "inputs": {
+      "video_latent": [
+        "ext_lj_v_1",
+        0
+      ],
+      "audio_latent": [
+        "ext_lj_a_1",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "AV-латент итога продления"
+    }
+  },
+  "ext_lsave": {
+    "inputs": {
+      "samples": [
+        "ext_ljoin",
+        0
+      ],
+      "filename_prefix": "latents/Minimax_Studio_combined",
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "MiniMaxStudioSaveAVLatent",
+    "_meta": {
+      "title": "Save AV Latent (итог продления → lossless-рефайн)"
+    }
+  }
+}

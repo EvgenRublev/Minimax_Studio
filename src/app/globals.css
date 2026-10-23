@@ -1,0 +1,612 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *, .dark-gray *, .dark-calm *)); /* (правка 61) тема «Аврора» удалена; (правка 441) + «Студия» (dark-calm) */
+
+/* System font stacks — defined locally so the build works fully offline
+   (no Google Fonts fetch at build time, required for portable/offline use).
+   Cross-platform: Windows (Segoe UI / Consolas / Cascadia),
+   macOS (-apple-system / SF Mono), Linux (Roboto / Liberation Mono / Menlo). */
+:root {
+  --font-geist-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-geist-mono: ui-monospace, "SF Mono", "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-creative: var(--creative);
+  --color-creative-foreground: var(--creative-foreground);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #f0f0f3;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #0891b2;
+  --primary-foreground: #ffffff;
+  --secondary: #e8e8ec;
+  --secondary-foreground: #18181b;
+  --muted: #e8e8ec;
+  --muted-foreground: #6b6b80;
+  --accent: #cffafe;
+  --accent-foreground: #155e75;
+  --destructive: #ef4444;
+  /* (правка 717) Семантические акценты тостов. Раньше --success/--warning/--info
+     не существовали НИ В ОДНОЙ теме, а sonner.tsx ссылался на них в
+     color-mix(... , transparent) → значение становилось некорректным, и
+     цветные типы тостов не применялись (все выглядели одинаково). */
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+  --info: #0891b2;
+  --info-foreground: #ffffff;
+  --border: #d4d4d8;
+  --input: #d4d4d8;
+  --ring: #0891b2;
+  --chart-1: #06b6d4;
+  --chart-2: #8b5cf6;
+  --chart-3: #10b981;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #0891b2;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #cffafe;
+  --sidebar-accent-foreground: #155e75;
+  --sidebar-border: #e4e4e7;
+  --sidebar-ring: #0891b2;
+  --creative: #06b6d4;
+  --creative-foreground: #ffffff;
+
+  /* Surface levels — clear hierarchy in light mode */
+  --surface-0: #e8e8ec;
+  --surface-1: #f5f5f7;
+  --surface-2: #ffffff;
+  --surface-3: #ededee;
+  --surface-4: #e0e0e5;
+  /* (правка 717) Плашка тостов — серая (в светлой теме --surface-2 белый,
+     а нужна именно серая подложка под текст). */
+  --toast-surface: #e6e6ec;
+
+  /* (правка 97) Акценты экрана-заставки — приглушённые для светлой темы */
+  --splash-a: #d97706;
+  --splash-b: #7c3aed;
+  --splash-c: #0891b2;
+  --splash-glow: rgba(217, 119, 6, 0.25);
+}
+
+.dark {
+  /* (правка 97) Акценты заставки — яркие на глубоком фоне */
+  --splash-a: #f59e0b;
+  --splash-b: #8b5cf6;
+  --splash-c: #06b6d4;
+  --splash-glow: rgba(245, 158, 11, 0.35);
+  --background: #07070c;
+  --foreground: #e8e8ed;
+  --card: #101018;
+  --card-foreground: #e8e8ed;
+  --popover: #101018;
+  --popover-foreground: #e8e8ed;
+  --primary: #06b6d4;
+  --primary-foreground: #04121a;
+  --secondary: #17212c;
+  --secondary-foreground: #e8e8ed;
+  --muted: #141420;
+  --muted-foreground: #6b7280;
+  --accent: #12212e;
+  --accent-foreground: #e8e8ed;
+  --destructive: #ef4444;
+  /* (правка 717) Семантические акценты тостов — см. :root */
+  --success: #22c55e;
+  --success-foreground: #04121a;
+  --warning: #f59e0b;
+  --warning-foreground: #04121a;
+  --info: #38bdf8;
+  --info-foreground: #04121a;
+  --border: rgba(255, 255, 255, 0.07);
+  --input: rgba(255, 255, 255, 0.09);
+  --ring: #06b6d4;
+  --chart-1: #06b6d4;
+  --chart-2: #8b5cf6;
+  --chart-3: #10b981;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --sidebar: #0a0c10;
+  --sidebar-foreground: #e8e8ed;
+  --sidebar-primary: #06b6d4;
+  --sidebar-primary-foreground: #04121a;
+  --sidebar-accent: #12212e;
+  --sidebar-accent-foreground: #e8e8ed;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-ring: #06b6d4;
+  --creative: #06b6d4;
+  --creative-foreground: #04121a;
+
+  /* Surface levels */
+  --surface-0: #07070c;
+  --surface-1: #0a0c11;
+  --surface-2: #10141c;
+  --surface-3: #161c27;
+  --surface-4: #1e2634;
+  /* (правка 717) Плашка тостов — серая подложка темы */
+  --toast-surface: #1a1f28;
+}
+
+.dark-gray {
+  /* (правка 97) Акценты заставки — чуть спокойнее, под серую тему */
+  --splash-a: #f59e0b;
+  --splash-b: #a78bfa;
+  --splash-c: #22d3ee;
+  --splash-glow: rgba(245, 158, 11, 0.28);
+  --background: #1c1c20;
+  --foreground: #e8e8ec;
+  --card: #252529;
+  --card-foreground: #e8e8ec;
+  --popover: #2b2b31;
+  --popover-foreground: #e8e8ec;
+  --primary: #06b6d4;
+  --primary-foreground: #04121a;
+  --secondary: #2e2e34;
+  --secondary-foreground: #e8e8ec;
+  --muted: #2a2a30;
+  --muted-foreground: #9a9aa4;
+  --accent: #33333a;
+  --accent-foreground: #e8e8ec;
+  --destructive: #ef4444;
+  /* (правка 717) Семантические акценты тостов — см. :root */
+  --success: #34d399;
+  --success-foreground: #04121a;
+  --warning: #fbbf24;
+  --warning-foreground: #1c1917;
+  --info: #22d3ee;
+  --info-foreground: #04121a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #06b6d4;
+  --chart-1: #06b6d4;
+  --chart-2: #8b5cf6;
+  --chart-3: #10b981;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --sidebar: #222226;
+  --sidebar-foreground: #e8e8ec;
+  --sidebar-primary: #06b6d4;
+  --sidebar-primary-foreground: #04121a;
+  --sidebar-accent: #33333a;
+  --sidebar-accent-foreground: #e8e8ec;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #06b6d4;
+  --creative: #06b6d4;
+  --creative-foreground: #04121a;
+
+  /* Surface levels — neutral gray, no blue tint */
+  --surface-0: #1c1c20;
+  --surface-1: #232328;
+  --surface-2: #2b2b32;
+  --surface-3: #33333a;
+  --surface-4: #3c3c44;
+  /* (правка 717) Плашка тостов — нейтрально-серая (тема «серая») */
+  --toast-surface: #2f2f36;
+}
+
+/* (правка 441) Тема «Студия»: ТЁПЛЫЙ графит (коричневато-умбровый подтон,
+   без холодной сини), тонкие тёплые hairline-границы, чуть крупные радиусы,
+   мягкий тёплый muted-текст. Рабочий акцент — янтарь (#f59e0b, из сплэша).
+   Cyan-утилиты перекрашены в янтарную шкалу на уровне токенов (см. ниже) —
+   компоненты не тронуты. */
+.dark-calm {
+  --radius: 0.75rem;
+  --splash-a: #f59e0b;
+  --splash-b: #a78bfa;
+  --splash-c: #fbbf24;
+  --splash-glow: rgba(245, 158, 11, 0.32);
+  --background: #131110;
+  --foreground: #ece8e2;
+  --card: #1b1815;
+  --card-foreground: #ece8e2;
+  --popover: #1f1b18;
+  --popover-foreground: #ece8e2;
+  --primary: #f59e0b;
+  --primary-foreground: #201404;
+  --secondary: #26211b;
+  --secondary-foreground: #ece8e2;
+  --muted: #1f1b17;
+  --muted-foreground: #a49d91;
+  --accent: #2a241d;
+  --accent-foreground: #ece8e2;
+  --destructive: #ef4444;
+  /* (правка 717) Семантические акценты тостов — тёплая шкала темы «Студия» */
+  --success: #6ee7a8;
+  --success-foreground: #201404;
+  --warning: #fbbf24;
+  --warning-foreground: #201404;
+  --info: #fcd34d;
+  --info-foreground: #201404;
+  --border: rgba(255, 240, 220, 0.06);
+  --input: rgba(255, 240, 220, 0.09);
+  --ring: #f59e0b;
+  --chart-1: #f59e0b;
+  --chart-2: #8b5cf6;
+  --chart-3: #10b981;
+  --chart-4: #fbbf24;
+  --chart-5: #ef4444;
+  --sidebar: #171412;
+  --sidebar-foreground: #ece8e2;
+  --sidebar-primary: #f59e0b;
+  --sidebar-primary-foreground: #201404;
+  --sidebar-accent: #2a241d;
+  --sidebar-accent-foreground: #ece8e2;
+  --sidebar-border: rgba(255, 240, 220, 0.06);
+  --sidebar-ring: #f59e0b;
+  --creative: #f59e0b;
+  --creative-foreground: #201404;
+
+  /* Surface levels — тёплая графитовая лестница */
+  --surface-0: #131110;
+  --surface-1: #181514;
+  --surface-2: #1f1b18;
+  --surface-3: #282219;
+  --surface-4: #322a1e;
+  /* (правка 717) Плашка тостов — тёплый графит (тема «Студия») */
+  --toast-surface: #26211c;
+
+  /* Перекраска cyan-шкалы Tailwind в янтарную: утилиты (text-cyan-500
+     и т.п.) ссылаются на эти переменные, поэтому в этой теме все
+     захардкоженные cyan-акценты становятся тёплыми без правок компонентов. */
+  --color-cyan-50: #fffbeb;
+  --color-cyan-100: #fef3c7;
+  --color-cyan-200: #fde68a;
+  --color-cyan-300: #fcd34d;
+  --color-cyan-400: #fbbf24;
+  --color-cyan-500: #f59e0b;
+  --color-cyan-600: #d97706;
+  --color-cyan-700: #b45309;
+  --color-cyan-800: #92400e;
+  --color-cyan-900: #78350f;
+  --color-cyan-950: #451a03;
+}
+
+/* Брендовый градиент в тёплой теме: янтарь → мягкий фиолет (как сплэш) */
+.dark-calm .gradient-creative {
+  background: linear-gradient(135deg, #f59e0b 0%, #a78bfa 100%);
+}
+
+.dark-calm .gradient-creative-text {
+  background: linear-gradient(135deg, #fbbf24 0%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dark-calm .glow-creative {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.16), 0 0 40px rgba(167, 139, 250, 0.07);
+}
+
+.dark-calm .glow-creative-sm {
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.1);
+}
+
+/* Скроллбар в тёплой теме — янтарный вместо cyan */
+.dark-calm ::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.28);
+}
+
+.dark-calm ::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.5);
+}
+
+/* Aurora-подложка в тёплой теме: янтарь/фиолет вместо cyan */
+.dark-calm .aurora-bg::before {
+  background:
+    radial-gradient(45% 55% at 20% 30%, rgba(245, 158, 11, 0.13), transparent 70%),
+    radial-gradient(40% 50% at 80% 20%, rgba(167, 139, 250, 0.12), transparent 70%),
+    radial-gradient(35% 45% at 55% 70%, rgba(251, 146, 60, 0.07), transparent 70%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* (правка 564) UI не выделяется как HTML-страница: подписи, кнопки, панели,
+     галерея — никаким выделением текста. Выделение ОСТАЁТСЯ только там, где
+     оно предусмотрено: поля ввода/текстерии/contenteditable и контейнеры с
+     классом .select-text (сообщения чата ассистента, метаданные, обучение,
+     ответы модели). */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  input,
+  textarea,
+  [contenteditable='true'],
+  .select-text {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  /* (правка 564) Целиком-невыделяемые элементы внутри .select-text
+     (кнопки в пузырях чата) — не участвуют в выделении текста. */
+  .select-text button {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* (правка 446/451) Цепочка высоты html→body→корень (h-full в page.tsx) —
+     корневой flex-лейаут не опирается на 100vh/100vw; overflow:hidden —
+     приложение фиксировано по вьюпорту, скроллятся только внутренние панели. */
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+/* Custom scrollbar (правка 139) — тоньше, чтобы не «выходить» за рамки полей ввода */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+/* (правка 562) Шапка окна Electron (DesktopTitleBar): вся полоса — область
+   перетаскивания окна; интерактивные элементы внутри (если появятся) — no-drag. */
+.h3-titlebar {
+  -webkit-app-region: drag;
+}
+.h3-titlebar button,
+.h3-titlebar a,
+.h3-titlebar input,
+.h3-titlebar .h3-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.28);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.5);
+}
+
+/* Fix: ensure all dropdown/popover/select content has a solid background */
+[data-slot="select-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="popover-content"],
+[data-slot="dialog-content"],
+[data-slot="command-dialog"] {
+  background-color: var(--surface-3, #161c27) !important;
+  backdrop-filter: blur(12px);
+}
+
+/* Creative gradient backgrounds (violet → cyan, the H3 Studio identity) */
+.gradient-creative {
+  background: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
+}
+
+.gradient-creative-text {
+  background: linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(16, 16, 24, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+:root:not(.dark):not(.dark-gray):not(.dark-calm) .glass {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.glass-border {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:root:not(.dark):not(.dark-gray):not(.dark-calm) .glass-border {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Glow effects */
+.glow-creative {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.16), 0 0 40px rgba(124, 58, 237, 0.07);
+}
+
+.glow-creative-sm {
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.1);
+}
+
+/* Soft aurora backdrop — used behind hero/empty states */
+.aurora-bg {
+  position: relative;
+  isolation: isolate;
+}
+
+.aurora-bg::before {
+  content: "";
+  position: absolute;
+  inset: -30% -10% auto -10%;
+  height: 70%;
+  z-index: -1;
+  background:
+    radial-gradient(45% 55% at 20% 30%, rgba(124, 58, 237, 0.14), transparent 70%),
+    radial-gradient(40% 50% at 80% 20%, rgba(6, 182, 212, 0.13), transparent 70%),
+    radial-gradient(35% 45% at 55% 70%, rgba(16, 185, 129, 0.07), transparent 70%);
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+:root:not(.dark):not(.dark-gray):not(.dark-calm) .aurora-bg::before {
+  background:
+    radial-gradient(45% 55% at 20% 30%, rgba(124, 58, 237, 0.08), transparent 70%),
+    radial-gradient(40% 50% at 80% 20%, rgba(6, 182, 212, 0.08), transparent 70%);
+}
+
+/* Subtle pulse for generating state */
+@keyframes creative-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.creative-pulse {
+  animation: creative-pulse 2s ease-in-out infinite;
+}
+
+/* Slow ambient drift for decorative blobs */
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2%, -3%, 0) scale(1.06); }
+}
+
+.animate-drift {
+  animation: drift 14s ease-in-out infinite;
+}
+
+/* Range slider — full custom look for the duration control */
+input[type="range"] {
+  cursor: pointer;
+}
+
+/* Native select inside cards keeps the dark surface */
+select {
+  color-scheme: dark;
+}
+
+:root:not(.dark):not(.dark-gray):not(.dark-calm) select {
+  color-scheme: light;
+}
+
+/* ── Тосты (правка 717) ──────────────────────────────────────────────
+   Прежние правила опирались на класс .sonner-toast, которого в sonner 2.0.8
+   НЕТ: тост помечается АТРИБУТОМ [data-sonner-toast]. Поэтому весь старый
+   блок был мёртвым (opacity 0.85, blur и размеры не применялись), а
+   полупрозрачность задавалась только CSS-переменными в sonner.tsx.
+
+   Теперь:
+   • серая НЕПРОЗРАЧНАЯ плашка по теме приложения (--toast-surface);
+   • кнопка закрытия ВНУТРИ плашки, мелкая, появляется только при наведении;
+   • тип тоста (ошибка/успех/предупреждение) читается по цвету иконки. */
+[data-sonner-toast] {
+  font-size: 12px !important;
+  padding: 8px 10px !important;
+  /* место под кнопку закрытия (она появляется при наведении) */
+  padding-right: 28px !important;
+  max-width: 300px !important;
+  border-radius: 8px !important;
+  gap: 6px !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  background: var(--toast-surface) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24) !important;
+}
+:root:not(.dark):not(.dark-gray):not(.dark-calm) [data-sonner-toast] {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+}
+[data-sonner-toast] [data-title] {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--foreground) !important;
+}
+[data-sonner-toast] [data-description] {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  /* (правка 717) Смесь foreground с подложкой, а НЕ --muted-foreground:
+     в тёмной теме muted-foreground давал ~3.5:1 на плашке — мелкий текст
+     (11px) читался плохо. Смесь даёт ~7:1 в тёмной и ~5.1:1 в светлой. */
+  color: color-mix(in srgb, var(--foreground) 75%, var(--toast-surface)) !important;
+}
+[data-sonner-toast] [data-icon] {
+  width: 16px !important;
+  height: 16px !important;
+}
+[data-sonner-toast] [data-icon] svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* Тип тоста — по цвету иконки (плашка всегда серая) */
+[data-sonner-toast][data-type="success"] [data-icon] { color: var(--success); }
+[data-sonner-toast][data-type="error"] [data-icon] { color: var(--destructive); }
+[data-sonner-toast][data-type="warning"] [data-icon] { color: var(--warning); }
+[data-sonner-toast][data-type="info"] [data-icon] { color: var(--primary); }
+
+/* Кнопка закрытия: ВНУТРИ плашки, мелкая, видна только при наведении */
+[data-sonner-toast] [data-close-button] {
+  position: absolute !important;
+  top: 4px !important;
+  right: 4px !important;
+  left: auto !important;
+  width: 18px !important;
+  height: 18px !important;
+  transform: none !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--muted-foreground) !important;
+  opacity: 0 !important;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease !important;
+}
+[data-sonner-toast]:hover [data-close-button],
+[data-sonner-toast]:focus-within [data-close-button] {
+  opacity: 1 !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: var(--surface-4) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+[data-sonner-toast] [data-close-button] svg {
+  width: 11px !important;
+  height: 11px !important;
+}

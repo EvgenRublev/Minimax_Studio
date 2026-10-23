@@ -1,0 +1,63 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+Thumbs.db
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files - keep .env (portable config), uncomment to ignore:
+# .env
+
+# (правка 587) Файл «nul» — ловушка Git Bash: `2>nul` в bash создаёт
+# literal-файл с зарезервированным именем Windows. Плюс журнал скрытых
+# ошибок запуска и локальный бэкап правок.
+nul
+start_error.log
+/.backup-before-fixes/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# logs
+*.log
+
+# ComfyUI portable install (copied separately, huge)
+/ComfyUI-Easy-Install
+
+# LLM-ассистент Bonsai 2 27B (докачивается на месте, huge)
+/Bonsai_2_27B
+
+# рабочие данные DLSS-моста (job-логи, артефакты рендера)
+/upscale/jobs/
+/upscale/logs/
+
+# locally staged reference uploads (ComfyUI offline fallback)
+/.local-input
+
+# python bytecode cache
+__pycache__/
+
+# bundled runtimes and binaries (hundreds of MB, не для git: GitHub не принимает файлы >100 МБ)
+/runtime/
+/stt/
+/upscale/bin/
+/tools/ck_pkg/
+
+# рабочие данные пользователя (загруженные видео, вложения чата)
+/data/upscale-input/
+/data/upscale-output/
+/data/chat-attachments/
