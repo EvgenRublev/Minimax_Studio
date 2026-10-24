@@ -1281,7 +1281,13 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
           'mode.width': final.genW,
           'mode.height': final.genH,
           align: 32,
+          // enable_chunking — вход старых версий ноды; новые версии (pinned
+          // 40316cf) переименовали его в enable_temporal_chunking и добавили
+          // обязательный force_unload. ComfyUI игнорирует лишние входы, поэтому
+          // отправляем оба имени — воркфлоу работает с любой версией ноды.
           enable_chunking: true, // (правка 68) было false — по запросу юзера
+          enable_temporal_chunking: true,
+          force_unload: true,
           device: 'cuda',
           precision: 'fp16',
           latent: ['46:35', 0],
@@ -2379,6 +2385,8 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
               // 431) — выход апскейлера получает чётный латент
               align: 16,
               enable_chunking: true,
+              enable_temporal_chunking: true,
+              force_unload: true,
               device: 'cuda',
               precision: 'fp16',
               latent: [`ext_ssep_${i}`, 0],
