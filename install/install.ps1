@@ -251,7 +251,7 @@ if (-not $SkipApp) {
     $checkVer = (& node --version 2>$null)
     if (-not $checkVer) { throw 'Node.js не запускается после установки.' }
 
-    $npmVersion = (& npm --version 2>$null)
+    $npmVersion = (& npm.cmd --version 2>$null)
     if (-not $npmVersion) {
         Warn 'npm не найден рядом с Node.js'
         throw 'npm недоступен. Установите Node.js 18+ с https://nodejs.org и запустите установщик снова.'
@@ -275,10 +275,10 @@ if (-not $SkipApp) {
 
         if (-not (Test-Path 'node_modules')) {
             Info 'npm ci - скачивается ~1.2 ГБ, займёт 5-15 минут'
-            & npm ci --no-audit --no-fund
+            & npm.cmd ci --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
                 Warn 'npm ci не удался, пробую npm install'
-                & npm install --no-audit --no-fund
+                & npm.cmd install --no-audit --no-fund
                 if ($LASTEXITCODE -ne 0) { throw 'не удалось установить node-зависимости (npm).' }
             }
             Ok 'node_modules установлены'
@@ -293,7 +293,7 @@ if (-not $SkipApp) {
 
         if (-not (Test-Path '.next\BUILD_ID')) {
             Info 'npm run build - сборка Next.js, займёт 2-5 минут'
-            & npm run build
+            & npm.cmd run build
             if ($LASTEXITCODE -ne 0) { throw 'сборка приложения (npm run build) завершилась ошибкой.' }
             Ok 'сборка .next готова'
         } else {
@@ -315,7 +315,7 @@ $python = Join-Path $pythonDir 'python.exe'
 $script:Python = $python
 
 if (-not $SkipComfy) {
-    Step 4 8 'ComfyUI 0.33.0'
+    Step 4 8 'ComfyUI (сборка 5f0c4e1)'
 
     if ($Force -and (Test-Path $comfyApp)) {
         Info 'удаляю ComfyUI (-Force)'
@@ -324,8 +324,8 @@ if (-not $SkipComfy) {
 
     if (-not (Test-Path (Join-Path $comfyApp 'main.py'))) {
         if (Test-Path $comfyApp) { Remove-Item $comfyApp -Recurse -Force }
-        $zip = Join-Path $Cache 'ComfyUI-v0.33.0.zip'
-        Get-Download 'https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v0.33.0.zip' $zip
+        $zip = Join-Path $Cache 'ComfyUI-5f0c4e1.zip'
+        Get-Download 'https://github.com/comfyanonymous/ComfyUI/archive/5f0c4e18cb7e98f0e7c46c2c7ce928d641351e67.zip' $zip
         $tmp = Join-Path $Cache 'comfy-extract'
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         Expand-ZipSafe $zip $tmp
@@ -333,9 +333,34 @@ if (-not $SkipComfy) {
         if (-not (Test-Path $comfyRoot)) { New-Item -ItemType Directory -Force -Path $comfyRoot | Out-Null }
         Move-Item $inner.FullName $comfyApp
         Remove-Item $tmp -Recurse -Force
-        Ok 'ComfyUI 0.33.0 распакован'
+        Ok 'ComfyUI распакован'
     } else {
         Ok 'ComfyUI уже на месте'
+    }
+
+    # Патчи проекта поверх ядра ComfyUI. Применяются при каждом запуске установщика,
+    # поэтому повторный запуск чинит и уже испорченную установку.
+    # Без них не работает часть узлов MiniMax H3:
+    #   comfy/ldm/minimax/model.py      - слой to_gate_compress для VSA-весов,
+    #                                     minimax_h3_layout и block_index для Veda;
+    #   comfy/model_detection.py        - определение gate_compress в чекпоинтах VSA;
+    #   comfy_extras/nodes_minimax_h3.py - правки keyframe-latent (правки 146/149);
+    #   utils/extra_config.py           - списки путей в extra_model_paths.yaml
+    #                                     (студия пишет их именно списками).
+    $patchDir = Join-Path $InstallDir 'comfy-patches'
+    if (Test-Path $patchDir) {
+        $patched = 0
+        Get-ChildItem $patchDir -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($patchDir.Length).TrimStart('\')
+            $dest = Join-Path $comfyApp $rel
+            $destDir = Split-Path $dest -Parent
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+            Copy-Item $_.FullName $dest -Force
+            $patched++
+        }
+        Ok ('патчи проекта применены: ' + $patched + ' файл(а) ядра')
+    } else {
+        Warn 'папка install\comfy-patches не найдена: ядро ComfyUI останется без патчей проекта, узлы H3/VSA могут не работать.'
     }
 
     if ($Force -and (Test-Path $pythonDir)) {
@@ -349,16 +374,6 @@ if (-not $SkipComfy) {
         Get-Download 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip' $zip
         Expand-ZipSafe $zip $pythonDir
 
-        $pth = Get-ChildItem $pythonDir -Filter 'python*._pth' | Select-Object -First 1
-        if ($pth) {
-            $lines = @(Get-Content $pth.FullName)
-            $lines = $lines | ForEach-Object { $_ -replace '^#\s*import site', 'import site' }
-            if (-not ($lines | Where-Object { $_ -match '^Lib\\site-packages' })) {
-                $lines = @('Lib\site-packages') + $lines
-            }
-            [IO.File]::WriteAllLines($pth.FullName, $lines, (New-Object Text.ASCIIEncoding))
-        }
-
         $getpip = Join-Path $Cache 'get-pip.py'
         Get-Download 'https://bootstrap.pypa.io/get-pip.py' $getpip
         & $python $getpip --no-warn-script-location
@@ -366,6 +381,28 @@ if (-not $SkipComfy) {
         Ok 'Python 3.12.10 установлен'
     } else {
         Ok 'Python уже на месте'
+    }
+
+    # Патчим python312._pth при каждом запуске (а не только при первой установке).
+    # Строка ../ComfyUI обязательна: start.bat запускает python с ключом -I,
+    # который отключает добавление папки скрипта в sys.path, и без неё
+    # main.py падает с ModuleNotFoundError: No module named 'comfy'.
+    $pth = Get-ChildItem $pythonDir -Filter 'python*._pth' | Select-Object -First 1
+    if ($pth) {
+        $lines = @(Get-Content $pth.FullName)
+        $lines = @($lines | ForEach-Object { $_ -replace '^#\s*import site', 'import site' })
+        if (-not ($lines | Where-Object { $_ -match '^Lib[\\/]site-packages' })) {
+            $lines = @('Lib\site-packages') + $lines
+        }
+        if (-not ($lines | Where-Object { $_ -match '^\.\.[\\/]ComfyUI\s*$' })) {
+            $lines = @('../ComfyUI') + $lines
+        }
+        if ($lines -match '^\.\./ComfyUI\s*$') {
+            Ok 'python312._pth настроен (../ComfyUI + Lib\site-packages)'
+        } else {
+            Warn 'не удалось проверить python312._pth'
+        }
+        [IO.File]::WriteAllLines($pth.FullName, $lines, (New-Object Text.ASCIIEncoding))
     }
 
     # --- 5. библиотеки ---

@@ -10,7 +10,7 @@
 | 1 | Проверки: Windows x64, свободное место, интернет, драйвер NVIDIA |
 | 2 | Node.js 22 (портативный в `runtime\`) — если в системе нет 18+ |
 | 3 | `node_modules` (`npm ci`) + production-сборка `.next` |
-| 4 | ComfyUI **0.33.0** + Python **3.12.10** (embedded) |
+| 4 | ComfyUI (сборка `5f0c4e1` + патчи проекта) + Python **3.12.10** (embedded) |
 | 5 | torch **2.11.0+cu130** и 288 пакетов по зафиксированным версиям |
 | 6 | 22 кастомные ноды по зафиксированным коммитам + 3 собственные ноды студии |
 | 7 | Папки моделей, `extra_model_paths.yaml`, блокировка автообновления |
@@ -63,6 +63,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\install.ps1 -Force
 Их нужно скопировать с рабочей машины вручную: положить папки рядом с
 `start.bat`. Всё остальное (генерация, продление, refine, FPS, Face Refine,
 ControlNet, галерея) работает без них.
+
+## Версия ComfyUI и патчи проекта
+
+Ядро ComfyUI скачивается не из тега, а из конкретного коммита
+`5f0c4e18cb7e98f0e7c46c2c7ce928d641351e67` (25.08.2026) — именно на нём
+построена рабочая установка студии (`__version__` при этом остаётся `0.33.0`).
+
+Поверх ядра установщик при каждом запуске копирует 4 файла из
+`install/comfy-patches/`:
+
+| Файл | Зачем |
+| --- | --- |
+| `comfy/ldm/minimax/model.py` | слой `to_gate_compress` для VSA-весов, `minimax_h3_layout` и `block_index` для Veda sparse attention |
+| `comfy/model_detection.py` | определение `gate_compress` в VSA-чекпоинтах |
+| `comfy_extras/nodes_minimax_h3.py` | правки keyframe-latent (правки 146/149) |
+| `utils/extra_config.py` | списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
+
+Копирование идемпотентно: повторный запуск установщика восстанавливает патчи,
+даже если ComfyUI уже был установлен или обновлён.
 
 ## Если что-то пошло не так
 
