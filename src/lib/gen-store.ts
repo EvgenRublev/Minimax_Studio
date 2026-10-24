@@ -122,7 +122,7 @@ export interface VideoGenState {
    * В Extend это НЕ точка сплита: там один BasicScheduler на клип
    * (steps = это значение, denoise = 1, сплита нет вообще) — смысл другой,
    * чем в генерации. Значение по умолчанию 4 — как в эталонном extend-воркфлоу
-   * (docs/Minimax_Studio_Extend_Workflow_420.json: BasicScheduler steps=4).
+   * (BasicScheduler steps=4).
    * Вынесено в отдельное поле, чтобы смена дефолта точки сплита в
    * генерации не трогала продление.
    */
