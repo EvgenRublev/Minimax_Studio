@@ -121,12 +121,14 @@ export interface VideoGenState {
    *
    * В Extend это НЕ точка сплита: там один BasicScheduler на клип
    * (steps = это значение, denoise = 1, сплита нет вообще) — смысл другой,
-   * чем в генерации. Значение по умолчанию 4 — как в эталонном extend-воркфлоу
-   * (docs/Minimax_Studio_Extend_Workflow_420.json: BasicScheduler steps=4).
-   * Вынесено в отдельное поле, чтобы смена дефолта точки сплита в
-   * генерации не трогала продление.
+   * чем в генерации.
+   * undefined = «авто»: шаги первого прохода исходника из его .meta.json
+   * (продление продолжает видео — расписание клипа берётся из исходника),
+   * без меты — firstSamplerSteps. Явное значение (2–30) побеждает авто.
+   * (история: раньше поле из UI молча терялось в хуке и клипы всегда
+   * генерились с firstSamplerSteps — теперь поле реально доходит до шаблона)
    */
-  extendClipSteps: number
+  extendClipSteps?: number
   /** Draft pipeline: direct step count of the single pass (default 4 = turbo-эталон). */
   draftSteps: number
   /** Pass 2 sigma profile: '3step' | '4step' | '5step' | '6step' | '7step'. */
@@ -202,8 +204,8 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   // Всего шагов в расписании pass 1. По умолчанию столько же, сколько
   // забирает сплит, — «6 из 6». Можно увеличить (например, «6 из 8»).
   firstSamplerTotalSteps: 6,
-  // (правка 719) Шаги клипа продления — отдельное поле (эталон = 4).
-  extendClipSteps: 4,
+  // Шаги клипа продления — undefined = «авто» (шаги исходника из его меты).
+  extendClipSteps: undefined,
   draftSteps: 4, // turbo-эталон; минимум 2 — максимально быстрый черновик
   sigmaVariant: '3step',
   pass2Sampler: 'euler',
@@ -359,7 +361,12 @@ export const useGenStore = create<GenStoreState>()(
       // (правка 449) version 6: Veda снова default OFF (отмена правки 425).
       // version 7: новый дефолт точки сплита pass 1 = 6.
       // (Ниже, в DEFAULT_VIDEO_STATE, всего шагов тоже 6 — «6 из 6».)
-      version: 7,
+      // version 8: extendClipSteps → «авто» (undefined). Поле раньше из UI
+      // молча терялось в хуке и НЕ влияло на генерацию; хранённое значение
+      // (обычно старый дефолт 4) вдруг стало бы работать — сбрасываем в авто,
+      // чтобы поведение не изменилось молча. Ручной выбор делается ПОСЛЕ
+      // миграции и уже сохраняется честно.
+      version: 8,
       // (правка 97) Новый дефолт шагов pass 1 = 4 (был 2).
       // Сбрасываем только значение, равное старому дефолту (2), — оно означает
       // «пользователь слайдер не трогал». Осознанный выбор (3–30) сохраняется.
@@ -392,6 +399,11 @@ export const useGenStore = create<GenStoreState>()(
         // сохраняется.
         if (oldVersion < 7 && state?.video && state.video.firstSamplerSteps === 4) {
           state.video = { ...state.video, firstSamplerSteps: 6 }
+        }
+        // version 8: шаги клипа продления — «авто» (см. комментарий у version).
+        if (oldVersion < 8 && state?.video && 'extendClipSteps' in state.video) {
+          const { extendClipSteps: _wiped, ...rest } = state.video
+          state.video = rest
         }
         return state
       },

@@ -1157,6 +1157,11 @@ export function useVideoGen() {
           extendSourceSubfolder: genMode === 'extend' ? params.extendSourceSubfolder : undefined, // (правка 385)
           // (правка 423) extend: двухпроходный режим (low-res → апскейл → рефайн)
           extendTwoPass: genMode === 'extend' ? params.extendTwoPass === true : undefined,
+          // Шаги клипа продления: undefined = «авто» (фолбэк шаблона —
+          // firstSamplerSteps, а клиент при наличии меты исходника подставляет
+          // его pass1_steps сам). Раньше поле терялось здесь — значение из UI
+          // молча игнорировалось и клипы всегда шли с firstSamplerSteps.
+          extendClipSteps: genMode === 'extend' ? params.extendClipSteps : undefined,
         }
 
         const myEpoch = interruptEpoch
@@ -1305,7 +1310,11 @@ export function useVideoGen() {
           video_length: videoLengthFrames,
           duration_seconds: videoLengthFrames / fps,
           fps,
-          pass1_steps: params.firstSamplerSteps ?? 6,
+          // Extend: фактические шаги КЛИПА (override > шаги исходника/first) —
+          // мету результата читает следующее продление как «авто».
+          pass1_steps: genMode === 'extend'
+            ? (params.extendClipSteps ?? params.firstSamplerSteps ?? 6)
+            : (params.firstSamplerSteps ?? 6),
           pass1_total_steps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
           ...(draft && { draft_steps: params.draftSteps ?? 4 }),
           pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[params.sigmaVariant || '3step'] ?? 3,

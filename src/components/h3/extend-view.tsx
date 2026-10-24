@@ -167,6 +167,31 @@ export function ExtendView() {
   const sourceVideoPath = video.extendSourceVideoPath
   const [videoDragOver, setVideoDragOver] = useState(false)
 
+  // Шаги клипа «авто»: первый проход ИСХОДНИКА из его .meta.json (продление
+  // продолжает исходник — его расписание и берём). null = меты нет (фолбэк —
+  // firstSamplerSteps, как в шаблоне). Явное значение из инпута побеждает.
+  const [autoClipSteps, setAutoClipSteps] = useState<number | null>(null)
+  useEffect(() => {
+    const name = video.extendSourceName
+    if (!name) { setAutoClipSteps(null); return }
+    const sub = video.extendSourceSubfolder ? video.extendSourceSubfolder + '/' : ''
+    let cancelled = false
+    fetch(`/api/comfy/meta?path=${encodeURIComponent(sub + name)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Record<string, unknown> | null) => {
+        if (cancelled || !d) return
+        const p = (d.params && typeof d.params === 'object' ? d.params : d) as Record<string, unknown>
+        const steps = typeof p.pass1_steps === 'number' ? p.pass1_steps
+          : typeof p.draft_steps === 'number' ? p.draft_steps
+          : null
+        setAutoClipSteps(steps && steps >= 2 ? steps : null)
+      })
+      .catch(() => { if (!cancelled) setAutoClipSteps(null) })
+    return () => { cancelled = true }
+  }, [video.extendSourceName, video.extendSourceSubfolder])
+  // Эффективное значение для инпута: override → авто из меты → firstSamplerSteps.
+  const effectiveClipSteps = video.extendClipSteps ?? autoClipSteps ?? video.firstSamplerSteps ?? 6
+
   const extendRefs = video.extendImageRefs
   const progressPercent = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0
 
@@ -531,9 +556,11 @@ export function ExtendView() {
       // (правка 174) Debug: ensure extendSourceVideoPath is not lost
       referenceDetail: v.referenceDetail || 'match', // (правка 307) — выбор Match/Max как в генерации
       lowResMP: v.lowResMP ?? 0.2,
-      firstSamplerSteps: v.firstSamplerSteps ?? 6,
-      // (правка 719) Шаги клипа продления — отдельное поле (эталон = 4).
-      extendClipSteps: v.extendClipSteps ?? 4,
+        firstSamplerSteps: v.firstSamplerSteps ?? 6,
+        // Шаги клипа: явное значение побеждает; иначе «авто» — шаги первого
+        // прохода исходника из его меты (посчитаны выше autoClipSteps); нет
+        // меты — undefined, сервер возьмёт firstSamplerSteps (фолбэк шаблона).
+        extendClipSteps: v.extendClipSteps ?? autoClipSteps ?? undefined,
       sigmaVariant: v.sigmaVariant || '3step',
       pass2Sampler: v.pass2Sampler || 'euler', // (правка 473) раньше не отправлялся — pass 2 продления всегда шёл на euler
       pass1Sampler: v.pass1Sampler || 'euler',
@@ -559,7 +586,7 @@ export function ExtendView() {
     } finally {
       submitInFlightRef.current = false
     }
-  }, [generate, assistantBusy, uploadingVideo])
+  }, [generate, assistantBusy, uploadingVideo, autoClipSteps])
 
   /* ──────────── Gallery ──────────── */
   const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile } = useVideoGallery({ phase })
@@ -967,20 +994,39 @@ export function ExtendView() {
                             Select-триггеры h-9 bg-[var(--surface-2)] text-sm. */}
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Сколько шагов делает модель, дорисовывая клип. Больше — точнее, но медленнее."
+                          title="Сколько шагов делает модель, дорисовывая клип. Больше — точнее, но медленнее. По умолчанию — авто: шаги первого прохода исходника (из его метаданных); ручное значение побеждает авто."
                         >
                           Шаги сэмплера
+                          {video.extendClipSteps == null && (
+                            <span className="ml-1.5 text-[10px] text-cyan-400/80">авто</span>
+                          )}
                         </Label>
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
                             min={2}
                             max={30}
-                            value={video.extendClipSteps ?? 4}
-                            onChange={(e) => patchVideo({ extendClipSteps: Math.max(2, Math.min(30, parseInt(e.target.value, 10) || 4)) })}
+                            value={effectiveClipSteps}
+                            onChange={(e) => patchVideo({ extendClipSteps: Math.max(2, Math.min(30, parseInt(e.target.value, 10) || 2)) })}
                             className="w-20 text-xs bg-[var(--surface-3)] border border-border rounded-md px-2 py-1.5 text-foreground"
                           />
-                          <span className="text-[10px] text-muted-foreground">2–30 шагов</span>
+                          {video.extendClipSteps != null ? (
+                            <button
+                              type="button"
+                              onClick={() => patchVideo({ extendClipSteps: undefined })}
+                              className="shrink-0 rounded-md border border-cyan-500/40 px-1.5 py-0.5 text-[10px] text-cyan-300 transition-colors hover:bg-cyan-500/10"
+                              title={`Вернуть «авто»: шаги исходника${autoClipSteps != null ? ` (${autoClipSteps})` : ' → как в генерации'}`}
+                            >
+                              авто
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">
+                              {autoClipSteps != null
+                                ? `из исходника · ${autoClipSteps}`
+                                : `как в генерации · ${video.firstSamplerSteps ?? 6}`}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground/70">2–30</span>
                         </div>
                       </div>
 

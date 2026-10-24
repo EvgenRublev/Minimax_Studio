@@ -37,6 +37,9 @@ export interface VideoGenerateParams {
   pipeline?: 'draft' | 'full'
   /** Шаги единственного прохода в пайплайне 'draft' (default 4, min 2). */
   draftSteps?: number
+  /** (правка 719) extend: шаги клипа продления. undefined = «авто» —
+   *  шаги первого прохода исходника (из его меты), без меты — firstSamplerSteps. */
+  extendClipSteps?: number
   /** (правка 161) extend: клипы для продления. */
   extendClips?: Array<{ prompt: string; duration: number; seed: number }>
   /** (правка 161) extend: картинки-рефы для продления (до 9). */

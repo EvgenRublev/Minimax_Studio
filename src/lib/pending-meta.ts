@@ -343,7 +343,11 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     video_length: videoLengthFrames,
     duration_seconds: videoLengthFrames / fps,
     fps,
-    pass1_steps: body.firstSamplerSteps ?? 6,
+    // Extend: фактические шаги КЛИПА (override > фолбэк firstSamplerSteps) —
+    // по этой мете следующее продление берёт значение «авто».
+    pass1_steps: genMode === 'extend'
+      ? (body.extendClipSteps ?? body.firstSamplerSteps ?? 6)
+      : (body.firstSamplerSteps ?? 6),
     // Всего шагов в расписании pass 1 (точка сплита = это число → «6 из 6»).
     pass1_total_steps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
     // (правка 722) Шаги ЕДИНСТВЕННОГО прохода драфта. Без этого поля серверный
