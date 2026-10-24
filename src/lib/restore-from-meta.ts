@@ -51,6 +51,8 @@ interface MetaJson {
   duration_seconds?: number
   fps?: number
   pass1_steps?: number
+  /** Всего шагов в расписании pass 1 (для «6 из 6»; старые сайдкары без поля). */
+  pass1_total_steps?: number
   pass2_steps?: number
   /** (правка 722) Пайплайн генерации: 'draft' (один проход) | 'full'. */
   pipeline?: string
@@ -180,6 +182,9 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     // Pass 1 steps
     if (typeof params.pass1_steps === 'number') {
       patch.firstSamplerSteps = params.pass1_steps
+    }
+    if (typeof params.pass1_total_steps === 'number') {
+      patch.firstSamplerTotalSteps = params.pass1_total_steps
     }
 
     // (правка 722) Пайплайн «Драфт»/«Полное» — из сайдкара. Раньше он туда

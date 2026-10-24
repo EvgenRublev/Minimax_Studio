@@ -1122,6 +1122,10 @@ export function useVideoGen() {
           finalResolution,
           lowResMP: params.lowResMP ?? 0.2,
           firstSamplerSteps: params.firstSamplerSteps ?? 6,
+          // Всего шагов расписания pass 1. Раньше поле не доходило до
+          // сервера — шаблон всегда брал 2× сплита («6 из 12»), и слайдер
+          // «Всего шагов» в UI ни на что не влиял. Дефолт — 6/6.
+          firstSamplerTotalSteps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
           sigmaVariant: params.sigmaVariant || '3step',
           pass2Sampler: params.pass2Sampler || 'euler', // (правка 69)
           pass1Sampler: params.pass1Sampler || 'euler', // (правка 70)
@@ -1302,15 +1306,15 @@ export function useVideoGen() {
           duration_seconds: videoLengthFrames / fps,
           fps,
           pass1_steps: params.firstSamplerSteps ?? 6,
+          pass1_total_steps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
           ...(draft && { draft_steps: params.draftSteps ?? 4 }),
           pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[params.sigmaVariant || '3step'] ?? 3,
           sigma_variant: params.sigmaVariant || '3step',
           pass2_sampler: params.pass2Sampler || 'euler', // (правка 69)
           pass1_sampler: params.pass1Sampler || 'euler', // (правка 70)
           pass1_scheduler: params.pass1Scheduler || 'simple', // (правка 70)
-          // (правка 720) turbo_lora_strength УБРАН из меты: турбо-лора не
-          // подключается к пайплайну (правки 578/587), и писать в метаданные
-          // «Турбо LoRA 1.0» — значит врать о том, что было использовано.
+          // Сила турбо-лоры хранится в loras.json (обычная запись), отдельное
+          // поле в мете не дублируем — применённые LoRA перечислены в `lora`.
           minimax_h3_reference_detail: params.referenceDetail || 'match', // (правка 58) — meta-dialog уже умеет показывать это поле
           sparse_attention: params.sparseAttention === true, // (правки 168→387) Sol-Attn default OFF
           // (правка 466) настройки Sol-Attn в сайдкар — «Повторить» восстанавливает
@@ -1338,9 +1342,8 @@ export function useVideoGen() {
                 chunk_ff_threshold: params.chunkFFThreshold ?? 4096,
               }
             : {}),
-          // (правка 720) Поле `lora` УБРАНО: там был зашит turbo-файл, который
-          // к пайплайну не подключается. Реально применённые LoRA сервер
-          // подставляет сам (customLoras в /api/comfy/generate).
+          // Поле `lora` не дублируем: сервер сам пишет фактически применённые
+          // LoRA (customLoras, включая турбо-лору) в pending-meta.
           references: metaReferences,
           // extend-режим: имя исходного видео (для авто-конкатенации после генерации)
           // (правка 174) Safeguard: если params.extendSourceVideo пустой, пробуем

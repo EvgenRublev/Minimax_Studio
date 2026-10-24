@@ -9,7 +9,7 @@ import { setActivePrompt } from '@/lib/comfy/progress-tracker'
 import { readStaged, deleteStaged } from '@/lib/staging'
 import { recordPendingMeta } from '@/lib/pending-meta'
 import { recordInflight } from '@/lib/inflight-journal'
-import { loadLoras, listLoraFiles } from '@/lib/loras-config'
+import { loadLoras, listLoraFiles, TURBO_LORA_NAME } from '@/lib/loras-config'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveSourceLatent } from '@/lib/refine-meta' // (правка 420)
@@ -311,14 +311,27 @@ export async function POST(req: NextRequest) {
     // (правка 89) Сверка с файлами на диске: запись в loras.json, файл
     // которой удалён вручную мимо приложения, — «призрак», ComfyUI упал бы
     // на загрузке несуществующей лоры. Такие записи молча пропускаем.
-    // (правка 95) Турбо-лора управляется той же записью в loras.json
-    // (enabled/strength) — в кастомную цепочку не входит.
+    //
+    // Встроенная турбо-лора — обычная запись loras.json (включена по
+    // умолчанию) и идёт через ту же цепочку customLoras. Исключение:
+    // режим «Кадры» (flf) с добавленным аудио — там турбо-лора пропускается
+    // (аудио-гайд стабильнее без 4-шагового ускорителя). Обычные LoRA
+    // пользователя не фильтруются никогда.
     const loraFiles = new Set(listLoraFiles())
     const allEntries = loadLoras()
-    // (правка 578) Турбо-лора убрана — все включённые LoRA теперь кастомные
-    const loraEntries = allEntries.filter((e) => e.enabled && loraFiles.has(e.name))
-    body.turboLoraEnabled = false
-    body.turboLoraStrength = 1.0
+    const flfWithAudio = body.mode === 'flf' && (body.refAudios?.length ?? 0) > 0
+    const loraEntries = allEntries.filter(
+      (e) =>
+        e.enabled &&
+        loraFiles.has(e.name) &&
+        !(flfWithAudio && e.name === TURBO_LORA_NAME),
+    )
+    // Турбо-лора применяется через customLoras, а не отдельной нодой шаблона;
+    // поля оставляем согласованными на случай, если их прочитает другой код.
+    const turboEntry = allEntries.find((e) => e.name === TURBO_LORA_NAME)
+    body.turboLoraEnabled =
+      turboEntry?.enabled === true && loraFiles.has(TURBO_LORA_NAME) && !flfWithAudio
+    body.turboLoraStrength = turboEntry?.strength ?? 1.0
     // (правка 89) Исходный промпт БЕЗ триггеров — уйдёт в метаданные,
     // иначе «Повторить генерацию» допишет триггеры к уже дописанному
     // промпту и они начнут накапливаться с каждым повтором.
@@ -328,8 +341,10 @@ export async function POST(req: NextRequest) {
     // дописываем в КАЖДЫЙ клип. Оригиналы сохраняем — в мету уходят чистые,
     // иначе «Повторить» накапливал бы триггеры в клипах.
     const extendClipsForMeta = body.extendClips
+    body.customLoras = loraEntries.length > 0
+      ? loraEntries.map((e) => ({ name: e.name, strength: e.strength }))
+      : undefined
     if (loraEntries.length > 0) {
-      body.customLoras = loraEntries.map((e) => ({ name: e.name, strength: e.strength }))
       // Append trigger words to the prompt (правка 46)
       const triggers = loraEntries
         .map((e) => e.trigger?.trim())

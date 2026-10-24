@@ -26,7 +26,7 @@ import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config' // (�
  *                     'x2' = удвоение разрешения — латентный ×2-рецепт)
  *   prompt?         — caption (default: enhance-промпт)
  *   seed?           — (-1/undefined = random)
- *   steps?          — сигма-лестница: 3 (default) | 4 | 5 шагов
+ *   steps?          — сигма-лестница: 3 (default) | 4 | 5 | 6 | 7 шагов
  *   sigmaStart?     — σ_start лестницы (0.1–0.95, «сколько шума убирать»;
  *                     undefined = эталонная лестница)
  *   (режим «Частями», параметры куска):
@@ -143,9 +143,9 @@ export async function POST(req: NextRequest) {
 
     const cfg = getAppConfig()
 
-    // (правка 483) Пользовательские LoRA из настроек — как в
-    // /api/comfy/generate: модель получает их цепочкой после турбо-лоры,
-    // триггерные слова — суффиксом conditioning-промпта (promptSuffix).
+    // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
+    // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
+    // умолчанию), триггерные слова — суффиксом conditioning-промпта (promptSuffix).
     // В мету промпт пишется БЕЗ триггеров — «Повторить» добавит их заново
     // по актуальному списку, иначе бы они накапливались (правка 89).
     const customLoraEntries = enabledCustomLoras()

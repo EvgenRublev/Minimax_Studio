@@ -69,3 +69,6 @@ __pycache__/
 /data/assistant-chats.json
 /data/inflight-generate.json
 /data/loras.json
+
+# внутренние документы разработки — в GitHub не публикуются
+/docs/

@@ -239,7 +239,7 @@ export function ModelsPanel() {
     }
   }, [fetchStatus])
 
-  // (правка 720) Опциональные модели (turbo LoRA и т.п.) в счётчик НЕ входят:
+  // (правка 720) Опциональные модели (Veda, FPS и т.п.) в счётчик НЕ входят:
   // иначе панель вечно показывала бы «8/9» жёлтым и держала кнопку
   // «Скачать все», хотя эта кнопка их всё равно не тянет (см. downloadAll).
   const requiredModels = visibleModels.filter(m => !m.optional)

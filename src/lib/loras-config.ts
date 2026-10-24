@@ -1,8 +1,9 @@
 /**
  * Custom LoRA management (правка 44).
  *
- * Stores settings for custom LoRAs in a JSON file in the project root.
- * The built-in turbo LoRA is NOT included in this list.
+ * Stores settings for LoRAs in a JSON file in the project root.
+ * The built-in turbo LoRA is stored here too: it is ON by default, while
+ * user LoRAs are OFF by default.
  *
  * File: loras.json
  * Schema: [{ name: string, strength: number, enabled: boolean, trigger?: string }]
@@ -23,7 +24,7 @@ export interface LoraEntry {
   trigger?: string
 }
 
-/** The turbo LoRA filename (excluded from custom list). */
+/** The built-in turbo LoRA filename (ON by default, skipped in flf+audio). */
 export const TURBO_LORA_NAME = 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'
 
 function lorasFile(): string {
@@ -31,14 +32,27 @@ function lorasFile(): string {
 }
 
 export function loadLoras(): LoraEntry[] {
+  let entries: LoraEntry[] = []
   try {
     const raw = fs.readFileSync(lorasFile(), 'utf-8')
     const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    return arr.filter((e) => e && typeof e.name === 'string')
+    if (Array.isArray(arr)) {
+      entries = arr.filter((e) => e && typeof e.name === 'string')
+    }
   } catch {
-    return []
+    entries = []
   }
+  // Встроенная турбо-лора включена по умолчанию. Если файл есть, а записи
+  // в loras.json ещё нет (первый запуск / старая установка), добавляем
+  // синтетическую включённую запись. Явная запись пользователя (в том числе
+  // enabled=false) всегда главнее — выключить турбо-лору в настройках можно.
+  if (!entries.some((e) => e.name === TURBO_LORA_NAME)) {
+    const files = listLoraFiles()
+    if (files.includes(TURBO_LORA_NAME)) {
+      entries.push({ name: TURBO_LORA_NAME, strength: 1.0, enabled: true, trigger: '' })
+    }
+  }
+  return entries
 }
 
 export function saveLoras(entries: LoraEntry[]): void {
@@ -47,20 +61,20 @@ export function saveLoras(entries: LoraEntry[]): void {
 
 /**
  * (правка 130) Сброс настроек LoRA к заводским:
- * все лоры выключены (enabled=false), сила по умолчанию (1.0), триггеры очищены.
- * Файл loras.json сохраняется с «чистым» состоянием.
+ * сила по умолчанию (1.0), триггеры очищены. Файл loras.json сохраняется
+ * с «чистым» состоянием.
  *
- * (правка 133) По умолчанию после заводского сброса включена стандартная
- * 4-шаговая турбо-лора (TURBO_LORA_NAME) — она нужна для базовой работы
- * генерации. Остальные кастомные лоры выключены.
+ * По умолчанию после заводского сброса включена стандартная 4-шаговая
+ * турбо-лора (TURBO_LORA_NAME) — она нужна для базовой работы генерации.
+ * Остальные кастомные лоры выключены.
  */
 export function resetLorasToDefaults(): LoraEntry[] {
   const files = listLoraFiles()
-  // (правка 578) Турбо-лора убрана — все LoRA теперь кастомные, по умолчанию выключены
+  // Встроенная турбо-лора — ON по умолчанию, пользовательские — OFF.
   const defaults: LoraEntry[] = files.map((name) => ({
     name,
     strength: 1.0,
-    enabled: false,
+    enabled: name === TURBO_LORA_NAME,
     trigger: '',
   }))
   saveLoras(defaults)
@@ -94,11 +108,12 @@ export function listLoraFiles(): string[] {
 }
 
 /**
- * (правка 483) Включённые пользовательские LoRA для роутов refine /
- * tile-upscale (generate-роут собирает список сам — ему ещё нужна
- * turbo-запись). Фильтры те же, что в /api/comfy/generate: запись
- * включена, это НЕ турбо-лора и файл реально есть на диске (иначе
- * ComfyUI упал бы на загрузке несуществующей лоры — «призрак», правка 89).
+ * (правка 483) Включённые LoRA для роутов refine / tile-upscale / controlnet
+ * (generate-роут собирает список сам — ему нужно отдельно пропускать турбо
+ * в режиме «Кадры» с аудио). Встроенная турбо-лора входит в список, когда
+ * включена (по умолчанию — да). Фильтры: запись включена и файл реально
+ * есть на диске (иначе ComfyUI упал бы на загрузке несуществующей лоры —
+ * «призрак», правка 89).
  */
 export function enabledCustomLoras(): Array<{ name: string; strength: number; trigger?: string }> {
   const files = new Set(listLoraFiles())

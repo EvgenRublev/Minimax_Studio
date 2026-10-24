@@ -56,7 +56,7 @@ import { refineSigmaLadder } from './refine-sigmas'
  *    мягкий вход (σ_start 0.63, правка 199) пересглаживал — не используем.
  *
  * Модельная цепочка = цепочка вкладки «Генерация»:
- *   UNET → [LowVRAM] → [ChunkFF] → Turbo LoRA → SigmaShift
+ *   UNET → [LowVRAM] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift
  *   → [SparseAttn] → AttentionBackend (+ KJ live preview)
  */
 import { computeFinalDimensions, type FinalDimensions } from './minimax-h3-template'
@@ -107,7 +107,7 @@ export interface RefineParams {
   prompt?: string
   /** Seed (-1 = random). */
   seed?: number
-  /** Сигма-лестница Pass 2: 3 (default) | 4 | 5 шагов. */
+  /** Сигма-лестница Pass 2: 3 (default) | 4 | 5 | 6 | 7 шагов. */
   steps?: number
   /** σ_start лестницы (0.1–0.95): «сколько шума убирать». undefined = эталон. */
   sigmaStart?: number
@@ -154,8 +154,9 @@ export interface RefineParams {
   refImageSize?: 'match' | 'max'
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini). */
   videoFormat?: VideoFormatSettings
-  /** (правка 483) Пользовательские LoRA из настроек — цепочкой после
-   *  турбо-лоры ('46:36'), как во вкладке «Генерация» (правка 44). */
+  /** (правка 483) Пользовательские LoRA из настроек — цепочкой customLoras
+   *  вместе с турбо-лорой (обычная запись, ON по умолчанию), как во
+   *  вкладке «Генерация» (правка 44). */
   customLoras?: Array<{ name: string; strength: number }>
   /** (правка 483) Суффикс промпта (триггерные слова включённых LoRA) —
    *  дописывается в самый конец conditioning-промпта, после подписей
@@ -309,7 +310,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
 
     ...modelNodes,
 
-    // (правка 578) Турбо-лора убрана — кастомные LoRA подключаются прямо к modelSrc
+    // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
+    // пользовательские LoRA; порядок задаёт loras.json.
     ...buildCustomLoraNodes(p.customLoras, modelSrc),
     '46:38': {
       inputs: { shift_video: 12, shift_audio: 3, model: getLastLoraOutput(p.customLoras, modelSrc) },
@@ -840,8 +842,8 @@ export interface ChunkedRefineParams {
   refImageSize?: 'match' | 'max'
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini). */
   videoFormat?: VideoFormatSettings
-  /** (правка 483) Пользовательские LoRA из настроек — цепочкой после
-   *  турбо-лоры ('46:36'), как в buildRefineWorkflow. */
+  /** (правка 483) LoRA из настроек — цепочкой customLoras (включая
+   *  турбо-лору, если она включена), как в buildRefineWorkflow. */
   customLoras?: Array<{ name: string; strength: number }>
   /** (правка 483) Суффикс промпта (триггеры LoRA) — дописывается в промпт
    *  КАЖДОГО окна цепочки (и сюжетный окна 0, и якорные окон 1+), иначе
@@ -1096,7 +1098,8 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
       _meta: { title: 'VAE (audio)' },
     },
     ...modelNodes,
-    // (правка 578) Турбо-лора убрана — кастомные LoRA подключаются прямо к modelSrc
+    // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
+    // пользовательские LoRA; порядок задаёт loras.json.
     ...buildCustomLoraNodes(p.customLoras, modelSrc),
     '46:38': {
       inputs: { shift_video: 12, shift_audio: 3, model: getLastLoraOutput(p.customLoras, modelSrc) },

@@ -21,6 +21,7 @@ import { readMetaImageRefs, readPromptChain } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { resolveFaceDetectors } from '@/lib/comfy/face-detectors'
+import { enabledCustomLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
 
 /**
  * POST /api/comfy/face-refine — перерисовка мелких лиц в готовом видео
@@ -255,6 +256,11 @@ export async function POST(req: NextRequest) {
       body.fallback === true && detectors.fallbackDetector ? detectors.fallbackDetector : 'none'
     const fallbackUnavailable = body.fallback === true && !detectors.fallbackDetector
 
+    // Встроенная турбо-лора — ON по умолчанию, как и в остальных режимах.
+    // Шаги face-refine по умолчанию 4 — ровно под эту 4-шаговую лору.
+    const turboLoraEntry = enabledCustomLoras().find((e) => e.name === TURBO_LORA_NAME)
+    const turboLora = turboLoraEntry?.name
+
     const workflow = buildFaceRefineWorkflow({
       sourceVideo: inName,
       prompt,
@@ -262,6 +268,8 @@ export async function POST(req: NextRequest) {
       canvas,
       denoise,
       steps,
+      lora: turboLora,
+      loraStrength: turboLoraEntry?.strength,
       sampler: body.sampler,
       select: body.select,
       selectIndex: body.selectIndex,
@@ -283,6 +291,12 @@ export async function POST(req: NextRequest) {
       denoiseLarge: body.denoiseLarge,
       refImages: usedRefs,
       refImageSize: body.refImageSize,
+      // Размеры/длина исходника — для .latent-сайдкара итога (ceil32-канва,
+      // тишина нужной длины у беззвучных): повторный рефайн этого видео
+      // пойдёт по lossless-латентному пути.
+      width: probe.width,
+      height: probe.height,
+      frames: probe.frames,
       outputSubfolder: sub,
       videoFormat: getVideoFormatSettings(),
     })
@@ -306,7 +320,11 @@ export async function POST(req: NextRequest) {
         prompt_source: promptSource,
         canvas,
         denoise,
-        steps,
+        // Шаги — в поле pass1_steps (единый контракт сайдкаров: его читает
+        // строка «Шаги» в MetaDialog; так же пишет refine-роут). Старые
+        // сайдкары с полем steps диалог понимает через fallback.
+        pass1_steps: steps,
+        ...(turboLora && { lora: turboLora }),
         sampler: body.sampler || 'euler',
         select: facePoint ? 'closest_to_xy' : (body.select || 'largest_face'),
         select_index: body.selectIndex ?? 0,

@@ -67,10 +67,10 @@ export async function POST(req: NextRequest) {
 
     const cfg = getAppConfig()
 
-    // (правка 483) Пользовательские LoRA из настроек — как в
-    // /api/comfy/generate: модель получает их цепочкой после турбо-лоры,
-    // триггерные слова дописываются в conditioning-промпт. В мету промпт
-    // пишется БЕЗ триггеров — «Повторить» добавит их заново по актуальному
+    // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
+    // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
+    // умолчанию), триггерные слова дописываются в conditioning-промпт.
+    // В мету промпт пишется БЕЗ триггеров — «Повторить» добавит их заново по актуальному
     // списку, иначе бы они накапливались (правка 89).
     const customLoraEntries = enabledCustomLoras()
     const customLoras = customLoraEntries.length > 0
@@ -105,6 +105,9 @@ export async function POST(req: NextRequest) {
       anchor_strength: body.anchorStrength ?? 0.999,
       target_resolution: body.targetResolution ?? 1080,
       denoise: body.denoise ?? 0.2,
+      // pass1_steps — единый контракт для строки «Шаги» MetaDialog (как у
+      // refine/face-refine). Поле steps оставлено: его пишут старые сайдкары.
+      pass1_steps: body.steps ?? 2,
       steps: body.steps ?? 2,
       ...(body.syncTiles === true && { sync_tiles: true }),
       ...(customLoras ? { lora: customLoras.map((l) => l.name).join(', ') } : {}),

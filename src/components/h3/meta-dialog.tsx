@@ -212,6 +212,9 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
     refine: 'Рефайн видео', // (правка 264)
     controlnet: 'ControlNet (движение)',
     upscale: 'Апскейл / DLSS',
+    facerefine: 'Face Refine (лица)',
+    tileupscale: 'Тайловый апскейл',
+    fps: 'FPS (интерполяция)',
   }
   const generationMode = typeof params?.generation_mode === 'string'
     ? params.generation_mode.trim().toLowerCase()
@@ -252,7 +255,13 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
     ? String(draftSteps ?? pass1 ?? '—')
     : pass1 != null || pass2 != null
       ? pass2Ran ? `${pass1 ?? '—'} + ${pass2 ?? '—'}` : `${pass1 ?? '—'}`
-      : params?.num_inference_steps != null ? String(params.num_inference_steps) : null
+      : params?.num_inference_steps != null
+        ? String(params.num_inference_steps)
+        : // Однопроходные режимы (face-refine, тайловый апскейл) пишут шаги
+          // полем steps — старые сайдкары до появления pass1_steps.
+          params?.steps != null && typeof params.steps === 'number'
+            ? String(params.steps)
+            : null
 
   // "Ещё": everything except the fields already rendered above
   const restJson = (() => {
@@ -272,6 +281,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
       delete p.num_inference_steps
       delete p.pass1_steps
       delete p.pass2_steps
+      delete p.steps // показан строкой «Шаги» (fallback однопроходных режимов)
       delete p.guidance_scale
       delete p.activated_loras
       delete p.loras_multipliers
@@ -478,7 +488,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                     <span className="font-mono">{String(params.pass2_sampler)}</span>
                   </ParamCell>
                 )}
-                {/* (правка 70) Pass 1: сэмплер, планировщик, турбо-лора */}
+                {/* (правка 70) Pass 1: сэмплер, планировщик */}
                 {params?.pass1_sampler != null && (
                   <ParamCell label="Сэмплер (pass 1)">
                     <span className="font-mono">{String(params.pass1_sampler)}</span>

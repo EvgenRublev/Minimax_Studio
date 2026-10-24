@@ -50,7 +50,8 @@ export interface FaceRefinePoint {
 }
 
 export interface FaceRefineUiParams {
-  /** Канва H3, px. 512 дешевле 768 в 2.25× по latent-токенам. */
+  /** Канва H3, px (пресеты 384–1280; движок клампит к 1344, кратность 32).
+   *  512 дешевле 768 в 2.25× по latent-токенам; выше 768 — дороже по VRAM. */
   canvas: number
   /** Базовый denoise. H3 — flow matching со сдвигом 12: 0.25 → sigma 0.800. */
   denoise: number

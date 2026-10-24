@@ -510,6 +510,81 @@ class MiniMaxH3SigmaShift(io.ComfyNode):
         return io.NodeOutput(m)
 
 
+class MiniMaxH3AudioOrSilent(io.ComfyNode):
+    """Pass the source audio through, or substitute silence.
+
+    Silent sources: VHS_LoadVideo hands downstream nodes an empty/absent
+    AUDIO, and feeding that into VAEEncodeAudio crashes the workflow. The
+    studio's refine/extend templates wrap every source-audio pickup with
+    this node (правка 313): a real waveform goes through untouched, a
+    missing one becomes a quiet stereo track of ``fallback_seconds``.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3AudioOrSilent",
+            description="Source audio, or silence when the source has no audio track.",
+            display_name="MiniMax H3 Audio or Silence",
+            search_aliases=["audio silence", "silent video"],
+            category="audio/minimax",
+            inputs=[
+                io.Audio.Input("audio", optional=True,
+                               tooltip="Source audio; may be empty for videos without a sound track."),
+                io.Float.Input("fallback_seconds", default=5.0, min=0.1, max=3600.0, step=0.1,
+                               tooltip="Length of the silent track to substitute when the input has no audio."),
+            ],
+            outputs=[io.Audio.Output(display_name="Audio")],
+        )
+
+    @classmethod
+    def execute(cls, audio, fallback_seconds) -> io.NodeOutput:
+        waveform = audio.get("waveform") if isinstance(audio, dict) else None
+        if waveform is not None and waveform.numel() > 0:
+            return io.NodeOutput(audio)
+        sample_rate = 32000  # native rate of the H3 audio VAE; VAEEncodeAudio resamples anyway
+        length = max(1, round(fallback_seconds * sample_rate))
+        silence = torch.zeros([1, 2, length], device=comfy.model_management.intermediate_device())
+        return io.NodeOutput({"waveform": silence, "sample_rate": sample_rate})
+
+
+class MiniMaxH3AudioSliceFrom(io.ComfyNode):
+    """Keep the part of the track from ``start_seconds`` to the end.
+
+    A negative value keeps the last |start_seconds| seconds instead — the
+    studio's extend workflow slices overlap tails this way.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3AudioSliceFrom",
+            description="Slice audio from a time point to the end (negative: from the end).",
+            display_name="MiniMax H3 Audio Slice From",
+            search_aliases=["audio slice", "audio tail"],
+            category="audio/minimax",
+            inputs=[
+                io.Audio.Input("audio"),
+                io.Float.Input("start_seconds", default=0.0, min=-3600.0, max=3600.0, step=0.01,
+                               tooltip="Keep audio from this second onward. Negative: keep only the last |value| seconds."),
+            ],
+            outputs=[io.Audio.Output(display_name="Audio")],
+        )
+
+    @classmethod
+    def execute(cls, audio, start_seconds) -> io.NodeOutput:
+        waveform = audio["waveform"]
+        sample_rate = audio["sample_rate"]
+        n = waveform.shape[-1]
+        if start_seconds >= 0:
+            cut = min(n, max(0, round(start_seconds * sample_rate)))
+            waveform = waveform[..., cut:]
+        else:
+            cut = min(n, max(0, round(-start_seconds * sample_rate)))
+            waveform = waveform[..., n - cut:]
+        return io.NodeOutput({"waveform": waveform, "sample_rate": sample_rate})
+
+
 class MiniMaxH3Extension(ComfyExtension):
     async def get_node_list(self):
         return [
@@ -518,6 +593,8 @@ class MiniMaxH3Extension(ComfyExtension):
             MiniMaxH3AddGuide,
             MiniMaxH3ReferenceToVideo,
             MiniMaxH3SigmaShift,
+            MiniMaxH3AudioOrSilent,
+            MiniMaxH3AudioSliceFrom,
             ]
 
 

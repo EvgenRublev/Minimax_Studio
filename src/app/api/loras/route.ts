@@ -6,6 +6,7 @@ import {
   saveLoras,
   lorasDir,
   listLoraFiles,
+  TURBO_LORA_NAME,
 } from '@/lib/loras-config'
 import { comfyBusy } from '@/lib/vram-arbiter'
 import {
@@ -20,20 +21,21 @@ import {
  */
 export async function GET(req: NextRequest) {
   try {
-    // (правка 95) Турбо-лора в общем списке: помечаем isTurbo для UI.
+    // Турбо-лора в общем списке: включена по умолчанию, как и остальные
+    // файлы, приходит из loras.json (loadLoras добавляет запись, если её нет).
     void req
     const files = listLoraFiles()
     const settings = loadLoras()
     const settingsMap = new Map(settings.map((e) => [e.name, e]))
 
     // Build the response: all files with their settings.
-    // (правка 578) Турбо-лора убрана — все LoRA теперь кастомные, по умолчанию выключены
+    // Встроенная турбо-лора включена по умолчанию; пользовательские — нет.
     const result = files.map((name) => {
       const s = settingsMap.get(name)
       return {
         name,
         strength: s?.strength ?? 1.0,
-        enabled: s?.enabled ?? false,
+        enabled: s?.enabled ?? (name === TURBO_LORA_NAME),
         trigger: s?.trigger ?? '',
         size: getFileSize(name),
       }
@@ -151,7 +153,7 @@ export async function POST(req: NextRequest) {
     // (правка 256) Только что ЗАГРУЖЕННАЯ лора включается сразу: загрузка —
     // само по себе намерение использовать (жалоба с YouTube «постоянно
     // забываю нажать включить»). Заводской сброс (resetLorasToDefaults)
-    // по-прежнему включает только турбо-лору.
+    // по-прежнему включает только встроенную турбо-лору.
     const entries = loadLoras()
     entries.push({ name: safeName, strength: 1.0, enabled: true })
     saveLoras(entries)
@@ -198,8 +200,8 @@ export async function PUT(req: NextRequest) {
     const entries = loadLoras()
     let entry = entries.find((e) => e.name === name)
     if (!entry) {
-      // (правка 578) Турбо-лора убрана — все LoRA теперь кастомные, по умолчанию выключены
-      entry = { name, strength: 1.0, enabled: false }
+      // Турбо-лора по умолчанию включена, остальные новые записи — выключены.
+      entry = { name, strength: 1.0, enabled: name === TURBO_LORA_NAME }
       entries.push(entry)
     }
 

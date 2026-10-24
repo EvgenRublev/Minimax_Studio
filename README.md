@@ -235,7 +235,7 @@ start.bat
 | Text Encoder    | `text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`                                 | ~15.7 ГБ |
 | VAE (video)     | `vae/minimax_h3_video_vae_int8_convrot.safetensors`                                        | ~2.8 ГБ  |
 | VAE (audio)     | `vae/minimax_h3_audio_vae_fp32.safetensors`                                                  | ~0.6 ГБ  |
-| Turbo LoRA      | `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` (опциональна)           | ~1.8 ГБ  |
+| Turbo LoRA      | `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` (обязательна; включена по умолчанию, кроме «Кадров» с аудио) | ~1.8 ГБ  |
 | Latent Upscaler | `latent_upscale_models/minimax_h3_latent_upscaler_3d_fp16.safetensors`                       | ~691 МБ  |
 | TAE Preview     | `vae_approx/taeh3.safetensors`                                                               | ~9.8 МБ  |
 | Veda (опциональна) | `veda/minimax_h3_t2va_veda_8nfe_600step_preview_fp8.safetensors`                          | ~275 МБ  |

@@ -344,6 +344,8 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     duration_seconds: videoLengthFrames / fps,
     fps,
     pass1_steps: body.firstSamplerSteps ?? 6,
+    // Всего шагов в расписании pass 1 (точка сплита = это число → «6 из 6»).
+    pass1_total_steps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
     // (правка 722) Шаги ЕДИНСТВЕННОГО прохода драфта. Без этого поля серверный
     // сайдкар драфта показывал в диалоге метаданных «6» (значение точки
     // сплита) вместо реально использованных шагов драфта — а «Повторить»
@@ -354,8 +356,9 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     pass2_sampler: body.pass2Sampler || 'euler', // (правка 69)
     pass1_sampler: body.pass1Sampler || 'euler', // (правка 70)
     pass1_scheduler: body.pass1Scheduler || 'simple', // (правка 70)
-    // (правка 720) turbo_lora_strength убран — турбо-лора не подключается
-    // к пайплайну (правки 578/587), в метаданных ей не место.
+    // Турбо-лора теперь снова подключается (через customLoras, включена по
+    // умолчанию), поэтому её имя попадает в `lora` ниже. Отдельная сила
+    // турбо в шаблоне не используется — сила хранится в loras.json.
     minimax_h3_reference_detail: body.refImageSize || 'match', // (правка 58)
     sparse_attention: body.sparseAttention === true, // (правки 168→387) Sol-Attn default OFF
     // (правка 466) настройки Sol-Attn — «Повторить» восстанавливает
@@ -383,9 +386,8 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
           chunk_ff_threshold: body.chunkFFThreshold ?? 4096,
         }
       : {}),
-    // (правка 587) Турбо-лора убрана из воркфлоу (правка 578) — метаданные
-    // не обещают её. Пишем фактически применённые кастомные LoRA (может быть
-    // пусто); единственный потребитель поля (MetaDialog «Ещё») его удаляет.
+    // Фактически применённые LoRA (включая встроенную турбо-лору, если она
+    // не пропущена в flf+audio). Может быть пусто; MetaDialog «Ещё» удаляет поле.
     lora: (body.customLoras ?? []).map((l) => l.name).join(', '),
     references,
     // (правка 161) extend-режим: клипы + рефы
@@ -596,8 +598,11 @@ export async function finalizePendingMeta(
             probed = {
               video_length: pr.frames,
               duration_seconds: Number(pr.durationSec.toFixed(2)),
+              // Фактический fps файла (probe из r_frame_rate): у режима FPS
+              // итог 48/72 к/с — прежний хардкод 24 врал в сайдкаре.
+              // Генерация/refine и так пишут 24 — значение не меняется.
+              fps: Math.round(pr.fps ?? 24),
               resolution: `${pr.width}x${pr.height}`,
-              fps: 24,
             }
           }
         } catch { /* probe не критичен — остаются плановые поля */ }

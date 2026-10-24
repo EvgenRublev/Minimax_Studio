@@ -91,8 +91,8 @@ export interface TileUpscaleParams {
    *  fade/overlap_mode/blend/brightness_match (overlap задаёт только
    *  геометрию рамп). Default true. */
   syncTiles?: boolean
-  /** (правка 483) Пользовательские LoRA из настроек — цепочкой после
-   *  турбо-лоры (tu_lora), до AdaLN-фикса и SigmaShift. */
+  /** (правка 483) LoRA из настроек — цепочкой customLoras (включая
+   *  турбо-лору, если она включена), до AdaLN-фикса и SigmaShift. */
   customLoras?: Array<{ name: string; strength: number }>
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini). */
   videoFormat?: VideoFormatSettings
@@ -240,7 +240,8 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   const minTile = snap32(256)
 
   // Model chain: UNET → [custom LoRAs] → SigmaShift
-  // (правка 578) Турбо-лора убрана — кастомные LoRA подключаются прямо к modelSrc
+  // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
+  // пользовательские LoRA; порядок задаёт loras.json.
   let modelSrc: [string, number] = ['tu_unet', 0]
   const modelNodes: Record<string, unknown> = {}
 

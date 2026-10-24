@@ -53,8 +53,8 @@ export interface ControlNetUiParams {
   /** Full pipeline, Pass 1: эффективные шаги (SplitSigmas split, default 6). */
   firstSamplerSteps: number
   /**
-   * (правка 719) ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   * undefined = авто (firstSamplerSteps × 2) — «N из 2N».
+   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
+   * По умолчанию 6 — столько же, сколько забирает сплит («6 из 6»).
    */
   firstSamplerTotalSteps?: number
   /** Pass 1 sampler (default 'euler'). */
@@ -79,6 +79,7 @@ const DEFAULT_PARAMS: ControlNetUiParams = {
   compressSource: true, // (правка 512) default ON — во всех режимах
   draftSteps: 4,
   firstSamplerSteps: 6,
+  firstSamplerTotalSteps: 6,
   pass1Sampler: 'euler',
   pass1Scheduler: 'simple',
   sigmaVariant: '3step',

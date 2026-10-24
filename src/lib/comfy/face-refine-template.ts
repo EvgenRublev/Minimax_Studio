@@ -133,6 +133,17 @@ export interface FaceRefineParams {
   diffusionModel?: string
   /** Турбо-LoRA (шаги должны совпадать с ней). */
   lora?: string
+  /** Сила турбо-LoRA (из loras.json; по умолчанию 1.0). */
+  loraStrength?: number
+  /**
+   * Размеры/длина исходника (probe роута). Нужны для .latent-сайдкара:
+   * итоговые кадры кодируются на канве ceil32 (латент обязан быть кратен
+   * 32 — его проверяет validateLatentFile), а длина — для тишины, когда
+   * исходник беззвучный. Не заданы — латент не сохраняется (старый behaviour).
+   */
+  width?: number
+  height?: number
+  frames?: number
   /** Подпапка вывода. */
   outputSubfolder?: string
   /** Формат/качество видео-выхода ([video] config.ini). */
@@ -212,7 +223,7 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
 
   if (p.lora) {
     modelNodes['fr_lora'] = {
-      inputs: { lora_name: p.lora, strength_model: 1.0, model: modelSrc },
+      inputs: { lora_name: p.lora, strength_model: p.loraStrength ?? 1.0, model: modelSrc },
       class_type: 'LoraLoaderModelOnly',
       _meta: { title: `Turbo LoRA (${p.lora})` },
     }
@@ -451,6 +462,70 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       class_type: 'VHS_VideoCombine',
       _meta: { title: 'Video Combine' },
     },
+
+    // ═══════════════════════════════════════════════
+    //  SAVE AV LATENT — для lossless-переиспользования
+    // ═══════════════════════════════════════════════
+    // Латент сэмплера (fr_sample) — это латент КРОПОВ лиц, а не итога:
+    // результатом face-refine служат исходные кадры с вклеенными лицами
+    // (fr_stitch). Поэтому .latent-сайдкар строим отдельно — VAE-кодируем
+    // именно итоговые кадры (тот же паттерн, что mp4-ветка рефайна:
+    // ресайз на канву ceil32 ≥ исходника → VAEEncode) + аудио исходника
+    // (AudioOrSilent защищает от беззвучных) → AV-латент → safetensors.
+    // Финализация меты подхватит .latent из outputs и запишет latent_file
+    // в сайдкар mp4 — следующий рефайн/апскейл этого видео пойдёт по
+    // lossless-пути, минуя h264-декод и повторный VAEEncode.
+    ...(p.width && p.height
+      ? {
+          fr_ls_res: {
+            inputs: {
+              image: ['fr_stitch', 0],
+              width: Math.ceil(p.width / 32) * 32,
+              height: Math.ceil(p.height / 32) * 32,
+              upscale_method: 'lanczos',
+              keep_proportion: 'stretch',
+              pad_color: '0, 0, 0',
+              crop_position: 'center',
+              divisible_by: 16,
+              device: 'cpu',
+            },
+            class_type: 'ImageResizeKJv2',
+            _meta: { title: `Итог → ceil32-канва (кодирование)` },
+          },
+          fr_ls_enc: {
+            inputs: { pixels: ['fr_ls_res', 0], vae: ['fr_vae_video', 0] },
+            class_type: 'VAEEncode',
+            _meta: { title: 'VAE-кодирование итога' },
+          },
+          fr_ls_asafe: {
+            inputs: {
+              audio: ['fr_src', 2],
+              fallback_seconds: Number(((p.frames ?? 120) / 24).toFixed(2)),
+            },
+            class_type: 'MiniMaxH3AudioOrSilent',
+            _meta: { title: 'Аудио исходника (или тишина)' },
+          },
+          fr_ls_aenc: {
+            inputs: { audio: ['fr_ls_asafe', 0], vae: ['fr_vae_audio', 0] },
+            class_type: 'VAEEncodeAudio',
+            _meta: { title: 'Аудио → латент' },
+          },
+          fr_ls_cat: {
+            inputs: { video_latent: ['fr_ls_enc', 0], audio_latent: ['fr_ls_aenc', 0] },
+            class_type: 'LTXVConcatAVLatent',
+            _meta: { title: 'AV-латент итога' },
+          },
+          fr_ls_save: {
+            inputs: {
+              samples: ['fr_ls_cat', 0],
+              filename_prefix: `${sub}latents/Minimax_Studio_facerefine`,
+              vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors',
+            },
+            class_type: 'MiniMaxStudioSaveAVLatent',
+            _meta: { title: 'Save AV Latent (для lossless-переиспользования)' },
+          },
+        }
+      : {}),
 
     ...modelNodes,
 

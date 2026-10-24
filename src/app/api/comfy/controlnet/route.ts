@@ -42,7 +42,7 @@ import { videoSamplerStages, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3
  *   pipeline?       — 'draft' | 'full'
  *   lowResMP?       — канва pass 1 (только pipeline='full')
  *   firstSamplerSteps? — эффективные шаги pass 1 (SplitSigmas split, default 6)
- *   firstSamplerTotalSteps? — всего шагов в расписании pass 1 (default: 2× split)
+ *   firstSamplerTotalSteps? — всего шагов в расписании pass 1 (default: = split, «6 из 6»)
  *   draftSteps?     — шаги единственного прохода (draft, default 4)
  *   pass1Sampler?   — сэмплер pass 1 (default 'euler')
  *   pass1Scheduler? — планировщик pass 1 (default 'simple')
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
       pipeline?: 'draft' | 'full'
       lowResMP?: number
       firstSamplerSteps?: number
-      /** (правка 719) Всего шагов в расписании pass 1 (default: 2× split). */
+      /** Всего шагов в расписании pass 1 (default: = split, «6 из 6»). */
       firstSamplerTotalSteps?: number
       draftSteps?: number
       pass1Sampler?: string
@@ -134,6 +134,7 @@ export async function POST(req: NextRequest) {
     const cnCommonMeta = {
       pipeline: cnPipeline,
       pass1_steps: body.firstSamplerSteps ?? 6,
+      pass1_total_steps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
       pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[body.sigmaVariant || '3step'] ?? 3,
       sigma_variant: body.sigmaVariant || '3step',
       pass1_sampler: body.pass1Sampler || 'euler',
@@ -269,8 +270,8 @@ export async function POST(req: NextRequest) {
           pipeline: body.pipeline === 'full' ? 'full' : 'draft',
           lowResMP: body.lowResMP,
           firstSamplerSteps: body.firstSamplerSteps,
-          // (правка 719) Всего шагов в расписании pass 1 (default: 2× split).
-          firstSamplerTotalSteps: body.firstSamplerTotalSteps,
+          // Всего шагов в расписании pass 1 (default: = split, «6 из 6»).
+          firstSamplerTotalSteps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
           draftSteps: body.draftSteps,
           pass1Sampler: body.pass1Sampler,
           pass1Scheduler: body.pass1Scheduler,

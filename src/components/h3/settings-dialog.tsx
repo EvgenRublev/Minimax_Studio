@@ -367,7 +367,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       title: 'Полный сброс?',
       // (правка 130 + полный сброс) Полный сброс «как с завода»: настройки +
       // LoRA + кэш + контент + апскейл + вложения/чаты + промпты + логи.
-      desc: 'Будут удалены ВСЕ ваши данные: сгенерированные видео (output), кэш и загрузки (input), файлы апскейла и его журналы, вложения чатов, история чатов ассистента, история и избранное промптов, текущий промпт, журнал задач и логи. Настройки (VRAM, LLM, модели, LoRA, формат видео, звук) вернутся к заводским, локальные данные браузера будут очищены. Действие необратимо. После сброса перезапустите программу, чтобы ComfyUI применил заводские настройки VRAM.',
+      desc: 'Будут удалены ВСЕ ваши данные: сгенерированные видео (output), кэш и загрузки (input), файлы апскейла и его журналы, вложения чатов, история чатов ассистента, история и избранное промптов, текущий промпт, журнал задач и логи. Настройки (VRAM, LLM, модели, LoRA, формат видео, звук) вернутся к заводским, локальные данные браузера будут очищены. Программа перезапустится. Действие необратимо.',
       button: 'Сбросить всё',
     },
   }
@@ -403,8 +403,6 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         useAssistantChats.getState().clearAll()
         useAssistantChats.getState().setAssistantMode('generate')
         usePromptHistory.getState().clear()
-        // Сначала отзываем blob-URL референсов, потом заменяем состояние.
-        useGenStore.getState().clearVideoRefs()
         useGenStore.setState({ video: { ...DEFAULT_VIDEO_STATE } })
         useGenDurations.getState().clear()
         useGenQueue.setState({ items: [] })
@@ -427,7 +425,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         // 5) Перезагрузка: гарантирует, что ни один стор не остался в памяти
         //    со старыми данными.
-        toast.success('Полный сброс выполнен. Данные удалены, страница перезагружается...')
+        toast.success('Полный сброс выполнен. Программа перезапускается...')
         window.setTimeout(() => window.location.reload(), 1200)
         return
       }

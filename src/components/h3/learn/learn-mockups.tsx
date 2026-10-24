@@ -518,9 +518,8 @@ export function MockSettingsOpt() {
   )
 }
 
-/** (правка 114) Список LoRAs: встроенная турбо (правки 95) + кастомные (правки 44/96).
- *  (правка 719) Встроенная турбо-лора убрана из списка (правка 578) — в списке
- *  только пользовательские файлы. */
+/** (правка 114) Список LoRAs: встроенная турбо (ON по умолчанию) +
+ *  пользовательские файлы (OFF по умолчанию). */
 export function MockLoraList() {
   return (
     <div className="w-[320px] rounded-lg border border-border bg-[var(--surface-1)] p-2.5 space-y-2">
@@ -528,9 +527,23 @@ export function MockLoraList() {
         <p className="text-[10px] font-semibold text-foreground">LoRAs</p>
         <MockButton>＋ Добавить</MockButton>
       </div>
-      {/* (правка 719) Встроенной турбо-лоры в списке больше нет (правка 578) —
-          список состоит только из пользовательских файлов, по умолчанию
-          все выключены. */}
+      {/* Встроенная турбо-лора — в списке и включена по умолчанию. */}
+      <div className="rounded-md border border-border bg-[var(--surface-2)]/70 p-2 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium text-foreground font-mono truncate">minimax_h3_ref2v_turbo_4step...safetensors</p>
+            <p className="text-[10px] text-muted-foreground">1.8 ГБ · включена</p>
+          </div>
+          <span className="text-cyan-400 text-xs shrink-0">⏻</span>
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">Сила</span>
+            <MockSlider value={50} max={100} />
+            <span className="text-[10px] font-mono text-muted-foreground">1.00</span>
+          </div>
+        </div>
+      </div>
       <div className="rounded-md border border-border bg-[var(--surface-2)]/70 p-2 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">

@@ -3,17 +3,17 @@ import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (
  * MiniMax H3 Reference-to-Video — Two-Pass Latent Upscaler workflow.
  *
  * Architecture:
- *   Pass 1: Low-res generation (0.2 MP, 8 total steps → SplitSigmas → 4 effective)
+ *   Pass 1: Low-res generation (0.2 MP, 6 total steps → SplitSigmas → 6 effective, «6/6»)
  *   Upscale: MinimaxH3LatentUpscaler3D to target resolution (default 0.7 MP)
  *   Pass 2: High-res refinement (3 steps via ManualSigmas)
  *   Decode: Separate VAEDecode (video) + VAEDecodeAudio (audio)
  *
- * Model chain: UNET → [LowVRAM] → [ChunkFF] → LoRA → SigmaShift → AttentionBackend → Preview
+ * Model chain: UNET → [LowVRAM] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift → AttentionBackend → Preview
  * (LowVRAM Attention and Chunk FeedForward are optional, default ON;
  *  SageAttn and SLA patches were removed in favour of --use-ck-attention)
  *
  * Defaults (overridable via MiniMaxH3Params):
- *   - LoRA: minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors, strength 1.0 (правка 70)
+ *   - LoRA: customLoras из loras.json; встроенная турбо-лора включена по умолчанию
  *   - Pass 1: сэмплер + планировщик на выбор (default euler / simple, правки 67, 70)
  *     BasicScheduler (steps) → SplitSigmas
  *   - Pass 2: сэмплер на выбор (default euler, правки 68–69) / ManualSigmas
@@ -170,19 +170,16 @@ export interface MiniMaxH3Params {
   targetDimensions?: { width: number; height: number }
   /** Low-res pass 1 resolution in MP (default 0.2, диапазон 0.2–2, правка 70). */
   lowResMP?: number
-  /** Pass 1 effective sampling steps (SplitSigmas split point, default 4, max 30). */
+  /** Pass 1 effective sampling steps (SplitSigmas split point, default 6, max 30). */
   firstSamplerSteps?: number
   /**
-   * (правка 719) ВСЕГО шагов в расписании BasicScheduler для pass 1.
+   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
    *
-   * Раньше было жёстко `steps = firstSamplerSteps * 2`, то есть «N из 2N»:
-   * сплит всегда ровно посередине, и «6 из 8» было недостижимо. Теперь
-   * число шагов расписания задаётся независимо от точки сплита — это
-   * позволяет, например, взять 6 сигм из 8-шаговой лестницы (сплит
-   * глубже, чем у «4 из 8»).
+   * Число шагов расписания задаётся независимо от точки сплита — это
+   * позволяет, например, взять 6 сигм из 8-шаговой лестницы.
    *
-   * undefined = авто (firstSteps × 2) — поведение по умолчанию и эталон
-   * вендора (steps=4, split=2) не меняются.
+   * undefined = столько же, сколько забирает сплит (firstSteps) — «6 из 6»
+   * по умолчанию. Раньше здесь было firstSteps × 2 («6 из 12»).
    */
   firstSamplerTotalSteps?: number
   /**
@@ -199,11 +196,11 @@ export interface MiniMaxH3Params {
   pass1Sampler?: string
   /** (правка 70) Pass 1 scheduler (default 'simple'). Must be one of PASS1_SCHEDULERS. */
   pass1Scheduler?: string
-  /** (правка 70) Turbo LoRA strength (default 1.0; 0 = отключена). */
+  /** @deprecated Турбо-лора идёт через customLoras; шаблон это поле не читает. */
   turboLoraStrength?: number
-  /** (правка 90) Turbo LoRA filename in models/loras/ (default: built-in ref2v turbo). */
+  /** @deprecated Турбо-лора идёт через customLoras; шаблон это поле не читает. */
   turboLoraName?: string
-  /** (правка 90) Chain the turbo LoRA at all (default true). */
+  /** @deprecated Турбо-лора идёт через customLoras; шаблон это поле не читает. */
   turboLoraEnabled?: boolean
   /** (правка 168) Разреженное внимание (Sol-Attn) — ускоряет длинные последовательности.
    *  Короткие (< min_tokens) остаются плотными автоматически. Default true. */
@@ -516,10 +513,9 @@ function loraNodeId(index: number): string {
   return `46:36_${index + 1}`
 }
 
-// (правка 483) Экспортированы для refine-template: цепочка кастомных LoRA
-// там вставляется между турбо-лорой ('46:36') и SigmaShift ('46:38') теми
-// же хелперами (id '46:36_N' в refine-воркфлоу не конфликтуют — '46:36'
-// там существует в одном экземпляре).
+// (правка 483) Экспортированы для refine-template: цепочка customLoras
+// вставляется между modelSrc и SigmaShift теми же хелперами (id '46:36_N'
+// в refine-воркфлоу не конфликтуют с другими нодами).
 export function buildCustomLoraNodes(
   loras: Array<{ name: string; strength: number }> | undefined,
   source: [string, number],
@@ -606,15 +602,13 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   const vhsEnc = vhsEncodeInputs(p.videoFormat)
   const finalRes = p.finalResolution ?? 0.7
   const lowResMP = clampLowResMP(p.lowResMP ?? 0.2, finalRes)
-  // (правка 719) Дефолт точки сплита = 6 (при авто-правиле «всего = 2× сплита»
-  // это «6 из 12»). Прежний дефолт был 4 («4 из 8»).
+  // Дефолт точки сплита = 6. Прежний дефолт был 4.
   const firstSteps = p.firstSamplerSteps ?? 6
-  // (правка 719) Всего шагов в расписании pass 1. По умолчанию — 2× точки
-  // сплита (прежнее поведение «N из 2N» и эталон вендора steps=4/split=2).
-  // Задаётся независимо → можно взять «6 из 8».
+  // Всего шагов в расписании pass 1. По умолчанию — столько же, сколько
+  // забирает сплит («6 из 6»). Задаётся независимо → можно взять «6 из 8».
   const totalSteps = Math.max(
     2,
-    Math.min(64, Math.round(p.firstSamplerTotalSteps ?? firstSteps * 2)),
+    Math.min(64, Math.round(p.firstSamplerTotalSteps ?? firstSteps)),
   )
   // Сплит не может превышать число доступных сигм (steps+1) — иначе нода
   // SplitSigmas получит несуществующий индекс.
@@ -636,7 +630,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   const pass1Scheduler = (PASS1_SCHEDULERS as readonly string[]).includes(p.pass1Scheduler || '')
     ? (p.pass1Scheduler as string)
     : DEFAULT_PASS1_SCHEDULER
-  // (правка 578) Турбо-лора убрана — кастомные LoRA подключаются прямо к modelSrc
+  // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
+  // пользовательские LoRA; порядок задаёт loras.json.
 
   // ─── (правка 146) Режим генерации ───
   const mode: 'ref' | 't2v' | 'flf' | 'extend' = p.mode === 't2v' || p.mode === 'flf' || p.mode === 'extend' ? p.mode : 'ref'
@@ -1089,7 +1084,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
 
     ...modelNodes,
 
-    // (правка 578) Турбо-лора убрана — кастомные LoRA подключаются прямо к modelSrc
+    // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
+    // пользовательские LoRA; порядок задаёт loras.json.
     ...buildCustomLoraNodes(p.customLoras, modelSrc),
     // Sigma Shift (receives last node in the LoRA chain)
     '46:38': {
@@ -1204,13 +1200,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     },
 
     // ═══════════════════════════════════════════════
-    //  PASS 1: Low-res (0.2 MP, 4 total steps → split to 2)
+    //  PASS 1: Low-res (0.2 MP, totalSteps → SplitSigmas)
     // ═══════════════════════════════════════════════
 
-    // BasicScheduler: 'full' — firstSteps*2 total (правки 67, 70), сплит
-    // отдаёт Pass 1 верхнюю половину; 'draft' — график единственного прохода
-    // длиной draftSteps (по умолчанию 8), полный, без сплита.
-    // (правка 719) steps = totalSteps (по умолчанию 2× точки сплита).
+    // BasicScheduler: 'full' — totalSteps (по умолчанию = точке сплита,
+    // «6 из 6»), SplitSigmas отдаёт Pass 1 верхнюю часть; 'draft' — график
+    // единственного прохода длиной draftSteps, полный, без сплита.
     '46:24': {
       inputs: {
         scheduler: pass1Scheduler,
@@ -1567,10 +1562,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   const sigmaVariant = SIGMA_VARIANTS[p.sigmaVariant || '3step'] || SIGMA_VARIANTS['3step']
   const pass2Sampler = p.pass2Sampler || 'euler'
 
-  // (правка 587) Турбо-лора убрана (правка 578) — мёртвые локалы
-  // turboLoraOn/turboStrength и пустой спред ...(turboLoraOn && {}) удалены.
-
-  // Model chain: UNET → [LowVRAM] → [ChunkFF] → TurboLoRA → [custom] → SigmaShift → [Sparse] → Attention
+  // Model chain: UNET → [LowVRAM] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift → [Sparse] → Attention
   const lowVram = p.lowVramAttention !== false
   const chunkFF = p.chunkFeedForward !== false
   const modelNodes: Record<string, unknown> = {}
@@ -1627,12 +1619,28 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // (правка 419) Эталон «V2V Extend Any Video»: перекрытие сегмент-к-сегменту
   // = тому же 2-секундному окну контекста (56 кадров), что и стык с исходником.
   const CHAIN_OVERLAP_FRAMES = 56
-  // Промпт клипа: клип 0 — с преамбулой продолжения (правка 207)
-  const clipPrompt = (idx: number) =>
-    idx === 0 && !clips[idx].prompt.includes('[Video Continuation]')
-      ? CONTINUATION_PREAMBLE + clips[idx].prompt
-      : clips[idx].prompt
+  // (подход H3ZeroStudio) Фраза непрерывности для клипов i>0: последний кадр
+  // предыдущего клипа приходит <Picture N>-референсом (нода ext_lf_i ниже) —
+  // якорь внешнего вида для ВСЕГО нового содержимого клипа, а не только шва.
+  const continuityPhrase = (pic: number) =>
+    `Continuity: <Picture ${pic}> is the last frame of the previous shot of this video; ` +
+    `continue seamlessly from it and keep characters, faces, clothing, lighting and ` +
+    `details consistent with <Picture ${pic}>.`
+  // Промпт клипа: клип 0 — с преамбулой продолжения (правка 207); клипы i>0 —
+  // с фразой непрерывности про последний кадр предыдущего (слот picSlot).
+  const clipPrompt = (idx: number, picSlot: number) => {
+    if (idx === 0) {
+      return clips[idx].prompt.includes('[Video Continuation]')
+        ? clips[idx].prompt
+        : CONTINUATION_PREAMBLE + clips[idx].prompt
+    }
+    return continuityPhrase(picSlot) + '\n\n' + clips[idx].prompt
+  }
   const clipSeed = (idx: number) => (clips[idx].seed < 0 ? seed + idx : clips[idx].seed)
+  // Полная длина клипа idx в кадрах (сетка 17k+5) — та же формула, что в
+  // цикле ниже: нужна заранее для ext_lf (последний кадр клипа idx).
+  const clipTotalFrames = (idx: number) =>
+    snapUp((idx === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES) + framesForDuration(clips[idx].duration))
 
   // Длительность для ноды расчёта кадров превью (как '17'+'46:19' вкладки
   // «Генерация»): берём самый длинный клип — превью анимируется по максимуму.
@@ -2051,12 +2059,15 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     ...(() => {
       const nodes: Record<string, unknown> = {}
       // (правка 423) Пространственный размер латента канвы pass 1
-      // (однопроходный режим: passW = final.genW).
-      const lw = Math.max(1, Math.round(passW / 16))
-      const lh = Math.max(1, Math.round(passH / 16))
+      // (однопроходный режим: passW = final.genW) — видео-маска pass 1
+      // удалена (подход H3ZeroStudio: keyframes + лок), осталась только
+      // геометрия pass 2 (lw2/lh2 ниже).
       // (правка 423) Двухпроходный: маски pass 2 — в геометрии final.
       const lw2 = Math.max(1, Math.round(final.genW / 16))
       const lh2 = Math.max(1, Math.round(final.genH / 16))
+      // Аудио-длины клипов (aTotal на индекс) — для аудио-контекста keyframe
+      // клипа i+1 (сколько звука доступно в клипе i до перекрытия).
+      const audioTotals: number[] = []
 
       // (правка 266) Картинки-рефы: LoadImage-ноды + привязка к КАЖДОМУ
       // ext_cond_i через ref_images.ref_image_N (как в режиме 'ref').
@@ -2087,15 +2098,35 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         const tTok = tok(totalFrames)
         const aOver = Math.round((overlapFrames * 5) / 3)
         const aTotal = Math.round((totalFrames * 5) / 3)
+        // Длина аудио-ленты предыдущего клипа (для аудио-контекста keyframe).
+        // Клип 0: хвост исходника (аудио кодируется ровно на tailFrames).
+        const prevATotal = i === 0 ? Math.round((tailFrames * 5) / 3) : audioTotals[i - 1]
+        audioTotals.push(aTotal)
 
         // Conditioning клипа + пустой латент totalFrames
         // (правка 423) Размеры кондишнинга/пустого латента — канва pass 1
         // (в однопроходном режиме passW = final.genW). Pass 2 переиспользует
         // тот же conditioning — как в основном билдере (там кондишнинг
         // строится на lowRes и идёт в оба прохода).
+        // (подход H3ZeroStudio) Клипы i>0 дополнительно получают ПОСЛЕДНИЙ
+        // КАДР клипа i−1 как <Picture>-референс (ext_lf_i): якорь внешнего
+        // вида для нового содержимого — раньше клип i>0 не имел вообще
+        // никакого визуального якоря, и контент генерировался «вслепую»
+        // (гостинг/двоения, накапливающиеся по цепочке).
+        if (i > 0 && extRefCount + 1 < 9) {
+          nodes[`ext_lf_${i}`] = {
+            inputs: {
+              images: [`ext_decv_${i - 1}`, 0],
+              start_index: clipTotalFrames(i - 1) - 1,
+              num_frames: 1,
+            },
+            class_type: 'GetImageRangeFromBatch',
+            _meta: { title: `Последний кадр клипа ${i} (якорь <Picture>)` },
+          }
+        }
         nodes[`ext_cond_${i}`] = {
           inputs: {
-            prompt: clipPrompt(i),
+            prompt: clipPrompt(i, extRefCount + 2),
             width: passW,
             height: passH,
             length: totalFrames,
@@ -2110,6 +2141,11 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             // идёт из preserved-аудио-латента.
             ...(hasSeed && extRefCount < 9 && {
               [`ref_images.ref_image_${extRefCount}`]: ['extv_fres', 0],
+            }),
+            // (подход H3ZeroStudio) последний кадр клипа i−1 — слотом после
+            // хвоста исходника; на него указывает фраза непрерывности.
+            ...(i > 0 && extRefCount + 1 < 9 && {
+              [`ref_images.ref_image_${extRefCount + 1}`]: [`ext_lf_${i}`, 0],
             }),
           },
           class_type: 'MiniMaxH3ReferenceToVideo',
@@ -2195,50 +2231,82 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           prevAudio = [`ext_p2aenc_${i}`, 0]
         }
 
-        // (правка 324) Маска preserved-хвоста ЖЁСТКАЯ чёрная для всех
-        // клипов: голова клипа 0 — кодированный хвост (extv_ssep), голова
-        // i>0 — выход сэмплера i−1; «смягчать» не нужно — граница
-        // стыкуется так же чисто, как межклиповые (i>0). Правка 323
-        // (серая 0.3 в общем прогоне) откачена: давала цветовые блоки и
-        // шум на тёмных сценах.
-        // Видео: прошлый хвост ⊕ пустой, обрезка до total токенов, маска
-        if (useOld) Object.assign(nodes, {
-          [`ext_vold_${i}`]: {
+        // (подход H3ZeroStudio) Хвост якорится ДВУМЯ механизмами вместо
+        // видео-SetLatentNoiseMask (она лишь держала токены в траектории
+        // сэмплера — DiT не видел хвост как контекст и генерировал новое
+        // содержимое «вслепую», отсюда гостинг на клипах 2+):
+        //   1. ext_kf_i — хвост в conditioning каналом minimax_keyframes:
+        //      PackedLayout пакует его cond-строками (img_update=0), модель
+        //      видит его чистым на каждом шаге. Аудио — с контекстом ДО
+        //      перекрытия (модель «слышит» продолжение, а не шум).
+        //   2. ext_lock_i — обёртка модели: предсказание x0 в залоченных
+        //      позициях принудительно = чистый латент хвоста (дрейф
+        //      невозможен физически). KJ-превью не конфликтует: оно на
+        //      OUTER_SAMPLE-обёртке, лок — на function wrapper.
+        // Аудио-маска (ext_amask/ext_aset ниже) ОСТАЁТСЯ: ядро превращает
+        // её в audio_denoise_mask conds — модель знает чистый timestep.
+        // Видео: прошлый хвост ⊕ пустой, обрезка до total токенов.
+        if (useOld) {
+          // Аудио-контекст keyframe: звук до перекрытия (≤1 с, кратно 5),
+          // заканчивается на границе перекрытия; frame-индекс отрицательный
+          // (5 аудио-шагов = 3 пиксельных кадра, FRAME_RESCALE 5/3).
+          const audioCtx = Math.max(0, Math.min(40, prevATotal - aOver))
+          const audioCtx5 = Math.floor(audioCtx / 5) * 5
+          nodes[`ext_actx_${i}`] = {
+            inputs: {
+              samples: prevAudio,
+              dim: 'x',
+              index: -(aOver + audioCtx5),
+              amount: aOver + audioCtx5,
+            },
+            class_type: 'LatentCut',
+            _meta: { title: `Аудио-контекст клип ${i + 1}: перекрытие ${aOver} + ${audioCtx5} шагов до него` },
+          }
+          nodes[`ext_vold_${i}`] = {
             inputs: { samples: prevVideo, dim: 't', index: -oTok, amount: oTok },
             class_type: 'LatentCut',
             _meta: { title: `Хвост прошлого (видео) ${i + 1}: ${oTok} ток.` },
-          },
-          [`ext_vcat_${i}`]: {
+          }
+          nodes[`ext_vcat_${i}`] = {
             inputs: { samples1: [`ext_vold_${i}`, 0], samples2: [`ext_esep_${i}`, 0], dim: 't' },
             class_type: 'LatentConcat',
             _meta: { title: `Concat видео ${i + 1}` },
-          },
-          [`ext_mb_${i}`]: {
-            inputs: { width: lw, height: lh, batch_size: oTok, color: 0 },
-            class_type: 'EmptyImage',
-            _meta: { title: `Маска: чёрная ${oTok}` },
-          },
-          [`ext_mw_${i}`]: {
-            inputs: { width: lw, height: lh, batch_size: tTok - oTok, color: 16777215 },
-            class_type: 'EmptyImage',
-            _meta: { title: `Маска: белая ${tTok - oTok}` },
-          },
-          [`ext_mbat_${i}`]: {
-            inputs: { inputcount: 2, image_1: [`ext_mb_${i}`, 0], image_2: [`ext_mw_${i}`, 0] },
-            class_type: 'ImageBatchMulti',
-            _meta: { title: `Маска видео ${i + 1}` },
-          },
-          [`ext_vmask_${i}`]: {
-            inputs: { image: [`ext_mbat_${i}`, 0], channel: 'red' },
-            class_type: 'ImageToMask',
-            _meta: { title: `ImageToMask ${i + 1}` },
-          },
-          [`ext_vset_${i}`]: {
-            inputs: { samples: [`ext_vtrim_${i}`, 0], mask: [`ext_vmask_${i}`, 0] },
-            class_type: 'SetLatentNoiseMask',
-            _meta: { title: `Noise mask видео ${i + 1}` },
-          },
-        })
+          }
+          nodes[`ext_aold_${i}`] = {
+            inputs: { samples: prevAudio, dim: 'x', index: -aOver, amount: aOver },
+            class_type: 'LatentCut',
+            _meta: { title: `Хвост прошлого (аудио) ${i + 1}: ${aOver}` },
+          }
+          // Хвост клипа i в conditioning (нативный keyframe-канал H3).
+          nodes[`ext_kf_${i}`] = {
+            inputs: {
+              conditioning: [`ext_cond_${i}`, 0],
+              video_latent: [`ext_vold_${i}`, 0],
+              video_frame: 0,
+              audio_latent: [`ext_actx_${i}`, 0],
+              audio_frame: -Math.floor((audioCtx5 * 3) / 5),
+            },
+            class_type: 'MiniMaxStudioExtendKeyframes',
+            _meta: { title: `Keyframe-якорь хвоста клип ${i + 1}` },
+          }
+          // Жёсткий лок перекрытия (перезапись предсказания x0).
+          // Лок-тензоры — ПОЛНЫЕ init-латенты клипа (хвост в начале,
+          // дальше нули с весом 0), как в H3ZeroStudio (lock = video с
+          // вписанным хвостом): размеры совпадают с выходом модели.
+          nodes[`ext_lock_${i}`] = {
+            inputs: {
+              model: ['extpv', 0],
+              lock_video: [`ext_vtrim_${i}`, 0],
+              video_tokens_locked: oTok,
+              video_tokens_total: tTok,
+              lock_audio: [`ext_atrim_${i}`, 0],
+              audio_steps_locked: aOver,
+              audio_steps_total: aTotal,
+            },
+            class_type: 'MiniMaxStudioLatentLock',
+            _meta: { title: `Лок перекрытия клип ${i + 1} (${oTok} ток. видео / ${aOver} аудио)` },
+          }
+        }
         nodes[`ext_vtrim_${i}`] = {
           inputs: {
             samples: useOld ? [`ext_vcat_${i}`, 0] : [`ext_esep_${i}`, 0],
@@ -2250,13 +2318,9 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           _meta: { title: `Trim видео ${i + 1} → ${tTok} ток.` },
         }
 
-        // Аудио: тот же паттерн вдоль x (аудио-шаги = кадры × 5/3)
+        // Аудио: тот же паттерн вдоль x (аудио-шаги = кадры × 5/3).
+        // ext_aold_i объявлен выше (useOld-блок) — он же вход лока.
         if (useOld) Object.assign(nodes, {
-          [`ext_aold_${i}`]: {
-            inputs: { samples: prevAudio, dim: 'x', index: -aOver, amount: aOver },
-            class_type: 'LatentCut',
-            _meta: { title: `Хвост прошлого (аудио) ${i + 1}: ${aOver}` },
-          },
           [`ext_acat_${i}`]: {
             inputs: { samples1: [`ext_aold_${i}`, 0], samples2: [`ext_esep_${i}`, 1], dim: 'x' },
             class_type: 'LatentConcat',
@@ -2306,10 +2370,14 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           _meta: { title: `Trim аудио ${i + 1} → ${aTotal}` },
         }
 
-        // AV-латент клипа + сэмплер (полный график — генерация с нуля)
+        // AV-латент клипа + сэмплер (полный график — генерация с нуля).
+        // Видео без SetLatentNoiseMask (по H3ZeroStudio: якорь — keyframes
+        // в conditioning + жёсткий лок обёрткой ext_lock_i), аудио — со
+        // своей маской: LTXVConcatAVLatent соберёт NestedTensor-маску
+        // (видео = единицы, аудио = amask) — ровно схема H3ZeroStudio.
         nodes[`ext_join_${i}`] = {
           inputs: {
-            video_latent: useOld ? [`ext_vset_${i}`, 0] : [`ext_vtrim_${i}`, 0],
+            video_latent: [`ext_vtrim_${i}`, 0],
             audio_latent: useOld ? [`ext_aset_${i}`, 0] : [`ext_atrim_${i}`, 0],
           },
           class_type: 'LTXVConcatAVLatent',
@@ -2340,7 +2408,13 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           _meta: { title: `Scheduler клип ${i + 1}` },
         }
         nodes[`ext_g_${i}`] = {
-          inputs: { model: ['extpv', 0], conditioning: [`ext_cond_${i}`, 0] },
+          // (подход H3ZeroStudio) модель — через лок-обёртку (ext_lock_i,
+          // над KJ-превью extpv), conditioning — через keyframe-якорь
+          // (ext_kf_i добавляет minimax_keyframes к ext_cond_i).
+          inputs: {
+            model: useOld ? [`ext_lock_${i}`, 0] : ['extpv', 0],
+            conditioning: useOld ? [`ext_kf_${i}`, 0] : [`ext_cond_${i}`, 0],
+          },
           class_type: 'BasicGuider',
           _meta: { title: `Guider клип ${i + 1}` },
         }

@@ -108,11 +108,11 @@ export interface VideoGenState {
   freeResolution: boolean
   /** Pass 1 low-res resolution in MP (default 0.2). */
   lowResMP: number
-  /** Pass 1 effective sampling steps (SplitSigmas split point, default 4, max 30). */
+  /** Pass 1 effective sampling steps (SplitSigmas split point, default 6, max 30). */
   firstSamplerSteps: number
   /**
-   * (правка 719) ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   * undefined = авто (firstSamplerSteps × 2) — прежнее поведение «N из 2N».
+   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
+   * По умолчанию 6 — столько же, сколько забирает сплит («6 из 6»).
    * Задаётся отдельно, чтобы можно было взять, например, «6 из 8».
    */
   firstSamplerTotalSteps?: number
@@ -122,7 +122,7 @@ export interface VideoGenState {
    * В Extend это НЕ точка сплита: там один BasicScheduler на клип
    * (steps = это значение, denoise = 1, сплита нет вообще) — смысл другой,
    * чем в генерации. Значение по умолчанию 4 — как в эталонном extend-воркфлоу
-   * (BasicScheduler steps=4).
+   * (docs/Minimax_Studio_Extend_Workflow_420.json: BasicScheduler steps=4).
    * Вынесено в отдельное поле, чтобы смена дефолта точки сплита в
    * генерации не трогала продление.
    */
@@ -199,9 +199,9 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   freeResolution: false,
   lowResMP: 0.2,
   firstSamplerSteps: 6,
-  // (правка 719) undefined = авто (firstSamplerSteps × 2) — «N из 2N»,
-  // как в эталоне вендора. Явно задаётся, чтобы взять «6 из 8».
-  firstSamplerTotalSteps: undefined,
+  // Всего шагов в расписании pass 1. По умолчанию столько же, сколько
+  // забирает сплит, — «6 из 6». Можно увеличить (например, «6 из 8»).
+  firstSamplerTotalSteps: 6,
   // (правка 719) Шаги клипа продления — отдельное поле (эталон = 4).
   extendClipSteps: 4,
   draftSteps: 4, // turbo-эталон; минимум 2 — максимально быстрый черновик
@@ -357,8 +357,8 @@ export const useGenStore = create<GenStoreState>()(
       // (она срабатывала при КАЖДОЙ ре-гидратации и стирала осознанный выбор
       // пользователя «8 шагов») в разовый migrate по версии persist.
       // (правка 449) version 6: Veda снова default OFF (отмена правки 425).
-      // (правка 719) version 7: новый дефолт точки сплита pass 1 = 6
-      // (при авто-правиле «всего = 2× сплита» это «6 из 12»).
+      // version 7: новый дефолт точки сплита pass 1 = 6.
+      // (Ниже, в DEFAULT_VIDEO_STATE, всего шагов тоже 6 — «6 из 6».)
       version: 7,
       // (правка 97) Новый дефолт шагов pass 1 = 4 (был 2).
       // Сбрасываем только значение, равное старому дефолту (2), — оно означает
@@ -386,7 +386,7 @@ export const useGenStore = create<GenStoreState>()(
         if (oldVersion < 5 && state?.video && state.video.extendTwoPass === false) {
           state.video = { ...state.video, extendTwoPass: true }
         }
-        // (правка 719) Новый дефолт точки сплита pass 1: 4 → 6 («6 из 12»).
+        // Новый дефолт точки сплита pass 1: 4 → 6.
         // Сбрасываем ТОЛЬКО старое значение дефолта (4) — оно означает
         // «пользователь ползунок не трогал». Осознанный выбор (2, 3, 5…30)
         // сохраняется.

@@ -55,11 +55,11 @@ export interface ControlNetGenParams {
   pipeline?: 'draft' | 'full'
   /** Low-res MP (для full pipeline, Pass 1). */
   lowResMP?: number
-  /** Pass 1 эффективные шаги (SplitSigmas split point, default 4, max 30). */
+  /** Pass 1 эффективные шаги (SplitSigmas split point, default 6, max 30). */
   firstSamplerSteps?: number
   /**
-   * (правка 719) Всего шагов в расписании BasicScheduler для pass 1.
-   * undefined = авто (firstSamplerSteps × 2) — «N из 2N».
+   * Всего шагов в расписании BasicScheduler для pass 1.
+   * undefined = firstSamplerSteps — «6 из 6» по умолчанию.
    */
   firstSamplerTotalSteps?: number
   /** Custom LoRAs. */
@@ -120,9 +120,9 @@ export interface ControlNetGenParams {
   pass2Sampler?: string
   /** Draft steps. */
   draftSteps?: number
-  /** Turbo LoRA strength. */
+  /** @deprecated Турбо-лора идёт через customLoras; шаблон это поле не читает. */
   turboLoraStrength?: number
-  /** Turbo LoRA enabled. */
+  /** @deprecated Турбо-лора идёт через customLoras; шаблон это поле не читает. */
   turboLoraEnabled?: boolean
 }
 
@@ -462,7 +462,7 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     targetDimensions: { width, height },
     lowResMP, // (правка 523) подобранный под target
     firstSamplerSteps: p.firstSamplerSteps,
-    // (правка 719) Всего шагов в расписании pass 1 (undefined = авто 2× сплита).
+    // Всего шагов в расписании pass 1 (undefined = точка сплита, «6 из 6»).
     firstSamplerTotalSteps: p.firstSamplerTotalSteps,
     refImageSize: p.refImageSize ?? 'max', // (правка 511) дефолт max
     outputSubfolder: p.outputSubfolder ?? '',

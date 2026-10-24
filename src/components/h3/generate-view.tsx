@@ -817,8 +817,8 @@ export function GenerateView() {
       finalResolution: v.finalResolution || undefined,
       lowResMP: v.lowResMP ?? 0.2,
       firstSamplerSteps: v.firstSamplerSteps ?? 6,
-      // (правка 719) undefined = авто (2× точки сплита) — «N из 2N».
-      firstSamplerTotalSteps: v.firstSamplerTotalSteps,
+      // Всего шагов расписания pass 1. По умолчанию = точке сплита («6 из 6»).
+      firstSamplerTotalSteps: v.firstSamplerTotalSteps ?? v.firstSamplerSteps ?? 6,
       draftSteps: v.mode === 'extend' ? undefined : (v.draftSteps ?? 4),
       sigmaVariant: v.sigmaVariant || '3step',
       pass2Sampler: v.pass2Sampler || 'euler',
@@ -1553,7 +1553,7 @@ export function GenerateView() {
                   const pass1Split = Math.max(1, Math.round(video.firstSamplerSteps ?? 6))
                   const pass1TotalSteps = Math.max(
                     2,
-                    Math.min(64, Math.round(video.firstSamplerTotalSteps ?? pass1Split * 2)),
+                    Math.min(64, Math.round(video.firstSamplerTotalSteps ?? pass1Split)),
                   )
                   const effSplit = Math.min(pass1Split, pass1TotalSteps)
                   // Конечная сигма pass 1: linspace(1.0, 0.0, steps+1)[split-1]
@@ -1702,18 +1702,18 @@ export function GenerateView() {
                               />
                             </div>
 
-                            {/* (правка 719) Всего шагов в расписании pass 1 — задаётся
-                                отдельно от точки сплита, иначе «N из 2N» единственный
-                                вариант и «6 из 8» недостижимо. undefined = авто (2× сплита). */}
+                            {/* Всего шагов в расписании pass 1 — задаётся отдельно
+                                от точки сплита: по умолчанию «6 из 6», можно взять
+                                «6 из 8». */}
                             {!isDraft && (
                               <div className="space-y-1">
                                 <SettingSlider
                                   label="Всего шагов (pass 1)"
                                   labelTitle={
                                     'Длина расписания BasicScheduler, из которого SplitSigmas ' +
-                                    'берёт верхнюю часть для чернового прохода. По умолчанию — вдвое ' +
-                                    'больше точки сплита («N из 2N», как в эталоне: 2 из 4). ' +
-                                    'Меньше сплита — pass 1 уходит глубже по шуму.'
+                                    'берёт верхнюю часть для чернового прохода. По умолчанию — ' +
+                                    'столько же, сколько у сплита («6 из 6»). Увеличьте, чтобы ' +
+                                    'взять, например, «6 из 8».'
                                   }
                                   value={pass1TotalSteps}
                                   onChange={(v) =>
@@ -1724,7 +1724,7 @@ export function GenerateView() {
                                   step={1}
                                   inputMin={2}
                                   inputMax={128}
-                                  inputHint="2–128 шагов расписания. По умолчанию — вдвое больше сплита"
+                                  inputHint="2–128 шагов расписания. По умолчанию — как у сплита (6/6)"
                                 />
                                 {/* Живая сводка: что реально получится — чтобы сравнивать
                                     качество, не считая формулы в голове. */}

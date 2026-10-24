@@ -38,8 +38,9 @@ export interface RefineUiParams {
   target: 'same' | '720' | '1080' | 'free'
   mode: 'whole' | 'chunks'
   chunkSec: '3' | '5' | '8'
-  /** '2' = лёгкий ×2-рецепт (BasicScheduler 2 шага, denoise 0.2). */
-  steps: '2' | '3' | '4' | '5'
+  /** '2' = лёгкий ×2-рецепт (BasicScheduler 2 шага, denoise 0.2).
+   *  '6'/'7' — те же лестницы сигм, что у Pass 2 генерации (6step/7step). */
+  steps: '2' | '3' | '4' | '5' | '6' | '7'
   /** σ_start лестницы («Влияние Refine» в UI), 0.3–0.95. */
   strength: number
   /** (правка 1) Режим размера референсов: 'match' — без апскейла рефа

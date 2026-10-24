@@ -1,9 +1,10 @@
 'use client'
 
 /**
- * LoraSettingsPanel (правка 44) — manages custom LoRAs in settings.
+ * LoraSettingsPanel (правка 44) — manages LoRAs in settings.
  * Shows enabled/disabled state, strength slider, add/remove buttons.
- * The built-in turbo LoRA is NOT shown here.
+ * The built-in turbo LoRA is shown here too: it is ON by default, user LoRAs
+ * are OFF by default. In «Кадры» + audio the app skips turbo automatically.
  * (правка 104) Прогресс загрузки — в общем store: закрытие окна настроек
  * не сбрасывает индикатор и не прерывает загрузку.
  */
@@ -240,6 +241,11 @@ export function LoraSettingsPanel() {
         />
       </div>
 
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Встроенная турбо-лора включена по умолчанию. В режиме «Кадры» с добавленным аудио
+        она пропускается автоматически; обычные LoRA работают всегда.
+      </p>
+
       {/* Upload progress (правка 104 — состояние из общего store) */}
       {uploading && (
         <div className="space-y-1">
@@ -322,9 +328,6 @@ export function LoraSettingsPanel() {
                     </span>
                   </div>
                   {/* Trigger words (правка 46) */}
-                  {/* (правка 587) Условие !lora.isTurbo удалено: турбо-лора
-                      убрана из списка (правка 578), поля isTurbo больше нет
-                      ни в интерфейсе, ни в ответе API (ошибка TS2339). */}
                   <input
                     type="text"
                     placeholder="Триггерные слова (добавляются к промпту)"

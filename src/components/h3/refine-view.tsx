@@ -890,7 +890,7 @@ export function RefineView() {
             >
               Проход (шаги)
             </Label>
-            <Select value={steps} onValueChange={(v) => patchParams({ steps: v as '3' | '4' | '5' })}>
+            <Select value={steps} onValueChange={(v) => patchParams({ steps: v as '2' | '3' | '4' | '5' | '6' | '7' })}>
               <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
                 <SelectValue placeholder="Шаги" />
               </SelectTrigger>
@@ -898,7 +898,9 @@ export function RefineView() {
                 <SelectItem value="2">2 шага</SelectItem>
                 <SelectItem value="3">3 шага — быстро (эталон генерации)</SelectItem>
                 <SelectItem value="4">4 шага — детальнее</SelectItem>
-                <SelectItem value="5">5 шагов — максимум</SelectItem>
+                <SelectItem value="5">5 шагов</SelectItem>
+                <SelectItem value="6">6 шагов</SelectItem>
+                <SelectItem value="7">7 шагов — максимум (как в генерации)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -942,7 +944,7 @@ export function RefineView() {
                 type="button"
                 onClick={() =>
                   patchParams({
-                    steps: String(REFINE_PASS2_STEPS) as '2' | '3' | '4' | '5',
+                    steps: String(REFINE_PASS2_STEPS) as '2' | '3' | '4' | '5' | '6' | '7',
                     strength: REFINE_PASS2_SIGMA,
                   })
                 }

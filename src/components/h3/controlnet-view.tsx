@@ -126,7 +126,7 @@ export function ControlNetView() {
   const isDraft = params.pipeline === 'draft'
   // (правка 719) Сводка по сплиту pass 1 — как на вкладке «Генерация».
   const cnSplit = Math.max(1, Math.round(params.firstSamplerSteps ?? 6))
-  const cnTotal = Math.max(2, Math.min(64, Math.round(params.firstSamplerTotalSteps ?? cnSplit * 2)))
+  const cnTotal = Math.max(2, Math.min(64, Math.round(params.firstSamplerTotalSteps ?? cnSplit)))
   const cnEffSplit = Math.min(cnSplit, cnTotal)
   const cnSigmaEnd = 1 - (cnEffSplit - 1) / cnTotal
   const cnPass2Steps =
@@ -175,9 +175,8 @@ export function ControlNetView() {
   // ── Готовность моделей: стандартный References-воркфлоу — нужны базовые H3
   //    модели (diffusion, text_encoder, vae_video) + upscaler в режиме «полный».
   //    Для «карты» depth нужна лишь depth_anything_v2_vits.
-  //    (правка 720) turbo LoRA из списка УБРАНА: она убрана из пайплайна
-  //    (правки 578/587) и больше не подключается, а скачать её теперь можно
-  //    только вручную — блокировать вкладку из-за неё нельзя.
+  //    Турбо-лора обязательна в Настройках → Модели (баннер + «Скачать все»),
+  //    но эту вкладку не блокирует: без файла генерация пойдёт без неё.
   const [missingModels, setMissingModels] = useState<string[]>([])
   // Свёрнутые доп. параметры (Seed), как на вкладке «Генерация»
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -357,8 +356,8 @@ export function ControlNetView() {
       // (правка 511) Доп. параметры — как на вкладке «Генерация»
       draftSteps: params.draftSteps,
       firstSamplerSteps: params.firstSamplerSteps,
-      // (правка 719) Всего шагов в расписании pass 1 (undefined = авто 2× сплита).
-      firstSamplerTotalSteps: params.firstSamplerTotalSteps,
+      // Всего шагов в расписании pass 1 (по умолчанию = точке сплита, «6 из 6»).
+      firstSamplerTotalSteps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
       pass1Sampler: params.pass1Sampler,
       pass1Scheduler: params.pass1Scheduler,
       pass2Sampler: params.pass2Sampler,
@@ -924,17 +923,16 @@ export function ControlNetView() {
                         />
                       </div>
 
-                      {/* (правка 719) Всего шагов в расписании pass 1 — задаётся
-                          отдельно от точки сплита (иначе «N из 2N» — единственный
-                          вариант). undefined = авто (2× сплита). */}
+                      {/* Всего шагов в расписании pass 1 — задаётся отдельно
+                          от точки сплита: по умолчанию «6 из 6». */}
                       {!isDraft && (
                         <div className="space-y-1">
                           <SettingSlider
                             label="Всего шагов (pass 1)"
                             labelTitle={
                               'Длина расписания BasicScheduler, из которого SplitSigmas берёт ' +
-                              'верхнюю часть для чернового прохода. По умолчанию — вдвое больше ' +
-                              'точки сплита («N из 2N»).'
+                              'верхнюю часть для чернового прохода. По умолчанию — столько же, ' +
+                              'сколько у сплита («6 из 6»).'
                             }
                             value={cnTotal}
                             onChange={(v) => patchParams({ firstSamplerTotalSteps: Math.round(v) })}
@@ -943,7 +941,7 @@ export function ControlNetView() {
                             step={1}
                             inputMin={2}
                             inputMax={128}
-                            inputHint="2–128 шагов расписания. По умолчанию — вдвое больше сплита"
+                            inputHint="2–128 шагов расписания. По умолчанию — как у сплита (6/6)"
                           />
                           <p className="text-[10px] text-muted-foreground/70 leading-snug">
                             Pass 1: {cnSplit} из {cnTotal} · σ 1.0 → {cnSigmaEnd.toFixed(3)} ·

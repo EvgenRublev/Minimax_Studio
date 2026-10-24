@@ -560,7 +560,10 @@ export function FaceRefineView() {
           {/* Параметры пайплайна */}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground" title="Канва, в которой H3 перерисовывает лицо. 512 дешевле 768 примерно в 2.25 раза по latent-токенам.">
+              <Label
+                className="text-xs text-muted-foreground"
+                title="Канва, в которой H3 перерисовывает лицо. 512 дешевле 768 примерно в 2.25 раза по latent-токенам; выше 768 — заметно дороже по VRAM и времени (максимум движка — 1344)."
+              >
                 Канва (px)
               </Label>
               <Select
@@ -572,8 +575,10 @@ export function FaceRefineView() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[var(--surface-3)] border-border">
-                  {[384, 512, 640, 768].map((n) => (
-                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                  {[384, 512, 640, 768, 896, 1024, 1152, 1280].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}{n > 768 ? ' — выше эталона' : ''}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
