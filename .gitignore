@@ -64,3 +64,8 @@ __pycache__/
 /data/upscale-input/
 /data/upscale-output/
 /data/chat-attachments/
+
+# пользовательское состояние (история чатов, незавершённые генерации, настройки LoRA)
+/data/assistant-chats.json
+/data/inflight-generate.json
+/data/loras.json
