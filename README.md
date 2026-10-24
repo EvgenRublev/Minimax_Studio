@@ -15,6 +15,12 @@
 > проверит, что всё на месте. Подробности — в разделе
 > [Сборка релиза](#сборка-релиза).
 
+## Скриншоты
+
+| Главное окно | Генерация по референсу | Результат |
+| :---: | :---: | :---: |
+| [![Главное окно](screenshots/main-window.jpg)](screenshots/main-window.jpg) | [![Генерация по референсу](screenshots/reference-generation.jpg)](screenshots/reference-generation.jpg) | [![Результат](screenshots/result-lightbox.jpg)](screenshots/result-lightbox.jpg) |
+
 ## Установка на новую машину
 
 Если проект **склонирован с GitHub** (то есть без `node_modules`,
