@@ -286,6 +286,30 @@ if (-not $SkipApp) {
             Ok 'node_modules уже на месте'
         }
 
+        # Electron 44+ больше не качает бинарник при npm ci: он скачивается
+        # лениво при первом require('electron'). start.bat проверяет
+        # node_modules\electron\dist\electron.exe и без него уходит в браузер,
+        # поэтому качаем бинарник сразу, на этапе установки.
+        $elDir = Join-Path $Root 'node_modules\electron'
+        if (Test-Path $elDir) {
+            if (Test-Path (Join-Path $elDir 'dist\electron.exe')) {
+                Ok 'Electron уже скачан (окно приложения)'
+            } else {
+                Info 'скачиваю бинарник Electron (~110 МБ, один раз)...'
+                Push-Location $Root
+                try {
+                    & $nodeExe (Join-Path $elDir 'install.js')
+                } finally {
+                    Pop-Location
+                }
+                if (Test-Path (Join-Path $elDir 'dist\electron.exe')) {
+                    Ok 'Electron скачан: приложение откроется в отдельном окне'
+                } else {
+                    Warn 'Electron не скачался: start.bat откроет приложение в браузере. Запустите install.bat ещё раз.'
+                }
+            }
+        }
+
         if ($Force -and (Test-Path '.next')) {
             Info 'удаляю старую сборку .next (-Force)'
             Remove-Item '.next' -Recurse -Force

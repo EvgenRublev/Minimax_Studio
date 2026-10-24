@@ -171,6 +171,9 @@ REM  свёрнутым лог-хостом; выход из окна завер
 REM  Нет Electron (node_modules не полный) — прежний браузерный режим.
 REM ============================================================
 if exist "node_modules\electron\dist\electron.exe" goto desktop_mode
+REM Electron 44+ downloads its binary lazily on first require('electron'),
+REM so cli.js is enough here: it fetches dist\ and starts the window.
+if exist "node_modules\electron\cli.js" goto desktop_mode
 echo  [WARN] Electron not found in node_modules - browser mode.
 goto web_mode
 
