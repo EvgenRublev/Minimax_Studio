@@ -364,10 +364,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       button: 'Удалить',
     },
     factory: {
-      title: 'Заводской сброс?',
-      // (правка 130) Полный сброс «как с завода»: настройки + LoRA + кэш +
-      // контент + апскейл + чаты + промпты. Всё, что делает программу «твоей», чистится.
-      desc: 'Будут сброшены ВСЕ настройки (VRAM, LLM, модели, звук), настройки LoRA (все выключены, триггеры очищены), удалён кэш (input), контент (output), файлы апскейла (входные и выходные), история чатов ассистента, история и избранное промптов, текущий промпт и все локальные данные браузера. Программа вернётся в состояние «из коробки». Действие необратимо.',
+      title: 'Полный сброс?',
+      // (правка 130 + полный сброс) Полный сброс «как с завода»: настройки +
+      // LoRA + кэш + контент + апскейл + вложения/чаты + промпты + логи.
+      desc: 'Будут удалены ВСЕ ваши данные: сгенерированные видео (output), кэш и загрузки (input), файлы апскейла и его журналы, вложения чатов, история чатов ассистента, история и избранное промптов, текущий промпт, журнал задач и логи. Настройки (VRAM, LLM, модели, LoRA, формат видео, звук) вернутся к заводским, локальные данные браузера будут очищены. Действие необратимо. После сброса перезапустите программу, чтобы ComfyUI применил заводские настройки VRAM.',
       button: 'Сбросить всё',
     },
   }
@@ -376,169 +376,59 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setExecuting(true)
     try {
       if (action === 'factory') {
-        /* (правка 130) Заводской сброс: полный сброс «как с завода».
-         * 1) Настройки → дефолты
-         * 2) LoRA → все выключены, триггеры очищены
-         * 3) Кэш (input) → удалён
-         * 4) Контент (output) → удалён
-         * 5) (правка 167) Файлы апскейла (input + output) → удалены
-         * 6) Чаты ассистента → очищены
-         * 7) Промпты (история + избранное) → очищены
-         * 8) Текущий промпт + длительности → очищены
-         * 9) Все localStorage-сторы → сброшены
+        /* (правка 130 + полный сброс) Полный сброс «как с завода».
+         *
+         * Сервер (/api/reset/full) удаляет:
+         *   контент ComfyUI (output), кэш (input), temp, вложения чатов,
+         *   файлы апскейла и его журналы, чаты, журнал задач, логи,
+         *   настройки LoRA, внешние папки моделей и config.ini.
+         * Клиент очищает Zustand-сторы, localStorage и sessionStorage,
+         * затем перезагружается — в памяти не остаётся ничего.
          */
-        // 1) Настройки
-        await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reserve_gb: 3,
-            dynamic_vram: true,
-            vram_headroom: 0, // (правка 490) запас VRAM → выкл
-            llm_device: 'auto',
-            llm_context_size: 25600,
-            llm_max_output_tokens: 4096,
-            llm_video_vision: false,
-            llm_kv_cache: 'q4_0',
-            // (правка 140) сэмплинг — всегда модель-осознанные значения
-            llm_sampling_override: false,
-            sound_on: true,
-            llm_model: 'Qwen3.5-9B-Q4_K_M.gguf',
-            diffusion_model: '',
-            // (правка 257) своя LLM и внешние папки — тоже сбрасываются
-            llm_custom_model: '',
-            llm_custom_mmproj: '',
-            model_extra_paths: [],
-            stt_enabled: true,
-            stt_dir: '',
-            stt_model: '',
-            stt_language: 'ru',
-            stt_threads: 0,
-          }),
-        })
-        setReserveVram(3)
-        setDynamicVram(true)
-        setVramHeadroom(0) // (правка 490)
-        setLlmDevice('auto')
-        setLlmCtxSize(25600)
-        setLlmMaxOut(4096)
-        setLlmVideoVision(false)
-        setLlmKvCache('q4_0')
-        setSoundOn(true)
-        setLlmCustomModel('')
-        setLlmCustomMmproj('')
-        setResetTick((t) => t + 1)
+        // 1) Очередь ComfyUI + inflight — до удаления файлов, чтобы задачи
+        //    не писали в уже очищенные папки.
+        await fetch('/api/comfy/purge-queue', { method: 'POST' }).catch(() => {})
 
-        // Загруженная LLM переживает сброс: продолжала бы отвечать со СТАРОЙ
-        // моделью/конфигом, а чат-роут уже шлёт протокол и сэмплинг НОВОГО —
-        // отсюда «глючные» первые ответы после сброса. Выгружаем (следующее
-        // сообщение поднимет сервер с дефолтами); ensureLlm дополнительно
-        // страхует сигнатурой конфигурации (llm-runner.ts).
-        void fetch('/api/llm/stop', { method: 'POST' }).catch(() => {})
+        // 2) Серверный полный сброс.
+        const res = await fetch('/api/reset/full', { method: 'POST' })
+        const data = await res.json().catch(() => null)
+        const failed = !res.ok || !data?.ok
+        const reason = Array.isArray(data?.errors) && data.errors.length
+          ? data.errors.join('; ')
+          : (data?.error || `HTTP ${res.status}`)
 
-        // Серверные шаги проверяем: раньше любой 500/сетевой сбой молча
-        // съедался, и тост «выполнен» врал про несделанное.
-        const serverOk = async (r: Response): Promise<boolean> => r.ok
-
-        // 2) LoRA → сброс к заводским
-        const loraOk = await serverOk(await fetch('/api/loras/reset', { method: 'POST' }))
-
-        // 3) Кэш (input)
-        const cleanInOk = await serverOk(await fetch('/api/comfy/clean', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: 'input' }),
-        }))
-        useGenStore.getState().clearVideoRefs()
-        // (правка 307) Полный сброс видео-настроек к заводским дефолтам:
-        // раньше только startFrame/endFrame/prompt сбрасывались, а vedaAttention
-        // и другие переключатели оставались в in-memory состоянии Zustand.
-        useGenStore.setState({ video: { ...DEFAULT_VIDEO_STATE } })
-
-        // 4) Контент (output)
-        const cleanOutOk = await serverOk(await fetch('/api/comfy/clean', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: 'output' }),
-        }))
-
-        // 5) (правка 167) Файлы апскейла (входные + выходные) — полный сброс
-        const cleanUpscaleOk = await serverOk(await fetch('/api/comfy/clean', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: 'upscale' }),
-        }))
-
-        // (правка 692) Сброс очереди ComfyUI + журнала inflight:
-        // stale queued prompts (WinError 2: 'E:\000\diffusion_models')
-        // и старые clientToken-записи удаляются. Не требует GPU.
-        void fetch('/api/comfy/purge-queue', { method: 'POST' }).catch(() => {})
-
-        // 6) Чаты ассистента
+        // 3) Клиентские сторы (в памяти). Чистим даже при частичной ошибке
+        //    сервера: иначе уцелевшие в памяти чаты синхронизировались бы
+        //    обратно в уже удалённый data/assistant-chats.json.
         useAssistantChats.getState().clearAll()
-        // (правка 435) И режим-фильтр ассистента → дефолтный «Генерация»
-        // (localStorage-ключ стирается ниже, но in-memory стор жив до
-        // перезагрузки — без этого ассистент остался бы в «Продлении»).
         useAssistantChats.getState().setAssistantMode('generate')
-
-        // 7) Промпты (история + избранное)
         usePromptHistory.getState().clear()
-
-        // 8) Текущий промпт + длительности
-        useGenStore.setState((s) => ({ video: { ...s.video, prompt: '' } }))
+        // Сначала отзываем blob-URL референсов, потом заменяем состояние.
+        useGenStore.getState().clearVideoRefs()
+        useGenStore.setState({ video: { ...DEFAULT_VIDEO_STATE } })
         useGenDurations.getState().clear()
-
-        // 9) Полный сброс localStorage-сторов (всё, что не задемо выше)
-        //    — генерация, длительности, чаты, промпты, тема, и т.д.
-        //    (Сброс localStorage для конкретных ключей, чтобы гарантировать
-        //     чистоту даже если какие-то стоуры не покрыты явным clear.)
-        const keysToClear = [
-          'h3-prompt-history',
-          'cb-gen-durations', // (факт-чек) стор длительностей живёт под ЭТИМ ключом
-          'h3-assistant-chats',
-          'h3-gen-store',
-          // (правка 557) Раньше эти ключи переживали «заводской сброс»:
-          // активные элементы очереди продолжали опрашивать удалённые с
-          // сервера задачи, а job-сторы после перезагрузки заново поднимали
-          // поллинг (onRehydrateStorage) несуществующих prompt_id.
-          'h3-gen-queue',
-          'h3-gen-progress',
-          'tile-upscale-job',
-          'controlnet-job',
-          'fps-job',
-          'h3-assistant-panel',
-          'assistantChatsSyncRetry',
-        ]
-        for (const k of keysToClear) {
-          try { localStorage.removeItem(k) } catch { /* noop */ }
-        }
-
-        // (правка 557) In-memory очередь и джоб-сторы тоже сбрасываем —
-        // localStorage чист, но сторы в памяти жили до перезагрузки:
-        // карточки очереди оставались видимыми, поллинг продолжался.
         useGenQueue.setState({ items: [] })
         useTileUpscaleJob.getState().reset()
         useControlNetJob.getState().reset()
         useFpsJob.getState().reset()
-
-        // (правка 134) Галерея: сигнал на перечитывание — видео удалены на
-        // бэкенде, галерея сразу опустеет (не дожидаясь переключения вкладок).
         useGalleryRefresh.getState().bump()
 
-        if (loraOk && cleanInOk && cleanOutOk && cleanUpscaleOk) {
-          toast.success('Заводской сброс выполнен. Программа в состоянии «из коробки». Перезапустите для полного сброса ComfyUI.')
-        } else {
-          // Часть серверных шагов не удалась — говорим честно, что именно
-          const failed = [
-            !loraOk && 'сброс LoRA',
-            !cleanInOk && 'очистка input',
-            !cleanOutOk && 'очистка output',
-            !cleanUpscaleOk && 'очистка upscale',
-          ].filter(Boolean).join(', ')
-          toast.error('Заводской сброс выполнен частично', {
-            description: `Не удалось: ${failed}. Проверьте, запущена ли программа, и повторите.`,
+        // 4) Всё локальное хранилище — целиком (тема, масштаб UI, приветствие,
+        //    история промптов, чаты, очереди, прогресс, джобы).
+        try { localStorage.clear() } catch { /* приватный режим */ }
+        try { sessionStorage.clear() } catch { /* приватный режим */ }
+
+        if (failed) {
+          toast.error('Полный сброс выполнен частично', {
+            description: `Не удалось: ${reason}. Проверьте, запущена ли программа, и повторите.`,
           })
+          return
         }
+
+        // 5) Перезагрузка: гарантирует, что ни один стор не остался в памяти
+        //    со старыми данными.
+        toast.success('Полный сброс выполнен. Данные удалены, страница перезагружается...')
+        window.setTimeout(() => window.location.reload(), 1200)
         return
       }
 
@@ -1632,7 +1522,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </p>
               </div>
 
-              {/* (правка 130) Заводской сброс — полный сброс «как с завода» */}
+              {/* (правка 130 + полный сброс) Полный сброс «как с завода» */}
               <div className="space-y-1.5 border-t border-border/40 pt-4">
                 <Button
                   variant="outline"
@@ -1641,10 +1531,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onClick={() => setConfirmAction('factory')}
                 >
                   <SparklesIcon className="w-3.5 h-3.5" />
-                  Заводской сброс (всё)
+                  Полный сброс (всё)
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
-                  Полный сброс «как с завода»: настройки, LoRA (все выкл, триггеры очищены), кэш, контент, чаты, промпты и все локальные данные. Для передачи программы другому человеку.
+                  Удалит ВСЁ ваше: видео, кэш, файлы апскейла, вложения и историю чатов, промпты, журналы и локальные данные. Настройки, LoRA и config.ini вернутся к заводским. Для передачи программы другому человеку — после сброса не останется ничего вашего.
                 </p>
               </div>
             </div>

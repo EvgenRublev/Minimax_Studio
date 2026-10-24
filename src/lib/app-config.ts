@@ -9,8 +9,8 @@
  *   2. env COMFY_ROOT
  *   3. ./ComfyUI-Easy-Install (default, next to the app)
  */
-import { readFileSync, writeFileSync, renameSync, rmSync, existsSync, statSync } from 'fs'
-import { join, resolve } from 'path'
+import { readFileSync, writeFileSync, renameSync, rmSync, existsSync, statSync, mkdirSync } from 'fs'
+import { dirname, join, resolve } from 'path'
 
 const CONFIG_PATH = join(process.cwd(), 'config', 'config.ini')
 
@@ -330,6 +330,91 @@ export function setConfigValue(section: string, key: string, value: string): voi
   // ошибке удаляем цель и повторяем.
   const tmpPath = CONFIG_PATH + '.tmp'
   writeFileSync(tmpPath, lines.join('\n'), 'utf-8')
+  try {
+    renameSync(tmpPath, CONFIG_PATH)
+  } catch {
+    try { rmSync(CONFIG_PATH, { force: true }) } catch { /* ignore */ }
+    renameSync(tmpPath, CONFIG_PATH)
+  }
+  cache = null
+}
+
+/* ─────────────────────── Полный сброс конфига ─────────────────────── */
+
+/**
+ * Заводское содержимое config.ini.
+ *
+ * (полный сброс) Раньше «Заводской сброс» перезаписывал только часть
+ * ключей через POST /api/config: `comfy_dir`, `upscale.*`, `video.*`,
+ * `async_offload` и прочее оставались пользовательскими. Для полного
+ * сброса «как с завода» файл перезаписывается целиком этим шаблоном.
+ * Значения совпадают с дефолтами кода (getAppConfig) и с config.ini
+ * репозитория, поэтому после сброса программа ведёт себя как при
+ * первой установке.
+ */
+const DEFAULT_CONFIG_INI = `[vram]
+reserve_gb=3
+dynamic_vram=1
+; 0 = синхронная загрузка моделей (стабильно), 1 = async-офлоад
+async_offload=0
+vram_headroom=0
+
+[comfy]
+turbo_lora=
+; Пусто = дефолтная diffusion-модель из кода
+diffusion_model=
+; comfy_dir не задан = ./ComfyUI-Easy-Install рядом с программой
+
+[llm]
+custom_mmproj_path=
+custom_model_path=
+repeat_penalty=1
+frequency_penalty=0
+presence_penalty=0
+min_p=0.05
+top_k=40
+top_p=0.95
+temperature=0.7
+sampling_override=0
+kv_cache=q4_0
+video_vision=0
+model=Qwen3.5-9B-Q4_K_M.gguf
+max_output_tokens=4096
+context_size=25600
+device=auto
+
+[ui]
+sound_on=1
+
+[stt]
+dir=
+threads=0
+language=ru
+model=
+enabled=1
+
+[upscale]
+enabled=1
+port=7890
+
+[models]
+extra_paths=[]
+
+[video]
+codec=h264
+crf=12
+nvenc_bitrate=16
+`
+
+/**
+ * (полный сброс) Перезаписать config/config.ini заводскими значениями.
+ * Атомарно (tmp + rename), как setConfigValue: сбой посреди записи не
+ * оставит обрезанный файл.
+ */
+export function resetConfigToDefaults(): void {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true })
+  const tmpPath = CONFIG_PATH + '.tmp'
+  writeFileSync(tmpPath, DEFAULT_CONFIG_INI, 'utf-8')
   try {
     renameSync(tmpPath, CONFIG_PATH)
   } catch {
