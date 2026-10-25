@@ -22,6 +22,9 @@ export const dynamic = 'force-dynamic'
  *   • upscale/outputs|jobs|logs — результаты и журналы апскейла
  *   • .local-input           — офлайн-загрузки
  *   • data/assistant-chats.json, data/inflight-generate.json — чаты и журнал задач
+ *   • ComfyUI/user         — логи ComfyUI (содержат промпты), comfyui.db,
+ *                            воркфлоу, кэш менеджера (занятые файлы
+ *                            обнуляются — см. purgeComfyUserDir)
  *   • start_error.log        — лог запуска (может содержать текст промптов)
  *   • data/loras.json        — настройки LoRA → заводские
  *   • ComfyUI/extra_model_paths.yaml — внешние папки моделей → пусто
@@ -62,6 +65,44 @@ async function cleanDirectory(dir: string): Promise<{ deleted: number; error?: s
     }
   }
   return { deleted, error: failed.length ? failed.join('; ') : undefined }
+}
+
+/**
+ * (полный сброс) ComfyUI/user — внутренние данные ComfyUI: логи (содержат
+ * тексты промптов пользователя), comfyui.db, сохранённые воркфлоу, кэш
+ * менеджера нод. Активный лог и БД заперты работающим ComfyUI — удаляем всё,
+ * что не занято, а занятые ФАЙЛЫ обнуляем (truncate работает даже у открытых
+ * на запись логов): тексты промптов исчезают, ComfyUI пересоздаёт файлы
+ * в полном виде после перезапуска программы.
+ */
+async function purgeComfyUserDir(
+  dir: string,
+): Promise<{ deleted: number; truncated: number; failed: string[] }> {
+  const out = { deleted: 0, truncated: 0, failed: [] as string[] }
+  let entries: import('fs').Dirent[]
+  try {
+    await fs.stat(dir)
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return out // каталога нет — уже пусто
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    try {
+      await fs.rm(full, { recursive: true, force: true })
+      out.deleted++
+    } catch {
+      if (entry.isFile()) {
+        try {
+          await fs.writeFile(full, '')
+          out.truncated++
+          continue
+        } catch { /* ниже — в failed */ }
+      }
+      out.failed.push(entry.name)
+    }
+  }
+  return out
 }
 
 /** Удаляет файл, если он есть. Возвращает 1 при удалении, иначе 0. */
@@ -118,6 +159,20 @@ export async function POST() {
     details[label] = r.deleted
     deleted += r.deleted
     if (r.error) errors.push(`${label}: ${r.error}`)
+  }
+
+  // 2.5) ComfyUI/user — логи с промптами пользователя, comfyui.db,
+  //      воркфлоу, кэш менеджера. Занятые файлы обнуляются, а не удаляются
+  //      (см. purgeComfyUserDir): сбои идут в warnings, а не errors — сброс
+  //      не считается неполным из-за работающего ComfyUI; после перезапуска
+  //      программы папка пересоздаётся чистой.
+  const user = await purgeComfyUserDir(path.join(cfg.comfyRoot, 'ComfyUI', 'user'))
+  deleted += user.deleted + user.truncated
+  details['ComfyUI/user'] = user.deleted + user.truncated
+  if (user.failed.length) {
+    warnings.push(
+      `ComfyUI/user (заняты работающим ComfyUI, обнулятся после перезапуска): ${user.failed.join(', ')}`,
+    )
   }
 
   // 3) Файлы с пользовательскими данными.
