@@ -108,13 +108,14 @@ $rootExcl = @(
   (Join-Path $src '.install-cache'),
   (Join-Path $src '.local-input'),
   (Join-Path $src 'data'),
+  (Join-Path $src 'install'),
   (Join-Path $src 'ComfyUI-Easy-Install'),
   (Join-Path $src '.next\cache')
 )
 $rcArgs = @(
   $src, $dst, '/E', '/COPY:DAT', '/DCOPY:DAT', '/R:1', '/W:1', '/NFL', '/NDL', '/NP',
   '/XD'
-) + $rootExcl + @('.git', '__pycache__', '/XF', '*.log', '*.pyc')
+) + $rootExcl + @('.git', '__pycache__', '/XF', '*.log', '*.pyc', 'install.bat')
 & robocopy @rcArgs
 if ($LASTEXITCODE -ge 8) { throw "robocopy root: $LASTEXITCODE" }
 
@@ -390,7 +391,9 @@ zip    ~5.4 ГБ
 
 - **Веса H3, VAE, LoRA, LLM** — скачиваются через «Настройки → Модели».
 - **`upscale/bin`** — проприетарный DLSS-рантайм NVIDIA; в открытой сборке его
-  нет. Если в исходнике папка отсутствует, в portable её тоже не будет.
+  нет. `upscale/` копируется целиком, поэтому если в исходнике `upscale/bin`
+  есть — он попадёт в portable; если папки нет, вкладка DLSS/Upscale не
+  заработает. Это не ошибка упаковки.
 - **Пользовательские данные**: чаты, история/избранное промптов, `data/loras.json`,
   `ComfyUI/user`, `input`, `output`, логи — не копируются.
 - **`prompts/`** — это системные промпты приложения, их оставляем.
@@ -403,6 +406,8 @@ zip    ~5.4 ГБ
 - [ ] `scripts/prune-build.mjs` выполнен.
 - [ ] `node_modules/caniuse-lite/data/browsers.js` есть.
 - [ ] `runtime/ffmpeg/ffmpeg.exe` и `runtime/ffmpeg/ffprobe.exe` есть, обе `-version` работают.
+- [ ] `install.bat` и `install/` в portable отсутствуют.
+- [ ] `start.bat` использует `runtime\node.exe` первым, а при блокировке VBS откатывается на `start /min`.
 - [ ] `python_embeded/.../torchvision/models/__init__.py` есть.
 - [ ] `python -c "import torch, cv2, torchvision; from torchvision import models"` проходит.
 - [ ] `ComfyUI main.py --quick-test-for-ci` проходит.

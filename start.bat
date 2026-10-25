@@ -15,13 +15,21 @@ REM родительский cmd-процесс (taskkill по PID родите�
 REM Аргумент :hidden — защита от бесконечного цикла (VBS уже запустил нас).
 if /i "%~1"==":hidden" goto main
 
-REM Если VBS-скрипт доступен — запускаем через него (полностью скрытое окно)
+REM Если VBS-скрипт доступен — запускаем через него (полностью скрытое окно).
+REM Если cscript/VBS заблокированы антивирусом или политикой — не выходим
+REM молча, а откатываемся на свёрнутое консольное окно.
 if exist "%~dp0start_hidden.vbs" (
-    cscript //nologo "%~dp0start_hidden.vbs"
-    exit /b %errorlevel%
+    where cscript >nul 2>&1
+    if not errorlevel 1 (
+        cscript //nologo "%~dp0start_hidden.vbs"
+        if not errorlevel 1 exit /b 0
+        echo [WARN] start_hidden.vbs failed - falling back to minimized console.
+    ) else (
+        echo [WARN] cscript not found - falling back to minimized console.
+    )
 )
 
-REM Fallback: нет VBS — свёрнутое окно (старое поведение)
+REM Fallback: VBS нет или он заблокирован — свёрнутое окно (старое поведение)
 start "" /min "%~f0" :hidden
 exit /b
 
@@ -52,24 +60,26 @@ echo  ============================================
 echo.
 
 REM ============================================================
-REM  [CHECK 1/5] Node.js — PATH first, then bundled runtime\node.exe
+REM  [CHECK 1/5] Node.js — bundled runtime\node.exe first, then PATH
 REM ============================================================
 set "NODE_CMD="
-where node >nul 2>&1
-if %errorlevel% equ 0 (
-    set "NODE_CMD=node"
-    echo  [OK] Node.js found in PATH
-) else if exist "%~dp0runtime\node.exe" (
+if exist "%~dp0runtime\node.exe" (
     set "NODE_CMD=%~dp0runtime\node.exe"
-    echo  [OK] Node.js not in PATH - using bundled runtime\node.exe
-) else (
+    echo  [OK] Using bundled runtime\node.exe
+)
+if not defined NODE_CMD (
+    where node >nul 2>&1
+    if not errorlevel 1 (
+        set "NODE_CMD=node"
+        echo  [OK] Node.js found in PATH
+    )
+)
+if not defined NODE_CMD (
     echo.
-    echo  [ERROR] Node.js not found: neither in PATH nor as runtime\node.exe.
-    echo          Install Node.js 18+ LTS from https://nodejs.org and
-    echo          restart this script, or copy node.exe into the runtime\
-    echo          folder next to start.bat.
+    echo  [ERROR] Node.js not found: neither runtime\node.exe nor in PATH.
+    echo          Copy node.exe into the runtime\ folder next to start.bat.
     echo.
-    call :pause_or_log "[ERROR] Node.js not found: PATH and runtime\node.exe missing"
+    call :pause_or_log "[ERROR] Node.js not found: runtime\node.exe and PATH missing"
     exit /b 1
 )
 for /f "tokens=*" %%v in ('"%NODE_CMD%" --version') do set NODE_VER=%%v
