@@ -328,7 +328,7 @@ function parseIniVram() {
   v.reserveGb = num(grab('reserve_gb'), '3', /^[0-9][0-9.]*$/)
   v.dynamicVram = num(grab('dynamic_vram'), '1', /^[01]$/)
   v.asyncOffload = num(grab('async_offload'), '0', /^[01]$/)
-  v.vramHeadroom = num(grab('vram_headroom'), '0', /^[0-9][0-9.]*$/)
+  v.vramHeadroom = num(grab('vram_headroom'), '2', /^[0-9][0-9.]*$/)
   return v
 }
 

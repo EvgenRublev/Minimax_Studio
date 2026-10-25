@@ -135,7 +135,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [reserveVram, setReserveVram] = useState(3)
   const [dynamicVram, setDynamicVram] = useState(true)
   // (правка 490) Доп. запас свободной VRAM (--vram-headroom), 0 = выкл
-  const [vramHeadroom, setVramHeadroom] = useState(0)
+  const [vramHeadroom, setVramHeadroom] = useState(2)
   const [llmDevice, setLlmDevice] = useState<'auto' | 'gpu' | 'cpu'>('auto')
   // (правка 257) своя LLM (.gguf + mmproj)
   const [llmCustomModel, setLlmCustomModel] = useState('')
@@ -199,7 +199,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           // превращал сохранённый 0 в 3 при каждом открытии диалога
           setReserveVram(typeof d.reserve_gb === 'number' ? d.reserve_gb : 3)
           setDynamicVram(d.dynamic_vram !== false)
-          setVramHeadroom(typeof d.vram_headroom === 'number' ? d.vram_headroom : 0) // (правка 490)
+          setVramHeadroom(typeof d.vram_headroom === 'number' ? d.vram_headroom : 2) // (правка 490)
           if (['auto', 'gpu', 'cpu'].includes(d.llm_device)) setLlmDevice(d.llm_device)
           if (typeof d.llm_context_size === 'number') setLlmCtxSize(d.llm_context_size)
           if (typeof d.llm_max_output_tokens === 'number') setLlmMaxOut(d.llm_max_output_tokens)
@@ -437,7 +437,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           body: JSON.stringify({
             reserve_gb: 3,
             dynamic_vram: true,
-            vram_headroom: 0, // (правка 490) запас VRAM → выкл
+            vram_headroom: 2, // (правка 490) заводской запас VRAM
             llm_device: 'auto',
             llm_context_size: 25600,       // (правка 119) дефолт контекста — 25K
             llm_max_output_tokens: 4096,

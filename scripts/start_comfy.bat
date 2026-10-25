@@ -26,7 +26,7 @@ if exist config\config.ini (
 )
 if not defined RESERVE_VRAM set "RESERVE_VRAM=3"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
-if not defined VRAM_HEADROOM set "VRAM_HEADROOM=0"
+if not defined VRAM_HEADROOM set "VRAM_HEADROOM=2"
 REM (правка) async_offload по умолчанию = 0 (выключен). comfy-aimdo 0.4.13
 REM на Windows+NVIDIA падает при загрузке больших моделей (~20 ГБ):
 REM   hostbuf_file_reader_read failed / HostBuffer.read_file_slice failed,
@@ -45,7 +45,7 @@ REM Нечисловое значение → безопасный дефолт.
 echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=3"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
-echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=0"
+echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=2"
 set "EXTRA_FLAGS="
 if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
 REM (правка 490) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит

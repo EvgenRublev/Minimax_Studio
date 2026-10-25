@@ -153,7 +153,7 @@ export async function GET() {
     // (правка 135b) сэмплинг — override выкл, значения модель-осознанные
     // (правка 316) llm_bonsai_dir/llm_custom_*/model_extra_paths — дефолты,
     // чтобы контракт GET при ошибке совпадал с обычным ответом.
-    return NextResponse.json({ reserve_gb: 3, dynamic_vram: true, vram_headroom: 0, llm_device: 'auto', llm_context_size: 25600, llm_max_output_tokens: 4096, comfy_dir: '', diffusion_model: '', llm_model: '', llm_bonsai_dir: '', llm_custom_model: '', llm_custom_mmproj: '', model_extra_paths: [], llm_video_vision: false, llm_kv_cache: 'q4_0', llm_sampling_override: false, llm_temperature: 0.7, llm_top_p: 0.95, llm_top_k: 40, llm_min_p: 0.05, llm_presence_penalty: 0.0, llm_frequency_penalty: 0.0, llm_repeat_penalty: 1.0, sound_on: true, stt_enabled: true, stt_dir: '', stt_model: '', stt_language: 'ru', stt_threads: 0, video_codec: 'h264', video_crf: 12, video_nvenc_bitrate: 16 })
+    return NextResponse.json({ reserve_gb: 3, dynamic_vram: true, vram_headroom: 2, llm_device: 'auto', llm_context_size: 25600, llm_max_output_tokens: 4096, comfy_dir: '', diffusion_model: '', llm_model: '', llm_bonsai_dir: '', llm_custom_model: '', llm_custom_mmproj: '', model_extra_paths: [], llm_video_vision: false, llm_kv_cache: 'q4_0', llm_sampling_override: false, llm_temperature: 0.7, llm_top_p: 0.95, llm_top_k: 40, llm_min_p: 0.05, llm_presence_penalty: 0.0, llm_frequency_penalty: 0.0, llm_repeat_penalty: 1.0, sound_on: true, stt_enabled: true, stt_dir: '', stt_model: '', stt_language: 'ru', stt_threads: 0, video_codec: 'h264', video_crf: 12, video_nvenc_bitrate: 16 })
   }
 }
 
