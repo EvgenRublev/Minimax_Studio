@@ -98,7 +98,7 @@ function Get-Download {
     Info ("скачивание: " + $Url)
     $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
     if (Test-Path $curl) {
-        & $curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
+        & $curl --ssl-revoke-best-effort -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
         if ($LASTEXITCODE -ne 0) {
             if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
             throw ('не удалось скачать: ' + $Url)
