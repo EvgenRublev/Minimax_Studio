@@ -12,7 +12,7 @@
 | 3 | `node_modules` (`npm ci`) + production-сборка `.next` |
 | 4 | ComfyUI (сборка `5f0c4e1` + патчи проекта) + Python **3.12.10** (embedded) |
 | 5 | torch **2.11.0+cu130** и 288 пакетов по зафиксированным версиям |
-| 6 | 22 кастомные ноды по зафиксированным коммитам + 3 собственные ноды студии |
+| 6 | 22 кастомные ноды по зафиксированным коммитам + 4 собственные ноды студии |
 | 7 | Папки моделей, `extra_model_paths.yaml`, блокировка автообновления |
 | 8 | Пробный запуск ComfyUI и проверка импорта всех нод |
 
@@ -77,7 +77,7 @@ ControlNet, галерея) работает без них.
 | --- | --- |
 | `comfy/ldm/minimax/model.py` | слой `to_gate_compress` для VSA-весов, `minimax_h3_layout` и `block_index` для Veda sparse attention |
 | `comfy/model_detection.py` | определение `gate_compress` в VSA-чекпоинтах |
-| `comfy_extras/nodes_minimax_h3.py` | правки keyframe-latent (правки 146/149) |
+| `comfy_extras/nodes_minimax_h3.py` | правки keyframe-latent (правки 146/149) + ноды `MiniMaxH3AudioOrSilent` / `MiniMaxH3AudioSliceFrom` (аудио исходника/тишина и срез хвоста — нужны рефайну, face-refine и продлению) |
 | `utils/extra_config.py` | списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
 
 Копирование идемпотентно: повторный запуск установщика восстанавливает патчи,

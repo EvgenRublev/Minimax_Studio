@@ -10,7 +10,7 @@ ComfyUI при каждом запуске (шаг 4, идемпотентно).
 | --- | --- |
 | `comfy/ldm/minimax/model.py` | `to_gate_compress` в `Attention` (веса VSA), `minimax_h3_layout` и `block_index` в `transformer_options` для Veda sparse attention |
 | `comfy/model_detection.py` | определяет `gate_compress` в VSA-чекпоинтах |
-| `comfy_extras/nodes_minimax_h3.py` | keyframe-latent: пересчёт latent'ов при переключении разрешения (правки 146/149) |
+| `comfy_extras/nodes_minimax_h3.py` | keyframe-latent: пересчёт latent'ов при переключении разрешения (правки 146/149); ноды `MiniMaxH3AudioOrSilent` (аудио исходника или тишина) и `MiniMaxH3AudioSliceFrom` (срез с секунды / хвост последних N секунд) — нужны рефайну, face-refine и продлению |
 | `utils/extra_config.py` | принимает списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
 
 Файлы — полные копии из рабочей установки, а не diff-патчи: так установка не
