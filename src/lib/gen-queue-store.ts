@@ -81,6 +81,7 @@ function rehydrateItems(persisted: unknown): QueueItem[] {
   const now = Date.now()
   return items.filter(
     (i) =>
+      (i as { type?: string }).type !== 'inpaint' &&
       now - i.createdAt < MAX_AGE_MS &&
       i.status !== 'done' &&
       i.status !== 'error' &&
