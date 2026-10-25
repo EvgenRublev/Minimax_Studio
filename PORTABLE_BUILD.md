@@ -6,8 +6,8 @@
 Целевой результат:
 
 ```text
-E:\Minimax_Studio_V7_Portable\       — папка portable-сборки (~9 ГБ)
-E:\Minimax_Studio_V7_Portable.zip    — zip64-архив (~5.2 ГБ)
+E:\Minimax_Studio_V7_Portable\       — папка portable-сборки (~9.4 ГБ)
+E:\Minimax_Studio_V7_Portable.zip    — zip64-архив (~5.4 ГБ)
 ```
 
 Модели H3, VAE, LoRA, LLM и остальные веса **не входят** в сборку. Их
@@ -61,6 +61,28 @@ Next.js пишет в `.next/server/...` абсолютный `resolvedPagePath`
 tar.exe -a -c -f $zip -C (Split-Path $dst -Parent) (Split-Path $dst -Leaf)
 ```
 
+### 1.5. Нужны и `ffmpeg.exe`, и `ffprobe.exe`
+
+`video-probe.ts` запускает `ffprobe.exe`, а `resolveFfprobe()` ищет его **рядом**
+с `ffmpeg.exe`, который вернул `resolveFfmpeg()`. В `imageio_ffmpeg` лежит
+только `ffmpeg.exe` — без `ffprobe.exe` падают refine, tile-upscale и FPS:
+
+```text
+spawn ffprobe.exe ENOENT
+```
+
+Положите оба файла в одну папку:
+
+```text
+runtime\ffmpeg\ffmpeg.exe
+runtime\ffmpeg\ffprobe.exe
+```
+
+Берите пару из одной статической сборки FFmpeg. В этом проекте пара уже
+лежит в `runtime\ffmpeg`; если её нет — скопируйте из своего FFmpeg `bin`.
+Только `ffprobe.exe` без `ffmpeg.exe` не поможет: приложение сначала
+разрешает ffmpeg и только потом ищет ffprobe рядом с ним.
+
 ---
 
 ## 2. Пошаговая сборка (PowerShell)
@@ -95,6 +117,20 @@ $rcArgs = @(
 ) + $rootExcl + @('.git', '__pycache__', '/XF', '*.log', '*.pyc')
 & robocopy @rcArgs
 if ($LASTEXITCODE -ge 8) { throw "robocopy root: $LASTEXITCODE" }
+
+# ── 1b. ffmpeg + ffprobe рядом (иначе refine/tile/FPS: ENOENT) ─────────
+$ffmpegDst = Join-Path $dst 'runtime\ffmpeg'
+$ffmpegOk = (Test-Path (Join-Path $ffmpegDst 'ffmpeg.exe')) -and
+            (Test-Path (Join-Path $ffmpegDst 'ffprobe.exe'))
+if (-not $ffmpegOk) {
+  $ffmpegBin = $env:FFMPEG_BIN
+  if (-not $ffmpegBin) {
+    throw 'Нет runtime\ffmpeg\ffmpeg.exe + ffprobe.exe. Положите пару в runtime\ffmpeg или задайте $env:FFMPEG_BIN=C:\ffmpeg\bin'
+  }
+  New-Item -ItemType Directory -Force -Path $ffmpegDst | Out-Null
+  Copy-Item (Join-Path $ffmpegBin 'ffmpeg.exe')  (Join-Path $ffmpegDst 'ffmpeg.exe')  -Force
+  Copy-Item (Join-Path $ffmpegBin 'ffprobe.exe') (Join-Path $ffmpegDst 'ffprobe.exe') -Force
+}
 
 # ── 2. Заводские config.ini и .env из HEAD (не копируйте пользовательские) ──
 foreach ($f in @('config/config.ini', '.env')) {
@@ -183,6 +219,8 @@ $must = @(
   '.next\BUILD_ID',
   'node_modules\electron\dist\MinimaxH3Studio.exe',
   'node_modules\caniuse-lite\data\browsers.js',
+  'runtime\ffmpeg\ffmpeg.exe',
+  'runtime\ffmpeg\ffprobe.exe',
   'ComfyUI-Easy-Install\python_embeded\python.exe',
   'ComfyUI-Easy-Install\python_embeded\Lib\site-packages\torchvision\models\__init__.py',
   'ComfyUI-Easy-Install\ComfyUI\main.py',
@@ -196,6 +234,11 @@ foreach ($f in $must) {
 # 2) Python-зависимости
 & $py -c "import torch, cv2, torchvision; from torchvision import models; print('torchvision ok')"
 if ($LASTEXITCODE -ne 0) { throw 'python imports failed' }
+
+# 2b) ffmpeg/ffprobe
+& (Join-Path $dst 'runtime\ffmpeg\ffmpeg.exe') -version | Select-Object -First 1
+& (Join-Path $dst 'runtime\ffmpeg\ffprobe.exe') -version | Select-Object -First 1
+if ($LASTEXITCODE -ne 0) { throw 'ffmpeg/ffprobe failed' }
 
 # 3) ComfyUI загружает все custom nodes
 & $py -I (Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI\main.py') --quick-test-for-ci
@@ -334,11 +377,12 @@ $zip = 'E:\Minimax_Studio_V7_Portable.zip'
 Размеры-ориентиры:
 
 ```text
-папка  ~8.9 ГБ
-zip    ~5.25 ГБ
+папка  ~9.4 ГБ
+zip    ~5.4 ГБ
 ```
 
 Если облако не принимает файл >5 ГБ — заливайте папку или делите zip на части.
+После добавления `ffmpeg.exe` + `ffprobe.exe` zip перевалил за 5 ГБ.
 
 ---
 
@@ -358,6 +402,7 @@ zip    ~5.25 ГБ
 - [ ] `npm run build` выполнен **внутри** `_Portable`.
 - [ ] `scripts/prune-build.mjs` выполнен.
 - [ ] `node_modules/caniuse-lite/data/browsers.js` есть.
+- [ ] `runtime/ffmpeg/ffmpeg.exe` и `runtime/ffmpeg/ffprobe.exe` есть, обе `-version` работают.
 - [ ] `python_embeded/.../torchvision/models/__init__.py` есть.
 - [ ] `python -c "import torch, cv2, torchvision; from torchvision import models"` проходит.
 - [ ] `ComfyUI main.py --quick-test-for-ci` проходит.
