@@ -184,11 +184,26 @@ if ($null -ne $freeGB) {
     Warn 'не удалось определить свободное место на диске'
 }
 
-try {
-    $probe = Invoke-WebRequest -Uri 'https://pypi.org/simple/' -UseBasicParsing -TimeoutSec 20 -Method Head
-    if ($probe.StatusCode -ge 200) { Ok 'интернет есть' }
-} catch {
-    throw 'Нет доступа к интернету (pypi.org). Проверьте подключение, VPN/прокси и повторите.'
+# curl.exe uses the same HTTPS path as the manual connectivity test.
+# PowerShell 5.1 Invoke-WebRequest can fail independently (TLS/proxy/.NET).
+$curlProbe = Join-Path $env:SystemRoot 'System32\curl.exe'
+if (Test-Path $curlProbe) {
+    & $curlProbe --head --location --silent --show-error --fail --connect-timeout 15 --max-time 30 --output NUL 'https://pypi.org/simple/'
+    $probeExitCode = $LASTEXITCODE
+    if ($probeExitCode -ne 0) {
+        throw ("PyPI HTTPS check failed (curl exit code $probeExitCode). Check proxy, VPN or certificates.")
+    }
+    Ok 'интернет есть (curl.exe)'
+} else {
+    try {
+        $probe = Invoke-WebRequest -Uri 'https://pypi.org/simple/' -UseBasicParsing -TimeoutSec 20 -Method Head
+        if ($probe.StatusCode -lt 200 -or $probe.StatusCode -ge 400) {
+            throw ("Unexpected PyPI HTTP status: " + $probe.StatusCode)
+        }
+        Ok 'интернет есть (Invoke-WebRequest)'
+    } catch {
+        throw ('PyPI HTTPS check failed: ' + $_.Exception.Message)
+    }
 }
 
 $nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
