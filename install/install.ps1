@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     MiniMax H3 Studio - автоматическая установка зависимостей.
@@ -87,24 +87,59 @@ function Fail { param([string]$M) $script:Failures.Add($M); Write-Log ("  [ERROR
 
 function Get-Download {
     param([string]$Url, [string]$Dest)
-    if ((Test-Path $Dest) -and (Get-Item $Dest).Length -gt 0) {
-        Info ("уже скачано: " + (Split-Path $Dest -Leaf))
+    if ((Test-Path $Dest) -and ((Get-Item $Dest).Length -gt 0)) {
+        Info ('уже скачано: ' + (Split-Path $Dest -Leaf))
         return
     }
     $dir = Split-Path -Parent $Dest
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
     $part = $Dest + '.part'
-    if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
-    Info ("скачивание: " + $Url)
+    Info ('скачивание: ' + $Url)
+    $downloaded = $false
     $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+
     if (Test-Path $curl) {
-        & $curl --ssl-revoke-best-effort -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
-        if ($LASTEXITCODE -ne 0) {
-            if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
-            throw ('не удалось скачать: ' + $Url)
+        if (Test-Path $part) { Remove-Item $part -Force }
+        & $curl --ssl-revoke-best-effort --http1.1 --location --fail --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 --output $part $Url
+        if (($LASTEXITCODE -eq 0) -and (Test-Path $part)) {
+            if ((Get-Item $part).Length -gt 0) { $downloaded = $true }
         }
-    } else {
-        Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
+        if (-not $downloaded) {
+            Info 'curl failed; trying BITS and PowerShell HTTP.'
+        }
+    }
+
+    if (-not $downloaded) {
+        if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+            if (Test-Path $part) { Remove-Item $part -Force }
+            try {
+                Start-BitsTransfer -Source $Url -Destination $part -ErrorAction Stop
+                if (Test-Path $part) {
+                    if ((Get-Item $part).Length -gt 0) { $downloaded = $true }
+                }
+            } catch {
+                Info ('BITS failed: ' + $_.Exception.Message)
+            }
+        }
+    }
+
+    if (-not $downloaded) {
+        if (Test-Path $part) { Remove-Item $part -Force }
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing -TimeoutSec 600 -ErrorAction Stop
+            if (Test-Path $part) {
+                if ((Get-Item $part).Length -gt 0) { $downloaded = $true }
+            }
+        } catch {
+            Info ('Invoke-WebRequest failed: ' + $_.Exception.Message)
+        }
+    }
+
+    if (-not $downloaded) {
+        if (Test-Path $part) { Remove-Item $part -Force }
+        throw ('не удалось скачать: ' + $Url)
     }
     Move-Item -Force $part $Dest
 }
