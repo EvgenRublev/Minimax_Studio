@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
       temporal_overlap: body.temporalOverlap ?? 17,
       anchor_strength: body.anchorStrength ?? 0.999,
       target_resolution: body.targetResolution ?? 1080,
-      denoise: body.denoise ?? 0.2,
+      denoise: body.denoise ?? 0.1,
       // pass1_steps — единый контракт для строки «Шаги» MetaDialog (как у
       // refine/face-refine). Поле steps оставлено: его пишут старые сайдкары.
       pass1_steps: body.steps ?? 2,

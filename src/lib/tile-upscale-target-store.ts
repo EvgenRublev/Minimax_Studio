@@ -25,7 +25,7 @@ export interface TileUpscaleSource {
 export interface TileUpscaleUiParams {
   /** Короткая сторона целевого разрешения: 720|1080|1440|2160. Default 1080. (правка 265) */
   targetResolution: number
-  /** Уровень денойза 0–1. Default 0.2. */
+  /** Уровень денойза 0–1. Default 0.1. */
   denoise: number
   /** Количество шагов. Default 2. */
   steps: number
@@ -47,7 +47,7 @@ export interface TileUpscaleUiParams {
 
 const DEFAULT_PARAMS: TileUpscaleUiParams = {
   targetResolution: 1080,
-  denoise: 0.2,
+  denoise: 0.1,
   steps: 2,
   tileSize: 768,
   overlap: 128,

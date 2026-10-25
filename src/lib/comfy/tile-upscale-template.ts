@@ -14,7 +14,7 @@ import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (
  *     latent_upscale_param (MMH3LatentUpscaleWithModelParams, target W×H)
  *     temporal_split_param (MMH3TemporalSplitParams)
  *     spatial_split_param (MMH3SpatialSplitParams)
- *     noise (RandomNoise), sampler (res_multistep), sigmas (BasicScheduler 2/denoise 0.2)
+ *     noise (RandomNoise), sampler (res_multistep), sigmas (BasicScheduler 2/denoise 0.1)
  *   VAEDecode → VHS_VideoCombine (24 fps, audio из исходника)
  *
  * Тайлы: пользователь задаёт только размер тайла (tileSize) — нода
@@ -81,7 +81,7 @@ export interface TileUpscaleParams {
   outputSubfolder?: string
   /** Короткая сторона целевого разрешения в px (720|1080|1440|2160). Default 1080. (правка 265) */
   targetResolution?: number
-  /** Уровень денойза 0–1. Default 0.2. */
+  /** Уровень денойза 0–1. Default 0.1. */
   denoise?: number
   /** Количество шагов сэмплирования. Default 2. */
   steps?: number
@@ -516,11 +516,11 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
       inputs: {
         scheduler: 'simple',
         steps: p.steps ?? 2,
-        denoise: p.denoise ?? 0.2,
+        denoise: p.denoise ?? 0.1,
         model: modelSrc,
       },
       class_type: 'BasicScheduler',
-      _meta: { title: `BasicScheduler (${p.steps ?? 2} steps, denoise ${p.denoise ?? 0.2})` },
+      _meta: { title: `BasicScheduler (${p.steps ?? 2} steps, denoise ${p.denoise ?? 0.1})` },
     },
     'tu_upscale': {
       inputs: {
