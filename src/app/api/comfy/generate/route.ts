@@ -320,17 +320,20 @@ export async function POST(req: NextRequest) {
     const loraFiles = new Set(listLoraFiles())
     const allEntries = loadLoras()
     const flfWithAudio = body.mode === 'flf' && (body.refAudios?.length ?? 0) > 0
+    // ref + Audio Guide: как flf+audio, 4-шаговая турбо-лора мешает
+    // стабильности аудио-гайда — на время такого прогона её пропускаем.
+    const refAudioGuide = body.mode === 'ref' && body.audioGuide === true && (body.refAudios?.length ?? 0) > 0
     const loraEntries = allEntries.filter(
       (e) =>
         e.enabled &&
         loraFiles.has(e.name) &&
-        !(flfWithAudio && e.name === TURBO_LORA_NAME),
+        !((flfWithAudio || refAudioGuide) && e.name === TURBO_LORA_NAME),
     )
     // Турбо-лора применяется через customLoras, а не отдельной нодой шаблона;
     // поля оставляем согласованными на случай, если их прочитает другой код.
     const turboEntry = allEntries.find((e) => e.name === TURBO_LORA_NAME)
     body.turboLoraEnabled =
-      turboEntry?.enabled === true && loraFiles.has(TURBO_LORA_NAME) && !flfWithAudio
+      turboEntry?.enabled === true && loraFiles.has(TURBO_LORA_NAME) && !flfWithAudio && !refAudioGuide
     body.turboLoraStrength = turboEntry?.strength ?? 1.0
     // (правка 89) Исходный промпт БЕЗ триггеров — уйдёт в метаданные,
     // иначе «Повторить генерацию» допишет триггеры к уже дописанному

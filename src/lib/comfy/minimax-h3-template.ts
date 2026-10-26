@@ -243,6 +243,12 @@ export interface MiniMaxH3Params {
   /* ── Standalone audio references (max 3) ── */
   /** Audio filenames in ComfyUI input/. Each maps to ref_audio_N. */
   refAudios?: string[]
+  /** ref-режим: подать аудио-рефы как Audio Guide (якорь на кадре 0), а не
+   *  только как ref_audios. Включается галочкой «сохранить оригинальный звук
+   *  + вести по нему»; вместе с этим server-side заменяет итоговую дорожку. */
+  audioGuide?: boolean
+  /** Заменить итоговую аудиодорожку оригинальной (после done). */
+  keepOriginalAudio?: boolean
   /** (правка 326) Обрезки аудио-рефов (параллельно refAudios): задано →
       между LoadAudio и потребителем вставляется MiniMaxStudioAudioTrim.
       Обрезка виртуальная (тензор), копии файлов не создаются. */
@@ -687,7 +693,9 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
 
   // ─── Standalone audio references (max 3) — LoadAudio → AUDIO ───
   // (правка 146) в режимах ref они идут в ref_audio_N основной ноды,
-  // в t2v/flf — в цепочку MiniMaxH3AddGuide (см. ниже).
+  // в t2v/flf — в цепочку MiniMaxH3AddGuide (см. ниже). В ref с audioGuide
+  // (опция «оригинальный звук + вести по нему») ref_audios НЕ подключаются:
+  // те же аудио идут в Audio Guide, а дорожку потом подставляет сервер.
   const refAudioCount = Math.min(p.refAudios?.length ?? 0, 3)
   const refAudioNodes: Record<string, unknown> = {}
   const refAudioLinks: Record<string, unknown> = {}
@@ -730,7 +738,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       }
       audioSrc = [gainId, 0]
     }
-    if (mode === 'ref') {
+    if (mode === 'ref' && p.audioGuide !== true) {
       refAudioLinks[`ref_audios.ref_audio_${i}`] = audioSrc
     }
     // t2v/flf: источник для MiniMaxH3AddGuide (ниже) — с учётом обрезки и громкости.
@@ -970,7 +978,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // цепочки.
   const audioGuideNodes: Record<string, unknown> = {}
   let condSrc: [string, number] = ['46:11', 0]
-  if (mode !== 'ref' && refAudioCount > 0) {
+  if ((mode !== 'ref' || p.audioGuide === true) && refAudioCount > 0) {
     for (let i = 0; i < refAudioCount; i++) {
       const gid = AUDIO_GUIDE_NODE_IDS[i]
       audioGuideNodes[gid] = {

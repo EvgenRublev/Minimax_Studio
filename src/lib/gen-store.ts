@@ -62,6 +62,9 @@ export interface VideoGenState {
   modelType: string
   /** (правка 146) Режим генерации: 'ref' | 't2v' | 'flf' | 'extend' (правка 161). Default 'ref'. */
   mode: 'ref' | 't2v' | 'flf' | 'extend'
+  /** ref + аудио-реф: вести генерацию аудио-гайдом и подставить оригинальный
+   *  звук в итоговое видео (опция на вкладке «Генерация»). */
+  audioGuide: boolean
   /** Пайплайн: 'draft' — один проход на low-res канве (быстрый черновик,
    *  апгрейд вкладкой Refine); 'full' — два прохода, как раньше. Default 'full'. */
   pipeline: 'draft' | 'full'
@@ -183,6 +186,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   seed: -1,
   modelType: 'minimax_h3_ref2va',
   mode: 'ref', // (правка 146)
+  audioGuide: false, // аудио-гайд + оригинальный звук — опция, по умолчанию выкл
   pipeline: 'full', // два прохода (low-res → upscale → Pass 2) по умолчанию
   extendClips: [], // (правка 161) extend: клипы для продления
   extendImageRefs: [], // (правка 162) extend: отдельные картинки-рефы

@@ -1,14 +1,12 @@
 /**
- * (правка 699) Замена аудиодорожки сгенерированного видео на оригинальную.
+ * Замена аудиодорожки сгенерированного видео на оригинальную.
  *
- * Режим «Кадры» (flf): модель генерирует видео и звук вместе, но
- * пользователь может приложить аудио-реф — в этом случае звук в итоге
- * оказывается хуже по качеству, чем оригинал. По завершении генерации
- * подставляем оригинальную дорожку (из ComfyUI input/), обрезая её по
- * длительности видео (ffmpeg -t).
+ * FLF всегда подставляет оригинальную дорожку, если есть аудио-реф;
+ * ref-режим — только по галочке «сохранить оригинальный звук и вести по
+ * нему» (флаг keep_original_audio). По завершении генерации подставляем
+ * дорожку из ComfyUI input/, обрезая её по длительности видео (ffmpeg -t).
  *
- * Используется в finalizePendingMeta (pending-meta.ts) для flf-джобов,
- * где в references есть хотя бы один type==='audio'.
+ * Используется в finalizePendingMeta (pending-meta.ts).
  */
 import { promisify } from 'util'
 import { execFile } from 'child_process'
@@ -100,14 +98,18 @@ export async function replaceVideoAudio(
 }
 
 /**
- * (правка 699) Given a pending-meta entry's params, decide whether to swap
- * in the original audio. Returns the audio path to use, or null if no swap
- * is needed.
+ * Given a pending-meta entry's params, decide whether to swap in the
+ * original audio. Returns the audio path to use, or null if no swap is
+ * needed.
+ *
+ * FLF historically swapped automatically whenever an audio ref was present.
+ * Ref-режим делает это только при явном keep_original_audio (галочка
+ * «аудио-гайд + оригинальный звук»).
  */
-export function resolveFlfAudioReplacement(
+export function resolveOriginalAudioReplacement(
   params: Record<string, unknown>,
 ): string | null {
-  if (params.generation_mode !== 'flf') return null
+  if (params.generation_mode !== 'flf' && params.keep_original_audio !== true) return null
   const references = params.references as Array<{ type?: string; path?: string }> | undefined
   if (!Array.isArray(references)) return null
   // Pick the FIRST audio reference (the user's original audio).

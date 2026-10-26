@@ -22,7 +22,7 @@ import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe' // (правка 410)
 import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
-import { replaceVideoAudio, resolveFlfAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
+import { replaceVideoAudio, resolveOriginalAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
 
 /* ──────────────────── shared helpers ──────────────────── */
 
@@ -313,6 +313,8 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     pipeline: draft ? 'draft' : 'full',
     seed: body.seed ?? -1,
     generation_mode: genMode,
+    ...(genMode === 'ref' && body.audioGuide === true && { audio_guide: true }),
+    ...(body.keepOriginalAudio === true && { keep_original_audio: true }),
     ...(genMode === 'flf' && {
       first_frame: body.firstFrame ?? null,
       last_frame: body.lastFrame ?? null,
@@ -573,18 +575,18 @@ export async function finalizePendingMeta(
       if (seen.has(key)) continue
       seen.add(key)
 
-      // (правка 699) FLF: подставляем оригинальную аудиодорожку (из
-      // references type='audio') вместо перегенерированной, обрезая по
-      // длительности видео. Делаем ДО пробы/сайдкара — иначе probe
-      // увидит старый аудио-стим.
+      // (правка 699) FLF — всегда, ref с галочкой аудио-гайда — по флагу
+      // keep_original_audio: подставляем оригинальную дорожку (references
+      // type='audio') вместо перегенерированной, обрезая по длине видео.
+      // Делаем ДО пробы/сайдкара — иначе probe увидит старый аудио-стим.
       if (i === 0 && OUTPUT_DIR) {
         const videoPath = path.join(OUTPUT_DIR, o.subfolder || '', path.basename(o.filename))
-        const audioPath = resolveFlfAudioReplacement(params)
+        const audioPath = resolveOriginalAudioReplacement(params)
         if (audioPath) {
           try {
             const ok = await replaceVideoAudio(videoPath, audioPath)
             if (ok) {
-              console.log(`[replace-audio] flf: swapped audio in ${o.filename} from ${path.basename(audioPath)}`)
+              console.log(`[replace-audio] ${params.generation_mode}: swapped audio in ${o.filename} from ${path.basename(audioPath)}`)
               params.audio_replaced_from = path.basename(audioPath) // метка в сайдкар
             }
           } catch (err) {

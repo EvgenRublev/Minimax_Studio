@@ -32,6 +32,9 @@ interface MetaJson {
   seed?: number
   /** (правка 146) Режим генерации: 'ref' | 't2v' | 'flf'. */
   generation_mode?: string
+  /** ref + аудио-гайд; keep_original_audio — серверная замена дорожки. */
+  audio_guide?: boolean
+  keep_original_audio?: boolean
   /** (правка 146) FL2VA: имя файла первого кадра в ComfyUI input/. */
   first_frame?: string | null
   /** (правка 146) FL2VA: имя файла последнего кадра в ComfyUI input/. */
@@ -316,6 +319,9 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
       patch.mode = 'ref'
     }
     const effMode: 'ref' | 't2v' | 'flf' = (patch.mode as string) as 'ref' | 't2v' | 'flf'
+    // ref + аудио-гайд: восстанавливаем галочку вместе с рефами.
+    patch.audioGuide =
+      effMode === 'ref' && (params.audio_guide === true || params.keep_original_audio === true)
 
     // ── References (отфильтрованы под режим) ──
     const allMetaRefs: MetaReference[] = Array.isArray(params.references)

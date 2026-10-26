@@ -799,6 +799,8 @@ export function GenerateView() {
       // (правка 152) Размеры первого кадра — для aspect ratio в режиме flf
       firstFrameWidth: v.mode === 'flf' ? v.startFrame?.width : undefined,
       firstFrameHeight: v.mode === 'flf' ? v.startFrame?.height : undefined,
+      // ref: аудио-гайд + сохранение оригинальной дорожки (галочка в UI).
+      audioGuide: v.mode === 'ref' && v.audioGuide === true,
       references: v.refs
         .filter((r) => v.mode === 'ref' || r.kind === 'audio')
         .map((r) => ({
@@ -1518,6 +1520,29 @@ export function GenerateView() {
                 <div className="space-y-2">
                   {video.refs.map(renderRefCard)}
                 </div>
+              )}
+
+              {/* ref + аудио: Audio Guide ведёт генерацию, а в готовый ролик
+                  сервер подставляет оригинальную дорожку. Опция — только когда
+                  есть аудио-реф; в t2v/flf аудио-гайд уже штатный. */}
+              {refCounts.audio > 0 && (
+                <label className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={video.audioGuide === true}
+                    onChange={(e) => patchVideo({ audioGuide: e.target.checked })}
+                    className="mt-0.5 accent-emerald-400"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium text-foreground">
+                      Сохранить оригинальный звук и вести по нему
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground/70 leading-snug mt-0.5">
+                      Аудио-рефы станут Audio Guide; в итоговое видео подставится
+                      оригинальная дорожка первого аудио-рефа, обрезанная по длине ролика.
+                    </span>
+                  </span>
+                </label>
               )}
             </div>
           )}

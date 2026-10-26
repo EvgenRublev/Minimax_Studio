@@ -1123,6 +1123,14 @@ export function useVideoGen() {
           refAudios: refAudios.length > 0 ? refAudios : undefined,
           refAudioTrims: refAudioTrims.some(Boolean) ? refAudioTrims : undefined, // (правка 304)
           refAudioVolumes: refAudioVolumes.some((v) => v != null) ? refAudioVolumes : undefined, // (правка 694)
+          // ref + аудио-реф: Audio Guide вместо ref_audio + сохранение
+          // оригинальной дорожки. В t2v/flf не нужно: там гайд уже штатный.
+          audioGuide: genMode === 'ref' && params.audioGuide === true && refAudios.length > 0
+            ? true
+            : undefined,
+          keepOriginalAudio: genMode === 'ref' && params.audioGuide === true && refAudios.length > 0
+            ? true
+            : undefined,
           aspectRatio,
           duration,
           seed: actualSeed,
@@ -1295,6 +1303,10 @@ export function useVideoGen() {
         genParamsMap.set(promptId, {
           prompt: params.prompt,
           generation_mode: genMode, // (правка 146) ref | t2v | flf
+          ...(genMode === 'ref' && params.audioGuide === true && refAudios.length > 0 && {
+            audio_guide: true,
+            keep_original_audio: true,
+          }),
           ...(genMode === 'flf' && {
             first_frame: transfers[params.firstFrame ?? ''] ?? params.firstFrame ?? null,
             last_frame: transfers[params.lastFrame ?? ''] ?? params.lastFrame ?? null,

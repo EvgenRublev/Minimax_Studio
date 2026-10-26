@@ -96,6 +96,11 @@ export interface VideoGenerateParams {
   /* ── ref2va: reference manifest ── */
   references?: VideoReferenceParam[]
   referenceDetail?: 'match' | 'max'
+  /** ref + аудио-реф: подать аудио как Audio Guide (а не только ref_audio)
+   *  и сохранить оригинальную дорожку в результате. */
+  audioGuide?: boolean
+  /** Серверная замена итоговой дорожки оригиналом (ставится вместе с audioGuide). */
+  keepOriginalAudio?: boolean
 
   /* ── Two-pass latent upscaler ── */
   /** (правка 124) Точные номинальные (финальные) размеры видео — приоритет
