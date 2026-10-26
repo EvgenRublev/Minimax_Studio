@@ -224,8 +224,10 @@ export function getAppConfig(): AppConfig {
     llmCustomModel: (ini['llm.custom_model_path'] ?? '').trim(),
     llmCustomMmproj: (ini['llm.custom_mmproj_path'] ?? '').trim(),
     modelExtraPaths: parseExtraPaths(ini['models.extra_paths'] ?? ''),
-    // (правка 53) по умолчанию ВЫКЛ: ассистент не тратит контекст на кадры видео
-    llmVideoVision: ini['llm.video_vision'] === '1',
+    // (правка 53) по умолчанию ВКЛ: видео-рефы идут в ассистент сжатым
+    // digest-описанием (кэшируется по содержимому), а не сырыми кадрами.
+    // Старые config.ini без ключа тоже получают новый дефолт; явный 0 — выкл.
+    llmVideoVision: ini['llm.video_vision'] !== '0',
     // (правка 109) квантизация KV-кэша; (правка 119) по умолчанию q4_0 — экономия памяти
     llmKvCache: (['off', 'q8_0', 'q5_1', 'q4_0'].includes(ini['llm.kv_cache'] ?? '')
       ? ini['llm.kv_cache']
@@ -379,7 +381,7 @@ top_p=0.95
 temperature=0.7
 sampling_override=0
 kv_cache=q4_0
-video_vision=0
+video_vision=1
 model=Qwen3.5-9B-Q4_K_M.gguf
 max_output_tokens=4096
 context_size=25600

@@ -60,9 +60,10 @@ const HISTORY_LIMIT = 200
  * это был главный канал «утечки» тем между чатами (вставленный из другого
  * чата промпт модель тащила в новый диалог). Пользователь цитирует черновик
  * в самом сообщении (кнопка «Улучшить мой промпт» делает это автоматически).
- * (правка 53) `videoVisionOn` — видит ли ассистент кадры видео-рефов (настройка
- * «Видение видео ассистентом», выкл по умолчанию). Без этого флага промпт
- * говорил модели «ты ВИДИШЬ кадры», хотя кадры не прикреплялись → выдумка.
+ * (правка 53) `videoVisionOn` — видит ли ассистент видео-рефы (настройка
+ * «Видение видео ассистентом», включена по умолчанию). Видео идёт сжатым
+ * digest-описанием, а не сырыми кадрами. Без этого флага промпт не должен
+ * говорить модели «ты ВИДИШЬ кадры», иначе она выдумывает содержимое.
  * (правка 150) Ассистент видит ТЕКУЩИЙ РЕЖИМ ГЕНЕРАЦИИ (t2v/flf/ref) из gen-store
  * и строит system-промпт с учётом режима: в t2v/flf запрещает метки <Picture N>,
  * <Video N>, <Subject N> (нода MiniMaxH3ReferenceToVideo не используется),
@@ -851,14 +852,14 @@ export function runAssistantCompletion(
       // (правка 53) Свежее значение «видение видео» из конфига — системный
       // промпт должен совпадать с тем, что сервер реально прикрепит.
       // Лёгкий локальный GET; при ошибке остаёмся по умолчанию (выкл).
-      let videoVisionOn = false
+      let videoVisionOn = true
       try {
         const cfgRes = await fetch('/api/config', { signal: ac.signal })
         if (cfgRes.ok) {
           const cfg = await cfgRes.json()
-          videoVisionOn = cfg.llm_video_vision === true
+          videoVisionOn = cfg.llm_video_vision !== false
         }
-      } catch { /* ignore — default OFF */ }
+      } catch { /* ignore — default ON (сжатый digest) */ }
       // The stored history is untouched; this copy may get a one-line
       // clarification for numeric selections ("1", "2", ...).
       const apiHistory = sanitizeRoles(history.slice(-HISTORY_LIMIT))

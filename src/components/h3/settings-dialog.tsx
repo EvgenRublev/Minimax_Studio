@@ -148,8 +148,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   // (правка 313) значение больше никуда не отправляется (см. saveLlm) —
   // храним только сеттер для сбросов; само число из GET не нужно.
   const [, setLlmMaxOut] = useState(4096)
-  // (правка 53) Видение видео ассистентом — по умолчанию ВЫКЛ
-  const [llmVideoVision, setLlmVideoVision] = useState(false)
+  // (правка 53) Видение видео ассистентом — по умолчанию ВКЛ: digest
+  // видео-рефов строится сжато и кэшируется по содержимому файла.
+  const [llmVideoVision, setLlmVideoVision] = useState(true)
   // (правка 109) Квантизация KV-кэша LLM; (правка 119) по умолчанию q4_0
   const [llmKvCache, setLlmKvCache] = useState<'off' | 'q8_0' | 'q5_1' | 'q4_0'>('q4_0')
   // (правка 140) Тонкая настройка сэмплинга УДАЛЕНА из UI: применяются
@@ -442,7 +443,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             llm_context_size: 25600,       // (правка 119) дефолт контекста — 25K
             llm_max_output_tokens: 4096,
             // (правка 54) ранее эти параметры сброс НЕ трогал — теперь сбрасываем всё:
-            llm_video_vision: false, // видение видео (правка 53) → выкл
+            llm_video_vision: true, // видение видео (правка 53) → включено (digest + кэш)
             llm_kv_cache: 'q4_0',    // квантизация KV-кэша (правки 109/119) → q4_0
             // (правка 140) сэмплинг — всегда модель-осознанные значения
             llm_sampling_override: false,
@@ -819,14 +820,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
             </div>
 
-            {/* (правка 53) Видение видео ассистентом — по умолчанию ВЫКЛ */}
+            {/* (правка 53) Видение видео ассистентом — по умолчанию ВКЛ */}
             <div className="space-y-1.5 pt-2 border-t border-border">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <span className="text-xs text-muted-foreground">Видение видео ассистентом</span>
                   <p className="text-[10px] text-muted-foreground/60">
-                    Вкл: ассистент смотрит кадры видео-рефов (заметно ест контекст).
-                    Выкл: модель знает только о НАЛИЧИИ видео и не выдумывает его содержимое.
+                    Вкл: ассистент получает сжатый digest видео-рефов (кэшируется по
+                    содержимому файла). Выкл: знает только о наличии видео и не
+                    выдумывает его содержимое.
                   </p>
                 </div>
                 <button

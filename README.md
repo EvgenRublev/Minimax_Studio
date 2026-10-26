@@ -219,7 +219,7 @@ start.bat
 | `llm.repeat_penalty` / `llm.frequency_penalty` / `llm.presence_penalty` | Штрафы сэмплинга LLM |
 | `llm.sampling_override` | 1 = применять параметры сэмплинга из config поверх дефолтов |
 | `llm.kv_cache`          | Тип KV-кэша llama.cpp: `off` / `q8_0` / `q5_1` / `q4_0` |
-| `llm.video_vision`      | Видение кадров видео-рефов ассистентом (1/0, выкл = экономия контекста) |
+| `llm.video_vision`      | Видение видео-рефов ассистентом (1/0; по умолчанию 1 — сжатый digest с кэшем) |
 | `llm.custom_model_path` | Свой .gguf (абсолютный путь) — бэкенд `custom`, приоритетнее `llm.model` |
 | `llm.custom_mmproj_path` | Свой mmproj для custom-модели (зрение)         |
 | `ui.sound_on`           | Звук при завершении генерации (1/0)             |
