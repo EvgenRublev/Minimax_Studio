@@ -195,6 +195,9 @@ export function AssistantView({
   // (правка 502) ControlNet-режим: <Picture N> нумеруются по refImages
   // вкладки «ControlNet» (controlnet-target-store).
   const controlnetRefs = useControlNetTarget((s) => s.refImages)
+  // Ярлык быстрой кнопки ControlNet-чата: «Исправить» имеет смысл только
+  // когда в поле вкладки уже есть промпт; иначе предлагаем придумать с нуля.
+  const controlnetHasPrompt = useControlNetTarget((s) => s.prompt.trim().length > 0)
 
   /** Build a preview URL for a reference by (kind, 1-based index).
    *  (правка 427) В extend-чате <Picture N> — это extendImageRefs вкладки
@@ -1319,7 +1322,7 @@ export function AssistantView({
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors"
                   >
                     <WandSparklesIcon className="w-3 h-3" />
-                    Исправить промпт
+                    {controlnetHasPrompt ? 'Исправить промпт' : 'Придумать промпт'}
                   </button>
                 ) : (
                 <button
