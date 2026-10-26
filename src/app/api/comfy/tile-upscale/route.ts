@@ -147,6 +147,7 @@ export async function POST(req: NextRequest) {
         submitWorkflowJson(
           buildTileUpscaleWorkflow({
             sourceVideo: inName,
+            diffusionModel: cfg.diffusionModel || undefined,
             sourceAudioPath: inPath, // (правка 488) аудио для latent-ветки
             sourceWidth: probe.width,
             sourceHeight: probe.height,
@@ -289,6 +290,7 @@ export async function POST(req: NextRequest) {
       submitWorkflowJson(
         buildTileUpscaleWorkflow({
           sourceVideo: destName,
+          diffusionModel: cfg.diffusionModel || undefined,
           sourceAudioPath: destPath, // (правка 488) аудио для latent-ветки
           videoFormat: getVideoFormatSettings(), // (правка 386)
           // (правка 381) lossless-ветка: размеры = канва латента, mp4 грузится

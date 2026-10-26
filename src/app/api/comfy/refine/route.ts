@@ -304,6 +304,7 @@ export async function POST(req: NextRequest) {
           submitWorkflowJson(
             buildChunkedRefineWorkflow({
               sourceVideo: inName,
+              diffusionModel: cfg.diffusionModel || undefined,
               sourceWidth: srcW,
               sourceHeight: srcH,
               sourceFrames: probe.frames,
@@ -372,6 +373,7 @@ export async function POST(req: NextRequest) {
       const run = await runGeneration(() =>
         submitRefine({
           sourceVideo: inName,
+          diffusionModel: cfg.diffusionModel || undefined,
           sourceWidth: srcW,
           sourceHeight: srcH,
           targetShortSide: target,
@@ -595,6 +597,7 @@ export async function POST(req: NextRequest) {
         submitWorkflowJson(
           buildChunkedRefineWorkflow({
             sourceVideo: destName,
+            diffusionModel: cfg.diffusionModel || undefined,
             videoFormat: getVideoFormatSettings(), // (правка 386)
             // (правка 382) lossless-ветка «Частями»: окна режутся токенами
             // из сохранённого латента; размеры = канва латента
@@ -677,6 +680,7 @@ export async function POST(req: NextRequest) {
     const run = await runGeneration(() =>
       submitRefine({
         sourceVideo: destName,
+        diffusionModel: cfg.diffusionModel || undefined,
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)
         ...(sourceLatent && { sourceLatent, sourceFrames: probe.frames }),

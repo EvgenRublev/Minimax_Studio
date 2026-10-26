@@ -263,6 +263,7 @@ export async function POST(req: NextRequest) {
 
     const workflow = buildFaceRefineWorkflow({
       sourceVideo: inName,
+      diffusionModel: cfg.diffusionModel || undefined,
       prompt,
       seed,
       canvas,

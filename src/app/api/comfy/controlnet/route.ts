@@ -253,6 +253,7 @@ export async function POST(req: NextRequest) {
         // Режим генерации: препроцессинг + стандартный References
         workflow = buildControlNetWorkflow({
           sourceVideo: inputName,
+          diffusionModel: cfg.diffusionModel || undefined,
           sourceWidth: probe.width,
           sourceHeight: probe.height,
           sourceFrames: probe.frames,
