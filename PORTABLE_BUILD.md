@@ -83,6 +83,23 @@ runtime\ffmpeg\ffprobe.exe
 Только `ffprobe.exe` без `ffmpeg.exe` не поможет: приложение сначала
 разрешает ffmpeg и только потом ищет ffprobe рядом с ним.
 
+### 1.6. FILM VFI — патч под PyTorch 2.11 / cuDNN 9.19
+
+Старая TorchScript-модель FILM (`film_net_fp32.pt`) использует
+`padding='same'` с чётным ядром. На `torch 2.11 + cuDNN 9.19` это даёт
+нативный `Fatal Python error: Aborted` в `Convolution.cpp`.
+
+В ComfyUI-Easy-Install уже применён рабочий патч: FILM загружается как
+eager `Interpolator` с явным padding и тем же `state_dict`. Для новой копии
+ComfyUI повторите:
+
+```powershell
+python scripts/patch-film-vfi.py --comfy-root <порт portable>/ComfyUI-Easy-Install/ComfyUI
+```
+
+После патча FILM работает на GPU и совпадает с оригиналом по выходу
+(max diff ~1e-5). Без патча используйте RIFE.
+
 ---
 
 ## 2. Пошаговая сборка (PowerShell)
