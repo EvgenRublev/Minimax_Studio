@@ -302,7 +302,7 @@ ${anchorBlock}${audioAnchorBlock}
 ${honestyBlock}
 ${guide3dBlock}
 
-Перед КАЖДЫМ промптом перечитай ТЕКУЩИЙ список референсов выше (${rescanHint}). Про длительность не спрашивай — она указана.`
+Перед КАЖДЫМ промптом сверься с ТЕКУЩИМ списком референсов выше (${rescanHint}), но НЕ пересказывай его пользователю и не повторяй список идей. Про длительность не спрашивай — она указана.`
 }
 
 /**
@@ -508,6 +508,32 @@ function sanitizeRoles(msgs: AssistantChatMessage[]): AssistantChatMessage[] {
   // LLM requires the first non-system message to be 'user'
   while (out.length && out[0].role !== 'user') out.shift()
   return out
+}
+
+/**
+ * A one-character reply like "1" is ambiguous to a small local model,
+ * especially when the system prompt is full of reference rules. If the
+ * previous assistant message contains a numbered list, make the selection
+ * explicit for this request only (the stored chat stays unchanged).
+ */
+function numberSelectionHint(msgs: AssistantChatMessage[], n: number): string | null {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.role !== 'assistant' || typeof m.content !== 'string') continue
+    const named = new RegExp(
+      `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:Идея|Вариант|Idea|Option)\\s*${n}\\b`,
+      'i',
+    )
+    const numbered = new RegExp(
+      `(?:^|\\n)\\s*\\*{0,2}${n}[.)]\\s+`,
+    )
+    if (named.test(m.content) || numbered.test(m.content)) {
+      return `[Выбор пользователя: вариант ${n} из твоего предыдущего списка. Выдай готовый промпт именно для него. Не повторяй список идей и не пересказывай референсы.]`
+    }
+    // Only the immediately preceding assistant turn is relevant.
+    return null
+  }
+  return null
 }
 
 /**
@@ -781,6 +807,22 @@ export function runAssistantCompletion(
           videoVisionOn = cfg.llm_video_vision === true
         }
       } catch { /* ignore — default OFF */ }
+      // The stored history is untouched; this copy may get a one-line
+      // clarification for numeric selections ("1", "2", ...).
+      const apiHistory = sanitizeRoles(history.slice(-HISTORY_LIMIT))
+      const lastApiMsg = apiHistory[apiHistory.length - 1]
+      if (lastApiMsg && lastApiMsg.role === 'user' && typeof lastApiMsg.content === 'string') {
+        const selection = /^\s*([1-9]|1[0-9]|2[0-5])\s*$/.exec(lastApiMsg.content)
+        if (selection) {
+          const hint = numberSelectionHint(apiHistory.slice(0, -1), Number(selection[1]))
+          if (hint) {
+            apiHistory[apiHistory.length - 1] = {
+              ...lastApiMsg,
+              content: `${lastApiMsg.content.trim()}\n\n${hint}`,
+            }
+          }
+        }
+      }
       const res = await fetch('/api/llm/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -799,7 +841,7 @@ export function runAssistantCompletion(
             // (клипы, extend-рефы, мета исходника); await: дочитывает мету.
             { role: 'system', content: await buildSystemMessage(videoVisionOn, chatMode, ac.signal) },
             // Replay the (capped) chat history so the model "remembers"
-            ...sanitizeRoles(history.slice(-HISTORY_LIMIT)),
+            ...apiHistory,
           ],
           // Send image references so the server can inject them as vision
           ...(refs.length > 0 ? { references: refs } : {}),

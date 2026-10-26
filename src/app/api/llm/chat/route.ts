@@ -169,6 +169,10 @@ export async function POST(req: NextRequest) {
         mkdirSync(tmpDir, { recursive: true })
         const mediaParts: Array<Record<string, unknown>> = []
         const textParts: string[] = []
+        // Digests are CONTEXT, not the user's request. They are appended to the
+        // system message so a short answer like "1" is not buried under a big
+        // reference-description block in the last user message.
+        const digestTextParts: string[] = []
         // (правка 53) true, если к запросу прикреплены кадры хотя бы одного видео-рефа
         let videoAttached = false
         // Reference digests: video first (as agreed with the user), then images.
@@ -277,7 +281,7 @@ export async function POST(req: NextRequest) {
             // cache). The old path below remains as a fallback.
             const digest = digestByTrigger.get(ref.trigger)
             if (digest) {
-              textParts.push(
+              digestTextParts.push(
                 `[${ref.trigger}] file="${ref.path}" (reference digest generated from the actual video frames — treat it as what you observed${ref.includeAudio !== false ? '; it has an audio track for MiniMax — reference it as <Video N> and do NOT invent what is "heard" in it' : ''}):\n${digest}`,
               )
               continue
@@ -356,7 +360,7 @@ export async function POST(req: NextRequest) {
 
           const imageDigest = digestByTrigger.get(ref.trigger)
           if (imageDigest) {
-            textParts.push(
+            digestTextParts.push(
               `[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'}; reference digest generated from the actual image — treat it as what you observed):\n${imageDigest}`,
             )
             continue
@@ -378,6 +382,30 @@ export async function POST(req: NextRequest) {
           textParts.push(`[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'})`)
         }
 
+        // Digests go into the SYSTEM context, never into the last user
+        // message. A short reply like "1" must remain the actual request; a
+        // big reference block in the same message made the model answer the
+        // block (repeating reference summaries/ideas) instead of "1".
+        if (digestTextParts.length > 0) {
+          const digestBlock = [
+            '=== REFERENCE DIGESTS (internal visual memory) ===',
+            'These are descriptions of the current generation references, not a user request. Use them as visual context for the actual request in the last user message; do not repeat or summarize this block unless the user asks. Do not mention the word "digest" to the user.',
+            ...digestTextParts,
+          ].join('\n')
+          const sys = messages[0]
+          if (sys && sys.role === 'system') {
+            if (typeof sys.content === 'string') {
+              messages[0] = { ...sys, content: `${sys.content}\n\n${digestBlock}` }
+            } else if (Array.isArray(sys.content)) {
+              messages[0] = { ...sys, content: [...sys.content, { type: 'text', text: digestBlock }] }
+            } else {
+              messages[0] = { ...sys, content: digestBlock }
+            }
+          } else {
+            messages.unshift({ role: 'system', content: digestBlock })
+          }
+        }
+
         // (правка 53) прикрепляем не только при наличии медиа: textParts могут
         // содержать «tag-only» заметки (видео с выключенным видением, аудио).
         // Раньше такие заметки молча терялись, и модель не знала о рефах.
@@ -387,18 +415,14 @@ export async function POST(req: NextRequest) {
           // референсы должны стоять рядом с ним; а trimToContext режет
           // историю с начала, и старое первое сообщение (с медиа) улетало
           // первым — видение тихо терялось в длинных чатах.
-          // (правка 53) интро зависит от того, прикреплены ли кадры видео
-          // With digests the model does not receive raw media for successful
-          // refs; be explicit that the text is its visual evidence. Any failed
-          // ref still uses the old raw-media path, which is called out below.
           const introText = digestUsed
             ? [
-                'Reference digests: compact text descriptions generated from the actual reference files. For each entry marked "reference digest", treat the digest as what you observed — do not claim to see details beyond it, do not invent details. Do not mention the word "digest" to the user; it is only your internal visual memory.',
+                'Reference digests are in the system context (internal visual memory; not a user request).',
                 mediaParts.length > 0
                   ? 'References that could not be digested are attached as raw media; you can see those directly.'
-                  : 'Raw reference media for digested entries is NOT attached, to save context.',
+                  : '',
                 'You CANNOT hear the audios — reference them as <Audio N> and do NOT describe or quote their content.',
-              ].join(' ')
+              ].filter(Boolean).join(' ')
             : videoAttached
               ? 'Attached references (you can SEE the images and WATCH the video frames; you CANNOT hear the audios — this model has no reliable audio input). Images: describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details. Videos: attached as whole short clips (≤512px, 8 fps) — describe the scene, motion and camera behaviour over time, ONLY what is actually in the frames. Audios: attached for MiniMax voice/tone ONLY — the model CANNOT hear them, so reference them as <Audio N> and do NOT describe or quote their content.'
               : 'Attached references (you can SEE the attached images — describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details; video references are TAGS ONLY — their frames are NOT attached to save context, so you only know they EXIST: use their <Video N> tags when the user asks, and do NOT describe, guess or invent what happens inside them). You CANNOT hear the audios — reference them as <Audio N> and do NOT describe or quote their content.'
@@ -417,7 +441,7 @@ export async function POST(req: NextRequest) {
               content: [
                 {
                   type: 'text',
-                  text: `${introText} ${textParts.join(digestUsed ? '\n\n' : '; ')}.\n\n${existingText}`,
+                  text: `${introText} ${textParts.join('; ')}.\n\n${existingText}`,
                 },
                 ...mediaParts,
               ],
