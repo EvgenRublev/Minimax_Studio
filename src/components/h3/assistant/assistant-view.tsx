@@ -84,9 +84,19 @@ interface DlInfo {
  */
 function llmDisplayName(modelId?: string | null, modelName?: string | null): string {
   if (modelId === 'llm_custom') return modelName ? `своя: ${modelName}` : 'своя модель (GGUF)'
+  if (modelId === 'llm_assistant_bonsai') return 'Bonsai 2 27B'
+  if (modelId === 'llm_assistant_bonsai_light') return 'Bonsai 2 27B (PTQ1_0)'
   if (modelId) {
     const m = MODELS.find((x) => x.id === modelId)
     if (m) return m.label
+  }
+  // Bonsai/Gemma/Qwen virtual ids may be absent from MODELS; the status
+  // carries the real GGUF name, so do not fall back to the Qwen default.
+  if (modelName) {
+    if (/bonsai/i.test(modelName)) return 'Bonsai 2 27B'
+    if (/gemma/i.test(modelName)) return 'Gemma 4 12B'
+    if (/qwen/i.test(modelName)) return 'Qwen3.5 9B'
+    return modelName
   }
   return 'Qwen3.5 9B (по умолчанию)'
 }
