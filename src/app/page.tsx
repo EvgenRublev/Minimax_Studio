@@ -22,7 +22,13 @@ import { initAssistantChatsSync } from '@/lib/assistant-chats-sync'
 // (правка 718) Сверка «идёт ли генерация» с живым ComfyUI при старте:
 // персистентный стор восстанавливает фазу «running» из localStorage, и без
 // сверки карточка «Генерация идёт» висела бы после каждого запуска.
-import { reconcileGenerationOnStartup, cancelReconcile } from '@/lib/gen-startup-reconcile'
+import {
+  reconcileGenerationOnStartup,
+  cleanupLostPendingQueueItems,
+  cancelReconcile,
+} from '@/lib/gen-startup-reconcile'
+import { initComfyTurn } from '@/lib/comfy-turn'
+import { sweepOrphanRefineItems } from '@/lib/refine-queue'
 // (правка 442) Ассистент — не вкладка, а правая панель на «Генерации» и
 // «Продлении»; событие «открыть ассистента» разворачивает панель через стор.
 import { useAssistantPanel } from '@/lib/assistant-panel-store'
@@ -125,6 +131,14 @@ export default function Home() {
   // (до 5 минут) и снимает «зависшее» состояние из localStorage. Пока
   // ComfyUI не отвечает, состояние НЕ трогаем — мы не знаем, что идёт.
   useEffect(() => {
+    // Сначала убираем «потерянные» элементы очереди (их payload не пережил
+    // reload), затем восстанавливаем ход у реально живой задачи ComfyUI.
+    cleanupLostPendingQueueItems()
+    // Refine после reload не имеет живого раннера; без этого его prompt_id
+    // никто не финализирует (глобальный поллер намеренно не делает stitch),
+    // и шлюз держал бы ход до watchdog.
+    sweepOrphanRefineItems()
+    initComfyTurn()
     void reconcileGenerationOnStartup()
     return () => cancelReconcile()
   }, [])

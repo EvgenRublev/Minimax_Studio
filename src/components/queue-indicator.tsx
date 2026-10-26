@@ -19,9 +19,12 @@ import {
   ArrowUpFromLineIcon,
   WaypointsIcon, // (правка 512) ControlNet
   GaugeIcon, // (правка 554) FPS
+  Grid3x3Icon,
+  ScanFaceIcon,
 } from 'lucide-react'
 import { useGenQueue, TYPE_ACCENT, TYPE_LABEL, type QueueItemType } from '@/lib/gen-queue-store'
 import { useAssistantPanel } from '@/lib/assistant-panel-store' // (правка 442) отступ от панели ассистента
+import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { cn } from '@/lib/utils'
 
 /* ──────────────────── Icon Map ──────────────────── */
@@ -35,6 +38,8 @@ const TYPE_ICON: Record<QueueItemType, typeof ImageIcon> = {
   upscale: ArrowUpFromLineIcon, // (правка 262) upscale в общей очереди
   controlnet: WaypointsIcon, // (правка 512)
   fps: GaugeIcon, // (правка 554)
+  'tile-upscale': Grid3x3Icon,
+  'face-refine': ScanFaceIcon,
 }
 
 /* ──────────────────── Status Icons ──────────────────── */
@@ -221,6 +226,18 @@ function useGlobalQueuePoller() {
               const fresh = useGenQueue.getState().items.find((it) => it.id === item.id)
               if (fresh && fresh.status !== 'done') {
                 store.setStatus(item.id, 'done')
+                // Локальный поллер вкладки мог не успеть сделать bump: с
+                // единым FIFO следующая задача стартует сразу после done, а
+                // старый поллер уже видит новый promptId и выходит. Галерею
+                // обновляем здесь, чтобы результат не потерялся.
+                if (
+                  item.type === 'controlnet' ||
+                  item.type === 'fps' ||
+                  item.type === 'tile-upscale' ||
+                  item.type === 'face-refine'
+                ) {
+                  useGalleryRefresh.getState().bump()
+                }
               }
             }
           } catch {
@@ -271,6 +288,14 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
   if (item.type === 'fps' && item.promptId) {
     const { markFpsCancelRequested } = await import('@/lib/fps-job-store')
     markFpsCancelRequested(item.promptId)
+  }
+  if (item.type === 'tile-upscale' && item.promptId) {
+    const { markTileUpscaleCancelRequested } = await import('@/lib/tile-upscale-job-store')
+    markTileUpscaleCancelRequested(item.promptId)
+  }
+  if (item.type === 'face-refine' && item.promptId) {
+    const { markFaceRefineCancelRequested } = await import('@/lib/face-refine-job-store')
+    markFaceRefineCancelRequested(item.promptId)
   }
   if (!item.promptId) {
     // No job yet — just remove from queue

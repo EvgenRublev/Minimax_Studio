@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { VideoGenerateParams } from '@/lib/comfy/video-config'
 import { useGenProgress, type GenPhase } from '@/lib/gen-progress-store'
 import { useGenQueue } from '@/lib/gen-queue-store'
+import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 // (правка 259) глобальный сигнал перерисовки галерей после завершения джобов
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
@@ -929,11 +930,18 @@ export function useVideoGen() {
           : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`
       queue.setClientToken(queueId, clientToken)
 
+      // (единая очередь) Ждём свой ход ДО отправки в ComfyUI. Пока ждём,
+      // элемент висит «В очереди»; после хода шлюз сам ставит 'submitting'.
+      // Если элемент отменили/удалили в ожидании — просто выходим.
+      const granted = await acquireComfyTurn(queueId)
+      if (!granted || !isComfyTurnActive(queueId)) return
+
       // Немедленно показываем «Отправка…» на чистой карточке — БЕЗ данных
-      // прошлой задачи. НО: если уже есть активная генерация (running/queued)
-      // в очереди — НЕ сбрасываем: таймер текущей генерации должен продолжить.
+      // прошлой задачи. Шлюз уже гарантирует, что другая видео-генерация
+      // сейчас не выполняется; более поздние видео в статусе 'queued' не
+      // должны блокировать сброс карточки для только что получившей ход.
       const hasActiveInQueue = useGenQueue.getState().items.some(
-        (i) => i.type === 'video' && ['submitting', 'queued', 'running'].includes(i.status) && i.id !== queueId
+        (i) => i.type === 'video' && i.status === 'running' && i.id !== queueId
       )
       if (!hasActiveInQueue) {
         useGenProgress.getState().beginVideoSubmit()
@@ -1190,8 +1198,10 @@ export function useVideoGen() {
         // (fix H2) Пользователь нажал «Отмена», пока POST был в полёте:
         // задача уже в ComfyUI, но UI её не отслеживает. Отменяем её на
         // сервере сразу и НЕ запускаем поллинг/карточку.
-        if (interruptEpoch !== myEpoch) {
-          void fetch('/api/comfy/cancel', {
+        if (interruptEpoch !== myEpoch || !isComfyTurnActive(queueId)) {
+          // Остановить уже принятую ComfyUI-задачу. Не оставляем её
+          // «сиротой», если очередь отменили, пока POST был в полёте.
+          await fetch('/api/comfy/cancel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt_id: promptId }),

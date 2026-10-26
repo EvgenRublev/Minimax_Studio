@@ -12,6 +12,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { toast } from 'sonner'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
+import { useGenQueue } from '@/lib/gen-queue-store'
+import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 
 export type FaceRefinePhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -48,6 +50,16 @@ let cancelEpoch = 0
  *  рисовал бы собственную отмену красным баннером «Ошибка». */
 let cancelRequestedFor: string | null = null
 
+/** queue-item, владеющий состоянием вкладки; защищает от запоздавшего
+ *  ответа отменённого POST, когда следующая задача уже стартовала. */
+let activeQid: string | null = null
+
+/** Отмена из общей очереди: прерванный ComfyUI-промпт не должен рисоваться
+ *  красным баннером ошибки. */
+export function markFaceRefineCancelRequested(promptId: string) {
+  cancelRequestedFor = promptId
+}
+
 export const useFaceRefineJob = create<FaceRefineJobState>()(
   persist(
     (set, get) => ({
@@ -59,10 +71,24 @@ export const useFaceRefineJob = create<FaceRefineJobState>()(
       busy: false,
 
       submit: async (body) => {
-        if (get().busy) return
+        const label = typeof body.sourceFilename === 'string' && body.sourceFilename
+          ? `Face: ${body.sourceFilename}`
+          : 'Face Refine'
+        const qid = useGenQueue.getState().enqueue('face-refine', label)
+
+        // Единый FIFO: несколько задач можно ставить в очередь; состояние
+        // вкладки меняем только после получения хода.
+        const granted = await acquireComfyTurn(qid)
+        if (!granted || !isComfyTurnActive(qid)) return
+
+        // Эпоху отмены фиксируем только на старте своей задачи, а не в
+        // момент постановки: Cancel текущего джоба не должен отменять все
+        // задачи, которые ещё стоят в очереди.
         const myEpoch = cancelEpoch
         cancelRequestedFor = null
+        activeQid = qid
         set({ phase: 'submitting', busy: true, error: null, progress: 0, startedAt: Date.now() })
+
         try {
           const res = await fetch('/api/comfy/face-refine', {
             method: 'POST',
@@ -70,23 +96,43 @@ export const useFaceRefineJob = create<FaceRefineJobState>()(
             body: JSON.stringify(body),
           })
           const data = await res.json()
-          if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`)
-          if (cancelEpoch !== myEpoch) {
+          if (!res.ok) {
+            useGenQueue.getState().setStatus(qid, 'error', data.error || `Ошибка ${res.status}`)
+            throw new Error(data.error || `Ошибка ${res.status}`)
+          }
+          if (!data.prompt_id) {
+            const msg = 'ComfyUI не вернул prompt_id'
+            useGenQueue.getState().setStatus(qid, 'error', msg)
+            throw new Error(msg)
+          }
+          if (cancelEpoch !== myEpoch || !isComfyTurnActive(qid)) {
             if (data.prompt_id) {
-              void fetch('/api/comfy/cancel', {
+              await fetch('/api/comfy/cancel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt_id: data.prompt_id }),
               }).catch(() => {})
             }
-            set({ phase: 'idle', busy: false, progress: 0, startedAt: null })
+            useGenQueue.getState().setStatus(qid, 'cancelled')
+            if (activeQid === qid) {
+              activeQid = null
+              set({ phase: 'idle', busy: false, progress: 0, startedAt: null })
+            }
             return
           }
           set({ promptId: data.prompt_id ?? null, phase: 'running' })
+          useGenQueue.getState().setPromptId(qid, data.prompt_id)
+          useGenQueue.getState().setStatus(qid, 'running')
           toast.success('Face Refine запущен')
           ensurePolling()
         } catch (e) {
-          set({ phase: 'error', error: e instanceof Error ? e.message : String(e), busy: false })
+          const msg = e instanceof Error ? e.message : String(e)
+          const qi = useGenQueue.getState().items.find((i) => i.id === qid)
+          if (!qi?.error) useGenQueue.getState().setStatus(qid, 'error', msg)
+          if (activeQid === qid) {
+            activeQid = null
+            set({ phase: 'error', error: msg, busy: false })
+          }
         }
       },
 
@@ -113,8 +159,13 @@ export const useFaceRefineJob = create<FaceRefineJobState>()(
         } catch { /* ignore */ }
         if (cancelled) {
           cancelRequestedFor = null
-          stopPolling()
-          set({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+          const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
+          if (qi) useGenQueue.getState().setStatus(qi.id, 'cancelled')
+          if (activeQid === null || activeQid === qi?.id) {
+            activeQid = null
+            stopPolling()
+            set({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+          }
           toast.info('Отменено')
         } else {
           cancelRequestedFor = null
@@ -125,6 +176,7 @@ export const useFaceRefineJob = create<FaceRefineJobState>()(
       reset: () => {
         cancelEpoch++
         cancelRequestedFor = null
+        activeQid = null
         stopPolling()
         set({ phase: 'idle', progress: 0, error: null, promptId: null, startedAt: null, busy: false })
       },
@@ -186,6 +238,8 @@ async function pollOnce() {
           error: 'ComfyUI не отвечает (сервер остановлен или перезапущен) — отслеживание остановлено',
           busy: false,
         })
+        const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
+        if (qi) useGenQueue.getState().setStatus(qi.id, 'error', 'ComfyUI не отвечает — отслеживание остановлено')
         stopPolling()
       }
       return
@@ -195,6 +249,11 @@ async function pollOnce() {
     if (cur.promptId !== promptId) return
     if (data.status === 'done') {
       useFaceRefineJob.setState({ phase: 'done', progress: 100, busy: false })
+      const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
+      if (qi) {
+        useGenQueue.getState().setStatus(qi.id, 'done')
+        useGenQueue.getState().setProgress(qi.id, 100, 100)
+      }
       useGalleryRefresh.getState().bump()
       stopPolling()
       setTimeout(() => {
@@ -204,23 +263,31 @@ async function pollOnce() {
     } else if (data.status === 'cancelled') {
       cancelRequestedFor = null
       useFaceRefineJob.setState({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+      const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
+      if (qi) useGenQueue.getState().setStatus(qi.id, 'cancelled')
       stopPolling()
     } else if (data.status === 'error') {
+      const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
       if (cancelRequestedFor === promptId) {
         cancelRequestedFor = null
         useFaceRefineJob.setState({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+        if (qi) useGenQueue.getState().setStatus(qi.id, 'cancelled')
       } else {
         useFaceRefineJob.setState({
           phase: 'error',
           error: data.error || data.detail || 'Ошибка Face Refine',
           busy: false,
         })
+        if (qi) useGenQueue.getState().setStatus(qi.id, 'error', data.error || data.detail || 'Ошибка Face Refine')
       }
       stopPolling()
     } else if (data.status === 'unknown') {
+      const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
       if (cancelRequestedFor === promptId) {
         cancelRequestedFor = null
         useFaceRefineJob.setState({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+        if (qi) useGenQueue.getState().setStatus(qi.id, 'cancelled')
+        stopPolling()
         return
       }
       unknownStreak++
@@ -230,6 +297,7 @@ async function pollOnce() {
           error: 'Задача не найдена в ComfyUI (сервер был перезапущен) — отслеживание остановлено',
           busy: false,
         })
+        if (qi) useGenQueue.getState().setStatus(qi.id, 'error', 'Задача не найдена в ComfyUI — отслеживание остановлено')
         stopPolling()
       }
     } else {
@@ -240,6 +308,8 @@ async function pollOnce() {
           const progData = await progRes.json()
           if (progData.progress && typeof progData.progress.percent === 'number') {
             useFaceRefineJob.setState({ progress: progData.progress.percent })
+            const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
+            if (qi) useGenQueue.getState().setProgress(qi.id, progData.progress.percent, 100)
           }
         }
       } catch { /* non-critical */ }

@@ -784,9 +784,9 @@ export function FaceRefineView() {
 
           {/* Запуск */}
           <div className="flex gap-2 pt-1">
-            <Button onClick={start} disabled={!source || busy} className="flex-1 gap-1.5">
-              {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {busy ? 'Выполняется…' : 'Запустить Face Refine'}
+            <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
+              <PlayIcon className="w-4 h-4" />
+              {busy ? 'Ещё в очередь' : 'Запустить Face Refine'}
             </Button>
           </div>
         </div>

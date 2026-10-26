@@ -11,10 +11,11 @@
  * Раннер — синглтон на уровне модуля (как движок ассистента): переживает
  * переключение вкладок; в фоне сабмитит задачу, опрашивает статус/прогресс,
  * для «Частями» сшивает куски и сигналит галерее. Продление и генерация
- * ходят в ту же очередь через use-video-gen (type 'video') — исполнение
- * сериализует ComfyUI на своей стороне.
+ * ходят в ту же очередь через use-video-gen (type 'video'); единый FIFO
+ * исполнения ComfyUI обеспечивает `comfy-turn.ts`.
  */
 import { useGenQueue, type QueueItem } from './gen-queue-store'
+import { acquireComfyTurn, isComfyTurnActive } from './comfy-turn'
 import { useGalleryRefresh } from './gallery-refresh-store'
 
 export interface RefineTask {
@@ -61,6 +62,12 @@ export interface RefineTask {
 
 /** Задачи, ожидающие своей очереди (module-level — переживает вкладки). */
 const tasks = new Map<string, RefineTask>()
+/**
+ * Ход в единой ComfyUI-очереди запрашивается СРАЗУ при постановке, а не
+ * когда раннер доберётся до задачи. Иначе refine №2, поставленный раньше
+ * видео, не участвовал бы в FIFO и видео могло обогнать его.
+ */
+const turns = new Map<string, Promise<boolean>>()
 let running = false
 /**
  * (правка 716) id элемента очереди, который раннер обрабатывает ПРЯМО СЕЙЧАС.
@@ -73,6 +80,7 @@ let activeItemId: string | null = null
 export function enqueueRefine(task: RefineTask): string {
   const id = useGenQueue.getState().enqueue('refine', `Refine: ${task.source.filename}`)
   tasks.set(id, task)
+  turns.set(id, acquireComfyTurn(id))
   kick()
   return id
 }
@@ -92,6 +100,7 @@ export async function cancelActiveRefines(): Promise<void> {
     // (правка 334) Ожидающая очереди задача — из Map тоже: иначе запись-
     // сирота оставалась навсегда (раннер её не возьмёт — элемент cancelled).
     tasks.delete(item.id)
+    turns.delete(item.id)
     if (item.promptId) {
       try {
         await fetch('/api/comfy/cancel', {
@@ -112,6 +121,7 @@ export async function cancelRefineItem(id: string): Promise<void> {
   const { setStatus } = useGenQueue.getState()
   const item = useGenQueue.getState().items.find((i) => i.id === id)
   tasks.delete(id)
+  turns.delete(id)
   setStatus(id, 'cancelled')
   if (item?.promptId) {
     try {
@@ -169,6 +179,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function runTask(id: string, task: RefineTask): Promise<void> {
   const q = () => useGenQueue.getState()
+
+  // Ход уже запрошен в enqueueRefine — ждём его здесь, сохраняя глобальный
+  // порядок постановки. Отменённая в ожидании задача просто выходит.
+  const turn = turns.get(id)
+  const granted = turn ? await turn : true
+  turns.delete(id)
+  if (!granted || !isComfyTurnActive(id) || isCancelled(id)) return
+
   q().setStatus(id, 'submitting')
 
   // (правка 264) Время генерации для сайдкара итогового файла:
@@ -228,6 +246,20 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
   }
   const promptId = data.prompt_id
   if (!promptId) throw new Error('ComfyUI не вернул prompt_id')
+
+  // Отменили/удалили очередь, пока POST был в полёте: задача уже принята
+  // ComfyUI — гасим её и не запускаем поллинг-сироту.
+  if (!isComfyTurnActive(id) || isCancelled(id)) {
+    try {
+      await fetch('/api/comfy/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt_id: promptId }),
+      })
+    } catch { /* ignore */ }
+    return
+  }
+
   q().setPromptId(id, promptId)
   q().setStatus(id, 'queued')
 

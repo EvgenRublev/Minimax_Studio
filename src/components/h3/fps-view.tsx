@@ -18,7 +18,6 @@ import {
   GaugeIcon,
   PlayIcon,
   FileVideoIcon,
-  Loader2Icon,
   ZapIcon,
   FilmIcon,
 } from 'lucide-react'
@@ -490,9 +489,9 @@ export function FpsView() {
 
           {/* Запуск */}
           <div className="flex gap-2 pt-1">
-            <Button onClick={start} disabled={!source || busy} className="flex-1 gap-1.5">
-              {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {busy ? 'Выполняется…' : 'Запустить FPS'}
+            <Button onClick={start} disabled={!source || uploadingSrc} className="flex-1 gap-1.5">
+              <PlayIcon className="w-4 h-4" />
+              {busy ? 'Ещё в очередь' : 'Запустить FPS'}
             </Button>
           </div>
 

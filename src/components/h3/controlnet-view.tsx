@@ -20,7 +20,6 @@ import {
   WaypointsIcon,
   PlayIcon,
   FileVideoIcon,
-  Loader2Icon,
   AlertTriangleIcon,
   DicesIcon,
   UploadIcon,
@@ -1145,8 +1144,8 @@ export function ControlNetView() {
           {/* Запуск */}
           <div className="flex gap-2 pt-1">
             <Button onClick={startWithHistory} disabled={!source || modelsMissing || uploadingSrc} className="flex-1 gap-1.5">
-              {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {params.preprocessOnly ? 'Сохранить карту' : 'Сгенерировать'}
+              <PlayIcon className="w-4 h-4" />
+              {busy ? 'Ещё в очередь' : params.preprocessOnly ? 'Сохранить карту' : 'Сгенерировать'}
             </Button>
           </div>
 

@@ -25,6 +25,7 @@ import { useGenQueue } from './gen-queue-store'
 import { useControlNetJob } from './controlnet-job-store'
 import { useFpsJob } from './fps-job-store'
 import { useTileUpscaleJob } from './tile-upscale-job-store'
+import { useFaceRefineJob } from './face-refine-job-store'
 
 /** Фазы, в которых карточка показывает «генерация идёт». */
 const ACTIVE_PHASES = ['submitting', 'queued', 'running'] as const
@@ -86,6 +87,8 @@ function collectCandidates(): string[] {
   if (fps.busy && fps.promptId) out.add(fps.promptId)
   const tu = useTileUpscaleJob.getState()
   if (tu.busy && tu.promptId) out.add(tu.promptId)
+  const fr = useFaceRefineJob.getState()
+  if (fr.busy && fr.promptId) out.add(fr.promptId)
   return [...out]
 }
 
@@ -172,9 +175,56 @@ function applyReconciliation(answer: ActiveAnswer): void {
     console.log(`[reconcile] Tile Upscale ${tu.promptId} в ComfyUI отсутствует — снимаем busy`)
     useTileUpscaleJob.getState().reset()
   }
+  const fr = useFaceRefineJob.getState()
+  if (fr.busy && fr.promptId && !alive.has(fr.promptId) && gone(fr.promptId)) {
+    console.log(`[reconcile] Face Refine ${fr.promptId} в ComfyUI отсутствует — снимаем busy`)
+    useFaceRefineJob.getState().reset()
+  }
 }
 
 /** Отменить ожидание (вызывается при размонтировании). */
 export function cancelReconcile(): void {
   cancelled = true
+}
+
+/**
+ * Почистить элементы общей очереди, которые после перезапуска приложения
+ * уже некому отправить. Очередь persisted, а payload/ожидающие промисы живут
+ * только в памяти страницы. У видео есть отдельное inflight-восстановление
+ * через clientToken, поэтому `submitting`-видео не трогаем; `queued`-видео
+ * означает, что оно ждало ход и не было отправлено.
+ */
+export function cleanupLostPendingQueueItems(): void {
+  const { items, setStatus } = useGenQueue.getState()
+  for (const item of items) {
+    if (item.promptId) continue
+    if (item.type === 'upscale') continue // DLSS живёт отдельно
+    if (item.status !== 'submitting' && item.status !== 'queued') continue
+    if (item.type === 'video' && item.status === 'submitting') continue
+
+    setStatus(
+      item.id,
+      'error',
+      'Приложение было перезапущено — задача не была отправлена. Запустите её заново.',
+    )
+  }
+
+  // Если потерянная задача была видео, карточка «Отправка…/В очереди» могла
+  // остаться в persisted gen-progress. Не сбрасываем её, пока есть шанс
+  // восстановить POST через clientToken (`submitting` без promptId).
+  const itemsNow = useGenQueue.getState().items
+  const hasRecoverableVideo = itemsNow.some(
+    (item) =>
+      item.type === 'video' &&
+      (!!item.promptId ||
+        item.status === 'submitting' ||
+        item.status === 'running' ||
+        item.status === 'queued'),
+  )
+  if (!hasRecoverableVideo) {
+    const video = useGenProgress.getState().video
+    if (video.phase === 'submitting' || video.phase === 'queued') {
+      useGenProgress.getState().resetVideoGen()
+    }
+  }
 }

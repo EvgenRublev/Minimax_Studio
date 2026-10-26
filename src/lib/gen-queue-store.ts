@@ -3,9 +3,12 @@
  *
  * Tracks all active/recent generations across all tabs so that:
  *   - The QueueIndicator can show overall status
- *   - Multiple generations can run concurrently
  *   - Each item has its own progress tracking
  *   - Auto-cleanup removes finished items after a timeout
+ *
+ * ComfyUI-режимы (video/refine/controlnet/fps/tile-upscale/face-refine)
+ * сериализуются единым FIFO-шлюзом `comfy-turn.ts`; параллельно может идти
+ * только отдельный DLSS Upscale (`upscale`).
  *
  * Persisted so the queue (and its ComfyUI prompt_ids) survives a page
  * reload — useVideoGen re-attaches polling for active items on mount.
@@ -17,7 +20,17 @@ import { persist } from 'zustand/middleware'
 
 /* ──────────────────── Types ──────────────────── */
 
-export type QueueItemType = 'image' | 'music' | 'sound' | 'video' | 'refine' | 'upscale' | 'controlnet' | 'fps'
+export type QueueItemType =
+  | 'image'
+  | 'music'
+  | 'sound'
+  | 'video'
+  | 'refine'
+  | 'upscale'
+  | 'controlnet'
+  | 'fps'
+  | 'tile-upscale'
+  | 'face-refine'
 export type QueueItemStatus = 'submitting' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 
 export interface QueueItem {
@@ -52,6 +65,8 @@ export const TYPE_ACCENT: Record<QueueItemType, string> = {
   upscale: '#A78BFA', // (правка 262) upscale в общей очереди
   controlnet: '#F97316', // (правка 512) ControlNet в общей очереди
   fps: '#22D3EE', // (правка 554) FPS (frame interpolation) в общей очереди
+  'tile-upscale': '#F59E0B',
+  'face-refine': '#EC4899',
 }
 
 export const TYPE_LABEL: Record<QueueItemType, string> = {
@@ -63,6 +78,8 @@ export const TYPE_LABEL: Record<QueueItemType, string> = {
   upscale: 'Апскейл',
   controlnet: 'ControlNet', // (правка 512)
   fps: 'FPS', // (правка 554)
+  'tile-upscale': 'Tile Upscale',
+  'face-refine': 'Face Refine',
 }
 
 /* ──────────────────── Auto-cleanup ──────────────────── */

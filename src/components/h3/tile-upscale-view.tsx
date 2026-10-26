@@ -18,7 +18,6 @@ import {
   Grid3x3Icon,
   PlayIcon,
   FileVideoIcon,
-  Loader2Icon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -469,9 +468,9 @@ export function TileUpscaleView() {
 
           {/* Запуск */}
           <div className="flex gap-2 pt-1">
-            <Button onClick={start} disabled={!source || busy} className="flex-1 gap-1.5">
-              {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {busy ? 'Выполняется…' : 'Запустить Tile Upscale'}
+            <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
+              <PlayIcon className="w-4 h-4" />
+              {busy ? 'Ещё в очередь' : 'Запустить Tile Upscale'}
             </Button>
           </div>
 

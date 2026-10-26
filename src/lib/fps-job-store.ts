@@ -20,6 +20,7 @@ import { persist } from 'zustand/middleware'
 import { toast } from 'sonner'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenQueue } from '@/lib/gen-queue-store'
+import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 
 export type FpsPhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -58,6 +59,10 @@ let cancelEpoch = 0
  *  баннером «Ошибка генерации» (это был старый баг fps-view). */
 let cancelRequestedFor: string | null = null
 
+/** queue-item, владеющий состоянием вкладки; защищает от запоздавшего
+ *  ответа отменённого POST, когда следующая задача уже стартовала. */
+let activeQid: string | null = null
+
 /** (правка 555) Пометить promptId как отменяемый — вызывается из
  *  QueueIndicator при отмене FPS/ControlNet-задачи ИЗ очереди: собственный
  *  поллер вкладки тогда воспримет последующий 'error' (interrupted) как
@@ -80,10 +85,23 @@ export const useFpsJob = create<FpsJobState>()(
         // (правка 554) Очередь: нет блокировки на busy — можно добавлять
         // несколько задач. Store отслеживает ПОСЛЕДНЮЮ отправленную задачу
         // (для статуса в UI), а gen-queue-store — все.
+        const label = typeof body.sourceFilename === 'string' && body.sourceFilename
+          ? `FPS: ${body.sourceFilename}`
+          : 'FPS'
+        const qid = useGenQueue.getState().enqueue('fps', label)
+
+        // Единый FIFO: не меняем состояние вкладки, пока задача ждёт ход.
+        const granted = await acquireComfyTurn(qid)
+        if (!granted || !isComfyTurnActive(qid)) return
+
+        // Эпоху отмены фиксируем только на старте своей задачи, а не в
+        // момент постановки: Cancel текущего джоба не должен отменять все
+        // задачи, которые ещё стоят в очереди.
         const myEpoch = cancelEpoch
         cancelRequestedFor = null
+        activeQid = qid
         set({ phase: 'submitting', busy: true, error: null, progress: 0, startedAt: Date.now() })
-        const qid = useGenQueue.getState().enqueue('fps', 'FPS')
+
         try {
           const res = await fetch('/api/comfy/fps', {
             method: 'POST',
@@ -95,18 +113,26 @@ export const useFpsJob = create<FpsJobState>()(
             useGenQueue.getState().setStatus(qid, 'error', data.error || `Ошибка ${res.status}`)
             throw new Error(data.error || `Ошибка ${res.status}`)
           }
+          if (!data.prompt_id) {
+            const msg = 'ComfyUI не вернул prompt_id'
+            useGenQueue.getState().setStatus(qid, 'error', msg)
+            throw new Error(msg)
+          }
           // Отмена пришла, пока POST был в полёте: задача уже в ComfyUI —
           // отменяем её на сервере и НЕ запускаем поллинг.
-          if (cancelEpoch !== myEpoch) {
+          if (cancelEpoch !== myEpoch || !isComfyTurnActive(qid)) {
             if (data.prompt_id) {
-              void fetch('/api/comfy/cancel', {
+              await fetch('/api/comfy/cancel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt_id: data.prompt_id }),
               }).catch(() => {})
             }
             useGenQueue.getState().setStatus(qid, 'cancelled')
-            set({ phase: 'idle', busy: false, progress: 0, startedAt: null })
+            if (activeQid === qid) {
+              activeQid = null
+              set({ phase: 'idle', busy: false, progress: 0, startedAt: null })
+            }
             return
           }
           set({ promptId: data.prompt_id ?? null, phase: 'running' })
@@ -118,7 +144,10 @@ export const useFpsJob = create<FpsJobState>()(
           if (!useGenQueue.getState().items.find((i) => i.id === qid)?.error) {
             useGenQueue.getState().setStatus(qid, 'error', e instanceof Error ? e.message : String(e))
           }
-          set({ phase: 'error', error: e instanceof Error ? e.message : String(e), busy: false })
+          if (activeQid === qid) {
+            activeQid = null
+            set({ phase: 'error', error: e instanceof Error ? e.message : String(e), busy: false })
+          }
         }
       },
 
@@ -149,13 +178,16 @@ export const useFpsJob = create<FpsJobState>()(
         } catch { /* ignore */ }
         if (cancelled) {
           cancelRequestedFor = null
-          stopPolling()
           // (правка 555) Помечаем элемент общей очереди отменённым — раньше
           // карточка в QueueIndicator оставалась «running» без поллера и
           // через ~2 мин перекатывалась в «Ошибка».
           const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
           if (qi) useGenQueue.getState().setStatus(qi.id, 'cancelled')
-          set({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+          if (activeQid === null || activeQid === qi?.id) {
+            activeQid = null
+            stopPolling()
+            set({ phase: 'idle', progress: 0, busy: false, promptId: null, startedAt: null })
+          }
           toast.info('Отменено')
         } else {
           cancelRequestedFor = null
@@ -166,6 +198,7 @@ export const useFpsJob = create<FpsJobState>()(
       reset: () => {
         cancelEpoch++
         cancelRequestedFor = null
+        activeQid = null
         stopPolling()
         set({ phase: 'idle', progress: 0, error: null, promptId: null, startedAt: null, busy: false })
       },
