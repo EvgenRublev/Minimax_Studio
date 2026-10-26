@@ -83,7 +83,7 @@ async function buildSystemMessage(
   if (chatMode === 'extend') return buildExtendSystemMessage(signal)
   // (правка 502) controlnet-чат — свой контекст (контрольное видео,
   // refImages вкладки «ControlNet», параметры контроля).
-  if (chatMode === 'controlnet') return buildControlNetSystemMessage()
+  if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn)
   const v = useGenStore.getState().video
   const mode = v.mode // (правка 150) 'ref' | 't2v' | 'flf' | 'extend'
   const refs = v.refs
@@ -439,19 +439,33 @@ ${honestyBlock}
  * Движение НЕ описывай словами — его задаёт контроль; промпт описывает
  * ТОЛЬКО внешний вид: сцену, персонажей, стиль, свет, звук.
  */
-function buildControlNetSystemMessage(): string {
+function buildControlNetSystemMessage(videoVisionOn: boolean): string {
   const st = useControlNetTarget.getState()
+  const direct = st.params.controlType === 'direct'
 
   const lines: string[] = []
-  lines.push('⚠️ РЕЖИМ ГЕНЕРАЦИИ: «ControlNet» (Ref2VA). Видео повторяет движение контрольного ролика; промпт описывает внешний вид. Формат — FORMAT B.')
+  lines.push(
+    direct
+      ? '⚠️ РЕЖИМ ГЕНЕРАЦИИ: «ControlNet» (direct). Это перенос анимации: движения, жестов, тайминга и камеры — из контрольного видео; новый вид создаётся по запросу. Промпт описывает внешний вид, а не пересказывает движение. Формат — FORMAT B.'
+      : '⚠️ РЕЖИМ ГЕНЕРАЦИИ: «ControlNet» (Ref2VA). Видео повторяет движение контрольного ролика; промпт описывает внешний вид. Формат — FORMAT B.',
+  )
 
   // ── ПРИКРЕПЛЁННЫЕ РЕФЕРЕНСЫ ──
   lines.push('')
   lines.push('=== ПРИКРЕПЛЁННЫЕ РЕФЕРЕНСЫ (available references) ===')
   lines.push('⚠️ ТЕКУЩИЙ РЕЖИМ ГЕНЕРАЦИИ: «ControlNet» (Ref2VA).')
   if (st.source) {
-    lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЁНО как контрольное видео. Это официальный видео-референс: ОН ЕСТЬ в референсах.`)
-    lines.push('Ты не видишь КАДРЫ этого видео (оно видео, не картинка) — но оно ПРИКРЕПЛЕНО и УЧИТываетСЯ при генерации. Движение/камера НЕ описываются словами (их задаёт контроль), но <Video 1> ОБЯЗАНО быть упомянуто в detailed_description.')
+    if (direct) {
+      lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЕНО как контрольное видео и источник анимации (ref_video_0): тайминг, движения тела, жесты, мимика, камера и монтажный ритм.`)
+      if (videoVisionOn) {
+        lines.push('Ты получаешь digest/кадры этого видео (сцена, персонажи, движение, камера). Используй их, чтобы понять перенос анимации, но НЕ пересказывай движение в промпте.')
+      } else {
+        lines.push('Кадры/digest не приложены: видение видео ассистентом выключено. Не угадывай содержимое; в промпте только сошлись на <Video 1> как на источник движения.')
+      }
+    } else {
+      lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЕНО как контрольное видео. Это официальный видео-референс: ОН ЕСТЬ в референсах.`)
+      lines.push('Ты не видишь КАДРЫ этого видео (оно видео, не картинка) — но оно ПРИКРЕПЛЕНО и УЧИТываетСЯ при генерации. Движение/камера НЕ описываются словами (их задаёт контроль), но <Video 1> ОБЯЗАНО быть упомянуто в detailed_description.')
+    }
   } else {
     lines.push('Контрольное видео пока НЕ выбрано — без него генерация не запустится; подскажи выбрать на вкладке «ControlNet».')
   }
@@ -469,15 +483,23 @@ function buildControlNetSystemMessage(): string {
   // ── Жёсткие правила режима ──
   // (правка 717) Сжато: 7 пунктов → 5, блок «ЧЕСТНОСТЬ» и «НЕЗАВИСИМОСТЬ
   // ЧАТОВ» объединены с «ЖЁСТКИМИ ПРАВИЛАМИ» (было ~1.3k токенов).
-  const rulesBlock =
-    '\n=== ПРАВИЛА РЕЖИМА CONTROLNET ===\n' +
-    '1) ⚠️ ОБЯЗАТЕЛЬНО: <Video 1> — это контрольное видео, официальный видео-референс. УПОМЯНИ его в detailed_description («The camera and subject motion follow <Video 1>»). Другие метки <Video N> ЗАПРЕЩЕНЫ.\n' +
-    '2) Движение/камеру/позы НЕ описывай словами — их задаёт контроль. Текст о движении МЕШАЕТ контролю.\n' +
-    '3) Промпт описывает ТОЛЬКО: сцена/локация, внешность, одежда, стиль, свет, атмосфера, звук. Каждое прикреплённое изображение — со своей меткой <Picture N> (создай <Subject N>, привяжи к <Picture N>).\n' +
-    `4) Одна НЕПРЕРЫВНАЯ сцена (~${st.params.duration} с), промпт на английском, ОДНИМ fence (FORMAT B). БЕЗ clip: N.\n` +
-    '5) ЗВУК: если речь/диалог/озвучка НЕ запрошены — overall_soundscape: ambient/тишина, non_diegetic_music: N/A. Голос, реплики, закадровый текст и музыку по умолчанию НЕ добавляй.\n' +
-    '6) ЧЕСТНОСТЬ: текущий список референсов выше — единственный источник правды. Кадров <Video 1> ты НЕ видишь (это видео, не картинка) — не угадывай и не описывай его содержимое, но в промпте он ОБЯЗАТЕЛЬНО упоминается. Деталей, которых не видишь на картинках, не выдумывай — скажи «не вижу».\n' +
-    '7) Этот чат независим: сообщений других чатов ты не видишь. Источник, параметры и референсы выше — ТЕКУЩЕЕ состояние вкладки «ControlNet». Вложения из чата — только для описания, это НЕ референсы: НИКОГДА не помечай их <Picture N>.'
+  // Direct — отдельная ветка: это не «карта движения», а перенос анимации.
+  const rulesBlock = direct
+    ? '\n=== ПРАВИЛА РЕЖИМА CONTROLNET (DIRECT: ПЕРЕНОС АНИМАЦИИ) ===\n' +
+      '1) ⚠️ <Video 1> — источник анимации: движения тела, жестов, мимики, тайминга, камеры и монтажного ритма. В detailed_description ОБЯЗАТЕЛЬНО одной фразой укажи: «The motion, timing, gestures and camera movement follow <Video 1>». Другие метки <Video N> ЗАПРЕЩЕНЫ.\n' +
+      '2) digest/кадры <Video 1> используй только чтобы понять перенос. НЕ расписывай движение и камеру по кадрам — контроль уже задаёт анимацию (это важнее общего требования базовой спеки описывать камеру). Если digest нет — не выдумывай содержимое видео.\n' +
+      '3) Новый вид создавай по запросу и <Picture N>: по умолчанию НЕ копируй из <Video 1> лицо, внешность, одежду и локацию. Сохранять их можно только по ЯВНОЙ просьбе. Каждое изображение — своей меткой <Picture N> (создай <Subject N>).\n' +
+      `4) Одна НЕПРЕРЫВНАЯ сцена (~${st.params.duration} с), английский, ОДИН fence (FORMAT B), БЕЗ clip: N.\n` +
+      '5) ЗВУК: если речь/диалог/озвучка НЕ запрошены — overall_soundscape: ambient/тишина, non_diegetic_music: N/A. Голос, реплики, закадровый текст и музыку по умолчанию НЕ добавляй.\n' +
+      '6) ЧЕСТНОСТЬ/ГРАНИЦЫ: список референсов выше — единственный источник правды; digest <Video 1> — только если приложен; деталей не выдумывай. Вложения чата — не референсы (никаких <Picture N>); другие чаты ты не видишь.'
+    : '\n=== ПРАВИЛА РЕЖИМА CONTROLNET ===\n' +
+      '1) ⚠️ ОБЯЗАТЕЛЬНО: <Video 1> — это контрольное видео, официальный видео-референс. УПОМЯНИ его в detailed_description («The camera and subject motion follow <Video 1>»). Другие метки <Video N> ЗАПРЕЩЕНЫ.\n' +
+      '2) Движение/камеру/позы НЕ описывай словами — их задаёт контроль. Текст о движении МЕШАЕТ контролю.\n' +
+      '3) Промпт описывает ТОЛЬКО: сцена/локация, внешность, одежда, стиль, свет, атмосфера, звук. Каждое прикреплённое изображение — со своей меткой <Picture N> (создай <Subject N>, привяжи к <Picture N>).\n' +
+      `4) Одна НЕПРЕРЫВНАЯ сцена (~${st.params.duration} с), промпт на английском, ОДНИМ fence (FORMAT B). БЕЗ clip: N.\n` +
+      '5) ЗВУК: если речь/диалог/озвучка НЕ запрошены — overall_soundscape: ambient/тишина, non_diegetic_music: N/A. Голос, реплики, закадровый текст и музыку по умолчанию НЕ добавляй.\n' +
+      '6) ЧЕСТНОСТЬ: текущий список референсов выше — единственный источник правды. Кадров <Video 1> ты НЕ видишь (это видео, не картинка) — не угадывай и не описывай его содержимое, но в промпте он ОБЯЗАТЕЛЬНО упоминается. Деталей, которых не видишь на картинках, не выдумывай — скажи «не вижу».\n' +
+      '7) Этот чат независим: сообщений других чатов ты не видишь. Источник, параметры и референсы выше — ТЕКУЩЕЕ состояние вкладки «ControlNet». Вложения из чата — только для описания, это НЕ референсы: НИКОГДА не помечай их <Picture N>.'
 
   return `${H3_SPEC_B}
 
@@ -486,7 +508,7 @@ ${lines.join('\n')}
 ${rulesBlock}
 
 Промпт — ОДИН \`\`\`text fence (FORMAT B), на английском. Русская заметка до fence — ОК.
-Перед промптом перечитывай ТЕКУЩИЙ список референсов выше.`
+${direct ? 'Главная связка: новый вид — из запроса и <Picture N>; анимация, тайминг и камера — из <Video 1>.' : 'Перед промптом перечитывай ТЕКУЩИЙ список референсов выше.'}`
 }
 /** Ensure roles alternate: merge consecutive same-role, and ensure first is user.
  *  Merge, NOT replace: два подряд user-сообщения появляются, когда прошлый
@@ -573,12 +595,42 @@ function getReferences(chatMode: AssistantChatMode = 'generate'): Array<{
   const v = useGenStore.getState().video
   // (правка 502) controlnet-чат: референсы — картинки вкладки «ControlNet»:
   // нумерация <Picture N> в системном промпте controlnet-чата идёт по ним.
+  //
+  // (direct) В режиме «Прямой» контрольное видео подаётся в H3 как
+  // ref_video_0 и является источником анимации. Добавляем его в refs, чтобы
+  // сервер построил digest по кадрам и закэшировал его по содержимому файла.
+  // Для depth/canny/pose оставляем прежнее поведение: ассистент видит только
+  // картинки, а движение задаёт карта.
   if (chatMode === 'controlnet') {
-    return useControlNetTarget.getState().refImages.map((r, i) => ({
-      path: r.path,
-      trigger: `Picture ${i + 1}`,
-      kind: 'image' as const,
-    }))
+    const cn = useControlNetTarget.getState()
+    const out: Array<{
+      path: string
+      trigger: string
+      intent?: string
+      kind: 'image' | 'video' | 'audio'
+      includeAudio?: boolean
+    }> = []
+    if (cn.params.controlType === 'direct' && cn.source) {
+      const sourcePath = cn.source.inputSource
+        || (cn.source.subfolder ? `${cn.source.subfolder}/${cn.source.filename}` : cn.source.filename)
+      out.push({
+        path: sourcePath,
+        trigger: 'Video 1',
+        // inputSource — файл с диска, уже лежит в input/staging; иначе это
+        // галерейный output-файл, и resolver должен искать его в output.
+        intent: cn.source.inputSource ? 'control_source_input' : 'control_source',
+        kind: 'video',
+        includeAudio: false,
+      })
+    }
+    for (const [i, r] of cn.refImages.entries()) {
+      out.push({
+        path: r.path,
+        trigger: `Picture ${i + 1}`,
+        kind: 'image',
+      })
+    }
+    return out
   }
   // (правка 427) extend-чат: референсы — картинки вкладки «Продление»
   // (extendImageRefs), а НЕ v.refs вкладки «Генерация»: нумерация <Picture N>

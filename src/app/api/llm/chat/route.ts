@@ -165,6 +165,7 @@ export async function POST(req: NextRequest) {
       }
       if (cappedReferences?.length) {
         const inputDir = path.join(cfg.comfyRoot, 'ComfyUI', 'input')
+        const outputDir = cfg.outputDir
         const tmpDir = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'llm', '_tmp_vision')
         mkdirSync(tmpDir, { recursive: true })
         const mediaParts: Array<Record<string, unknown>> = []
@@ -190,10 +191,27 @@ export async function POST(req: NextRequest) {
           cfg.llmModel,
           backend === 'custom' ? cfg.llmCustomModel : '',
         ].filter(Boolean).join('|')
-        const resolveRefPath = async (refPath: string): Promise<string | null> => {
-          const absPath = path.resolve(inputDir, refPath)
-          const refInside = absPath.startsWith(path.resolve(inputDir) + path.sep)
-          if (refInside && existsSync(absPath)) return absPath
+        const resolveRefPath = async (refPath: string, preferOutput = false): Promise<string | null> => {
+          const tryInput = (): string | null => {
+            const absPath = path.resolve(inputDir, refPath)
+            const inside = absPath.startsWith(path.resolve(inputDir) + path.sep)
+            return inside && existsSync(absPath) ? absPath : null
+          }
+          const tryOutput = (): string | null => {
+            const absPath = path.resolve(outputDir, refPath)
+            const inside = absPath.startsWith(path.resolve(outputDir) + path.sep)
+            return inside && existsSync(absPath) ? absPath : null
+          }
+          // ControlNet direct берёт источник из галереи (output), а не из input:
+          // при совпадении имён input-копия может быть от другой задачи.
+          // Обычные референсы output не ищут: там может лежать чужой файл с
+          // тем же именем, а staged-копия — их законный fallback.
+          if (preferOutput) {
+            const output = tryOutput()
+            if (output) return output
+          }
+          const input = tryInput()
+          if (input) return input
           // (правка 697) Fallback на staging: когда ComfyUI не запущен,
           // uploadInputFile() кладёт реф в .local-input/ и возвращает staged-имя.
           return await stagedPath(refPath)
@@ -216,7 +234,7 @@ export async function POST(req: NextRequest) {
             const kind = ref.kind ?? 'image'
             if (kind === 'audio') continue
             if (kind === 'video' && !cfg.llmVideoVision) continue
-            const resolved = await resolveRefPath(ref.path)
+            const resolved = await resolveRefPath(ref.path, ref.intent === 'control_source')
             if (!resolved) continue
             const result = await getReferenceDigest({
               ref,
@@ -247,24 +265,9 @@ export async function POST(req: NextRequest) {
         for (const ref of cappedReferences) {
           // (правка 170) SECURITY: ref.path приходит от клиента без проверок —
           // path traversal (../../ или абсолютный путь) давал чтение
-          // произвольных файлов. Резолвим и требуем остаться внутри inputDir
-          // (подход safeAttachPath из assistant/attachment); нарушение
-          // отклоняется тем же механизмом, что и отсутствующий файл ниже.
-          const absPath = path.resolve(inputDir, ref.path)
-          const refInside = absPath.startsWith(path.resolve(inputDir) + path.sep)
-          let resolvedPath = refInside && existsSync(absPath) ? absPath : null
-          // (правка 697) Fallback на staging: когда ComfyUI не запущен,
-          // uploadInputFile() кладёт реф в .local-input/ и возвращает staged-имя
-          // (unique-timestamp-origname). extend-view / controlnet-view хранят
-          // ЭТО имя в extendImageRefs[].path / refImages[].path — и превью в UI
-          // работает (/api/comfy/file смотрит staging первым), но ассистент
-          // «не видит» реф: этот роут раньше резолвил ТОЛЬКО ComfyUI/input/ и
-          // молча писал «COULD NOT ATTACH — file not found». Ищем файл в
-          // staging по basename — staged-имя и есть basename в .local-input/.
-          if (!resolvedPath) {
-            const staged = await stagedPath(ref.path)
-            if (staged) resolvedPath = staged
-          }
+          // произвольных файлов. resolveRefPath держит путь внутри input/output
+          // (подход safeAttachPath) и делает fallback на staging.
+          const resolvedPath = await resolveRefPath(ref.path, ref.intent === 'control_source')
           if (!resolvedPath) {
             // ПРАВКА 36: файл рефа отсутствует на диске — явно сообщаем модели,
             // чтобы она НЕ выдумывала его содержимое. Раньше тихий `continue`
@@ -273,7 +276,7 @@ export async function POST(req: NextRequest) {
             textParts.push(`[${ref.trigger}] file="${ref.path}" (COULD NOT ATTACH — file not found on disk; do NOT describe, reference, or invent its content; if it matters, ask the user to re-attach it)`)
             continue
           }
-          const safeName = (resolvedPath === absPath ? ref.path : path.basename(resolvedPath)).replace(/[^a-zA-Z0-9.]/g, '_')
+          const safeName = path.basename(resolvedPath).replace(/[^a-zA-Z0-9.]/g, '_')
 
           if (ref.kind === 'video') {
             // A successful digest already contains the visual facts; do not
