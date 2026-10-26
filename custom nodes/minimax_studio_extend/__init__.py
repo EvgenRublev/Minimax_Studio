@@ -1,4 +1,4 @@
-"""MiniMax Studio: ноды бесшовного продления (подход H3ZeroStudio).
+"""MiniMax Studio: ноды бесшовного продления.
 
 Проблема прежней схемы extend (SetLatentNoiseMask 0/1 на хвосте): маска
 держит токены хвоста «чистыми» в траектории сэмплера, но DiT получает
@@ -7,7 +7,7 @@
 «вслепую» относительно головы → неплотное примыкание, двоения
 (гостинг), накапливающиеся от клипа к клипу.
 
-Решение — два якоря, как в H3ZeroStudio (GPL-3.0, идеи портированы):
+Решение — два якоря:
 
 1. MiniMaxStudioExtendKeyframes — хвост-латент уходит в conditioning
    каналом minimax_keyframes (нативный keyframe-механизм H3, тот же,
@@ -44,7 +44,7 @@ def _unpack(x, shapes):
 class _LockWrapper:
     """model_function_wrapper: заменяет предсказанный x0 в залоченных зонах
     (перекрытие с предыдущим клипом) чистым латентом хвоста — точный порт
-    LockWrapper из H3ZeroStudio/h3s_gen.py."""
+    LockWrapper."""
 
     def __init__(self, lock_v=None, w_v=None, lock_a=None, w_a=None):
         self.lock_v, self.w_v, self.lock_a, self.w_a = lock_v, w_v, lock_a, w_a
@@ -116,7 +116,7 @@ class MiniMaxStudioLatentLock:
     Лок-тензоры — те же хвосты, что ушли в keyframes; веса — по числу
     залоченных temporal-токенов видео (T) и аудио-шагов (A) от начала.
     handoff_ramp: последние N аудио-шагов лок-зоны плавно отпускаются
-    (0 = жёсткая граница, как дефолт H3ZeroStudio).
+    (0 = жёсткая граница).
     """
 
     @classmethod

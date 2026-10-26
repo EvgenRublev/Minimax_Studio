@@ -1622,7 +1622,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // (правка 419) Эталон «V2V Extend Any Video»: перекрытие сегмент-к-сегменту
   // = тому же 2-секундному окну контекста (56 кадров), что и стык с исходником.
   const CHAIN_OVERLAP_FRAMES = 56
-  // (подход H3ZeroStudio) Фраза непрерывности для клипов i>0: последний кадр
+  // Фраза непрерывности для клипов i>0: последний кадр
   // предыдущего клипа приходит <Picture N>-референсом (нода ext_lf_i ниже) —
   // якорь внешнего вида для ВСЕГО нового содержимого клипа, а не только шва.
   const continuityPhrase = (pic: number) =>
@@ -2063,7 +2063,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       const nodes: Record<string, unknown> = {}
       // (правка 423) Пространственный размер латента канвы pass 1
       // (однопроходный режим: passW = final.genW) — видео-маска pass 1
-      // удалена (подход H3ZeroStudio: keyframes + лок), осталась только
+      // удалена (keyframes + лок), осталась только
       // геометрия pass 2 (lw2/lh2 ниже).
       // (правка 423) Двухпроходный: маски pass 2 — в геометрии final.
       const lw2 = Math.max(1, Math.round(final.genW / 16))
@@ -2111,7 +2111,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         // (в однопроходном режиме passW = final.genW). Pass 2 переиспользует
         // тот же conditioning — как в основном билдере (там кондишнинг
         // строится на lowRes и идёт в оба прохода).
-        // (подход H3ZeroStudio) Клипы i>0 дополнительно получают ПОСЛЕДНИЙ
+        // Клипы i>0 дополнительно получают ПОСЛЕДНИЙ
         // КАДР клипа i−1 как <Picture>-референс (ext_lf_i): якорь внешнего
         // вида для нового содержимого — раньше клип i>0 не имел вообще
         // никакого визуального якоря, и контент генерировался «вслепую»
@@ -2145,7 +2145,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             ...(hasSeed && extRefCount < 9 && {
               [`ref_images.ref_image_${extRefCount}`]: ['extv_fres', 0],
             }),
-            // (подход H3ZeroStudio) последний кадр клипа i−1 — слотом после
+            // последний кадр клипа i−1 — слотом после
             // хвоста исходника; на него указывает фраза непрерывности.
             ...(i > 0 && extRefCount + 1 < 9 && {
               [`ref_images.ref_image_${extRefCount + 1}`]: [`ext_lf_${i}`, 0],
@@ -2234,7 +2234,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           prevAudio = [`ext_p2aenc_${i}`, 0]
         }
 
-        // (подход H3ZeroStudio) Хвост якорится ДВУМЯ механизмами вместо
+        // Хвост якорится ДВУМЯ механизмами вместо
         // видео-SetLatentNoiseMask (она лишь держала токены в траектории
         // сэмплера — DiT не видел хвост как контекст и генерировал новое
         // содержимое «вслепую», отсюда гостинг на клипах 2+):
@@ -2294,7 +2294,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           }
           // Жёсткий лок перекрытия (перезапись предсказания x0).
           // Лок-тензоры — ПОЛНЫЕ init-латенты клипа (хвост в начале,
-          // дальше нули с весом 0), как в H3ZeroStudio (lock = video с
+          // дальше нули с весом 0), lock = video с
           // вписанным хвостом): размеры совпадают с выходом модели.
           nodes[`ext_lock_${i}`] = {
             inputs: {
@@ -2374,10 +2374,10 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         }
 
         // AV-латент клипа + сэмплер (полный график — генерация с нуля).
-        // Видео без SetLatentNoiseMask (по H3ZeroStudio: якорь — keyframes
+        // Видео без SetLatentNoiseMask (якорь — keyframes
         // в conditioning + жёсткий лок обёрткой ext_lock_i), аудио — со
         // своей маской: LTXVConcatAVLatent соберёт NestedTensor-маску
-        // (видео = единицы, аудио = amask) — ровно схема H3ZeroStudio.
+        // (видео = единицы, аудио = amask) — ровно эта схема.
         nodes[`ext_join_${i}`] = {
           inputs: {
             video_latent: [`ext_vtrim_${i}`, 0],
@@ -2411,7 +2411,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           _meta: { title: `Scheduler клип ${i + 1}` },
         }
         nodes[`ext_g_${i}`] = {
-          // (подход H3ZeroStudio) модель — через лок-обёртку (ext_lock_i,
+          // модель — через лок-обёртку (ext_lock_i,
           // над KJ-превью extpv), conditioning — через keyframe-якорь
           // (ext_kf_i добавляет minimax_keyframes к ext_cond_i).
           inputs: {
