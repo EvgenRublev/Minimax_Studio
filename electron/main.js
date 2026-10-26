@@ -495,9 +495,19 @@ function createWindow() {
       console.log(`[desktop] редирект на посторонний origin заблокирован: ${url}`)
     }
   })
-  // Микрофон — только для локального origin приложения.
+  // Микрофон и буфер обмена — только для локального origin приложения.
+  // Chromium запрашивает clipboard-sanitized-write для navigator.clipboard.writeText()
+  // (кнопка «Скопировать всё» в консоли, копирование промптов/путей).
+  // Раньше разрешение выдавалось только для media, поэтому копирование в
+  // Electron стабильно падало с «запрос разрешения отклонён».
+  const CLIPBOARD_PERMISSIONS = new Set([
+    'clipboard-read',
+    'clipboard-write',
+    'clipboard-sanitized-write',
+  ])
   win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    const allowed = permission === 'media' && isLocalAppUrl(win && win.webContents.getURL())
+    const local = isLocalAppUrl(win && win.webContents.getURL())
+    const allowed = local && (permission === 'media' || CLIPBOARD_PERMISSIONS.has(permission))
     if (!allowed) console.log(`[desktop] запрос разрешения отклонён: ${permission}`)
     callback(allowed)
   })
