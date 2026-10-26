@@ -4,6 +4,7 @@ import { samplingForModel } from '@/lib/llm-sampling'
 import { startChat, noteLlmStreaming } from '@/lib/vram-arbiter'
 import { getAppConfig } from '@/lib/app-config'
 import { prepVideoForLlm, extractVideoFrames } from '@/lib/llm-media'
+import { getReferenceDigest } from '@/lib/llm-ref-digest'
 import { toOpenAiMessages, openAiSseToDelta } from '@/lib/llm-bonsai'
 import { LLM_STOP_TOKENS, probeAudioAnswer } from '@/lib/llm-audio-guard'
 import {
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
             // (Bonsai видео-видение, src/lib/llm-media.ts) после крахов
             // копились бесконечно — свип раньше удалял только файлы.
             // Удаляем рекурсивно с тем же age-порогом (1 час).
-            st.isDirectory() && /^(llmvidframes_|llmvidcaframes_)/.test(f) &&
+            st.isDirectory() && /^(llmvidframes_|llmvidcaframes_|digest_)/.test(f) &&
             now - st.mtimeMs > 3600_000
           ) {
             rmdirSync(join(sweepDir, f), { recursive: true })
@@ -170,6 +171,65 @@ export async function POST(req: NextRequest) {
         const textParts: string[] = []
         // (правка 53) true, если к запросу прикреплены кадры хотя бы одного видео-рефа
         let videoAttached = false
+        // Reference digests: video first (as agreed with the user), then images.
+        // Each one is generated in an isolated LLM request and cached by file
+        // identity; the main chat receives only the compact text. If a digest
+        // fails, the old raw-media path below is kept as a fallback.
+        const digestByTrigger = new Map<string, string>()
+        let digestUsed = false
+        const useRefDigest = body?.useRefDigest !== false
+        // Model fingerprint for cache invalidation: switching Qwen/Bonsai,
+        // a different quantization, or another custom GGUF must not reuse
+        // descriptions produced by the previous model.
+        const digestModelKey = [
+          activeLlmModelId(),
+          cfg.llmModel,
+          backend === 'custom' ? cfg.llmCustomModel : '',
+        ].filter(Boolean).join('|')
+        const resolveRefPath = async (refPath: string): Promise<string | null> => {
+          const absPath = path.resolve(inputDir, refPath)
+          const refInside = absPath.startsWith(path.resolve(inputDir) + path.sep)
+          if (refInside && existsSync(absPath)) return absPath
+          // (правка 697) Fallback на staging: когда ComfyUI не запущен,
+          // uploadInputFile() кладёт реф в .local-input/ и возвращает staged-имя.
+          return await stagedPath(refPath)
+        }
+        if (useRefDigest) {
+          const digestStartedAt = Date.now()
+          // Keep the first turn from blocking the 10-minute client header
+          // watchdog indefinitely. If we run out of budget, remaining refs use
+          // the raw-media fallback and the chat still starts.
+          const digestBudgetMs = 7 * 60_000
+          const digestOrder = [...cappedReferences].sort((a, b) => {
+            const rank = (k: string | undefined) => (k === 'video' ? 0 : k === 'image' ? 1 : 2)
+            return rank(a.kind) - rank(b.kind)
+          })
+          for (const ref of digestOrder) {
+            if (Date.now() - digestStartedAt > digestBudgetMs) {
+              console.warn('[llm] ref digest budget exhausted — remaining references use raw media')
+              break
+            }
+            const kind = ref.kind ?? 'image'
+            if (kind === 'audio') continue
+            if (kind === 'video' && !cfg.llmVideoVision) continue
+            const resolved = await resolveRefPath(ref.path)
+            if (!resolved) continue
+            const result = await getReferenceDigest({
+              ref,
+              resolvedPath: resolved,
+              backend,
+              modelId: digestModelKey,
+              videoVision: cfg.llmVideoVision,
+              signal: req.signal,
+            })
+            if (result.ok && result.digest) {
+              digestByTrigger.set(ref.trigger, result.digest)
+              digestUsed = true
+            } else {
+              console.warn(`[llm] ref digest unavailable for ${ref.trigger}: ${result.error ?? 'unknown error'} — falling back to raw media`)
+            }
+          }
+        }
         const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         // (правка 169) сколько целых видео уйдёт в контекст (standard backend
         // с включённым видением): длительность каждого ограничиваем свободным
@@ -212,6 +272,16 @@ export async function POST(req: NextRequest) {
           const safeName = (resolvedPath === absPath ? ref.path : path.basename(resolvedPath)).replace(/[^a-zA-Z0-9.]/g, '_')
 
           if (ref.kind === 'video') {
+            // A successful digest already contains the visual facts; do not
+            // attach raw frames/video again (that is the whole point of the
+            // cache). The old path below remains as a fallback.
+            const digest = digestByTrigger.get(ref.trigger)
+            if (digest) {
+              textParts.push(
+                `[${ref.trigger}] file="${ref.path}" (reference digest generated from the actual video frames — treat it as what you observed${ref.includeAudio !== false ? '; it has an audio track for MiniMax — reference it as <Video N> and do NOT invent what is "heard" in it' : ''}):\n${digest}`,
+              )
+              continue
+            }
             // (правка 53) По умолчанию ассистент НЕ смотрит кадры видео —
             // экономия контекста: модель знает только о НАЛИЧИИ видео-рефа и
             // НЕ описывает/не выдумывает его содержимое. Полное видение включается
@@ -284,6 +354,14 @@ export async function POST(req: NextRequest) {
             continue
           }
 
+          const imageDigest = digestByTrigger.get(ref.trigger)
+          if (imageDigest) {
+            textParts.push(
+              `[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'}; reference digest generated from the actual image — treat it as what you observed):\n${imageDigest}`,
+            )
+            continue
+          }
+
           // Image: resize to max 512px longest side — keeps vision tokens low
           const outPath = path.join(tmpDir, `vision_${uid()}_${safeName}`)
           try {
@@ -310,9 +388,20 @@ export async function POST(req: NextRequest) {
           // историю с начала, и старое первое сообщение (с медиа) улетало
           // первым — видение тихо терялось в длинных чатах.
           // (правка 53) интро зависит от того, прикреплены ли кадры видео
-          const introText = videoAttached
-            ? 'Attached references (you can SEE the images and WATCH the video frames; you CANNOT hear the audios — this model has no reliable audio input). Images: describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details. Videos: attached as whole short clips (≤512px, 8 fps) — describe the scene, motion and camera behaviour over time, ONLY what is actually in the frames. Audios: attached for MiniMax voice/tone ONLY — the model CANNOT hear them, so reference them as <Audio N> and do NOT describe or quote their content.'
-            : 'Attached references (you can SEE the attached images — describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details; video references are TAGS ONLY — their frames are NOT attached to save context, so you only know they EXIST: use their <Video N> tags when the user asks, and do NOT describe, guess or invent what happens inside them). You CANNOT hear the audios — reference them as <Audio N> and do NOT describe or quote their content.'
+          // With digests the model does not receive raw media for successful
+          // refs; be explicit that the text is its visual evidence. Any failed
+          // ref still uses the old raw-media path, which is called out below.
+          const introText = digestUsed
+            ? [
+                'Reference digests: compact text descriptions generated from the actual reference files. For each entry marked "reference digest", treat the digest as what you observed — do not claim to see details beyond it, do not invent details. Do not mention the word "digest" to the user; it is only your internal visual memory.',
+                mediaParts.length > 0
+                  ? 'References that could not be digested are attached as raw media; you can see those directly.'
+                  : 'Raw reference media for digested entries is NOT attached, to save context.',
+                'You CANNOT hear the audios — reference them as <Audio N> and do NOT describe or quote their content.',
+              ].join(' ')
+            : videoAttached
+              ? 'Attached references (you can SEE the images and WATCH the video frames; you CANNOT hear the audios — this model has no reliable audio input). Images: describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details. Videos: attached as whole short clips (≤512px, 8 fps) — describe the scene, motion and camera behaviour over time, ONLY what is actually in the frames. Audios: attached for MiniMax voice/tone ONLY — the model CANNOT hear them, so reference them as <Audio N> and do NOT describe or quote their content.'
+              : 'Attached references (you can SEE the attached images — describe faces, hair, clothing, colors, distinguishing details — ONLY what is actually visible, do not invent details; video references are TAGS ONLY — their frames are NOT attached to save context, so you only know they EXIST: use their <Video N> tags when the user asks, and do NOT describe, guess or invent what happens inside them). You CANNOT hear the audios — reference them as <Audio N> and do NOT describe or quote their content.'
           let lastUserIdx = -1
           for (let i = messages.length - 1; i >= 0; i--) {
             if (messages[i].role === 'user') { lastUserIdx = i; break }
@@ -328,9 +417,7 @@ export async function POST(req: NextRequest) {
               content: [
                 {
                   type: 'text',
-                  text: `${introText} ${textParts.join('; ')}. 
-
-${existingText}`,
+                  text: `${introText} ${textParts.join(digestUsed ? '\n\n' : '; ')}.\n\n${existingText}`,
                 },
                 ...mediaParts,
               ],

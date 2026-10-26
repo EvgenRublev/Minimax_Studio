@@ -1273,7 +1273,7 @@ export function AssistantView({
               {streamingHere && (
                 <div className="flex justify-start">
                   <div className="select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words bg-[var(--surface-2)]/60 border border-border/60 text-foreground/95 rounded-bl-sm">
-                    {streamText ? renderChatContent(streamText) : '…'}
+                    {streamText ? renderChatContent(streamText) : 'Готовлю ответ…'}
                   </div>
                 </div>
               )}
