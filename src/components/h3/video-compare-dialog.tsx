@@ -9,8 +9,10 @@
  * шторки, правое (B, «после») видно целиком. Шторку тащат мышью/пальцем.
  *
  * Два режима:
- *  • «Видео» — оба ролика играют синхронно (A — ведущий, B догоняет);
- *  • «Кадр»  — пауза, таймлайн и покадровое листание (←/→), как на стоп-кадре.
+ *  • «Видео» — оба ролика играют синхронно; цикл ограничен длительностью
+ *    короткого, поэтому длинный не обгоняет и оба кадра совпадают;
+ *  • «Кадр»  — только пауза, таймлайн и покадровое листание (←/→), без
+ *    воспроизведения.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -41,6 +43,8 @@ interface VideoCompareDialogProps {
 }
 
 const FPS = 24
+/** Допустимый дрейф B относительно A — не больше одного кадра. */
+const SYNC_TOLERANCE = 1 / FPS
 
 /** m:ss.d — компактно и без «00:00.000». */
 function fmtTime(sec: number): string {
@@ -61,13 +65,17 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
   const aRef = useRef<HTMLVideoElement>(null)
   const bRef = useRef<HTMLVideoElement>(null)
   const draggingRef = useRef(false)
-  const lastTimeRef = useRef(0)
 
   const [split, setSplit] = useState(0.5)
   const [mode, setMode] = useState<'video' | 'frame'>('video')
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
-  const [duration, setDuration] = useState(0)
+  // Ограничиваем сравнение коротким роликом: длинный показываем только
+  // до этой границы, чтобы оба кадра совпадали по времени/кадру.
+  const [aDuration, setADuration] = useState(0)
+  const [bDuration, setBDuration] = useState(0)
+  const knownDurations = [aDuration, bDuration].filter((d) => Number.isFinite(d) && d > 0)
+  const duration = knownDurations.length > 0 ? Math.min(...knownDurations) : 0
   const [muted, setMuted] = useState(true)
 
   /* ── Открыли новый набор — сбрасываем состояние ── */
@@ -76,8 +84,8 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
     setMode('video')
     setMuted(true)
     setTime(0)
-    setDuration(0)
-    lastTimeRef.current = 0
+    setADuration(0)
+    setBDuration(0)
   }, [a?.url, b?.url])
 
   /* ── Блокируем прокрутку страницы, пока открыто ── */
@@ -90,7 +98,9 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
   const seek = useCallback((t: number) => {
     const va = aRef.current
     const vb = bRef.current
-    const total = va?.duration && Number.isFinite(va.duration) ? va.duration : duration
+    const total = duration > 0
+      ? duration
+      : (va?.duration && Number.isFinite(va.duration) ? va.duration : 0)
     const target = Math.max(0, Math.min(total || 0, t))
     if (va) {
       try { va.currentTime = target } catch { /* meta ещё нет */ }
@@ -115,15 +125,16 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
   }, [])
 
   const togglePlay = useCallback(() => {
+    // В режиме «Кадр» воспроизведения быть не должно — только ←/→ и таймлайн.
+    if (mode === 'frame') return
     const va = aRef.current
     if (!va) return
     if (va.paused) {
-      setMode('video')
       playBoth()
     } else {
       pauseBoth()
     }
-  }, [playBoth, pauseBoth])
+  }, [mode, playBoth, pauseBoth])
 
   const applyMode = useCallback((next: 'video' | 'frame') => {
     setMode(next)
@@ -142,13 +153,22 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
   /* ── Автозапуск: muted-видео стартует само; подстраховка на случай,
         если браузер не отработал autoPlay до готовности метаданных ── */
   useEffect(() => {
+    if (mode !== 'video') return
     const id = setTimeout(() => playBoth(), 150)
     return () => clearTimeout(id)
-  }, [a?.url, b?.url, playBoth])
+  }, [a?.url, b?.url, mode, playBoth])
+
+  /* ── В покадровом режиме не оставляем текущую позицию за границей
+        короткого ролика (например, если B загрузился позже A). ── */
+  useEffect(() => {
+    if (mode !== 'frame' || duration <= 0) return
+    const va = aRef.current
+    if (va && va.currentTime > duration) seek(duration)
+  }, [mode, duration, seek])
 
   /* ── Синхронизация B за A (A — ведущий). rAF вместо редкого интервала:
-        поправка только при заметном дрейфе, иначе частые перемотки дают
-        заикание; вставший после конца/паузы B снова запускаем. ── */
+        держим расхождение в пределах одного кадра; вставший после
+        конца/паузы B снова запускаем. ── */
   useEffect(() => {
     if (mode !== 'video') return
     let raf = 0
@@ -156,15 +176,32 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
       const va = aRef.current
       const vb = bRef.current
       if (va && vb) {
-        if (va.paused) {
+        const fallback = Number.isFinite(va.duration) && va.duration > 0 ? va.duration : 0
+        const limit = duration > 0 ? duration : fallback
+
+        // Оба ролика идут только до длительности короткого. Это и есть
+        // «длинное подгоняется под короткое»: лишний хвост не играет, оба
+        // кадра на одной временной позиции.
+        if (limit > 0 && (va.ended || (!va.paused && va.currentTime >= limit - 1 / (FPS * 2)))) {
+          try {
+            va.currentTime = 0
+            vb.currentTime = 0
+          } catch { /* meta ещё нет */ }
+          setTime(0)
+          if (va.paused) void va.play().catch(() => { /* автоплей */ })
+          if (vb.paused) void vb.play().catch(() => { /* автоплей */ })
+        } else if (va.paused) {
           if (!vb.paused) vb.pause()
         } else if (vb.readyState >= 2) {
+          if (vb.ended) {
+            try { vb.currentTime = 0 } catch { /* пропускаем такт */ }
+          }
           if (vb.paused && !vb.ended) {
-            vb.play().catch(() => { /* автоплей заблокирован */ })
+            void vb.play().catch(() => { /* автоплей заблокирован */ })
           }
           const bd = Number.isFinite(vb.duration) && vb.duration > 0 ? vb.duration : Infinity
-          const target = Math.min(va.currentTime, bd)
-          if (Math.abs(vb.currentTime - target) > 0.18) {
+          const target = Math.min(va.currentTime, limit > 0 ? limit : bd)
+          if (Math.abs(vb.currentTime - target) > SYNC_TOLERANCE) {
             try { vb.currentTime = target } catch { /* пропускаем такт */ }
           }
         }
@@ -173,7 +210,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [mode])
+  }, [mode, duration])
 
   /* ── Клавиатура: Esc, пробел, покадрово ── */
   useEffect(() => {
@@ -263,23 +300,18 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
         className="relative flex-1 min-h-0 m-2 sm:m-3 rounded-xl overflow-hidden bg-black select-none touch-none cursor-ew-resize"
         title="Потяните шторку, чтобы сравнить"
       >
-        {/* B — «после», целиком под шторкой. Без своего loop: циклом управляет
-              A, иначе при разной длине ролики перезапускаются вразнобой. */}
+        {/* B — «после», целиком под шторкой. Цикл общий: ограничен
+              длительностью короткого ролика, поэтому длинный не обгоняет. */}
         <video
           ref={bRef}
           src={b.url}
           muted
           playsInline
           preload="auto"
-          autoPlay
           onPlay={() => { aRef.current?.play().catch(() => {}) }}
-          onEnded={() => {
-            /* B короче A: доиграл и встал — возвращаем на позицию A. */
-            const vb = bRef.current
-            const va = aRef.current
-            if (!vb) return
-            try { vb.currentTime = va ? va.currentTime : 0 } catch { /* пропускаем */ }
-            if (va && !va.paused) vb.play().catch(() => { /* автоплей */ })
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration
+            if (Number.isFinite(d) && d > 0) setBDuration(d)
           }}
           className="absolute inset-0 w-full h-full object-contain pointer-events-none"
         />
@@ -292,13 +324,11 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
             ref={aRef}
             src={a.url}
             muted={muted}
-            loop
             playsInline
             preload="auto"
-            autoPlay
             onLoadedMetadata={(e) => {
               const d = e.currentTarget.duration
-              if (Number.isFinite(d) && d > 0) setDuration(d)
+              if (Number.isFinite(d) && d > 0) setADuration(d)
             }}
             onPlay={() => {
               setPlaying(true)
@@ -308,19 +338,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
               setPlaying(false)
               bRef.current?.pause()
             }}
-            onTimeUpdate={(e) => {
-              const t = e.currentTarget.currentTime
-              // A зациклен: резкий откат назад — перезапускаем и B.
-              if (t + 0.25 < lastTimeRef.current) {
-                const vb = bRef.current
-                if (vb) {
-                  try { vb.currentTime = t } catch { /* пропускаем */ }
-                  if (vb.paused && !vb.ended) vb.play().catch(() => { /* автоплей */ })
-                }
-              }
-              lastTimeRef.current = t
-              setTime(t)
-            }}
+            onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
             className="absolute inset-0 w-full h-full object-contain pointer-events-none"
           />
         </div>
@@ -354,8 +372,13 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
           <button
             type="button"
             onClick={togglePlay}
-            className="shrink-0 w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:bg-white/90 transition-colors"
-            title={playing ? 'Пауза (пробел)' : 'Играть (пробел)'}
+            disabled={mode === 'frame'}
+            className="shrink-0 w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              mode === 'frame'
+                ? 'В режиме «Кадр» воспроизведение отключено'
+                : playing ? 'Пауза (пробел)' : 'Играть (пробел)'
+            }
           >
             {playing ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5 translate-x-[1px]" />}
           </button>
@@ -437,7 +460,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
         </div>
 
         <p className="text-[10px] text-white/40 leading-tight">
-          Тяните шторку мышью · «Кадр» — стоп-кадр и ←/→ по кадрам · Пробел — пауза/играть · Esc — закрыть
+          Тяните шторку мышью · «Кадр» — только ←/→ и таймлайн · Пробел — пауза/играть в режиме «Видео» · Esc — закрыть
         </p>
       </div>
     </div>,
