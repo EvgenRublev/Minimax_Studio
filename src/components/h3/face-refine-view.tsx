@@ -73,6 +73,10 @@ export function FaceRefineView() {
   // (правка 723) Точка на лице, указанная кликом по кадру.
   const facePoint = useFaceRefineTarget((s) => s.facePoint)
   const setFacePoint = useFaceRefineTarget((s) => s.setFacePoint)
+  // Нода H3FaceTrackCrop при подключённом identity_reference игнорирует
+  // select/select_index и ведёт человека с фото. Показываем это явно, чтобы
+  // «Правило» и «Номер в рейтинге» не выглядели рабочими впустую.
+  const identityOverridesSelection = Boolean(identityRef) && !facePoint
   const params = useFaceRefineTarget((s) => s.params)
   const patchParams = useFaceRefineTarget((s) => s.patchParams)
 
@@ -454,7 +458,7 @@ export function FaceRefineView() {
                   if (mode !== 'closest_to_xy') setFacePoint(null)
                   else if (!facePoint) setPickOpen(true)
                 }}
-                disabled={busy}
+                disabled={busy || identityOverridesSelection}
               >
                 <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
                   <SelectValue />
@@ -474,7 +478,7 @@ export function FaceRefineView() {
               <Select
                 value={String(params.selectIndex)}
                 onValueChange={(v) => patchParams({ selectIndex: parseInt(v, 10) })}
-                disabled={busy || Boolean(facePoint)}
+                disabled={busy || Boolean(facePoint) || identityOverridesSelection}
               >
                 <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
                   <SelectValue />
@@ -485,6 +489,13 @@ export function FaceRefineView() {
                   ))}
                 </SelectContent>
               </Select>
+              {identityOverridesSelection && (
+                <p className="text-[10px] leading-snug text-yellow-400/90">
+                  Выбран референс конкретного человека — нода использует его,
+                  а правило и номер в рейтинге игнорируются. Чтобы вернуть
+                  правило, уберите фото референса.
+                </p>
+              )}
             </div>
 
             {/* Референс конкретного человека — надёжнее правила: трекер

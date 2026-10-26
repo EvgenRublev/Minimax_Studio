@@ -134,6 +134,12 @@ export function FacePickDialog({
     ? { left: `${(marker.x / size.w) * 100}%`, top: `${(marker.y / size.h) * 100}%` }
     : null
 
+  // Вписываем даже вертикальное/огромное видео в окно: ширина ограничена
+  // 52vh по высоте (52 * aspect), а не 900px по ширине. Иначе 9:16-ролик
+  // получался высотой в несколько экранов и низ кадра уезжал под скролл.
+  const maxVideoWidthVh =
+    size.w > 0 && size.h > 0 ? 52 * (size.w / size.h) : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[900px] max-h-[92vh] overflow-y-auto">
@@ -150,35 +156,41 @@ export function FacePickDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Кадр. Клик по видео = точка. Ширина 100% + высота auto: рамка элемента
-            совпадает с кадром, поэтому проценты превью равны пикселям видео. */}
-        <div
-          className="relative rounded-lg overflow-hidden bg-black cursor-crosshair select-none"
-          onClick={handleClick}
-          title="Кликните по лицу"
-        >
-          <video
-            ref={videoRef}
-            src={url}
-            className="w-full h-auto block"
-            preload="metadata"
-            playsInline
-            onLoadedMetadata={handleMetadata}
-            onError={() => setLoadFailed(true)}
-            onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
-          />
-          {markerPct && (
-            <div
-              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-              style={markerPct}
-            >
-              <span className="absolute -inset-3 rounded-full border-2 border-yellow-400" />
-              <span className="absolute left-1/2 top-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-400" />
-            </div>
-          )}
+        {/* Кадр. Клик по видео = точка. Обёртка получает ширину из aspect
+            видео и ограничения 52vh по высоте: даже огромный вертикальный
+            ролик целиком помещается в окно, без прокрутки до нижнего края.
+            Рамка обёртки совпадает с кадром, поэтому проценты маркера равны
+            пикселям видео. */}
+        <div className="flex justify-center">
+          <div
+            className="relative inline-block max-w-full rounded-lg overflow-hidden bg-black cursor-crosshair select-none"
+            style={maxVideoWidthVh ? { width: `min(100%, ${maxVideoWidthVh}vh)` } : { width: '100%' }}
+            onClick={handleClick}
+            title="Кликните по лицу"
+          >
+            <video
+              ref={videoRef}
+              src={url}
+              className="w-full h-auto block"
+              preload="metadata"
+              playsInline
+              onLoadedMetadata={handleMetadata}
+              onError={() => setLoadFailed(true)}
+              onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
+            />
+            {markerPct && (
+              <div
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                style={markerPct}
+              >
+                <span className="absolute -inset-3 rounded-full border-2 border-yellow-400" />
+                <span className="absolute left-1/2 top-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-400" />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Таймлайн и кадр */}
