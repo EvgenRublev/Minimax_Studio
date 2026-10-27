@@ -116,9 +116,6 @@ export async function POST(req: NextRequest) {
       sparseEndPercent?: number
       sparseMinTokens?: number
       sparseExtraTokens?: number
-      /** (правка 492) Муксить оригинальную дорожку исходника вместо
-       *  перегенерированного звука (галочка вкладки Refine). */
-      keepOriginalAudio?: boolean
       /** (правка 494) «Свободное разрешение»: цель в мегапикселях (до 4K =
        *  8.3 Мп). Перебивает target — конвертация в короткую сторону здесь,
        *  по реальным размерам источника (канва латента в lossless-ветке). */
@@ -157,10 +154,6 @@ export async function POST(req: NextRequest) {
       ...(customLoras ? { customLoras } : {}),
       ...(loraSuffix ? { promptSuffix: loraSuffix } : {}),
     }
-
-    // (правка 492) Оригинальный звук без перегенерации — галочка вкладки Refine
-    const keepAudio = body.keepOriginalAudio === true
-    const keepAudioParam = keepAudio ? { keepOriginalAudio: true } : {}
 
     // (правка 317) Режим размера референсов: валидация, дефолт 'max'
     // (требование пользователя — точнее идентичность).
@@ -234,6 +227,12 @@ export async function POST(req: NextRequest) {
       pass1_scheduler: body.steps === 2 ? 'simple' : 'manual-sigmas',
       low_vram_attention: true,
       chunk_feed_forward: true,
+      // (правка 736, 737) Audio Guide по дорожке исходника теперь всегда
+      // в графе рефайна — фиксируем в сайдкаре, как у Generate-ref.
+      audio_guide: true,
+      // (правка 737) И на выход всегда муксится оригинальная дорожка
+      // исходника (вместо перегенерированного звука) — тоже всегда.
+      keep_original_audio: true,
       ...sparseMeta,
       ...loraMeta,
     }
@@ -319,7 +318,6 @@ export async function POST(req: NextRequest) {
               ...veda, // (правка 408)
               ...sparse, // (правка 466)
               ...loraParams, // (правка 483)
-              ...keepAudioParam, // (правка 492)
               // (правка 509) Референсы от пользователя (файл с диска)
               ...(userRefImages.length > 0 && { refImages: userRefImages }),
             }),
@@ -350,7 +348,6 @@ export async function POST(req: NextRequest) {
             minimax_h3_reference_detail: refImageSize, // (правка 317)
             ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
             ...vedaMeta, // (правка 408)
-            ...(keepAudio && { keep_original_audio: true }), // (правка 492)
             // (правка 318) референсы исходника — якоря повторного рефайна;
             // (правка 509) приоритет — референсы, поданные пользователем.
             ...(userRefImages.length > 0
@@ -385,7 +382,6 @@ export async function POST(req: NextRequest) {
           ...veda, // (правка 408)
           ...sparse, // (правка 466)
           ...loraParams, // (правка 483)
-          ...keepAudioParam, // (правка 492)
           // (правка 509) Референсы от пользователя (файл с диска)
           ...(userRefImages.length > 0 && { refImages: userRefImages }),
         }),
@@ -413,7 +409,6 @@ export async function POST(req: NextRequest) {
           minimax_h3_reference_detail: refImageSize, // (правка 317)
           ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
           ...vedaMeta, // (правка 408)
-          ...(keepAudio && { keep_original_audio: true }), // (правка 492)
           // (правка 318) референсы исходника — якоря повторного рефайна;
           // (правка 509) приоритет — референсы, поданные пользователем.
           ...(userRefImages.length > 0
@@ -619,7 +614,6 @@ export async function POST(req: NextRequest) {
             ...veda, // (правка 408)
             ...sparse, // (правка 466)
             ...loraParams, // (правка 483)
-            ...keepAudioParam, // (правка 492)
             // (правка 311) Картинки-рефы из меты исходника (с ролями)
             ...(metaRefImages.length > 0 && { refImages: metaRefImages }),
           }),
@@ -655,7 +649,6 @@ export async function POST(req: NextRequest) {
           minimax_h3_reference_detail: refImageSize, // (правка 317)
           ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
           ...vedaMeta, // (правка 408)
-          ...(keepAudio && { keep_original_audio: true }), // (правка 492)
           // (правка 305) число картинок-рефов из меты
           ...(metaRefImages.length > 0 && { meta_ref_count: metaRefImages.length }),
           // (правка 318) и сами референсы — якоря повторного рефайна
@@ -698,7 +691,6 @@ export async function POST(req: NextRequest) {
         ...veda, // (правка 408)
         ...sparse, // (правка 466)
         ...loraParams, // (правка 483)
-        ...keepAudioParam, // (правка 492)
         // (правка 366) Результат — в папку оригинала (как у режима «Частями»);
         // источник из корня output → sub='' → общая папка, как раньше.
         outputSubfolder: sub,
@@ -741,7 +733,6 @@ export async function POST(req: NextRequest) {
         minimax_h3_reference_detail: refImageSize, // (правка 317)
         ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
         ...vedaMeta, // (правка 408)
-        ...(keepAudio && { keep_original_audio: true }), // (правка 492)
       })
     }
 

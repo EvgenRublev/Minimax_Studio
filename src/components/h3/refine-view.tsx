@@ -100,7 +100,7 @@ export function RefineView() {
 
   const params = useRefineTarget((s) => s.params)
   const patchParams = useRefineTarget((s) => s.patchParams)
-  const { target, steps, strength, mode, chunkSec, refDetail, keepOriginalAudio, targetMp } = params
+  const { target, steps, strength, mode, chunkSec, refDetail, targetMp } = params
 
   // (правка 509) Промпт — в сторе (переживает переключение вкладок);
   // вводится вручную для источников с диска (у них нет .meta.json).
@@ -366,7 +366,6 @@ export function RefineView() {
       ...(userRefs.length > 0 && { refImages: userRefs.map((r) => r.path) }),
       chunkSeconds: parseInt(chunkSec, 10),
       refImageSize: refDetail, // (правка 276)
-      keepOriginalAudio, // (правка 492)
       // (правка 407) Veda-настройки из общих настроек программы (gen-store)
       ...(useGenStore.getState().video.vedaAttention === true && {
         vedaAttention: true,
@@ -388,7 +387,7 @@ export function RefineView() {
     }
     enqueueRefine(task)
     toast.info(`Refine поставлен в очередь: ${src.filename}`)
-  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, uploadingSrc, refDetail, keepOriginalAudio, userRefs])
+  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, uploadingSrc, refDetail, userRefs])
 
   const cancel = useCallback(async () => {
     await cancelActiveRefines()
@@ -960,29 +959,6 @@ export function RefineView() {
               </button>
             </div>
           </div>
-
-          {/* (правка 492) Оригинальный звук: без перегенерации дорожки —
-              на выход муксится звук исходника (для lossless-источников —
-              первозданный из латента). Видео-часть не меняется. */}
-          <label
-            className="flex items-start gap-2 cursor-pointer select-none pt-1"
-            title="По умолчанию звук перегенерируется моделью вместе с видео. Галочка оставляет оригинальную дорожку исходника как есть."
-          >
-            <input
-              type="checkbox"
-              checked={keepOriginalAudio}
-              onChange={(e) => patchParams({ keepOriginalAudio: e.target.checked })}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-500"
-            />
-            <span className="text-xs text-muted-foreground font-medium leading-tight">
-              Оставить оригинальный звук
-              <span className="block text-[10px] font-normal text-muted-foreground/70">
-                не перегенерировать дорожку — меньше работы, звук как в исходнике
-              </span>
-            </span>
-          </label>
-
-
 
           {/* Запуск (правка 261): можно ставить в очередь, пока идёт задача */}
           <div className="flex gap-2 pt-1">

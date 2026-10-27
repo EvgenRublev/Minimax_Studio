@@ -60,6 +60,21 @@ __pycache__/
 /upscale/bin/
 /tools/ck_pkg/
 
+# (правка 738) DLSS/RTX-бинарники апскейла (NVIDIA) — никогда в git.
+# Они и так под /upscale/bin/, но дублируем явно: nvngx_dlssnr.dll весит
+# ~162 МБ (> лимита GitHub 100 МБ на файл), а push с ними отклонится.
+# Глобальные *.dll/*.addon64/nvngx* — страховка от `git add -f` и переноса
+# папки: в исходниках студии DLL не нужны.
+/upscale/bin/runtime/dlss/
+/upscale/bin/runtime/dlssg/
+/upscale/bin/runtime/dlssnr/
+/upscale/bin/runtime/host/
+/upscale/bin/runtime/rtx_video/
+*.dll
+*.addon64
+nvngx*
+dlssg-worker.exe
+
 # рабочие данные пользователя (загруженные видео, вложения чата)
 /data/upscale-input/
 /data/upscale-output/

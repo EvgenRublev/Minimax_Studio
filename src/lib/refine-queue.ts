@@ -53,8 +53,6 @@ export interface RefineTask {
   sparseEndPercent?: number
   sparseMinTokens?: number
   sparseExtraTokens?: number
-  /** (правка 492) Оригинальная дорожка вместо перегенерированного звука. */
-  keepOriginalAudio?: boolean
   /** (правка 509) Картинки-референсы от пользователя (имена в input/) —
    *  для источников с диска без метаданных. */
   refImages?: string[]
@@ -227,8 +225,6 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
         sparseExtraTokens: task.sparseExtraTokens,
       }),
       ...(task.mode === 'chunks' ? { mode: 'chunks', chunkSeconds: task.chunkSeconds } : {}),
-      // (правка 492) Оригинальный звук — галочка вкладки Refine
-      ...(task.keepOriginalAudio === true && { keepOriginalAudio: true }),
       // (правка 509) Референсы от пользователя (источник с диска)
       ...(task.refImages && task.refImages.length > 0 && { refImages: task.refImages }),
     }),

@@ -162,13 +162,6 @@ export interface RefineParams {
    *  дописывается в самый конец conditioning-промпта, после подписей
    *  референсов. В мету не попадает (роут хранит чистый промпт). */
   promptSuffix?: string
-  /** (правка 492) Не перегенерировать звук: на выход муксится ОРИГИНАЛЬНАЯ
-   *  дорожка исходника вместо декода аудио-латента сэмплера. mp4-путь —
-   *  'r_asafe' (VHS_LoadVideo целиком, тишина при отсутствии дорожки);
-   *  latent-путь — декод родного аудио-латента из .latent ('r_lsep', 1),
-   *  т.е. первозданный звук без aac/re-encode потерь. На sampling не влияет:
-   *  аудио-латент в затравке остаётся прежним. */
-  keepOriginalAudio?: boolean
 }
 
 /**
@@ -257,6 +250,17 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // же, что у ComfyMathExpression 'r_cap': max(5, a - ((a - 5) % 17)).
   const srcFrames = Math.max(0, Math.round(p.sourceFrames ?? 0))
   const framesGrid = Math.max(5, srcFrames - ((srcFrames - 5) % 17))
+
+  // (правка 736, 737) Audio Guide (как в Generate-ref): дорожка исходника
+  // якорится на кадр 0 conditioning-а — работает ВСЕГДА, без галочки.
+  // Источник звука: mp4-ветка — готовый AUDIO 'r_asafe'; latent-ветка —
+  // waveform из аудио-половины латента ('r_aorig'; декод нужен и для выхода).
+  // Латент ноде нужен только для геометрии/длины — берём затравку сэмплера,
+  // чтобы длины A/V-потоков совпали с ним.
+  const samplerSeedLatent: [string, number] = latentMode
+    ? (needsUpscale ? ['r_cat', 0] : ['r_lat', 0])
+    : ['r_cat', 0]
+  const guideAudioSrc: [string, number] = latentMode ? ['r_aorig', 0] : ['r_asafe', 0]
 
   // ─── Model optimization chain: UNET → [LowVRAM] → [ChunkFF] ───
   const lowVram = p.lowVramAttention !== false
@@ -392,14 +396,13 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         _meta: { title: 'Исходник: первый кадр (якорь conditioning)' },
       },
       // (правка 492) r_lsep нужен и БЕЗ апскейлера (цель 'same'): из
-      // аудио-половины латента берётся оригинальный звук (keepOriginalAudio).
-      ...((needsUpscale || p.keepOriginalAudio) && {
-        'r_lsep': {
-          inputs: { av_latent: ['r_lat', 0] },
-          class_type: 'LTXVSeparateAVLatent',
-          _meta: { title: 'Separate AV Latent (загруженный)' },
-        },
-      }),
+      // аудио-половины латента берётся оригинальный звук для выхода и гайда.
+      // (правка 736) …Audio Guide теперь всегда в графе.
+      'r_lsep': {
+        inputs: { av_latent: ['r_lat', 0] },
+        class_type: 'LTXVSeparateAVLatent',
+        _meta: { title: 'Separate AV Latent (загруженный)' },
+      },
       ...(needsUpscale && {
         // Тот же узел/параметры, что Pass 1→2 вкладки «Генерация» ('46:26').
         'r_up': {
@@ -431,15 +434,14 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           _meta: { title: 'AV-латент (апскейл загруженного латента)' },
         },
       }),
-      // (правка 492) Оригинальный звук без перегенерации: декод родного
-      // аудио-латента из .latent исходника (первозданный, без aac-потерь mp4).
-      ...(p.keepOriginalAudio && {
-        'r_aorig': {
-          inputs: { samples: ['r_lsep', 1], vae: ['46:4', 0] },
-          class_type: 'VAEDecodeAudio',
-          _meta: { title: 'Оригинальный звук (аудио-латент исходника)' },
-        },
-      }),
+      // (правка 492, 737) Оригинальный звук из .latent исходника
+      // (первозданный, без aac-потерь mp4) — он же идёт в Audio Guide:
+      // на выход ВСЕГДА муксится он, поэтому декод нужен всегда.
+      'r_aorig': {
+        inputs: { samples: ['r_lsep', 1], vae: ['46:4', 0] },
+        class_type: 'VAEDecodeAudio',
+        _meta: { title: 'Оригинальный звук (аудио-латент исходника)' },
+      },
     } : {
       // force_rate 24: таймбаза модели; исходники H3 и так 24 fps —
       // нормализация для импортных 25/30 fps (паттерн правки 211).
@@ -607,6 +609,24 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         ? `Conditioning (${metaRefs.length} мета-рефов, без якоря кадра)`
         : `Conditioning (${1 + metaRefs.length} рефов: меты + кадр)` },
     },
+    // (правка 736, 737) Audio Guide: тот же MiniMaxH3AddGuide, что в
+    // Generate-ref — conditioning якорит дорожку исходника на кадр 0, и
+    // модель ведёт губы по реальному звуку. Всегда в графе (кроме legacy
+    // chunkJob: у куска нет своего среза аудио — гайд от начала дорожки
+    // разъехался бы с кадрами куска); сэмплер берёт хвост цепочки.
+    ...(!p.chunkJob && {
+      'r_ag': {
+        inputs: {
+          positive: [condNodeId, 0],
+          latent: samplerSeedLatent,
+          frame_idx: 0,
+          audio: guideAudioSrc,
+          audio_vae: ['46:4', 0],
+        },
+        class_type: 'MiniMaxH3AddGuide',
+        _meta: { title: 'Audio Guide (дорожка исходника)' },
+      },
+    }),
 
     // ═══════════════════════════════════════════════
     //  SAMPLER (RandomNoise, euler, ManualSigmas = Pass 2)
@@ -650,7 +670,12 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       _meta: { title: 'Model Preview Override' },
     },
     '46:29': {
-      inputs: { model: ['12', 0], conditioning: [condNodeId, 0] },
+      inputs: {
+        model: ['12', 0],
+        // (правка 736, 737) Audio Guide — conditioning с якорем дорожки
+        // исходника (в legacy chunkJob гайда нет — см. блок 'r_ag').
+        conditioning: [p.chunkJob ? condNodeId : 'r_ag', 0],
+      },
       class_type: 'BasicGuider',
       _meta: { title: 'Guider' },
     },
@@ -663,9 +688,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         // (правка 376) Затравка: latent-ветка без апскейлера ('same') — сам
         // загруженный AV-латент ('r_lat'); с апскейлером — 'r_cat' (апскейл
         // видео-части + родное аудио). mp4-ветка — 'r_cat', как раньше.
-        latent_image: latentMode
-          ? (needsUpscale ? ['r_cat', 0] : ['r_lat', 0])
-          : ['r_cat', 0],
+        latent_image: samplerSeedLatent,
       },
       class_type: 'SamplerCustomAdvanced',
       _meta: { title: 'Refine Sampler (Pass 2)' },
@@ -704,11 +727,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     },
     // (правка 313) Декод аудио-латента сэмплера — как '46:14' во 2-м
     // проходе генерации (minimax-h3-template.ts).
-    'r_adec': {
-      inputs: { samples: ['46:35', 1], vae: ['46:4', 0] },
-      class_type: 'VAEDecodeAudio',
-      _meta: { title: 'Decode Audio (правка 313)' },
-    },
+    // (правка 737) На выход ВСЕГДА муксится оригинальная дорожка, поэтому
+    // декод перегенерированного аудио больше не нужен — узел убран.
     ...(needsCrop && {
       '46:48': {
         inputs: {
@@ -724,10 +744,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     }),
 
     // ═══════════════════════════════════════════════
-    //  OUTPUT: видео + звук. (правка 313) В целом режиме звук =
-    //  перегенерированный сэмплером (r_adec), как во 2-м проходе
-    //  генерации. В legacy-пути chunkJob звук кладёт сшивка из
-    //  оригинала (у таких кусков аудио не генерится).
+    //  OUTPUT: видео + звук. (правка 737) Звук — ВСЕГДА оригинальная
+    //  дорожка исходника: mp4-путь 'r_asafe' (VHS_LoadVideo грузит исходник
+    //  целиком, frame_load_cap=0 — дорожка не режется; у беззвучного —
+    //  тишина), latent-путь — декод родного аудио-латента ('r_aorig').
+    //  В legacy-пути chunkJob звук и так кладёт сшивка из оригинала.
     // ═══════════════════════════════════════════════
     '45': {
       inputs: {
@@ -740,14 +761,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         pingpong: false,
         save_output: true,
         images: needsCrop ? ['46:48', 0] : ['46:25', 0],
-        // (правка 313) перегенерированный звук вместо дорожки исходника.
-        // (правка 492) keepOriginalAudio — мукс ОРИГИНАЛЬНОЙ дорожки: mp4-путь
-        // — 'r_asafe' (VHS_LoadVideo грузит исходник целиком, frame_load_cap=0
-        // — дорожка не режется; у беззвучного — тишина), latent-путь — декод
-        // родного аудио-латента ('r_aorig').
-        ...(p.chunkJob
-          ? {}
-          : { audio: p.keepOriginalAudio ? [latentMode ? 'r_aorig' : 'r_asafe', 0] : ['r_adec', 0] }),
+        ...(p.chunkJob ? {} : { audio: guideAudioSrc }),
       },
       class_type: 'VHS_VideoCombine',
       _meta: { title: p.chunkJob ? 'Video Combine (кусок)' : 'Video Combine (refine)' },
@@ -849,10 +863,6 @@ export interface ChunkedRefineParams {
    *  КАЖДОГО окна цепочки (и сюжетный окна 0, и якорные окон 1+), иначе
    *  поздние окна рефинились бы без стиля LoRA. В мету не попадает. */
   promptSuffix?: string
-  /** (правка 492) Оригинальный звук вместо перегенерированного: на финальный
-   *  combine муксится дорожка исходника (mp4 — 'r_src' pin 2 через
-   *  MiniMaxH3AudioOrSilent; latent — декод аудио-латента 'r_lsep'). */
-  keepOriginalAudio?: boolean
 }
 
 /** Перекрытие цепочки (сетка 17k+5): preserved-голова куска k>0. */
@@ -1337,6 +1347,19 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           audioEnc = [`caenc_${k}`, 0]
         }
 
+        // (правка 736, 737) Audio Guide окна — всегда: нода принимает AUDIO,
+        // поэтому mp4-ветка берёт готовый срез 'caw_${k}', latent-ветка
+        // декодирует срез аудио-латента окна (VAEDecodeAudio).
+        let guideAudio: [string, number] = [`caw_${k}`, 0]
+        if (latentMode) {
+          nodes[`cadec_${k}`] = {
+            inputs: { samples: audioEnc, vae: ['46:4', 0] },
+            class_type: 'VAEDecodeAudio',
+            _meta: { title: `Аудио окна ${k + 1} → waveform (Audio Guide)` },
+          }
+          guideAudio = [`cadec_${k}`, 0]
+        }
+
         // Видео-латент куска (правка 272, схема D-версии — рабочая):
         // k=0: окно целиком (маска не нужна).
         // k>0: LatentCut + LatentConcat — срез головы O токенов у кодированного
@@ -1481,9 +1504,26 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             : `Conditioning окна ${k + 1} (${1 + metaRefs.length} рефов)` },
         }
         nodes[`cg_${k}`] = {
-          inputs: { model: ['12', 0], conditioning: [`ccond_${k}`, 0] },
+          inputs: {
+            model: ['12', 0],
+            // (правка 736, 737) Audio Guide окна — хвост цепочки conditioning-а.
+            conditioning: [`cag_${k}`, 0],
+          },
           class_type: 'BasicGuider',
           _meta: { title: `Guider окна ${k + 1}` },
+        }
+        // (правка 736, 737) Audio Guide: дорожка окна якорится на кадр 0 его
+        // conditioning-а; латент — AV-затравка окна (нужна только геометрия).
+        nodes[`cag_${k}`] = {
+          inputs: {
+            positive: [`ccond_${k}`, 0],
+            latent: [`cj_${k}`, 0],
+            frame_idx: 0,
+            audio: guideAudio,
+            audio_vae: ['46:4', 0],
+          },
+          class_type: 'MiniMaxH3AddGuide',
+          _meta: { title: `Audio Guide окна ${k + 1}` },
         }
         // (правка 305) Один и тот же шум на всех окнах: детали регенерируются
         // согласованно, на стыках нет смены «характера» текстуры.
@@ -1634,36 +1674,29 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         }
         framesAll = [`ccrop`, 0]
       }
-      // Аудио-латент мал — сегментировать не нужно, один декод на весь ролик
-      nodes[`cadec`] = {
-        inputs: { samples: fullAudio, vae: ['46:4', 0] },
-        class_type: 'VAEDecodeAudio',
-        _meta: { title: 'Decode Audio (полный)' },
-      }
-      // (правка 492) keepOriginalAudio: вместо перегенерированного звука
-      // муксится ОРИГИНАЛЬНАЯ дорожка исходника — mp4-путь: 'r_src' pin 2
-      // (загрузка целиком, дорожка не режется; беззвучный → тишина длиной
-      // ролика), latent-путь: декод родного аудио-латента из .latent.
-      let outAudio: [string, number] = [`cadec`, 0]
-      if (p.keepOriginalAudio) {
-        if (latentMode) {
-          nodes['corigdec'] = {
-            inputs: { samples: ['r_lsep', 1], vae: ['46:4', 0] },
-            class_type: 'VAEDecodeAudio',
-            _meta: { title: 'Оригинальный звук (аудио-латент исходника)' },
-          }
-          outAudio = ['corigdec', 0]
-        } else {
-          nodes['corigs'] = {
-            inputs: {
-              audio: ['r_src', 2],
-              fallback_seconds: Number((p.sourceFrames / 24).toFixed(2)),
-            },
-            class_type: 'MiniMaxH3AudioOrSilent',
-            _meta: { title: 'Оригинальный звук исходника (или тишина)' },
-          }
-          outAudio = ['corigs', 0]
+      // (правка 492, 737) На выход ВСЕГДА муксится ОРИГИНАЛЬНАЯ дорожка
+      // исходника: mp4-путь — 'r_src' pin 2 (загрузка целиком, дорожка не
+      // режется; беззвучный → тишина длиной ролика), latent-путь — декод
+      // родного аудио-латента из .latent. Декод перегенерированного аудио
+      // (бывший 'cadec') больше не нужен — узел убран.
+      let outAudio: [string, number]
+      if (latentMode) {
+        nodes['corigdec'] = {
+          inputs: { samples: ['r_lsep', 1], vae: ['46:4', 0] },
+          class_type: 'VAEDecodeAudio',
+          _meta: { title: 'Оригинальный звук (аудио-латент исходника)' },
         }
+        outAudio = ['corigdec', 0]
+      } else {
+        nodes['corigs'] = {
+          inputs: {
+            audio: ['r_src', 2],
+            fallback_seconds: Number((p.sourceFrames / 24).toFixed(2)),
+          },
+          class_type: 'MiniMaxH3AudioOrSilent',
+          _meta: { title: 'Оригинальный звук исходника (или тишина)' },
+        }
+        outAudio = ['corigs', 0]
       }
       // ОДИН VHS_VideoCombine: единственное h264-кодирование (было: encode
       // каждого refinepart + повторный encode при ffmpeg-сшивке).
