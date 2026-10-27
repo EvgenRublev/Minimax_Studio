@@ -32,11 +32,14 @@ export default function RootLayout({
           {/* (правка 61) тема «Аврора» удалена; (правка 98) светлая тоже —
               если одна из них сохранена в браузере, миграция на дефолтную
               серую тему до первого рендера — иначе next-themes наложит
-              несуществующий класс и страница откроется без темы. */}
+              несуществующий класс и страница откроется без темы.
+              (правка 741) масштаб UI: 80% — только когда значения ещё нет
+              (первый запуск). Раньше условие `s==='100'` подменяло осознанно
+              выбранные 100% на 80%, и после перезапуска масштаб откатывался. */}
           <script
             suppressHydrationWarning
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null||s==='100')?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=p+'%';}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}})();`,
+              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null)?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=(p===100?'':p+'%');}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}})();`,
             }}
           />
           {children}
