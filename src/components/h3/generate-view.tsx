@@ -671,11 +671,13 @@ export function GenerateView() {
 
   const canGenerateNow = canGenerate && !assistantBusy
 
-  // (правка 333) Guard от случайного дабл-клика: пока generate() не вернулся
-  // (POST сабмита в полёте, prompt_id ещё не получен), повторный вызов
-  // игнорируется. Намеренные повторные запуски («Ещё в очередь») не
-  // блокируются — после получения prompt_id флаг снимается.
-  const submitInFlightRef = useRef(false)
+  // (правка 729) Guard от случайного дабл-клика — троттл по времени, как в
+  // refine-view (правка 333). In-flight флаг здесь врал: generate() ждёт ход
+  // в общем FIFO (acquireComfyTurn) и не возвращается, пока предыдущая
+  // задача не завершится. Флаг всё это время оставался true, следующий клик
+  // молча игнорировался — в очередь вставало максимум ДВЕ задачи (одна идёт,
+  // одна ждёт), хотя кнопка «Ещё в очередь» была активна.
+  const lastSubmitAtRef = useRef(0)
 
   const handleGenerate = useCallback(async () => {
     // Единый guard для всех путей запуска (кнопка, Ctrl+Enter, диалог
@@ -768,12 +770,11 @@ export function GenerateView() {
       }
     }
 
-    // (правка 333, 346) Флаг ставим синхронно ДО await — второй клик,
-    // пришедший, пока валидация/сабмит первого ещё идут, отсекается guard'ом.
-    // Запись в историю промптов — ПОСЛЕ guard'а, иначе дабл-клик клал в
-    // историю два одинаковых энтрика.
-    if (submitInFlightRef.current) return
-    submitInFlightRef.current = true
+    // (правка 729) Троттл вместо in-flight флага: гасим только быстрый
+    // повторный клик. Запись в историю промптов — ПОСЛЕ guard'а, иначе
+    // дабл-клик клал в историю два одинаковых энтрика.
+    if (Date.now() - lastSubmitAtRef.current < 1000) return
+    lastSubmitAtRef.current = Date.now()
     usePromptHistory.getState().add(prompt)
     // (правка 696) Зафиксировать stageKind на момент старта: во время
     // генерации переключение «Драфт/Полное» не меняет шаблон подписи.
@@ -846,8 +847,9 @@ export function GenerateView() {
       chunkFFThreshold: v.chunkFFThreshold,
       outputSubfolder: v.outputFolder || '', // (правка 91) папка проекта
       })
-    } finally {
-      submitInFlightRef.current = false
+    } catch {
+      // (правка 729) Ошибки generate() уже показаны тостом внутри хука —
+      // здесь только не даём промису уйти в unhandled rejection.
     }
   }, [generate, assistantBusy])
 

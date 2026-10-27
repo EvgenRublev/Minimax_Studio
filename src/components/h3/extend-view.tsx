@@ -458,10 +458,13 @@ export function ExtendView() {
 
   /* ──────────── Generate ──────────── */
 
-  // (правка 333) Guard от случайного дабл-клика: пока generate() не вернулся
-  // (POST сабмита в полёте, prompt_id ещё не получен), повторный вызов
-  // игнорируется. Намеренные повторные запуски не блокируются.
-  const submitInFlightRef = useRef(false)
+  // (правка 729) Guard от случайного дабл-клика — троттл по времени, как в
+  // refine-view (правка 333). In-flight флаг здесь врал: generate() ждёт ход
+  // в общем FIFO (acquireComfyTurn) и не возвращается, пока предыдущая
+  // задача не завершится. Флаг всё это время оставался true, и следующее
+  // «Ещё в очередь» молча игнорировалось — в очередь вставало максимум ДВЕ
+  // задачи, хотя кнопка оставалась активной.
+  const lastSubmitAtRef = useRef(0)
 
   const handleGenerate = useCallback(async () => {
     if (assistantBusy) {
@@ -532,10 +535,10 @@ export function ExtendView() {
     // buildExtendWorkflow не срабатывает).
     const MEANINGFUL_WORD = /[a-zA-Zа-яА-ЯёЁ]{2,}/
     const labelPrompt = v.extendClips.find((c) => MEANINGFUL_WORD.test(c.prompt))?.prompt.trim() ?? ''
-    // (правка 333) Флаг синхронно до await — дабл-клик за время сабмита
-    // не шлёт дубль задачи.
-    if (submitInFlightRef.current) return
-    submitInFlightRef.current = true
+    // (правка 729) Троттл вместо in-flight флага: гасим только быстрый
+    // повторный клик, намеренная постановка в очередь проходит всегда.
+    if (Date.now() - lastSubmitAtRef.current < 1000) return
+    lastSubmitAtRef.current = Date.now()
     // (правка 696) Зафиксировать stageKind на момент старта: во время
     // генерации переключение «Драфт/Полное» не меняет шаблон подписи.
     useGenProgress.getState().setVideoFrozenStageKind(v.extendTwoPass ? 'clips2' : 'clips')
@@ -583,8 +586,9 @@ export function ExtendView() {
       chunkFFThreshold: v.chunkFFThreshold,
       outputSubfolder: v.extendSourceSubfolder ?? (v.outputFolder || ''), // (правка 363) галерея-источник → папка оригинала
       })
-    } finally {
-      submitInFlightRef.current = false
+    } catch {
+      // (правка 729) Ошибки generate() уже показаны тостом внутри хука —
+      // здесь только не даём промису уйти в unhandled rejection.
     }
   }, [generate, assistantBusy, uploadingVideo, autoClipSteps])
 
