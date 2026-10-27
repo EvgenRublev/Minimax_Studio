@@ -41,6 +41,14 @@ let startedAt = 0
  * продолжался. Теперь starting-ветка проверяет флаг после spawn и в healthUp.
  */
 let pendingStop = false
+/**
+ * (правка 743) Хвост вывода дочернего STT-сервера (stdout + stderr). По нему
+ * показываем РЕАЛЬНУЮ причину сбоя («transcribe.dll не найдена: …», ошибка
+ * загрузки модели), а не общую догадку «нет модели или DLL». Раньше
+ * пользователь видел один и тот же текст независимо от настоящей ошибки.
+ * Важно: stt_server.py печатает и ошибки, и обычный лог в stdout через log().
+ */
+let childTail = ''
 
 // (правка 348) Сироты: при выходе Node-процесса (закрытие студии) дочерний
 // STT-сервер оставался жить на порту 8091 до своего idle-таймаута (15 мин).
@@ -65,6 +73,23 @@ export function sttStatus(): SttStatus {
     error: lastError,
     startedAt,
   }
+}
+
+/**
+ * (правка 743) Последняя содержательная строка вывода → причина сбоя.
+ * Python печатает `[stt] ОШИБКА: …` или `RuntimeError: …` — убираем префиксы
+ * и оставляем человеческий текст.
+ */
+function childFailureReason(): string | null {
+  const lines = childTail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return null
+  const pick = [...lines].reverse().find((l) => /error|ошибка|exception|не найден|не удалось|failed/iu.test(l)) ?? lines[lines.length - 1]
+  const msg = pick
+    .replace(/^\[stt\]\s*/i, '')
+    .replace(/^(?:ОШИБКА|ERROR|FAILED)\s*:\s*/iu, '')
+    .replace(/^(?:[A-Za-z_.]*Error|Exception):\s*/, '')
+    .trim()
+  return msg ? msg.slice(0, 300) : null
 }
 
 async function healthUp(timeoutMs: number): Promise<boolean> {
@@ -149,8 +174,16 @@ export async function ensureStt(): Promise<SttStartResult> {
       })
       child = proc
       startedAt = Date.now()
-      proc.stdout?.on('data', (d: Buffer) => process.stdout.write(`[stt] ${d}`))
-      proc.stderr?.on('data', (d: Buffer) => process.stderr.write(`[stt] ${d}`))
+      childTail = ''
+      proc.stdout?.on('data', (d: Buffer) => {
+        process.stdout.write(`[stt] ${d}`)
+        // (правка 743) stt_server.py пишет и лог, и текст ошибки в stdout.
+        childTail = (childTail + d.toString()).slice(-4000)
+      })
+      proc.stderr?.on('data', (d: Buffer) => {
+        process.stderr.write(`[stt] ${d}`)
+        childTail = (childTail + d.toString()).slice(-4000)
+      })
       proc.on('exit', () => {
         if (child === proc) {
           child = null
@@ -174,8 +207,13 @@ export async function ensureStt(): Promise<SttStartResult> {
           if (child === proc) child = null
           return { ok: false, error: 'Остановлено пользователем' }
         }
-        // Process likely exited with an error (no model, bad DLL).
-        const err = 'STT-сервер не запустился: нет модели STT или не найдена transcribe.dll (см. консоль и настройки «Голосовой ввод»)'
+        // (правка 743) Показываем настоящую причину из stderr дочернего
+        // процесса (например, «transcribe.dll не найдена: <путь>»), а не
+        // общую догадку. Общий текст — только если процесс молчал.
+        const reason = childFailureReason()
+        const err = reason
+          ? `STT-сервер не запустился: ${reason}`
+          : 'STT-сервер не запустился: нет модели STT или не найдена transcribe.dll (см. консоль и настройки «Голосовой ввод»)'
         lastError = err
         if (child === proc) {
           try { proc.kill() } catch { /* уже мёртв */ }

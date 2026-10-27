@@ -44,6 +44,9 @@ interface SttStatusResp {
   model: string
   models: string[]
   modelDirs: Array<{ dir: string; files: string[] }>
+  /** (правка 743) Путь к transcribe.dll и признак его наличия. */
+  runtimePath?: string
+  runtimeFound?: boolean
   language: string
   threads: number
   service: { running: boolean; starting: boolean; error: string | null; startedAt: number }
@@ -533,9 +536,19 @@ export function VoiceSettingsPanel() {
                 <CheckCircleIcon className="w-3 h-3" />
                 Работает
               </Badge>
+            ) : st?.runtimeFound === false ? (
+              /* (правка 743) Рантайма нет — «запустится при первом диктанте»
+                 было неправдой: сервер не сможет стартовать вообще. */
+              <Badge className="bg-red-500/15 text-red-300 border-red-500/30 text-[10px]">
+                Недоступен: нет transcribe.dll
+              </Badge>
+            ) : (st?.models?.length ?? 0) === 0 ? (
+              <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
+                Недоступен: нет модели распознавания
+              </Badge>
             ) : (
               <Badge variant="secondary" className="text-[10px]">
-                Остановлен (запустится при первом диктате)
+                Остановлен (запустится при первом диктанте)
               </Badge>
             )}
           </div>
@@ -554,7 +567,19 @@ export function VoiceSettingsPanel() {
             {st.health.version ? ` · ${String(st.health.version)}` : ''}
           </p>
         )}
-        {service?.error && (
+        {/* (правка 743) Нет рантайма — объясняем, что делать. Общую ошибку
+            запуска в этом случае не дублируем: причина уже названа. */}
+        {st?.runtimeFound === false && (
+          <p className="text-xs text-amber-300/90 flex items-start gap-1.5">
+            <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>
+              Папка <code className="font-mono">stt/</code> с рантаймом
+              (transcribe.dll и соседние DLL) не входит в поставку — скопируйте
+              её целиком с рабочей машины рядом с <code className="font-mono">start.bat</code>.
+            </span>
+          </p>
+        )}
+        {service?.error && st?.runtimeFound !== false && (
           <p className="text-xs text-red-300/90 flex items-start gap-1.5">
             <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             {service.error}

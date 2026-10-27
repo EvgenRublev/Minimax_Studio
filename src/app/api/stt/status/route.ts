@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readdirSync, statSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sttStatus, STT_PORT } from '@/lib/stt-runner'
@@ -38,6 +38,9 @@ export async function GET() {
   ]
   const byDir = modelDirs.map((d) => ({ dir: d, files: listModels(d) }))
   const allModels = byDir.flatMap((d) => d.files)
+  // (правка 743) Рантайм STT (transcribe.dll) в репозиторий не входит — UI
+  // должен честно сказать «недоступен», а не «остановлен, запустится сам».
+  const runtimePath = join(sttDir, 'transcribe.dll')
 
   let health: Record<string, unknown> | null = null
   if (sttStatus().running) {
@@ -57,6 +60,8 @@ export async function GET() {
     model: cfg.sttModel,
     models: allModels,
     modelDirs: byDir,
+    runtimePath,
+    runtimeFound: existsSync(runtimePath),
     language: cfg.sttLanguage,
     threads: cfg.sttThreads,
     service: sttStatus(),

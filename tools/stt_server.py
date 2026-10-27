@@ -41,6 +41,15 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# (правка 743) Принудительный UTF-8 для stdout/stderr. На русской Windows Python
+# печатает в cp866/cp1251, а Node читает pipe как UTF-8 → в UI вместо причины
+# ошибки приходили «кракозябры». Ошибки запуска должны быть читаемыми.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 # ── args ──
 # (правка 72) STT-рантайм встроен в проект: <root>/stt (рядом с tools/)
 _DEFAULT_STT_DIR = os.path.normpath(
