@@ -577,17 +577,18 @@ export async function finalizePendingMeta(
 
       // (правка 699) FLF — всегда, ref с галочкой аудио-гайда — по флагу
       // keep_original_audio: подставляем оригинальную дорожку (references
-      // type='audio') вместо перегенерированной, обрезая по длине видео.
+      // type='audio') вместо перегенерированной, ОБРЕЗАННУЮ по триму рефа
+      // (правка 728) и по длине видео.
       // Делаем ДО пробы/сайдкара — иначе probe увидит старый аудио-стим.
       if (i === 0 && OUTPUT_DIR) {
         const videoPath = path.join(OUTPUT_DIR, o.subfolder || '', path.basename(o.filename))
-        const audioPath = resolveOriginalAudioReplacement(params)
-        if (audioPath) {
+        const swap = resolveOriginalAudioReplacement(params)
+        if (swap) {
           try {
-            const ok = await replaceVideoAudio(videoPath, audioPath)
+            const ok = await replaceVideoAudio(videoPath, swap.path, { start: swap.trimStart, end: swap.trimEnd })
             if (ok) {
-              console.log(`[replace-audio] ${params.generation_mode}: swapped audio in ${o.filename} from ${path.basename(audioPath)}`)
-              params.audio_replaced_from = path.basename(audioPath) // метка в сайдкар
+              console.log(`[replace-audio] ${params.generation_mode}: swapped audio in ${o.filename} from ${path.basename(swap.path)}`)
+              params.audio_replaced_from = path.basename(swap.path) // метка в сайдкар
             }
           } catch (err) {
             console.error('[replace-audio] flf swap failed:', err)
