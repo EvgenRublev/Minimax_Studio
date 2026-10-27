@@ -2,8 +2,8 @@
  * Model download manager — streams files from HuggingFace to disk,
  * tracks progress, and supports status queries.
  */
-import { createWriteStream, existsSync, mkdirSync, unlinkSync, statSync, statfsSync } from 'fs'
-import { dirname, join } from 'path'
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, statSync, statfsSync, renameSync, copyFileSync, readdirSync, rmdirSync } from 'fs'
+import { basename, dirname, join } from 'path'
 import { Readable } from 'stream'
 import { MODELS, type ModelDef } from './models-config'
 import { getAppConfig } from './app-config'
@@ -107,6 +107,35 @@ function sizeOk(abs: string, expected: number): boolean {
   }
 }
 
+/**
+ * (правка 732) Пользователи иногда кладут модель не файлом, а ПАПКОЙ с тем же
+ * именем: `.../qwen3.5-9b/mmproj-F16.gguf/mmproj-F16.gguf` (создали каталог и
+ * положили файл внутрь). existsSync такой путь подтверждает, но statSync — это
+ * каталог: размер 0 → студия считала модель не скачанной и предлагала качать
+ * заново, а запуск ассистента падал на каталоге вместо файла.
+ * Разворачиваем один уровень: файл с тем же именем внутри (или единственный
+ * файл в папке). Возвращает путь к файлу либо null.
+ */
+export function resolveModelFilePath(absPath: string): string | null {
+  try {
+    const st = statSync(absPath)
+    if (st.isFile()) return absPath
+    if (!st.isDirectory()) return null
+    const same = join(absPath, basename(absPath))
+    try {
+      if (statSync(same).isFile()) return same
+    } catch { /* файла с тем же именем внутри нет */ }
+    // Единственный файл в папке — тоже однозначно модель.
+    try {
+      const files = readdirSync(absPath, { withFileTypes: true }).filter((e) => e.isFile())
+      if (files.length === 1) return join(absPath, files[0].name)
+    } catch { /* каталог не читается */ }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /** Check if a model file already exists (and has reasonable size) */
 export function modelExists(modelId: string): boolean {
   const model = MODELS.find(m => m.id === modelId)
@@ -119,7 +148,13 @@ export function modelExists(modelId: string): boolean {
       return model.extractFiles.every(f => existsSync(join(dir, f)))
     }
     const abs = modelAbsPath(model)
-    if (existsSync(abs) && sizeOk(abs, model.sizeBytes)) return true
+    // (правка 732) Модель ассистента могли положить папкой с именем файла —
+    // resolveModelFilePath разворачивает такой каталог в файл. Для остальных
+    // моделей так не делаем: ComfyUI вложенный файл всё равно не найдёт.
+    const found = model.category === 'llm'
+      ? resolveModelFilePath(abs)
+      : (existsSync(abs) ? abs : null)
+    if (found && sizeOk(found, model.sizeBytes)) return true
     // (правка 505) Проверяем внешние папки моделей (extra paths) — если
     // пользователь указал свою папку с моделями, файл может лежать там.
     // relPath вида 'vae/xxx.safetensors' → категория='vae', файл='xxx.safetensors'.
@@ -139,7 +174,12 @@ export function modelExists(modelId: string): boolean {
         // Сначала полный подпуть (как его видит ComfyUI), затем — только имя.
         for (const candidate of subPath !== fileName ? [subPath, fileName] : [fileName]) {
           const extPath = join(extDir, ...candidate.split('/'))
-          if (existsSync(extPath) && sizeOk(extPath, model.sizeBytes)) return true
+          // (правка 732) Во внешней папке модель ассистента тоже может лежать
+          // каталогом с именем файла.
+          const extFile = model.category === 'llm'
+            ? resolveModelFilePath(extPath)
+            : (existsSync(extPath) ? extPath : null)
+          if (extFile && sizeOk(extFile, model.sizeBytes)) return true
         }
       }
     }
@@ -189,6 +229,75 @@ async function extractZipFiles(zipPath: string, targetDir: string, fileNames: st
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
+}
+
+/* ── (правка 731) Финализация скачанного файла: .part → целевое имя ──
+ * На Windows rename падает с EPERM/EACCES, даже когда запись уже завершена:
+ * дескриптор закрывается асинхронно после 'finish', а антивирус/индексатор
+ * в этот момент сканирует только что дописанный файл (918 МБ mmproj или
+ * 20 ГБ модель — это секунды/десятки секунд). Раньше ошибка была фатальной,
+ * а повторное «Скачать» отправляло Range-запрос за концом файла, получало
+ * 416, УДАЛЯЛО готовые гигабайты и качало заново — и падало так же, по кругу. */
+const RENAME_RETRY_DELAYS_MS = [100, 200, 300, 500, 700, 1000, 1000, 1000, 1000, 1500]
+
+/** true = в .part лежит практически весь файл, сеть не нужна. */
+function tmpFileComplete(tmpPath: string, model: ModelDef): boolean {
+  if (!(model.sizeBytes > 1_000_000)) return false
+  try {
+    // 99.5%: rename падает уже ПОСЛЕ полной записи, поэтому здесь допускаем
+    // только расхождение в округлении размера — иначе можно «финализировать»
+    // обрезанный файл, который потом не загрузится.
+    return statSync(tmpPath).size / model.sizeBytes >= 0.995
+  } catch {
+    return false
+  }
+}
+
+/** Переместить .part на место: повторы rename, затем копирование. */
+async function moveTmpIntoPlace(tmpPath: string, finalPath: string): Promise<void> {
+  let lastErr: unknown = null
+  for (let i = 0; i <= RENAME_RETRY_DELAYS_MS.length; i++) {
+    try {
+      renameSync(tmpPath, finalPath)
+      return
+    } catch (e) {
+      lastErr = e
+      const code = (e as NodeJS.ErrnoException).code
+      // EXDEV — другой том (съёмный/сетевой диск): rename невозможен, сразу
+      // копируем. EPERM/EACCES/EBUSY — файл ещё держит ОС/антивирус: ждём.
+      if (code === 'EXDEV' || code === 'ENOTSUP' || code === 'EISDIR') break
+      if (i < RENAME_RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RENAME_RETRY_DELAYS_MS[i]))
+      }
+    }
+  }
+  // Запасной путь: копирование не переименовывает каталог, поэтому проходит
+  // и когда rename блокирован. Затем убираем .part.
+  try {
+    copyFileSync(tmpPath, finalPath)
+    try { unlinkSync(tmpPath) } catch { /* .part останется — не критично */ }
+    console.log(`[download] rename не удался — файл скопирован: ${finalPath}`)
+    return
+  } catch { /* копия тоже не прошла — ниже отдаём понятную ошибку */ }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr)
+  throw new Error(
+    `Не удалось переименовать файл: ${msg}. Файл скачан полностью — заново качать не нужно: ` +
+    'закройте антивирус или программу, которая держит файл, и нажмите «Скачать» ещё раз — ' +
+    'программа только завершит сохранение.',
+  )
+}
+
+/** Доставить скачанный .part на место (zip-движок Bonsai — распаковать). */
+async function finalizeDownloadedFile(model: ModelDef, tmpPath: string, finalPath: string): Promise<void> {
+  if (model.extractFiles) {
+    console.log(`[download] Extracting ${model.extractFiles.length} files from zip: ${model.label}`)
+    mkdirSync(dirname(finalPath), { recursive: true })
+    await extractZipFiles(tmpPath, finalPath, model.extractFiles)
+    try { unlinkSync(tmpPath) } catch { /* уже удалён */ }
+    return
+  }
+  console.log(`[download] Renaming: ${tmpPath} → ${finalPath}`)
+  await moveTmpIntoPlace(tmpPath, finalPath)
 }
 
 /** Get status for all models */
@@ -363,6 +472,19 @@ async function doDownloadWithRetry(
 
   // (правка 337) Контроллер отмены живёт до конца ВСЕХ ретраев.
   try {
+  // (правка 731) Файл уже докачан, но финальное переименование в прошлый раз
+  // не удалось (EPERM — файл держал антивирус/ОС). Не качаем заново: Range-
+  // запрос за концом файла получал 416, ветка 416 удаляла готовые гигабайты
+  // и загрузка начиналась с нуля — и падала так же. Просто доводим сохранение.
+  if (tmpFileComplete(tmpPath, model)) {
+    console.log(`[download] .part уже полный — только финализирую: ${model.label}`)
+    await finalizeDownloadedFile(model, tmpPath, finalPath)
+    state.status = 'done'
+    state.speed = 0
+    console.log(`[download] DONE (без повторной загрузки): ${model.label}`)
+    activeDownloads.delete(model.id)
+    return
+  }
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
@@ -426,8 +548,8 @@ async function doDownload(
   controller: AbortController,
   resumeBytes: number,
 ) {
-  const { renameSync } = await import('fs')
-  
+  // (правка 731) renameSync/copyFileSync импортированы сверху: финализация
+  // файла вынесена в moveTmpIntoPlace.
   // (фикс) Логирование — раньше при ошибке не было понятно, на каком этапе
   // упало скачивание. Теперь ключевые этапы пишутся в консоль.
   console.log(`[download] START: ${model.label} (${model.sizeLabel})`)
@@ -513,7 +635,10 @@ async function doDownload(
 
     await new Promise<void>((resolve, reject) => {
       nodeStream.pipe(fileStream)
-      fileStream.on('finish', () => {
+      // (правка 731) Ждём 'close', а не 'finish': 'finish' — «данные отданы
+      // ОС», файловый дескриптор закрывается асинхронно уже ПОСЛЕ него, и
+      // rename в этот момент на Windows падал с EPERM (файл ещё открыт).
+      fileStream.on('close', () => {
         console.log(`[download] File stream finished: ${model.label}`)
         resolve()
       })
@@ -568,19 +693,9 @@ async function doDownload(
     // ошибка не обрабатывалась, и state.status оставался 'downloading' forever.
     // (правка 138) zip-записи (движок Bonsai): вместо rename — распаковка
     // избранных файлов в целевой каталог, zip удаляется.
-    if (model.extractFiles) {
-      console.log(`[download] Extracting ${model.extractFiles.length} files from zip: ${model.label}`)
-      mkdirSync(dirname(finalPath), { recursive: true })
-      await extractZipFiles(tmpPath, finalPath, model.extractFiles)
-      try { unlinkSync(tmpPath) } catch { /* уже удалён */ }
-    } else {
-      console.log(`[download] Renaming: ${tmpPath} → ${finalPath}`)
-      try {
-        renameSync(tmpPath, finalPath)
-      } catch (e) {
-        throw new Error(`Не удалось переименовать файл: ${e instanceof Error ? e.message : String(e)}`)
-      }
-    }
+    // (правка 731) Финализация вынесена в общий helper: тот же код нужен,
+    // когда файл уже докачан, а rename в прошлый раз не удался (EPERM).
+    await finalizeDownloadedFile(model, tmpPath, finalPath)
     state.status = 'done'
     state.speed = 0
     console.log(`[download] DONE: ${model.label}`)
@@ -646,7 +761,13 @@ export function deleteModel(modelId: string): { ok: boolean; error?: string } {
       }
       console.log(`[download] Deleted ${removed}/${model.extractFiles.length} files: ${model.label}`)
     } else {
-      if (existsSync(absPath)) unlinkSync(absPath)
+      // (правка 732) Модель могла лежать папкой с именем файла — удаляем сам
+      // файл и, если обёртка осталась пустой, саму папку.
+      const target = resolveModelFilePath(absPath) ?? absPath
+      if (existsSync(target)) unlinkSync(target)
+      if (target !== absPath) {
+        try { rmdirSync(absPath) } catch { /* внутри остались файлы — не трогаем */ }
+      }
       console.log(`[download] Deleted: ${model.label}`)
     }
     // Хвосты незавершённых загрузок, включая общий ZIP от старых версий.

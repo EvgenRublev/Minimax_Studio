@@ -13,6 +13,7 @@ import path from 'path'
 import { existsSync, statSync } from 'fs'
 import { getAppConfig } from './app-config'
 import { MODELS } from './models-config'
+import { resolveModelFilePath } from './model-downloader'
 
 const execFileAsync = promisify(execFile)
 
@@ -177,6 +178,24 @@ let actualCtx: number | null = null
  */
 let spawnSig: string | null = null
 
+/* ── (правка 730) Бюджет холодного старта модели ──
+ * Раньше healthUp ждал ровно 180 с и в любом случае отвечал «Модель не
+ * загрузилась за 3 минуты». При этом процесс НЕ убивался и часто поднимался
+ * позже, а следующая попытка через 90 с его УБИВАЛА (правка 259), выбрасывая
+ * уже почти сделанную загрузку — отсюда «иногда ошибка, иногда нет».
+ * Первый запуск (GGUF ~8 ГБ с HDD, mmproj, проверка антивирусом, выгрузка
+ * ComfyUI) законно занимает больше трёх минут. Клиентский таймаут заголовков
+ * чата — 10 минут (assistant-stream, правка 267), так что ждать дольше
+ * безопасно. */
+const COLD_START_TIMEOUT_MS = 360_000
+/** Запас сверх бюджета: процесс жив, но /health молчит. Только после него
+ *  считаем загрузку зависшей и перезапускаем (правка 259). */
+const STARTUP_GRACE_MS = 120_000
+/** Общий текст для «модель ещё грузится»: это не поломка, загрузка идёт
+ *  в фоне, повторное сообщение просто дожидается её конца. */
+const STILL_LOADING_ERROR =
+  'Модель ассистента ещё загружается — первый запуск может занимать несколько минут. Подождите минуту и отправьте сообщение снова: загрузка уже идёт, заново ничего не начнётся.'
+
 /** Сигнатура ЖЕЛАЕМОЙ конфигурации по текущему config.ini. */
 function desiredSpawnSig(): string {
   try {
@@ -224,7 +243,10 @@ export function llmModelPath(): string {
   // Резолвим через MODELS + активную модель (правка 52): так корректно
   // работают и кванты Gemma в llm/, и Qwen3.5 9B в подпапке llm/qwen3.5-9b/.
   const def = MODELS.find((m) => m.id === activeLlmModelId())
-  return path.join(cfg.comfyRoot, 'ComfyUI', 'models', def?.relPath ?? 'llm')
+  const raw = path.join(cfg.comfyRoot, 'ComfyUI', 'models', def?.relPath ?? 'llm')
+  // (правка 732) Модель могла быть положена папкой с именем файла — отдаём
+  // путь к самому файлу, иначе llama-server получал каталог и падал.
+  return resolveModelFilePath(raw) ?? raw
 }
 
 /** Path to the multimodal projector (vision) file, or null if not present.
@@ -235,7 +257,8 @@ function llmMmprojPath(): string | null {
   // (правка 257) Своя модель: mmproj из config, если указан и существует.
   if (llmBackend() === 'custom') {
     const cfg = getAppConfig()
-    return cfg.llmCustomMmproj && existsSync(cfg.llmCustomMmproj) ? cfg.llmCustomMmproj : null
+    // (правка 732) ...и даже если он лежит папкой с тем же именем.
+    return resolveModelFilePath(cfg.llmCustomMmproj)
   }
   // (правка 162) Bonsai: свой mmproj в папке сборки, не в ComfyUI/models
   if (llmBackend() === 'bonsai') {
@@ -249,7 +272,9 @@ function llmMmprojPath(): string | null {
   const def = MODELS.find((m) => m.id === mmId)
   if (!def) return null
   const p = path.join(cfg.comfyRoot, 'ComfyUI', 'models', def.relPath)
-  return existsSync(p) ? p : null
+  // (правка 732) Каталог с именем файла (пользователь так разложил модель)
+  // разворачиваем в сам файл — см. resolveModelFilePath.
+  return resolveModelFilePath(p)
 }
 
 export function llmModelExists(): boolean {
@@ -417,7 +442,18 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
         // (PID известен) — убиваем и проваливаемся в ветку холодного спавна
         // ниже (рестарт ровно один раз за вызов). Если бы PID был неизвестен
         // (чужой/осиротевший процесс на порту) — вслепую не убиваем.
-        console.warn('[llm] (правка 259) процесс жив, но /health молчит 90 с — убиваю и перезапускаю')
+        //
+        // (правка 730) Но пока процесс в окне холодного старта, «молчит 90 с»
+        // — это НЕ деадлок, а идущая загрузка: kill выбрасывал уже сделанную
+        // работу и запускал всё заново (второй источник «Модель не загрузилась
+        // за 3 минуты»). В этом окне просто сообщаем, что модель грузится, —
+        // сам процесс продолжает загрузку и у следующей попытки будет готов.
+        const startupAge = startedAt ? Date.now() - startedAt : Number.POSITIVE_INFINITY
+        if (startupAge < COLD_START_TIMEOUT_MS + STARTUP_GRACE_MS) {
+          console.log(`[llm] (правка 730) процесс жив, /health молчит 90 с, но загрузка идёт ${Math.round(startupAge / 1000)} с — не перезапускаю`)
+          return { ok: false, error: STILL_LOADING_ERROR }
+        }
+        console.warn('[llm] (правка 259/730) процесс жив, но /health молчит 90 с — убиваю и перезапускаю')
         await stopLlm()
       } else {
         return { ok: false, error: 'LLM сервер не отвечает' }
@@ -639,10 +675,20 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
         stopBonsaiIdleWatchdog()
       })
 
-      const up = await healthUp(180_000)
-      return up
-        ? { ok: true }
-        : { ok: false, error: 'Модель не загрузилась за 3 минуты (см. лог сервера)' }
+      const up = await healthUp(COLD_START_TIMEOUT_MS)
+      if (up) return { ok: true }
+      // (правка 730) Различаем «процесс умер» и «ещё грузится»: раньше в обоих
+      // случаях отдавали «Модель не загрузилась за 3 минуты (см. лог сервера)»,
+      // и пользователь не понимал, ждать ему или чинить. Процесс при таймауте
+      // НЕ убиваем: загрузка продолжится, повторное сообщение подхватит её
+      // (см. окно старта в ветке «already running» выше).
+      const dead = !proc || proc.exitCode !== null || proc.signalCode !== null
+      return {
+        ok: false,
+        error: dead
+          ? 'Модель ассистента не запустилась: процесс завершился при загрузке (не хватило VRAM/RAM или повреждён файл модели). Подробности — в логе сервера.'
+          : STILL_LOADING_ERROR,
+      }
     } catch (err) {
       // Чистим ссылку только на процесс, созданный ЭТИМ запуском:
       // до spawn мог оставаться старый (kill'нутый, ещё умирающий) процесс.

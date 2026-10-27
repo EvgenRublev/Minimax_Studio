@@ -615,8 +615,8 @@ export async function onQueueDrained(): Promise<void> {
   // Быстрая проверка под замком: не конкурируем со стартом чата/генерации.
   // (правка 716) withLock ОТКЛОНЯЕТСЯ при превышении LOCK_WAIT_TIMEOUT_MS
   // (120 с) — а замок штатно удерживает startChat на время загрузки модели
-  // (до 180 с). Раньше этот await был вне try/catch, а вызов шёл как
-  // `void onQueueDrained()` — необработанный rejection в процессе Next.js →
+  // (до 6 мин, правка 730). Раньше этот await был вне try/catch, а вызов шёл
+  // как `void onQueueDrained()` — необработанный rejection в процессе Next.js →
   // падение сервера. Теперь ловим и логируем.
   let shouldEvict = false
   try {
