@@ -1068,8 +1068,18 @@ export function GenerateView() {
         <Badge variant="secondary" className="text-[10px]">{video.resolution}</Badge>
       )}
       <Badge variant="secondary" className="text-[10px]">{(video.videoLength / fps).toFixed(1)} с · {fps} fps</Badge>
-      <Badge className="text-[10px] bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
-        2-Pass · {video.finalResolution || 'auto'} MP
+      {/* (правка 742) Количество проходов зависит от пайплайна: драфт —
+          ОДИН проход (шаблон не добавляет узлы Pass 2), полное — два.
+          Раньше бейдж был статичным «2-Pass» и в драфте врал. */}
+      <Badge
+        className={cn(
+          'text-[10px]',
+          video.pipeline === 'draft'
+            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/15'
+            : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/15',
+        )}
+      >
+        {video.pipeline === 'draft' ? '1-Pass' : '2-Pass'} · {video.finalResolution || 'auto'} MP
       </Badge>
       {video.refs.length > 0 && (
         <Badge variant="secondary" className="text-[10px]">{video.refs.length} референс(ов)</Badge>
