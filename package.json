@@ -5,7 +5,7 @@
   "productName": "Minimax H3 Studio",
   "description": "Локальная студия генерации кинематографичных видео со звуком на базе модели MiniMax H3 (ComfyUI + Electron).",
   "author": "MiniMax H3 Studio",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=18.0.0"
   },

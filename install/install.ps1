@@ -432,7 +432,10 @@ if (-not $SkipComfy) {
     # --- 5. библиотеки ---
     Step 5 8 'Библиотеки Python (~7 ГБ, самый долгий шаг)'
 
-    Invoke-Pip @('-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel', '--no-warn-script-location', '--disable-pip-version-check') 'обновление pip'
+    # (правка 740) setuptools фиксируем на версии из requirements.lock.txt:
+    # `--upgrade setuptools` без версии ставит новейшую (84.2.1+), а ComfyUI
+    # требует setuptools<82 — на чистой машине установка падала (issue #4).
+    Invoke-Pip @('-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools==78.1.0', 'wheel', '--no-warn-script-location', '--disable-pip-version-check') 'обновление pip'
 
     Invoke-Pip @('-m', 'pip', 'install',
         'torch==2.11.0+cu130', 'torchvision==0.26.0+cu130', 'torchaudio==2.11.0+cu130',

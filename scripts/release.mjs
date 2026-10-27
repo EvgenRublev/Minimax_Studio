@@ -112,6 +112,8 @@ check(existsSync(join(ROOT, '.env')), '.env (COMFY_URL)', 'скопируйте 
 check(existsSync(join(ROOT, 'public', 'splash-videos')), 'public/splash-videos (видео-заставка)');
 check(existsSync(join(ROOT, 'public', 'logo.svg')), 'public/logo.svg');
 check(existsSync(join(ROOT, 'config', 'config.ini')), 'config/config.ini');
+// (правка 740) GPL-3.0 требует передавать лицензию вместе с программой.
+check(existsSync(join(ROOT, 'LICENSE')), 'LICENSE (GPL-3.0)');
 
 // Мусор в корне.
 const junk = [];

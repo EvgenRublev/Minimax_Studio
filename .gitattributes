@@ -1,0 +1,34 @@
+# (правка 740) Единые окончания строк, чтобы клонирование на Windows не
+# переписывало файлы и не сыпало предупреждениями «LF will be replaced by CRLF».
+# В репозитории текст хранится с LF; рабочие копии скриптов Windows — с CRLF.
+* text=auto
+
+.gitattributes text eol=lf
+LICENSE text eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.mp4 binary
+*.webm binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
