@@ -9,6 +9,7 @@ import {
   useImperativeHandle,
 } from 'react'
 import { cn } from '@/lib/utils'
+import { FilmIcon, ImageIcon, AudioLinesIcon } from 'lucide-react'
 import {
   MentionPreviewCard,
   parseMentionTag,
@@ -681,7 +682,11 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
                         : 'hover:bg-white/5',
                     )}
                   >
-                    {m.previewUrl ? (
+                    {/* (правка 735) Миниатюра-картинка только для изображений:
+                        previewUrl у видео/аудио — это blob самого файла (mp4/mp3),
+                        <img> его не декодирует и в списке оставался пустой
+                        квадрат. Звук и видео показываем значком. */}
+                    {m.kind === 'image' && m.previewUrl ? (
                       <img
                         src={m.previewUrl}
                         alt=""
@@ -690,11 +695,17 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
                     ) : (
                       <span
                         className={cn(
-                          'inline-flex items-center justify-center w-5 h-5 shrink-0 rounded text-[10px] font-medium',
+                          'inline-flex items-center justify-center w-5 h-5 shrink-0 rounded',
                           m.color || 'bg-purple-500/15 text-purple-400',
                         )}
                       >
-                        {m.kind === 'image' ? '🖼' : m.kind === 'video' ? '🎬' : '🎵'}
+                        {m.kind === 'image' ? (
+                          <ImageIcon className="w-3 h-3" />
+                        ) : m.kind === 'video' ? (
+                          <FilmIcon className="w-3 h-3" />
+                        ) : (
+                          <AudioLinesIcon className="w-3 h-3" />
+                        )}
                       </span>
                     )}
                     <span className="flex-1 min-w-0">
