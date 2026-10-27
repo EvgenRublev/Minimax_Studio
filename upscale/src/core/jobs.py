@@ -149,17 +149,6 @@ class BoundedLogBuffer:
         seen: set[str] = set()
         return [line for line in [*important, *tail] if not (line in seen or seen.add(line))]
 
-    # (правка 716) Совместимость с list: код пайплайнов делает
-    # encoder_logs[-40:] (последние строки) и кладёт лог в JSON-отчёт.
-    def __getitem__(self, index):  # type: ignore[no-untyped-def]
-        return self.snapshot()[index]
-
-    def __len__(self) -> int:
-        return len(self.snapshot())
-
-    def __iter__(self):  # type: ignore[no-untyped-def]
-        return iter(self.snapshot())
-
     @property
     def dropped_lines(self) -> int:
         with self._lock:

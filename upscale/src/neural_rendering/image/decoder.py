@@ -86,12 +86,8 @@ def decode_image(path: str | os.PathLike[str]) -> _DecodedImage:
             warnings.append(f"Used the first frame/page of {frame_count}.")
             image.seek(0)
         original_mode = image.mode
-        # (правка 716) Метаданные снимаем ПОСЛЕ exif_transpose: ориентация
-        # меняет и сам EXIF-блок, и часть info (пиксели на дюйм, XMP).
-        # Раньше info копировался до трансформации, и в выходной файл
-        # попадало смешанное состояние «до/после».
-        image = ImageOps.exif_transpose(image)
         info = dict(image.info)
+        image = ImageOps.exif_transpose(image)
         image.load()
         if original_mode not in {"1", "L", "LA", "P", "RGB", "RGBA", "CMYK"}:
             warnings.append(f"Converted {original_mode} source data to 8-bit SDR sRGB.")

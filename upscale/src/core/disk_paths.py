@@ -105,20 +105,7 @@ class OutputFile:
             # Windows rename is atomic and fails if destination already exists.
             os.rename(self.temporary, self.destination)
         else:
-            # (правка 716) os.link падает с FileExistsError, если цель
-            # появилась между проверкой и публикацией. Раньше этот файл
-            # оставался на диске (stray) и блокировал следующий запуск.
-            try:
-                os.link(self.temporary, self.destination)
-            except FileExistsError:
-                raise
-            except OSError:
-                # Файловая система не поддерживает жёсткие ссылки
-                # (например, некоторые сетевые) — откатываемся на rename.
-                os.replace(self.temporary, self.destination)
-                stat = self.destination.stat()
-                self._published_identity = (stat.st_dev, stat.st_ino)
-                return
+            os.link(self.temporary, self.destination)
             self.temporary.unlink()
         stat = self.destination.stat()
         self._published_identity = (stat.st_dev, stat.st_ino)

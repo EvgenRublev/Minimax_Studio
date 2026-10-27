@@ -40,8 +40,7 @@ def runtime_files() -> None:
 def _probe(luid: str, worker_stamp: int, vsr_stamp: int, hdr_stamp: int) -> dict:
     controller = current_job_controller() or JobController()
     process = subprocess.Popen([str(WORKER), "--probe", "--gpu-luid", luid], cwd=RUNTIME_DIR,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
     controller.register(process)
     deadline = time.monotonic() + 90
     try:

@@ -168,6 +168,8 @@ def _final_mux_once(
         *(["-copyts"] if source_time_origin is not None else []),
         "-i",
         str(temp_video),
+        "-t",
+        f"{duration:.9f}",
         *(["-itsoffset", f"{-source_time_origin:.9f}"] if source_time_origin is not None else []),
         "-i",
         str(source),
@@ -177,13 +179,6 @@ def _final_mux_once(
         "-map_chapters",
         "1",
         *streams,
-        # (правка 716) -t — ОПЦИЯ ВЫВОДА, поэтому ставим её ПОСЛЕ всех -i.
-        # Раньше она стояла между двумя -i и становилась опцией ВХОДА (в ffmpeg
-        # опция перед -i относится к следующему входу) — ограничивала не
-        # длительность вывода, а объём чтения source. При source_time_origin
-        # шкала source сдвинута на -origin, поэтому хвост аудио терялся.
-        "-t",
-        f"{duration:.9f}",
         *(["-avoid_negative_ts", "disabled", "-metadata:s:v:0", "rotate=0"] if source_time_origin is not None else []),
         *(["-metadata", "comment=" + comment] if comment is not None else []),
         str(output),

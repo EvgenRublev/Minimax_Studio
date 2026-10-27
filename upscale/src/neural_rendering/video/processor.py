@@ -102,21 +102,18 @@ def convert_video(
                 return
             try:
                 v = float(value)
-                # (правка 716) Clamp применяется к ИТОГОВОМУ v. Раньше в ветке
-                # else значение пересчитывалось из сырого `value`, т.е. clamp
-                # отменялся — и на старте/финише рендера (v <= 0.01 / v >= 0.99)
-                # в прогресс-бар уходили значения вне [0, 1]. Близкий двойник
-                # frame_interpolation/processor.py такой ошибки не содержит.
                 v = 0.0 if v < 0 else (1.0 if v > 1 else v)
                 elapsed = time.perf_counter() - started
                 if 0.01 < v < 0.99 and elapsed > 0.5:
                     eta = elapsed * (1 - v) / max(v, 1e-6)
                     desc = f"{desc} - Time Remaining: {eta:.1f}s"
+                else:
+                    v = float(value) if isinstance(value, (int, float)) else v
                 # Use positional `desc` so it works for both gr.Progress(desc=) and report_item(message)
                 progress(v, desc)
             except Exception:
                 try:
-                    progress(min(1.0, max(0.0, float(value))), desc)
+                    progress(value, desc)
                 except Exception:
                     pass
 
@@ -661,7 +658,7 @@ def convert_video(
                 "timings": timings,
                 "worker_log": session.worker_logs,
                 "worker_log_dropped_lines": session.worker_log_dropped_lines,
-                "encoder_log": encoder_logs.snapshot(),
+                "encoder_log": encoder_logs,
                 "dlssnr_evidence": feature_evidence["evidence"],
             }
             report_path = LOGS / f"{output.name}.report.json"

@@ -374,29 +374,13 @@ def _job_list_payload() -> list[dict[str, Any]]:
 
 def _worker(job: Job) -> None:
     global RENDER_BUSY
-    # (правка 716) Импорт — ВНУТРИ защитного блока: раньше он стоял выше
-    # try/finally, и сбой импорта (или любое BaseException) оставлял
-    # RENDER_BUSY во True навсегда — мост переставал принимать задачи.
-    try:
-        from src.core.jobs import Cancelled, JobController
-    except BaseException:
-        log(f"job {job.id} [{job.feature}] не удалось импортировать src.core.jobs:")
-        log(traceback.format_exc(limit=6))
-        job.status = "error"
-        job.error = "Не удалось запустить обработку"
-        with RENDER_BUSY_LOCK:
-            RENDER_BUSY = False
-        return
+    from src.core.jobs import Cancelled, JobController
 
     defn = FEATURES.get(job.feature)
     if defn is None:
         job.status = "error"
         job.error = f"Неизвестная функция: {job.feature}"
-        # (правка 356) RENDER_BUSY сбрасываем под локом, как в finally ниже —
-        # без лока возможна гонка с одновременным POST /render (проверка +
-        # установка в do_POST тоже под RENDER_BUSY_LOCK).
-        with RENDER_BUSY_LOCK:
-            RENDER_BUSY = False
+        RENDER_BUSY = False
         return
 
     job.status = "running"
@@ -430,13 +414,9 @@ def _worker(job: Job) -> None:
             job.output = asdict(result)
         else:
             job.output = {"output_path": str(result)}
-        # (правка 716) Порядок важен: прогресс и сообщение выставляются
-        # ДО статуса. Раньше статус ставился первым, и HTTP-опрос /jobs
-        # (другой поток) мог увидеть status="done" при progress=0.4 —
-        # UI показывал «готово» с неполным прогрессом.
+        job.status = "done"
         job.progress = 1.0
         job.message = "Готово"
-        job.status = "done"
         out = job.output.get("output_path") if isinstance(job.output, dict) else None
         log(f"job {job.id} [{job.feature}] готово: {out}")
     except Cancelled:
@@ -466,32 +446,20 @@ def _start_job(feature: str, input_path: str, options_raw: dict[str, Any]) -> Jo
         if RENDER_BUSY:
             raise BusyRender()
         RENDER_BUSY = True
-    # (правка 716) Создание job'а и запуск потока — ПОД try/except.
-    # Раньше RENDER_BUSY=True ставился ДО этих строк, а сбрасывался только в
-    # finally потока _worker. Любое исключение здесь (ошибка импорта
-    # JobController, «не удалось создать поток» под нагрузкой) оставляло флаг
-    # во True НАВСЕГДА: мост навсегда отдавал 409 «GPU занята» даже при свободной
-    # GPU, и сбросить флаг было нечем.
-    try:
-        job = Job(feature, input_path, options_raw)
-        # Контроллер — сразу при создании job: отмена в окне queued→running
-        # (поток ещё не дошёл до пайплайна) раньше терялась молча.
-        from src.core.jobs import JobController
+    job = Job(feature, input_path, options_raw)
+    # Контроллер — сразу при создании job: отмена в окне queued→running
+    # (поток ещё не дошёл до пайплайна) раньше терялась молча.
+    from src.core.jobs import JobController
 
-        job.controller = JobController()
-        with JOBS_LOCK:
-            JOBS[job.id] = job
-            if len(JOBS) > 200:
-                oldest = sorted(JOBS.items(), key=lambda kv: kv[1].created)[:50]
-                for key, _ in oldest:
-                    JOBS.pop(key, None)
-        threading.Thread(target=_worker, args=(job,), daemon=True, name=f"upscale-{job.id}").start()
-        return job
-    except BaseException:
-        # Поток не стартовал → его finally не сработает → сбрасываем флаг сами.
-        with RENDER_BUSY_LOCK:
-            RENDER_BUSY = False
-        raise
+    job.controller = JobController()
+    with JOBS_LOCK:
+        JOBS[job.id] = job
+        if len(JOBS) > 200:
+            oldest = sorted(JOBS.items(), key=lambda kv: kv[1].created)[:50]
+            for key, _ in oldest:
+                JOBS.pop(key, None)
+    threading.Thread(target=_worker, args=(job,), daemon=True, name=f"upscale-{job.id}").start()
+    return job
 
 
 class BusyRender(RuntimeError):
@@ -552,36 +520,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
-        # (правка 716) Убрано 'Access-Control-Allow-Origin: *'. Мост слушает
-        # 127.0.0.1 и обращается к нему ТОЛЬКО серверная часть студии
-        # (src/lib/upscale-runner.ts) — браузер к этому порту не ходит.
-        # С '*' любой открытый сайт мог прочитать /probe и /jobs (абсолютные
-        # локальные пути, имена файлов) и запускать рендеры на машине
-        # пользователя (простой запрос с Content-Type: text/plain обходит
-        # preflight). Ответы моста теперь читает только свой origin.
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         try:
             self.wfile.write(payload)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
-    def _origin_rejected(self) -> bool:
-        """(правка 716) Отклонить запрос, пришедший из браузера.
-
-        Браузер всегда присылает Origin для cross-origin запросов; серверная
-        часть студии (Node fetch) Origin не шлёт. Поэтому наличие Origin
-        означает «это веб-страница», а не студия → 403. Закрывает и CSRF,
-        и DNS-rebinding с чтением метаданных локальных файлов."""
-        origin = self.headers.get("Origin")
-        if not origin:
-            return False
-        try:
-            from urllib.parse import urlsplit
-            parts = urlsplit(origin)
-        except Exception:
-            return True
-        host = (parts.hostname or "").lower()
-        return host not in ("127.0.0.1", "localhost", "::1")
 
     def _read_json_body(self, limit: int = 1_000_000) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
@@ -603,9 +547,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self._path()
         try:
-            if self._origin_rejected():
-                self._send_json(403, {"error": "Cross-origin запрос запрещён"})
-                return
             if path in ("/", "/health"):
                 self._send_json(200, {
                     "ok": True,
@@ -642,9 +583,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self._path()
         try:
-            if self._origin_rejected():
-                self._send_json(403, {"error": "Cross-origin запрос запрещён"})
-                return
             body = self._read_json_body()
             if path == "/render":
                 feature = str(body.get("feature") or "")

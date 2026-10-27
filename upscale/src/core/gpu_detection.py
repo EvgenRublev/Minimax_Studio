@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import re
 import subprocess
+from functools import lru_cache
 from typing import Any
 
 
@@ -53,26 +54,8 @@ def _cuda_device_identities() -> dict[str, dict[str, Any]]:
     return identities
 
 
-# (правка 716) Результат (в т.ч. ОШИБКА) кэшируется вручную: lru_cache
-# НЕ кэширует исключения, поэтому на машине без nvidia-smi каждый вызов
-# (а он идёт на каждый рендер и пробу) платил полный 10-секундный таймаут
-# nvidia-smi — по 10 секунд на каждую операцию.
-_GPU_CACHE: tuple[dict[str, Any], ...] | Exception | None = None
-
-
+@lru_cache(maxsize=1)
 def detect_gpus() -> tuple[dict[str, Any], ...]:
-    global _GPU_CACHE
-    if _GPU_CACHE is None:
-        try:
-            _GPU_CACHE = _detect_gpus_uncached()
-        except Exception as exc:  # noqa: BLE001 — кэшируем и ошибку
-            _GPU_CACHE = exc
-    if isinstance(_GPU_CACHE, Exception):
-        raise _GPU_CACHE
-    return _GPU_CACHE
-
-
-def _detect_gpus_uncached() -> tuple[dict[str, Any], ...]:
     command = [
         "nvidia-smi",
         "--query-gpu=index,uuid,pci.bus_id,name,driver_version,memory.total",

@@ -338,13 +338,8 @@ def start_encoder(
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     controller.register(process)
-    # (правка 716) Лог ffmpeg ВСЕГДА ограничен хвостом (BoundedLogBuffer).
-    # Раньше bounded_logs по умолчанию был False, и два пайплайна
-    # (NR-video и Frame-Interpolation) писали в обычный список КАЖДУЮ
-    # строку stderr за весь рендер: неограниченный рост памяти и
-    # многомегабайтный JSON-отчёт (encoder_log в отчёте NR-video).
-    logs = BoundedLogBuffer(max_tail=60)
+    logs = BoundedLogBuffer(max_tail=60) if bounded_logs else []
     assert process.stderr is not None
-    thread = threading.Thread(target=drain_bounded_text, args=(process.stderr, logs), daemon=True)
+    thread = threading.Thread(target=drain_bounded_text if bounded_logs else drain_text, args=(process.stderr, logs), daemon=True)
     thread.start()
     return process, thread, logs, selected, quality

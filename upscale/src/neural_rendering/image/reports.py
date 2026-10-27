@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -97,11 +96,7 @@ def _write_report(
         "dlssnr_evidence": evidence["evidence"],
         "elapsed_seconds": result.elapsed_seconds,
     }
-    # (правка 716) Имя отчёта — с меткой времени: раньше оно строилось из
-    # имени выходного файла, и два входа с одинаковым stem из разных папок
-    # ПЕРЕЗАПИСЫВАЛИ отчёт друг друга (в отчёте оставались данные последнего).
-    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 1_000_000:06d}"
-    report_path = LOGS / f"{Path(result.output_path).stem}_{stamp}.report.json"
+    report_path = LOGS / f"{Path(result.output_path).name}.report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return str(report_path)
 

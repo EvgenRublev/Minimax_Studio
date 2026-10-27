@@ -41,14 +41,9 @@ def _run_json(
             size = errors.seek(0, os.SEEK_END)
             errors.seek(max(0, size - 8000))
             details = errors.read().decode("utf-8", "replace").strip()
-            # (правка 716) strict_decode отменял рендер при ЛЮБОМ байте в
-            # stderr, даже когда ffprobe завершился с кодом 0 и корректно
-            # посчитал кадры (ffprobe часто пишет нефатальные per-frame
-            # предупреждения). Теперь ошибкой считаем ТОЛЬКО ненулевой код
-            # возврата; stderr при успешном выходе — информационный.
+            if strict_decode and size:
+                raise RuntimeError("Source decoding failed during frame-count verification:\n" + details)
             if process.returncode:
-                if strict_decode and size:
-                    raise RuntimeError("Source decoding failed during frame-count verification:\n" + details)
                 raise RuntimeError(details or "Media probe failed")
             return json.loads(stdout)
         finally:
@@ -70,35 +65,6 @@ def _positive_count(value: object) -> int:
         return max(0, int(value))
     except (ValueError, TypeError, OverflowError):
         return 0
-
-
-def _as_int(value: object, default: int = 0) -> int:
-    """(правка 716) Безопасное целое из значения ffprobe ("90.0", "N/A", None)."""
-    try:
-        if value is None:
-            return default
-        if isinstance(value, str):
-            value = value.strip()
-            if not value or value.upper() == "N/A":
-                return default
-        return int(float(value))
-    except (ValueError, TypeError, OverflowError):
-        return default
-
-
-def _as_float(value: object, default: float = 0.0) -> float:
-    """(правка 716) Безопасное число из значения ffprobe."""
-    try:
-        if value is None:
-            return default
-        if isinstance(value, str):
-            value = value.strip()
-            if not value or value.upper() == "N/A":
-                return default
-        result = float(value)
-        return result if result == result else default  # NaN → default
-    except (ValueError, TypeError, OverflowError):
-        return default
 
 
 def probe_video(
@@ -142,18 +108,12 @@ def probe_video(
     if not streams:
         raise ValueError("The selected file contains no decodable video stream.")
     stream = streams[0]
-    # (правка 716) Значения из ffprobe — ВНЕШНИЕ данные: они могут быть
-    # "N/A", "90.0" или отсутствовать. Раньше int(...)/float(...) падали с
-    # ValueError/KeyError прямо в probe — на пути, который выполняется перед
-    # КАЖДЫМ рендером. Теперь нечитаемое значение → безопасный дефолт.
-    rotation = _as_int((stream.get("tags") or {}).get("rotate"), 0)
+    rotation = int((stream.get("tags") or {}).get("rotate", 0) or 0)
     for side in stream.get("side_data_list") or []:
         if "rotation" in side:
-            rotation = _as_int(side["rotation"], rotation)
+            rotation = int(side["rotation"] or 0)
     rotation %= 360
-    width, height = _as_int(stream.get("width"), 0), _as_int(stream.get("height"), 0)
-    if width <= 0 or height <= 0:
-        raise ValueError("The selected file has no usable video dimensions.")
+    width, height = int(stream["width"]), int(stream["height"])
     if rotation in (90, 270):
         width, height = height, width
     declared_frames = _positive_count(stream.get("nb_frames"))
@@ -175,33 +135,20 @@ def probe_video(
     rate_text = average_rate_text if average_rate_text != "0/0" else nominal_rate_text
     if rate_text == "0/0":
         rate_text = "30/1"
-    # (правка 716) Fraction() бросает ValueError на мусорной строке вида
-    # "N/A" или "25/0" — probe идёт перед каждым рендером, поэтому читаем
-    # некорректную частоту как 30 fps, а не роняем рендер.
-    try:
-        rate = Fraction(rate_text)
-        if rate <= 0:
-            raise ValueError
-    except (ValueError, ZeroDivisionError, TypeError):
-        rate = Fraction(30, 1)
-    try:
-        nominal_rate = (
-            Fraction(nominal_rate_text)
-            if nominal_rate_text != "0/0"
-            else rate
-        )
-        if nominal_rate <= 0:
-            raise ValueError
-    except (ValueError, ZeroDivisionError, TypeError):
-        nominal_rate = rate
+    rate = Fraction(rate_text) if rate_text != "0/0" else Fraction(30, 1)
+    nominal_rate = (
+        Fraction(nominal_rate_text)
+        if nominal_rate_text != "0/0"
+        else rate
+    )
     transfer = stream.get("color_transfer") or "unknown"
     primaries = stream.get("color_primaries") or "unknown"
     color_space = stream.get("color_space") or "unknown"
     return {
         "width": width,
         "height": height,
-        "coded_width": _as_int(stream.get("width")),
-        "coded_height": _as_int(stream.get("height")),
+        "coded_width": int(stream["width"]),
+        "coded_height": int(stream["height"]),
         "rotation": rotation,
         "frames": frames,
         "frame_count_source": frame_count_source,
@@ -210,7 +157,7 @@ def probe_video(
         "nominal_rate": nominal_rate,
         "cfr": rate == nominal_rate,
         "time_base": Fraction(stream.get("time_base") or "1/1000"),
-        "duration": _as_float(
+        "duration": float(
             (data.get("format") or {}).get("duration") or stream.get("duration") or 0
         ),
         "codec": stream.get("codec_name") or "unknown",

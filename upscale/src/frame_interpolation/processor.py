@@ -518,16 +518,10 @@ def interpolate_video(
             controller.terminate_processes()
             if output_file is not None:
                 output_file.cleanup(rollback=True)
-            # (правка 716) Порядок проверок: сначала — ЯВЛЯЕТСЯ ли исключение
-            # отменой, потом — был ли отменён пользователем. Раньше сначала
-            # проверялся controller.cancel, и настоящая причина (Cancelled с
-            # подробным текстом, например «FFmpeg упал: …») терялась —
-            # пользователю всегда показывалось безликое «остановлено
-            # пользователем». Как в neural_rendering/video/processor.py.
-            if isinstance(exc, Cancelled):
-                raise
             if controller.cancel.is_set():
                 raise Cancelled("Frame interpolation stopped by user.") from exc
+            if isinstance(exc, Cancelled):
+                raise
             LOGS.mkdir(exist_ok=True)
             failure_stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 1_000_000:06d}"
             failure_path = LOGS / f"DLSSFG_{source.stem}_{failure_stamp}.failure.json"
