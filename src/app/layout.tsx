@@ -36,7 +36,7 @@ export default function RootLayout({
           <script
             suppressHydrationWarning
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null||s==='100')?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=p+'%';}catch(e){}})();`,
+              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null||s==='100')?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=p+'%';}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}})();`,
             }}
           />
           {children}

@@ -720,6 +720,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 />
               </button>
             </div>
+
+            {/* (правка 739) Выделение текста в интерфейсе (по умолчанию выкл.) */}
+            <SelectTextSwitcher />
           </div>
         )}
 
@@ -2074,6 +2077,73 @@ function UiScaleSwitcher() {
       <p className="text-[10px] text-muted-foreground/60">
         Меняет базовый размер шрифта — за ним масштабируется весь интерфейс. Применяется сразу и запоминается.
       </p>
+    </div>
+  )
+}
+
+/**
+ * (правка 739) «Выделение текста в интерфейсе» (Настройки → Внешний вид).
+ * По умолчанию выделение заблокировано (globals.css, правка 564); включённый
+ * свитч ставит атрибут data-select-text на <html> — правило в globals.css
+ * разрешает выделение глобально. Чисто клиентская настройка окна, поэтому
+ * localStorage ('h3-selectable-text'), как масштаб UI; на старте её
+ * подхватывает инлайн-скрипт в layout.tsx (без вспышки и рассинхрона).
+ */
+const SELECT_TEXT_KEY = 'h3-selectable-text'
+
+function applySelectText(on: boolean) {
+  const d = document.documentElement
+  if (on) d.setAttribute('data-select-text', '1')
+  else d.removeAttribute('data-select-text')
+}
+
+function SelectTextSwitcher() {
+  const [on, setOn] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    try {
+      setOn(localStorage.getItem(SELECT_TEXT_KEY) === '1')
+    } catch { /* приватный режим */ }
+  }, [])
+
+  const toggle = () => {
+    const next = !on
+    setOn(next)
+    try {
+      localStorage.setItem(SELECT_TEXT_KEY, next ? '1' : '0')
+    } catch { /* ignore */ }
+    applySelectText(next)
+  }
+
+  if (!mounted) return <div className="h-10" />
+
+  return (
+    <div className="flex items-center justify-between pt-2 border-t border-border">
+      <div>
+        <span className="text-xs text-muted-foreground">Выделение текста в интерфейсе</span>
+        <p className="text-[10px] text-muted-foreground/60">
+          Разрешить выделять и копировать текст в UI (по умолчанию заблокировано)
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        onClick={toggle}
+        className={cn(
+          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
+          on ? 'bg-cyan-600' : 'bg-muted-foreground/30',
+        )}
+      >
+        <span
+          className={cn(
+            'pointer-events-none block h-4 w-4 rounded-full bg-white shadow-lg transition-transform',
+            on ? 'translate-x-4' : 'translate-x-0.5',
+          )}
+        />
+      </button>
     </div>
   )
 }
