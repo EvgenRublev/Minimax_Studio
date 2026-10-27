@@ -1428,7 +1428,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <img src="/logo.svg" alt="" className="w-10 h-10" />
               <div>
                 <div className="text-sm font-medium">Minimax H3 Studio</div>
-                <div className="text-xs text-muted-foreground">Версия 7.0.1</div>
+                <div className="text-xs text-muted-foreground">Версия 7.0.2</div>
               </div>
             </div>
             {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}

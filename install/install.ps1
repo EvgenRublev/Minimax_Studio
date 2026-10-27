@@ -8,12 +8,13 @@
       * Node.js 22 (портативный, если в системе нет 18+)
       * node_modules + production-сборку .next
       * ComfyUI 0.33.0 + Python 3.12.10 + torch 2.11.0+cu130 + 288 пакетов
-      * 22 кастомные ноды по зафиксированным коммитам + 3 локальные ноды
+      * 22 кастомные ноды по зафиксированным коммитам + 4 локальные ноды
+      * STT-рантайм transcribe.cpp v0.1.3 (голосовой ввод; CPU-only)
       * папки моделей, extra_model_paths.yaml, .no-auto-update
 
     Модели НЕ скачиваются - они загружаются через UI студии.
-    Папки upscale/bin и stt в репозиторий не входят и установщиком не
-    восстанавливаются (см. предупреждения в конце).
+    Папка upscale/bin в репозиторий не входит и установщиком не
+    восстанавливается (проприетарный DLSS-рантайм NVIDIA).
 
 .PARAMETER Root
     Папка проекта. По умолчанию - родительская для папки install.
@@ -109,6 +110,22 @@ function Get-Download {
     Move-Item -Force $part $Dest
 }
 
+# (правка 744) Проверка доступности хоста: сначала curl.exe, потом
+# Invoke-WebRequest. На части машин IWR падает на TLS (ложное «нет интернета»),
+# хотя pip и GitHub работают — из-за этого установка обрывалась на шаге 1.
+function Test-Host {
+    param([string]$Url)
+    $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+    if (Test-Path $curl) {
+        & $curl -s -I -L --fail --max-time 25 $Url 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $true }
+    }
+    try {
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 20 -Method Head
+        return ($r.StatusCode -ge 200)
+    } catch { return $false }
+}
+
 function Expand-ZipSafe {
     param([string]$Zip, [string]$Dest)
     if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
@@ -119,6 +136,17 @@ function Expand-ZipSafe {
     } else {
         Expand-Archive -Path $Zip -DestinationPath $Dest -Force
     }
+}
+
+function Expand-TarGz {
+    param([string]$Archive, [string]$Dest)
+    if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path $tar)) {
+        throw 'tar.exe не найден: нужна Windows 10 1803+ (или распакуйте .tar.gz вручную).'
+    }
+    & $tar -xzf $Archive -C $Dest
+    if ($LASTEXITCODE -ne 0) { throw ('не удалось распаковать архив: ' + $Archive) }
 }
 
 function Invoke-Pip {
@@ -157,7 +185,7 @@ Write-Log ''
 
 # ------------------------------------------------------- 1. проверки системы ---
 
-Step 1 8 'Проверка системы'
+Step 1 9 'Проверка системы'
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw 'Нужна 64-битная Windows (x64). 32-битные системы не поддерживаются.'
@@ -184,11 +212,20 @@ if ($null -ne $freeGB) {
     Warn 'не удалось определить свободное место на диске'
 }
 
-try {
-    $probe = Invoke-WebRequest -Uri 'https://pypi.org/simple/' -UseBasicParsing -TimeoutSec 20 -Method Head
-    if ($probe.StatusCode -ge 200) { Ok 'интернет есть' }
-} catch {
-    throw 'Нет доступа к интернету (pypi.org). Проверьте подключение, VPN/прокси и повторите.'
+# (правка 744) Проверяем не только pypi, но и GitHub (ComfyUI, ноды, STT):
+# раньше установка обрывалась позже и с непонятной ошибкой, если GitHub закрыт.
+if (-not (Test-Host 'https://pypi.org/simple/')) {
+    throw 'Нет доступа к pypi.org. Проверьте подключение, VPN/прокси и запустите установку снова.'
+}
+Ok 'pypi.org доступен'
+
+if (-not (Test-Host 'https://github.com')) {
+    throw 'Нет доступа к github.com — без него не скачать ComfyUI, кастомные ноды и STT-рантайм. Проверьте VPN/прокси.'
+}
+Ok 'github.com доступен'
+
+if (-not (Test-Host 'https://download.pytorch.org/whl/cu130/')) {
+    Warn 'download.pytorch.org недоступен — шаг установки torch может не пройти (VPN/прокси).'
 }
 
 $nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
@@ -206,7 +243,7 @@ if ($nvidia) {
 # ------------------------------------------------------------- 2. Node.js ---
 
 if (-not $SkipApp) {
-    Step 2 8 'Node.js'
+    Step 2 9 'Node.js'
 
     $nodeExe = 'node'
     $runtimeDir = Join-Path $Root 'runtime'
@@ -264,7 +301,7 @@ if (-not $SkipApp) {
 # ------------------------------------------- 3. node_modules и сборка .next ---
 
 if (-not $SkipApp) {
-    Step 3 8 'Node-зависимости и production-сборка'
+    Step 3 9 'Node-зависимости и production-сборка'
 
     Push-Location $Root
     try {
@@ -339,7 +376,7 @@ $python = Join-Path $pythonDir 'python.exe'
 $script:Python = $python
 
 if (-not $SkipComfy) {
-    Step 4 8 'ComfyUI (сборка 5f0c4e1)'
+    Step 4 9 'ComfyUI (сборка 5f0c4e1)'
 
     if ($Force -and (Test-Path $comfyApp)) {
         Info 'удаляю ComfyUI (-Force)'
@@ -430,7 +467,7 @@ if (-not $SkipComfy) {
     }
 
     # --- 5. библиотеки ---
-    Step 5 8 'Библиотеки Python (~7 ГБ, самый долгий шаг)'
+    Step 5 9 'Библиотеки Python (~7 ГБ, самый долгий шаг)'
 
     # (правка 740) setuptools фиксируем на версии из requirements.lock.txt:
     # `--upgrade setuptools` без версии ставит новейшую (84.2.1+), а ComfyUI
@@ -462,7 +499,7 @@ if (-not $SkipComfy) {
     }
 
     # --- 6. кастомные ноды ---
-    Step 6 8 'Кастомные ноды (22 из GitHub + 3 локальные)'
+    Step 6 9 'Кастомные ноды (22 из GitHub + 4 локальные)'
 
     $nodesDir = Join-Path $comfyApp 'custom_nodes'
     if (-not (Test-Path $nodesDir)) { New-Item -ItemType Directory -Force -Path $nodesDir | Out-Null }
@@ -512,7 +549,7 @@ if (-not $SkipComfy) {
 # --------------------------------------- 7. конфигурация и папки моделей ---
 
 if (-not $SkipComfy) {
-    Step 7 8 'Конфигурация и папки моделей'
+    Step 7 9 'Конфигурация и папки моделей'
 
     $flag = Join-Path $comfyRoot '.no-auto-update'
     if (-not (Test-Path $flag)) { New-Item -ItemType Directory -Force -Path $flag | Out-Null }
@@ -556,15 +593,75 @@ if (-not $SkipComfy) {
     if (-not (Test-Path (Join-Path $Root 'upscale\bin'))) {
         Warn 'вкладка Upscale не заработает: папки upscale\bin нет (это проприетарный DLSS-рантайм NVIDIA, в репозиторий он не входит).'
     }
-    if (-not (Test-Path (Join-Path $Root 'stt\models'))) {
-        Warn 'голосовой ввод не заработает: папки stt\ нет (движок whisper в репозиторий не входит).'
-    }
 }
 
-# -------------------------------------------------------- 8. проверка ---
+# ------------------------------------------ 8. STT-рантайм (голосовой ввод) ---
+
+if (-not $SkipApp) {
+    Step 8 9 'Голосовой ввод (STT-рантайм transcribe.cpp)'
+
+    $sttDir = Join-Path $Root 'stt'
+    $sttDll = Join-Path $sttDir 'transcribe.dll'
+    $sttModels = Join-Path $sttDir 'models'
+    if (-not (Test-Path $sttModels)) { New-Item -ItemType Directory -Force -Path $sttModels | Out-Null }
+
+    if (Test-Path $sttDll) {
+        Ok 'STT-рантайм уже на месте'
+    } else {
+        # (правка 744) Раньше папка stt/ не восстанавливалась, поэтому голосовой
+        # ввод не работал ни у кого после чистой установки. transcribe.cpp —
+        # MIT, официальные Windows-сборки лежат на GitHub. Версия v0.1.3:
+        # именно с ней сверен ABI в tools/stt_server.py.
+        $sttVersion = '0.1.3'
+        $sttAsset = 'transcribe-native-0.1.3-windows-x86_64-cpu-vulkan.tar.gz'
+        $sttSha = '9f536cb0fb839bd305e6d92fb214fd417c7718a416a6c7646a9911fbd56fdad5'
+        try {
+            $sttArchive = Join-Path $Cache $sttAsset
+            Get-Download ('https://github.com/handy-computer/transcribe.cpp/releases/download/v' + $sttVersion + '/' + $sttAsset) $sttArchive
+            $hash = (Get-FileHash $sttArchive -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne $sttSha) { throw 'контрольная сумма архива не совпала' }
+
+            $tmp = Join-Path $Cache 'stt-extract'
+            if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+            Expand-TarGz $sttArchive $tmp
+            $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
+            if (-not $inner) { throw 'архив STT пуст' }
+
+            New-Item -ItemType Directory -Force -Path $sttDir | Out-Null
+            # Студия просит backend CPU, поэтому ggml-vulkan.dll (74 МБ) не нужен.
+            Get-ChildItem $inner.FullName -Filter *.dll |
+                Where-Object { $_.Name -ne 'ggml-vulkan.dll' } |
+                ForEach-Object { Copy-Item $_.FullName (Join-Path $sttDir $_.Name) -Force }
+            $contract = Join-Path $inner.FullName 'contract.json'
+            if (Test-Path $contract) { Copy-Item $contract (Join-Path $sttDir 'contract.json') -Force }
+            $licenses = Join-Path $inner.FullName 'licenses'
+            if (Test-Path $licenses) { Copy-Item $licenses (Join-Path $sttDir 'licenses') -Recurse -Force }
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+            if (Test-Path $sttDll) {
+                Ok ('STT-рантайм ' + $sttVersion + ' установлен (CPU, MIT)')
+            } else {
+                throw 'transcribe.dll не появился после распаковки'
+            }
+        } catch {
+            Warn ('голосовой ввод не заработает: ' + $_.Exception.Message + ' Папку stt можно скопировать с рабочей машины.')
+        }
+    }
+
+    $modelFiles = @(Get-ChildItem $sttModels -File -ErrorAction SilentlyContinue)
+    if ($modelFiles.Count -eq 0) {
+        Info 'модель распознавания не входит в установку: Настройки -> Голос -> скачать модель (ggml-small ~466 МБ)'
+    } else {
+        Ok ('модель распознавания: ' + $modelFiles[0].Name)
+    }
+} else {
+    Info 'пропущено (-SkipApp)'
+}
+
+# -------------------------------------------------------- 9. проверка ---
 
 if (-not $SkipComfy) {
-    Step 8 8 'Проверка установки'
+    Step 9 9 'Проверка установки'
 
     Info 'проверяю импорт torch...'
     & $python -c "import torch, torchvision, torchaudio; print('      torch', torch.__version__, '| cuda:', torch.cuda.is_available())"
