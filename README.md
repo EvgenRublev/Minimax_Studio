@@ -488,6 +488,8 @@ node scripts/release.mjs --verify
 
 ## Лицензия
 
+Copyright (C) 2026 Evgen Rublev.
+
 Проект распространяется под **GNU General Public License v3.0** — полный текст
 в файле [LICENSE](LICENSE).
 
