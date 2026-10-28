@@ -74,6 +74,12 @@ $env:npm_config_cache = Join-Path $Cache 'npm'
 $env:ELECTRON_CACHE = Join-Path $Cache 'electron'
 $env:electron_config_cache = Join-Path $Cache 'electron'
 
+# (правка 761) кэш uv - тоже внутрь папки проекта (удаляется вместе с .install-cache).
+# uv качает и распаковывает пакеты параллельно, pip - по одному файлу.
+$env:UV_CACHE_DIR = Join-Path $Cache 'uv'
+$env:UV_HTTP_TIMEOUT = '120'
+$env:UV_PYTHON_DOWNLOADS = 'never'
+
 # ---------------------------------------------------------------- logging ---
 
 function Write-Log {
@@ -117,6 +123,110 @@ function Write-SetupStatus {
 
 # ------------------------------------------------------------- primitives ---
 
+$script:Curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+if (-not (Test-Path $script:Curl)) { $script:Curl = $null }
+$script:UvExe = $null
+
+# (правка 761) Быстрые загрузки.
+# Один поток curl на файл 1.8 ГБ (torch) или 1 ГБ (ComfyUI) часто получает от
+# сервера лишь часть полосы. Режем файл на 6 диапазонов и качаем параллельно;
+# если сервер не умеет Range или что-то пошло не так - молча падаем на обычный
+# однопоточный curl, ничего не ломая.
+function Start-CurlProc {
+    param([string]$ArgStr)
+    try {
+        return (Start-Process -FilePath $script:Curl -ArgumentList $ArgStr -NoNewWindow -PassThru -ErrorAction Stop)
+    } catch {
+        return (Start-Process -FilePath $script:Curl -ArgumentList $ArgStr -WindowStyle Hidden -PassThru)
+    }
+}
+
+function Get-DownloadSegmented {
+    param([string]$Url, [string]$Dest, [int]$Threads = 6, [int64]$MinSize = 16MB)
+    if (-not $script:Curl) { return $false }
+    $head = @()
+    try { $head = @(& $script:Curl -sIL --fail --max-time 40 $Url 2>$null) } catch { return $false }
+    if ($head.Count -eq 0) { return $false }
+    $size = [int64]0
+    $ranges = $false
+    foreach ($line in $head) {
+        if ($line -match '(?i)^content-length:\s*(\d+)') { $size = [int64]$Matches[1] }
+        if ($line -match '(?i)^accept-ranges:\s*bytes') { $ranges = $true }
+    }
+    if (-not $ranges -or $size -lt $MinSize) { return $false }
+
+    $n = [int][Math]::Min($Threads, 8)
+    $chunk = [int64][Math]::Ceiling($size / $n)
+    $parts = New-Object System.Collections.ArrayList
+    $procs = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $n; $i++) {
+        $from = [int64]($i * $chunk)
+        $to = [int64][Math]::Min($size - 1, ($from + $chunk - 1))
+        if ($from -gt $to) { break }
+        $p = $Dest + '.' + $i
+        if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        [void]$parts.Add($p)
+        $argStr = '-sL --fail --retry 3 --retry-delay 2 --connect-timeout 30 -r ' + $from + '-' + $to + ' -o "' + $p + '" "' + $Url + '"'
+        [void]$procs.Add((Start-CurlProc $argStr))
+    }
+    if ($procs.Count -lt 2) {
+        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        return $false
+    }
+
+    # ждём и раз в ~12 секунд пишем в лог, сколько уже скачано (видно в окне)
+    $lastLog = Get-Date
+    while ($true) {
+        $alive = 0
+        foreach ($pr in $procs) {
+            try { if (-not $pr.HasExited) { $alive++ } } catch { }
+        }
+        if ($alive -eq 0) { break }
+        if (((Get-Date) - $lastLog).TotalSeconds -ge 12) {
+            $lastLog = Get-Date
+            $got = [int64]0
+            foreach ($p in $parts) { if (Test-Path $p) { $got += (Get-Item $p).Length } }
+            Info ('  загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + [Math]::Round($size / 1MB, 0) + ' МБ')
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    $got = [int64]0
+    $bad = $false
+    foreach ($p in $parts) {
+        if (Test-Path $p) { $got += (Get-Item $p).Length } else { $bad = $true }
+    }
+    foreach ($pr in $procs) {
+        # у процессов, запущенных через Start-Process -PassThru, ExitCode бывает
+        # пустым - тогда верим только размеру (сумма частей = Content-Length)
+        try {
+            $code = $pr.ExitCode
+            if ($null -ne $code -and $code -ne 0) { $bad = $true }
+        } catch { }
+    }
+    if ($got -ne $size) { $bad = $true }
+    if ($bad) {
+        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        Info '  параллельная загрузка не удалась - качаю обычным способом'
+        return $false
+    }
+
+    try {
+        $out = [IO.File]::Open($Dest, 'Create', 'Write')
+        try {
+            foreach ($p in $parts) {
+                $in = [IO.File]::OpenRead($p)
+                try { $in.CopyTo($out) } finally { $in.Dispose() }
+            }
+        } finally { $out.Dispose() }
+    } catch {
+        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        return $false
+    }
+    foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+    return $true
+}
+
 function Get-Download {
     param([string]$Url, [string]$Dest)
     if ((Test-Path $Dest) -and (Get-Item $Dest).Length -gt 0) {
@@ -128,18 +238,77 @@ function Get-Download {
     $part = $Dest + '.part'
     if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
     Info ("скачивание: " + $Url)
-    $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
-    if (Test-Path $curl) {
-        & $curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
-        if ($LASTEXITCODE -ne 0) {
-            if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
-            throw ('не удалось скачать: ' + $Url)
-        }
-    } else {
-        Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $ok = $false
+    if ($script:Curl) {
+        if (Get-DownloadSegmented -Url $Url -Dest $part) { $ok = $true }
     }
+    if (-not $ok) {
+        if ($script:Curl) {
+            & $script:Curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $part) -and (Get-Item $part).Length -gt 0) {
+                $ok = $true
+            } else {
+                if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
+            }
+        } else {
+            try {
+                Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
+                $ok = $true
+            } catch {
+                $ok = $false
+            }
+        }
+    }
+    $sw.Stop()
+    if (-not $ok) { throw ('не удалось скачать: ' + $Url) }
     Move-Item -Force $part $Dest
+    $mb = (Get-Item $Dest).Length / 1MB
+    $sec = [Math]::Max(0.5, $sw.Elapsed.TotalSeconds)
+    Info ("скачано " + [Math]::Round($mb, 1) + " МБ за " + [Math]::Round($sec, 1) + " с (" + [Math]::Round($mb / $sec, 1) + " МБ/с)")
 }
+
+# (правка 761) Много мелких файлов параллельно (архивы кастомных нод с GitHub).
+function Get-DownloadMany {
+    param([object[]]$Jobs, [int]$Max = 6)
+    if (-not $script:Curl) {
+        foreach ($j in $Jobs) { try { Get-Download $j.Url $j.Dest } catch { } }
+        return
+    }
+    $queue = New-Object System.Collections.Queue
+    foreach ($j in $Jobs) { $queue.Enqueue($j) }
+    $running = New-Object System.Collections.ArrayList
+    while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+        while ($running.Count -lt $Max -and $queue.Count -gt 0) {
+            $j = $queue.Dequeue()
+            $dir = Split-Path -Parent $j.Dest
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+            $argStr = '-sL --fail --retry 3 --retry-delay 2 --connect-timeout 30 -o "' + $j.Dest + '" "' + $j.Url + '"'
+            try {
+                [void]$running.Add([pscustomobject]@{ P = (Start-CurlProc $argStr); Job = $j })
+            } catch {
+                Info ('  пропуск: ' + (Split-Path $j.Dest -Leaf))
+            }
+        }
+        Start-Sleep -Milliseconds 250
+        $finished = @($running | Where-Object { try { $_.P.HasExited } catch { $true } })
+        foreach ($f in $finished) {
+            $ok = (Test-Path $f.Job.Dest) -and ((Get-Item $f.Job.Dest).Length -gt 0)
+            if ($ok) {
+                try {
+                    $code = $f.P.ExitCode
+                    if ($null -ne $code -and $code -ne 0) { $ok = $false }
+                } catch { }
+            }
+            if (-not $ok) {
+                Remove-Item $f.Job.Dest -Force -ErrorAction SilentlyContinue
+                Info ('  не скачалось: ' + (Split-Path $f.Job.Dest -Leaf))
+            }
+            [void]$running.Remove($f)
+        }
+    }
+}
+
 
 # (правка 744) Проверка доступности хоста: сначала curl.exe, потом
 # Invoke-WebRequest. На части машин IWR падает на TLS (ложное «нет интернета»),
@@ -190,6 +359,127 @@ function Invoke-Pip {
         if ($LASTEXITCODE -ne 0) { throw ('pip завершился с ошибкой: ' + $Title) }
     }
 }
+
+# (правка 761) uv - быстрый установщик пакетов: качает до 50 файлов
+# параллельно и распаковывает их тоже параллельно (pip - строго по одному).
+# Если uv не скачался или упал - установка продолжается на pip как раньше.
+function Install-Uv {
+    if ($script:UvExe) { return $script:UvExe }
+    $dir = Join-Path $Root 'runtime\uv'
+    $exe = Join-Path $dir 'uv.exe'
+    if (-not (Test-Path $exe)) {
+        try {
+            $zip = Join-Path $Cache 'uv-x86_64-pc-windows-msvc.zip'
+            Get-Download 'https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-pc-windows-msvc.zip' $zip
+            Expand-ZipSafe $zip $dir
+        } catch {
+            Warn ('uv не скачался (' + $_.Exception.Message + ') - ставлю пакеты через pip, это медленнее')
+        }
+    }
+    if (Test-Path $exe) {
+        $script:UvExe = $exe
+        Ok 'uv готов (параллельная установка пакетов)'
+    } else {
+        $script:UvExe = $null
+    }
+    return $script:UvExe
+}
+
+function Invoke-Uv {
+    param([string[]]$UvArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $script:UvExe @UvArgs
+    } finally {
+        $ErrorActionPreference = $old
+    }
+    return $LASTEXITCODE
+}
+
+# Колесо torch для Windows ищется на индексе pytorch: точное имя + sha256.
+function Get-WheelMeta {
+    param([string]$IndexUrl, [string]$Package, [string]$Version)
+    if (-not $script:Curl) { return $null }
+    $page = $IndexUrl.TrimEnd('/') + '/' + $Package + '/'
+    $html = @(& $script:Curl -sL --fail --max-time 60 $page 2>$null) -join "`n"
+    if (-not $html) { return $null }
+    $want = $Package + '-' + $Version + '+cu130-cp312-cp312-win_amd64.whl'
+    foreach ($m in [regex]::Matches($html, 'href="([^"]+\.whl[^"]*)"')) {
+        $href = $m.Groups[1].Value
+        $sha = ''
+        if ($href -match '#sha256=([0-9a-fA-F]+)') { $sha = $Matches[1].ToLower() }
+        $clean = ($href -split '#')[0]
+        $name = [uri]::UnescapeDataString($clean.Substring($clean.LastIndexOf('/') + 1))
+        if ($name -eq $want) {
+            return [pscustomobject]@{ Url = $clean; Name = $name; Sha256 = $sha }
+        }
+    }
+    return $null
+}
+
+# torch/torchvision/torchaudio: качаем колёса сами в 6 соединений (1.8 ГБ одним
+# потоком идёт очень долго), проверяем sha256 и ставим локально без сети.
+# При любой проблеме возвращаем $false - вызывающий поставит через pip как раньше.
+function Install-TorchWheels {
+    $index = 'https://download.pytorch.org/whl/cu130'
+    $wanted = @(
+        @{ Name = 'torch'; Version = '2.11.0' },
+        @{ Name = 'torchvision'; Version = '0.26.0' },
+        @{ Name = 'torchaudio'; Version = '2.11.0' }
+    )
+    $files = @()
+    foreach ($w in $wanted) {
+        $meta = Get-WheelMeta $index $w.Name $w.Version
+        if (-not $meta) { throw ('на индексе нет колеса ' + $w.Name + ' ' + $w.Version) }
+        $dst = Join-Path $Cache ('wheels\' + $meta.Name)
+        Get-Download $meta.Url $dst
+        if ($meta.Sha256) {
+            $h = (Get-FileHash $dst -Algorithm SHA256).Hash.ToLower()
+            if ($h -ne $meta.Sha256) {
+                Remove-Item $dst -Force -ErrorAction SilentlyContinue
+                throw ('контрольная сумма не совпала: ' + $meta.Name)
+            }
+            Ok ('sha256 ок: ' + $meta.Name)
+        }
+        $files += $dst
+    }
+    if ($script:UvExe) {
+        Info ('установка torch из локальных колёс (uv)')
+        $uvArgs = @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress') + $files
+        if ((Invoke-Uv $uvArgs) -eq 0) {
+            return $true
+        }
+        Warn 'uv не поставил torch - пробую pip'
+    }
+    Info 'установка torch из локальных колёс (pip)'
+    & $script:Python -m pip install --no-deps --no-warn-script-location --disable-pip-version-check @files
+    return ($LASTEXITCODE -eq 0)
+}
+
+# 288 пакетов из requirements.lock.txt ставим пачками через uv: так видно
+# прогресс в окне и параллельно качается/распаковывается всё сразу.
+function Install-RequirementsUv {
+    param([string]$File, [int]$Batch = 60)
+    if (-not $script:UvExe) { return $false }
+    $lines = @(Get-Content $File | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+    if ($lines.Count -eq 0) { return $false }
+    $i = 0
+    while ($i -lt $lines.Count) {
+        $last = [Math]::Min($i + $Batch - 1, $lines.Count - 1)
+        $chunk = @($lines[$i..$last])
+        $bf = Join-Path $Cache 'uv-batch.txt'
+        [IO.File]::WriteAllLines($bf, $chunk, (New-Object Text.ASCIIEncoding))
+        Info ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
+        if ((Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf)) -ne 0) {
+            Warn ('uv не осилил пакеты ' + ($i + 1) + '-' + ($last + 1) + ' - доустанавливаю через pip')
+            return $false
+        }
+        $i = $last + 1
+    }
+    return $true
+}
+
 
 function Write-TextFileNoBom {
     param([string]$Path, [string]$Content)
@@ -556,14 +846,33 @@ if (-not $SkipComfy) {
     # требует setuptools<82 — на чистой машине установка падала (issue #4).
     Invoke-Pip @('-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools==78.1.0', 'wheel', '--no-warn-script-location', '--disable-pip-version-check') 'обновление pip'
 
-    Invoke-Pip @('-m', 'pip', 'install',
-        'torch==2.11.0+cu130', 'torchvision==0.26.0+cu130', 'torchaudio==2.11.0+cu130',
-        '--index-url', 'https://download.pytorch.org/whl/cu130',
-        '--no-warn-script-location', '--disable-pip-version-check') 'torch 2.11.0+cu130 (~3.5 ГБ)'
+    # (правка 761) uv ставит пакеты параллельно - это в разы быстрее pip
+    # на 288 пакетах. Не получилось - работаем на pip, как раньше.
+    Install-Uv | Out-Null
+
+    $torchOk = $false
+    try {
+        $torchOk = Install-TorchWheels
+    } catch {
+        Warn ('быстрая установка torch не удалась: ' + $_.Exception.Message)
+    }
+    if (-not $torchOk) {
+        Invoke-Pip @('-m', 'pip', 'install',
+            'torch==2.11.0+cu130', 'torchvision==0.26.0+cu130', 'torchaudio==2.11.0+cu130',
+            '--index-url', 'https://download.pytorch.org/whl/cu130',
+            '--no-warn-script-location', '--disable-pip-version-check') 'torch 2.11.0+cu130 (~3.5 ГБ)'
+    }
     Ok 'torch установлен'
 
-    Invoke-Pip @('-m', 'pip', 'install', '--no-deps', '--no-warn-script-location', '--disable-pip-version-check',
-        '-r', (Join-Path $InstallDir 'requirements.lock.txt')) 'основные пакеты (288)'
+    $lockFile = Join-Path $InstallDir 'requirements.lock.txt'
+    $lockDone = $false
+    if ($script:UvExe) {
+        $lockDone = Install-RequirementsUv $lockFile
+    }
+    if (-not $lockDone) {
+        Invoke-Pip @('-m', 'pip', 'install', '--no-deps', '--no-warn-script-location', '--disable-pip-version-check',
+            '-r', $lockFile) 'основные пакеты (288)'
+    }
     Ok 'основные пакеты установлены'
 
     Invoke-Pip @('-m', 'pip', 'install', '--no-deps', '--no-build-isolation', '--no-warn-script-location', '--disable-pip-version-check',
@@ -587,6 +896,29 @@ if (-not $SkipComfy) {
     if (-not (Test-Path $nodesDir)) { New-Item -ItemType Directory -Force -Path $nodesDir | Out-Null }
 
     $nodes = Get-Content (Join-Path $InstallDir 'nodes.json') -Raw | ConvertFrom-Json
+
+    # (правка 761) 22 архива с GitHub качаем параллельно (6 потоков), а не
+    # по одному: каждый мелкий запрос ждал TLS-рукопожатие.
+    $pending = New-Object System.Collections.ArrayList
+    foreach ($node in $nodes) {
+        $zip = Join-Path $Cache ('nodes\' + $node.name + '.zip')
+        if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
+            [void]$pending.Add([pscustomobject]@{
+                Url  = ('https://codeload.github.com/' + $node.repo + '/zip/' + $node.sha)
+                Dest = $zip
+            })
+        }
+    }
+    if ($pending.Count -gt 0) {
+        Info ('параллельная загрузка нод: ' + $pending.Count)
+        $swN = [Diagnostics.Stopwatch]::StartNew()
+        Get-DownloadMany -Jobs $pending -Max 6
+        $swN.Stop()
+        $gotN = 0
+        foreach ($j in $pending) { if (Test-Path $j.Dest) { $gotN += (Get-Item $j.Dest).Length } }
+        Info ('ноды: ' + [Math]::Round($gotN / 1MB, 1) + ' МБ за ' + [Math]::Round($swN.Elapsed.TotalSeconds, 1) + ' с')
+    }
+
     $idx = 0
     foreach ($node in $nodes) {
         $idx++
