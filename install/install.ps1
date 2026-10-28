@@ -338,21 +338,24 @@ if (-not $SkipApp) {
             Remove-Item 'node_modules' -Recurse -Force
         }
 
-        # (правка 750) папка node_modules может быть НЕПОЛНОЙ (прошлая установка
-        # прервалась) - проверяем наличие ключевых пакетов, а не только папки.
-        $nmMarkers = @('next', 'electron', '@electron\get')
-        $nmBroken = $false
+        # (правки 750/751) node_modules может быть битым: папки есть, а файлы
+        # пакетов не читаются (обрыв установки, перенос копированием).
+        # Проверяем, что ключевые пакеты реально разрешаются самим Node.js.
+        $nmOk = $false
         if (Test-Path 'node_modules') {
-            $missing = @($nmMarkers | Where-Object { -not (Test-Path (Join-Path 'node_modules' $_)) })
-            if ($missing.Count -eq 0) {
+            Push-Location $Root
+            try {
+                & $nodeExe -e "for (const p of ['next', 'electron', '@electron/get']) require.resolve(p)" 2>$null
+                if ($LASTEXITCODE -eq 0) { $nmOk = $true }
+            } finally { Pop-Location }
+            if ($nmOk) {
                 Ok 'node_modules уже на месте'
             } else {
-                Warn ('node_modules неполный (нет: ' + ($missing -join ', ') + ') - переустанавливаю')
-                Remove-Item 'node_modules' -Recurse -Force
-                $nmBroken = $true
+                Warn 'node_modules поврежден (пакеты не читаются) - переустанавливаю'
+                & cmd.exe /c "rmdir /s /q `"$(Join-Path $Root 'node_modules')`""
             }
         }
-        if ($nmBroken -or -not (Test-Path 'node_modules')) {
+        if (-not $nmOk) {
             Info 'npm ci - скачивается ~1.2 ГБ, займёт 5-15 минут'
             & npm.cmd ci --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
@@ -360,9 +363,13 @@ if (-not $SkipApp) {
                 & npm.cmd install --no-audit --no-fund
                 if ($LASTEXITCODE -ne 0) { throw 'не удалось установить node-зависимости (npm).' }
             }
-            $stillMissing = @($nmMarkers | Where-Object { -not (Test-Path (Join-Path 'node_modules' $_)) })
-            if ($stillMissing.Count -gt 0) {
-                throw ('npm отработал, но пакеты не найдены: ' + ($stillMissing -join ', ') + '. Проверьте антивирус и запустите install.bat ещё раз.')
+            Push-Location $Root
+            try {
+                & $nodeExe -e "for (const p of ['next', 'electron', '@electron/get']) require.resolve(p)" 2>$null
+                $nmVerified = ($LASTEXITCODE -eq 0)
+            } finally { Pop-Location }
+            if (-not $nmVerified) {
+                throw 'npm отработал, но ключевые пакеты (next/electron) так и не читаются. Закройте все окна с install.bat, отключите антивирус на время установки и запустите install.bat ещё раз.'
             }
             Ok 'node_modules установлены'
         }
