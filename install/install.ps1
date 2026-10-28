@@ -338,7 +338,21 @@ if (-not $SkipApp) {
             Remove-Item 'node_modules' -Recurse -Force
         }
 
-        if (-not (Test-Path 'node_modules')) {
+        # (правка 750) папка node_modules может быть НЕПОЛНОЙ (прошлая установка
+        # прервалась) - проверяем наличие ключевых пакетов, а не только папки.
+        $nmMarkers = @('next', 'electron', '@electron\get')
+        $nmBroken = $false
+        if (Test-Path 'node_modules') {
+            $missing = @($nmMarkers | Where-Object { -not (Test-Path (Join-Path 'node_modules' $_)) })
+            if ($missing.Count -eq 0) {
+                Ok 'node_modules уже на месте'
+            } else {
+                Warn ('node_modules неполный (нет: ' + ($missing -join ', ') + ') - переустанавливаю')
+                Remove-Item 'node_modules' -Recurse -Force
+                $nmBroken = $true
+            }
+        }
+        if ($nmBroken -or -not (Test-Path 'node_modules')) {
             Info 'npm ci - скачивается ~1.2 ГБ, займёт 5-15 минут'
             & npm.cmd ci --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
@@ -346,9 +360,11 @@ if (-not $SkipApp) {
                 & npm.cmd install --no-audit --no-fund
                 if ($LASTEXITCODE -ne 0) { throw 'не удалось установить node-зависимости (npm).' }
             }
+            $stillMissing = @($nmMarkers | Where-Object { -not (Test-Path (Join-Path 'node_modules' $_)) })
+            if ($stillMissing.Count -gt 0) {
+                throw ('npm отработал, но пакеты не найдены: ' + ($stillMissing -join ', ') + '. Проверьте антивирус и запустите install.bat ещё раз.')
+            }
             Ok 'node_modules установлены'
-        } else {
-            Ok 'node_modules уже на месте'
         }
 
         # Electron 44+ больше не качает бинарник при npm ci: он скачивается
