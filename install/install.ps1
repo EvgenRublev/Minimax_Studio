@@ -53,6 +53,7 @@ $Root = [IO.Path]::GetFullPath($Root)
 $InstallDir = $PSScriptRoot
 $Cache = Join-Path $Root '.install-cache'
 $LogFile = Join-Path $Root 'install.log'
+$StatusFile = Join-Path $Cache 'setup_status.json'
 
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Warnings = New-Object System.Collections.Generic.List[string]
@@ -82,11 +83,30 @@ function Write-Log {
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch { }
 }
 
-function Step { param([int]$N, [int]$Total, [string]$Text) Write-Log '' ; Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step' }
+function Step { param([int]$N, [int]$Total, [string]$Text) Write-SetupStatus 'running' $N $Total $Text; Write-Log '' ; Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step' }
 function Info { param([string]$M) Write-Log ("  " + $M) }
 function Ok   { param([string]$M) Write-Log ("  [OK] " + $M) 'ok' }
 function Warn { param([string]$M) $script:Warnings.Add($M); Write-Log ("  [WARN] " + $M) 'warn' }
 function Fail { param([string]$M) $script:Failures.Add($M); Write-Log ("  [ERROR] " + $M) 'err' }
+
+# (правка 748) Машиночитаемый статус установки для заставки:
+# Electron (первый запуск без зависимостей) и страница /splash читают этот
+# JSON и показывают «шаг N/9». pid — чтобы приложение могло убить
+# установщик кнопкой «закрыть» (в т.ч. запущенный снаружи install.bat).
+$script:StatusStep = 0
+function Write-SetupStatus {
+    param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '')
+    if ($StepN -gt 0) { $script:StatusStep = $StepN }
+    $obj = [ordered]@{
+        state = $State
+        step  = $StepN
+        total = $TotalN
+        title = $Title
+        pid   = $PID
+        ts    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+    try { Write-TextFileNoBom $StatusFile (ConvertTo-Json $obj -Compress) } catch { }
+}
 
 # ------------------------------------------------------------- primitives ---
 
@@ -771,6 +791,14 @@ Write-Log ''
 
 $exitCode = 0
 if ($script:Failures.Count -gt 0) { $exitCode = 1 }
+
+# финальный статус — ПОСЛЕ очистки кэша (Write-TextFileNoBom сам создаёт
+# папку): Electron дожидается done/error и только затем поднимает ComfyUI.
+if ($exitCode -eq 0) {
+    Write-SetupStatus 'done' 9 9 'Установка завершена'
+} else {
+    Write-SetupStatus 'error' $script:StatusStep 9 ('Установка завершилась с ошибками (шаг ' + $script:StatusStep + ')')
+}
 
 if (-not $NoPause) {
     Write-Host '  Нажмите Enter, чтобы закрыть окно...' -ForegroundColor DarkGray

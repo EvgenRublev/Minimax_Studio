@@ -21,7 +21,7 @@
  */
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
-const { existsSync, readFileSync } = require('node:fs')
+const { existsSync, readFileSync, mkdirSync, writeFileSync } = require('node:fs')
 const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
@@ -33,6 +33,12 @@ const CONFIG_INI = path.join(APP_ROOT, 'config', 'config.ini')
 const COMFY_ROOT = resolveComfyRoot()
 const COMFY_PY = path.join(COMFY_ROOT, 'python_embeded', 'python.exe')
 const ICON = path.join(__dirname, 'icons', 'icon.ico')
+
+/* (правка 748) Файл машиночитаемого статуса установки зависимостей:
+ * пишет install.ps1 (шаги 1-9) и мы сами (done/error). Заставка читает
+ * его через /api/setup-status и показывает «шаг N/9» вместо вечного
+ * «Идёт загрузка ComfyUI…». */
+const SETUP_STATUS = path.join(APP_ROOT, '.install-cache', 'setup_status.json')
 
 function resolveComfyRoot() {
   let configured = ''
@@ -352,6 +358,87 @@ function startComfy() {
   return spawnChild(COMFY_PY, args)
 }
 
+/* ── (правка 748) Первый запуск: зависимости не установлены ──────
+ * Если python_embeded нет (пользователь снял галку «установить
+ * зависимости» в инсталляторе или скачивание оборвалось), приложение
+ * само запускает install.ps1 СКРЫТО (windowsHide — без консоли) и ждёт.
+ * install.ps1 пишет каждый шаг в .install-cache\setup_status.json,
+ * заставка показывает «Установка компонентов: [N/9] …». ComfyUI
+ * поднимается только после успешного завершения установки.
+ * Если установщик уже запущен снаружи (install.bat из ПУСКа или прошлый
+ * запуск) — второй не поднимаем, просто следим за статус-файлом. */
+const POWERSHELL = path.join(process.env.SystemRoot || 'C:\\Windows',
+  'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+
+function readSetupStatus() {
+  try {
+    return JSON.parse(readFileSync(SETUP_STATUS, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function writeSetupStatus(state, step, total, title) {
+  try {
+    mkdirSync(path.dirname(SETUP_STATUS), { recursive: true })
+    writeFileSync(SETUP_STATUS, JSON.stringify({
+      state, step, total, title, pid: process.pid,
+      ts: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+    }), 'utf8')
+  } catch (err) {
+    console.log(`[desktop] не удалось записать статус установки: ${err && err.message ? err.message : err}`)
+  }
+}
+
+/** Статус «установка идёт» актуален? (устаревший = упавший установщик) */
+function statusIsLive(st) {
+  if (!st || st.state !== 'running') return false
+  const ts = Date.parse(st.ts || '')
+  return Number.isFinite(ts) && Date.now() - ts < 12 * 60 * 1000
+}
+
+async function runSetupIfNeeded() {
+  if (existsSync(COMFY_PY)) return true
+  const ps1 = path.join(APP_ROOT, 'install', 'install.ps1')
+
+  const st = readSetupStatus()
+  if (statusIsLive(st)) {
+    appendConsole(`[desktop] установка уже идёт (PID ${st.pid}) — жду её завершения\n`)
+    return await waitForExternalSetup()
+  }
+  if (!existsSync(ps1)) {
+    writeSetupStatus('error', 0, 9, 'Не найден install\\install.ps1')
+    return false
+  }
+
+  appendConsole('[desktop] зависимости не установлены — запускаю установку (скрыто)\n')
+  writeSetupStatus('running', 0, 9, 'Запуск установки зависимостей…')
+  const inst = spawnChild(POWERSHELL, [
+    '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass',
+    '-File', ps1, '-Root', APP_ROOT, '-NoPause',
+  ])
+  const code = await new Promise((resolve) => inst.on('exit', (c) => resolve(c)))
+  if (quitting) return false
+  if (code === 0 && existsSync(COMFY_PY)) {
+    writeSetupStatus('done', 9, 9, 'Установка завершена')
+    return true
+  }
+  writeSetupStatus('error', 0, 9, `Установка завершилась с ошибкой (код ${code})`)
+  return false
+}
+
+/** Ждём внешнего установщика: пока статус «running» и живой — ждём. */
+async function waitForExternalSetup() {
+  while (!quitting) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const st = readSetupStatus()
+    if (statusIsLive(st)) continue
+    if (st && st.state === 'done') return existsSync(COMFY_PY)
+    return false
+  }
+  return false
+}
+
 function startWebServer() {
   // Node самого Electron: ELECTRON_RUN_AS_NODE превращает electron.exe в
   // обычный node — системный Node для рантайма не нужен (нужен только для
@@ -561,6 +648,15 @@ app.on('before-quit', () => {
   quitting = true
   for (const c of children) killTree(c.pid)
   children.clear()
+  // (правка 748) Установщик, запущенный НАМИ (spawnChild), уже убит выше.
+  // Если установка шла СНАРУЖИ (install.bat из меню ПУСК или прошлый запуск,
+  // статус-файл с чужим pid) — прикрываем и её: «закрыть» = стоп всё.
+  try {
+    const st = readSetupStatus()
+    if (st && st.state === 'running' && st.pid && Number(st.pid) !== process.pid) {
+      killTree(Number(st.pid))
+    }
+  } catch { /* ignore */ }
   // (правка 570/587) Убить родительский cmd-процесс (скрытая консоль от
   // start_hidden.vbs / start.bat). process.ppid — НЕ cmd: в штатной цепочке
   // запуска (start.bat → node electron\cli.js → electron.exe) родителем
@@ -603,7 +699,16 @@ if (!app.requestSingleInstanceLock()) {
     killPortListeners(COMFY_PORT)
 
     const server = startWebServer()
-    startComfy()
+    if (existsSync(COMFY_PY)) {
+      startComfy()
+    } else {
+      // (правка 748) Первый запуск: окно и заставка открываются СРАЗУ,
+      // установка зависимостей идёт скрыто на фоне, заставка показывает
+      // шаги; ComfyUI стартует после успешного завершения установки.
+      void runSetupIfNeeded().then((ok) => {
+        if (ok && !quitting) startComfy()
+      })
+    }
 
     // Крах сервера (не our quit) — честно сообщаем и выходим.
     server.on('exit', (code) => {

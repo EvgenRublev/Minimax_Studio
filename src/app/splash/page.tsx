@@ -15,6 +15,13 @@
  *  - после ~5 мин — честное предупреждение, что ComfyUI стартует дольше;
  *  - при готовности — «Готово — открываем студию…» и router.replace('/').
  *
+ * (правка 748) Первый запуск без зависимостей: параллельно опрашивается
+ * /api/setup-status (пишет install.ps1 через Electron). Пока установка идёт —
+ * вместо шиммера показывается «Установка компонентов: [N/9] …» с честным
+ * прогресс-баром; при ошибке — текст ошибки. Вверху справа — маленькая
+ * кнопка «закрыть» (только в десктоп-режиме, через preload-мост h3desktop):
+ * закрывает программу целиком, Electron по пути убивает и установщик.
+ *
  * Оформление строится на CSS-переменных темы (--surface-*, --foreground,
  * --splash-*) и следует светлой/тёмной теме приложения.
  */
@@ -24,6 +31,14 @@ import { useRouter } from 'next/navigation'
 const POLL_MS = 2000
 /** Пауза на «Готово» перед переходом, мс. */
 const EXIT_DELAY_MS = 700
+
+/** (правка 748) Статус установки зависимостей из .install-cache\setup_status.json. */
+interface SetupStatus {
+  state: 'running' | 'done' | 'error'
+  step?: number
+  total?: number
+  title?: string
+}
 
 /** 8 видео-кадров (public/splash-videos). 9:16, зациклены, без звука. */
 const SPLASH_TILES = [
@@ -43,6 +58,10 @@ export default function SplashPage() {
   const [failed, setFailed] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(Date.now())
+  // (правка 748) Статус установки зависимостей (первый запуск) и сам
+  // десктоп-мост: кнопка «закрыть» нужна только в Electron-окне.
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
+  const [desktop, setDesktop] = useState(false)
 
   /* Порядок кадров: при каждой загрузке экрана — перемешанный.
    * Перемешиваем ОДИН базовый порядок и дублируем его в обеих группах
@@ -104,6 +123,37 @@ export default function SplashPage() {
       if (exitTimer) clearTimeout(exitTimer)
     }
   }, [router])
+
+  /* (правка 748) Опрос статуса установки зависимостей. Пока state=running —
+   * ComfyUI заведомо не поднялся (Electron поднимет его после установки),
+   * поэтому показываем честные шаги «[N/9]» вместо шиммера. done → null:
+   * дальше обычная «загрузка ComfyUI». */
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/setup-status', { signal: AbortSignal.timeout(5000) })
+        if (r.ok) {
+          const d = await r.json().catch(() => ({}))
+          const st = (d as { status?: SetupStatus | null }).status ?? null
+          if (!cancelled) setSetup(st && st.state !== 'done' ? st : null)
+        }
+      } catch {
+        /* веб-сервер только стартует или статус-файла нет — как обычно */
+      }
+    }
+    void poll()
+    const id = setInterval(poll, POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
+
+  /* (правка 748) Десктоп-режим? (preload-мост h3desktop есть только в Electron) */
+  useEffect(() => {
+    setDesktop(Boolean((window as unknown as { h3desktop?: unknown }).h3desktop))
+  }, [])
 
   /* Счётчик секунд загрузки — чтобы было видно, что всё живо. */
   useEffect(() => {
@@ -169,6 +219,19 @@ export default function SplashPage() {
           <span>by Evgen Rublev</span>
           <span className="opacity-50">·</span>
           <span className="font-medium">Comfy UI</span>
+          {/* (правка 748) «закрыть» — только в десктоп-окне (preload-мост):
+              закрывает программу целиком, Electron убивает и установщик. */}
+          {desktop && (
+            <button
+              onClick={() =>
+                (window as unknown as { h3desktop?: { close: () => void } }).h3desktop?.close()
+              }
+              className="pointer-events-auto ml-1 rounded-md border border-white/10 bg-black/25 px-2 py-1 text-[11px] leading-none text-white/55 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white"
+              title="Закрыть программу"
+            >
+              закрыть ✕
+            </button>
+          )}
         </div>
       </div>
 
@@ -181,6 +244,42 @@ export default function SplashPage() {
             </svg>
             <span className="text-sm font-medium">Готово — открываем студию…</span>
           </div>
+        ) : setup?.state === 'error' ? (
+          /* (правка 748) Установка упала — честно говорим и не ждём вечно. */
+          <div className="flex flex-col items-center gap-1.5">
+            <p className="text-sm font-medium text-red-400">
+              {setup.title || 'Установка завершилась с ошибкой'}
+            </p>
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              Подробности — в файле install.log в папке программы. Можно закрыть
+              программу и запустить снова — установка продолжится с того места, где оборвалась.
+            </p>
+          </div>
+        ) : setup?.state === 'running' ? (
+          /* (правка 748) Установка зависимостей идёт — детерминированный
+             прогресс по шагам install.ps1 (N/9), а не бесконечный шиммер. */
+          <>
+            <div className="h-1 w-64 overflow-hidden rounded-full bg-[var(--surface-2)] relative">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-700"
+                style={{
+                  width: `${Math.min(100, Math.round(((setup.step ?? 0) / Math.max(1, setup.total ?? 9)) * 100))}%`,
+                  background: 'linear-gradient(90deg, var(--splash-a), var(--splash-b))',
+                }}
+              />
+            </div>
+            <p className="flex items-center gap-2 text-xs tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full animate-[splash-pulse_1.5s_ease-in-out_infinite]"
+                style={{ background: 'var(--splash-a)' }}
+              />
+              Установка компонентов: [{setup.step ?? 0}/{setup.total ?? 9}] {setup.title || '…'}
+              <span className="opacity-50">·</span>
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+              </span>
+            </p>
+          </>
         ) : (
           <>
             {/* Бегущая полоска-шиммер */}
