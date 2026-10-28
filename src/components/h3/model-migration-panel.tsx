@@ -1,13 +1,11 @@
 'use client'
 
 /**
- * Migration from an old version of the app: models + generated content +
- * assistant chats (правка 47, 64; правка 74).
+ * Migration from an old version of the app (правка 47, 64, 74; ПРАВКА 765).
  *
- * (правка 74) Все три категории переносятся одним способом: выбирается папка
- * старой версии, программа ищет внутри папку "models" (модели), папку "output"
- * (контент) и файл "assistant-chats.json" (чаты) и переносит их в текущую
- * установку. Экспорт/импорт чатов в JSON удалён — он больше не нужен.
+ * (правка 765) Категории — содержимое папок целиком: models, input, output,
+ * data (чаты ассистента, пресеты). Коллизии имен больше не молчат:
+ * отличающиеся файлы переносятся под новым именем (счётчик «переименовано»).
  */
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -29,26 +27,30 @@ interface CategoryResult {
   file?: string | null
   moved: number
   skipped: number
+  /** (правка 765) Перенесено под новым именем (коллизия с другим содержимым). */
+  renamed: number
   errors: string[]
 }
 
 interface MigrateResult {
   models: CategoryResult
-  content: CategoryResult
-  chats: CategoryResult
+  input: CategoryResult
+  output: CategoryResult
+  data: CategoryResult
 }
 
 export function ModelMigrationPanel() {
   const [expanded, setExpanded] = useState(false)
   const [sourceDir, setSourceDir] = useState('')
   const [migrating, setMigrating] = useState(false)
-  // Выбор категорий переноса (правки 64/74)
+  // Выбор категорий переноса (правка 765)
   const [selModels, setSelModels] = useState(true)
-  const [selContent, setSelContent] = useState(true)
-  const [selChats, setSelChats] = useState(true)
+  const [selInput, setSelInput] = useState(true)
+  const [selOutput, setSelOutput] = useState(true)
+  const [selData, setSelData] = useState(true)
   const [result, setResult] = useState<MigrateResult | null>(null)
 
-  const nothingSelected = !selModels && !selContent && !selChats
+  const nothingSelected = !selModels && !selInput && !selOutput && !selData
 
   const handleMigrate = async () => {
     if (!sourceDir.trim()) {
@@ -56,7 +58,7 @@ export function ModelMigrationPanel() {
       return
     }
     if (nothingSelected) {
-      toast.error('Выберите, что переносить: модели, контент и/или чаты.')
+      toast.error('Выберите, что переносить: модели, файлы, контент и/или данные.')
       return
     }
 
@@ -68,7 +70,7 @@ export function ModelMigrationPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceDir: sourceDir.trim(),
-          items: { models: selModels, content: selContent, chats: selChats },
+          items: { models: selModels, input: selInput, output: selOutput, data: selData },
         }),
       })
       const data = await res.json()
@@ -80,18 +82,23 @@ export function ModelMigrationPanel() {
         const parts: string[] = []
         for (const [cat, label] of [
           [data.models, 'Модели'],
-          [data.content, 'Контент'],
-          [data.chats, 'Чаты'],
+          [data.input, 'Файлы ввода'],
+          [data.output, 'Контент'],
+          [data.data, 'Данные'],
         ] as const) {
           if (!cat.enabled) continue
           if (cat.found) {
-            parts.push(`${label}: перенесено ${cat.moved}, пропущено (уже есть) ${cat.skipped}`)
+            let p = `${label}: перенесено ${cat.moved + cat.renamed}`
+            if (cat.renamed > 0) p += ` (под новыми именами: ${cat.renamed})`
+            p += `, дубликатов пропущено: ${cat.skipped}`
+            parts.push(p)
           } else {
             parts.push(`${label}: не найдено`)
           }
         }
-        const errCount = data.models.errors.length + data.content.errors.length + data.chats.errors.length
-        const allFound = [data.models, data.content, data.chats].every((c) => !c.enabled || c.found)
+        const cats = [data.models, data.input, data.output, data.data]
+        const errCount = cats.reduce((s, c) => s + c.errors.length, 0)
+        const allFound = cats.every((c) => !c.enabled || c.found)
         const msg = parts.join(' · ')
         if (allFound && errCount === 0) {
           toast.success(msg)
@@ -100,7 +107,7 @@ export function ModelMigrationPanel() {
         }
 
         // (правка 74) Чаты перенесены — подгружаем их в UI (вкладка «Ассистент»)
-        if (data.chats.enabled && data.chats.found && data.chats.moved > 0) {
+        if (data.data.enabled && data.data.found && data.data.moved > 0) {
           await reloadAssistantChats()
         }
       }
@@ -122,7 +129,7 @@ export function ModelMigrationPanel() {
         disabled={migrating}
       >
         <FolderOpenIcon className="w-3.5 h-3.5" />
-        Перенос со старой версии (модели, контент, чаты)
+        Перенос со старой версии (модели, файлы, контент, данные)
         {expanded ? (
           <span className="ml-auto text-xs text-muted-foreground">↑</span>
         ) : (
@@ -169,7 +176,7 @@ export function ModelMigrationPanel() {
             </div>
           </div>
 
-          {/* (правки 64/74) Выбор категорий переноса */}
+          {/* (правка 765) Выбор категорий переноса */}
           <div className="space-y-1.5">
             <label className="text-xs text-muted-foreground">Что перенести</label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
@@ -187,21 +194,31 @@ export function ModelMigrationPanel() {
                 <input
                   type="checkbox"
                   className="accent-primary"
-                  checked={selContent}
-                  onChange={(e) => setSelContent(e.target.checked)}
+                  checked={selInput}
+                  onChange={(e) => setSelInput(e.target.checked)}
                   disabled={migrating}
                 />
-                Контент (сгенерированные видео)
+                Файлы ввода (что кидал)
               </label>
               <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                 <input
                   type="checkbox"
                   className="accent-primary"
-                  checked={selChats}
-                  onChange={(e) => setSelChats(e.target.checked)}
+                  checked={selOutput}
+                  onChange={(e) => setSelOutput(e.target.checked)}
                   disabled={migrating}
                 />
-                Чаты ассистента
+                Контент (output)
+              </label>
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="accent-primary"
+                  checked={selData}
+                  onChange={(e) => setSelData(e.target.checked)}
+                  disabled={migrating}
+                />
+                Данные (чаты, пресеты)
               </label>
             </div>
           </div>
@@ -226,19 +243,20 @@ export function ModelMigrationPanel() {
           </Button>
 
           <p className="text-[10px] text-muted-foreground/50">
-            Программа найдёт в выбранной папке папку "models" (модели), папку "output"
-            (сгенерированные видео с метаданными) и файл "assistant-chats.json"
-            (чаты ассистента) — до 3 уровней глубины. Всё это переместится в текущую
-            установку. Уже существующие файлы и чаты будут пропущены, ничего не
-            перезаписывается.
+            Программа найдёт в выбранной папке папки "models", "input", "output" и "data"
+            (до 3 уровней глубины) и перенесёт их содержимое в текущую установку.
+            Файлы с одинаковым именем и размером считаются дубликатами; если файл
+            с таким же именем ДРУГОЙ — он переносится под новым именем ( суффикс
+            "_restored"), ничего не перезаписывается и не теряется.
           </p>
 
           {/* Result panels — по одной карточке на категорию */}
           {result && (
             <div className="space-y-2">
               <CategoryCard label="Модели" cat={result.models} unit="файлов" />
-              <CategoryCard label="Контент" cat={result.content} unit="файлов" />
-              <CategoryCard label="Чаты ассистента" cat={result.chats} unit="чатов" />
+              <CategoryCard label="Файлы ввода" cat={result.input} unit="файлов" />
+              <CategoryCard label="Контент" cat={result.output} unit="файлов" />
+              <CategoryCard label="Данные (чаты, пресеты)" cat={result.data} unit="файлов" />
             </div>
           )}
         </div>
@@ -275,8 +293,14 @@ function CategoryCard({ label, cat, unit = 'файлов' }: { label: string; ca
           )}
           <p>
             Перенесено {unit}: <span className="text-emerald-400 font-medium">{cat.moved}</span>
+            {cat.renamed > 0 && (
+              <>
+                {' · '}
+                Под новым именем: <span className="text-sky-400 font-medium">{cat.renamed}</span>
+              </>
+            )}
             {' · '}
-            Пропущено (уже есть): <span className="text-amber-400 font-medium">{cat.skipped}</span>
+            Дубликатов пропущено: <span className="text-amber-400 font-medium">{cat.skipped}</span>
           </p>
           {cat.errors.length > 0 && (
             <>
