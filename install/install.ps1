@@ -62,6 +62,10 @@ if ($Force -and (Test-Path $Cache)) {
     Remove-Item $Cache -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# pip-кэш в AppData иногда блокируется антивирусом (Permission denied при
+# сохранении собранных wheel) — уводим кэш в локальный каталог установки.
+$env:PIP_CACHE_DIR = Join-Path $Cache 'pip'
+
 # ---------------------------------------------------------------- logging ---
 
 function Write-Log {
@@ -153,7 +157,11 @@ function Invoke-Pip {
     param([string[]]$PipArgs, [string]$Title)
     Info ('pip: ' + $Title)
     & $script:Python @PipArgs
-    if ($LASTEXITCODE -ne 0) { throw ('pip завершился с ошибкой: ' + $Title) }
+    if ($LASTEXITCODE -ne 0) {
+        Info 'повторяю без pip-кэша (возможна блокировка антивирусом)...'
+        & $script:Python @PipArgs '--no-cache-dir'
+        if ($LASTEXITCODE -ne 0) { throw ('pip завершился с ошибкой: ' + $Title) }
+    }
 }
 
 function Write-TextFileNoBom {
@@ -728,12 +736,8 @@ if (-not $SkipComfy) {
 
 if (-not $KeepCache) {
     if (Test-Path $Cache) {
-        Info 'удаляю временные архивы...'
+        Info 'удаляю временные архивы и pip-кэш...'
         Remove-Item $Cache -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    if ($script:Python -and (Test-Path $script:Python)) {
-        Info 'очищаю pip-кэш...'
-        & $script:Python -m pip cache purge 2>$null | Out-Null
     }
 }
 
