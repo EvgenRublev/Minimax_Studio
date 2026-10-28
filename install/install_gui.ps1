@@ -178,10 +178,9 @@ function Test-PidAlive([int]$ProcessId) {
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'MiniMax H3 Studio 7 - установка зависимостей'
 $form.ClientSize = New-Object System.Drawing.Size(668, 442)
-# (правка 762) Фон формы = цвет рамки, весь контент - в панели с отступом 1px.
-# Так светлая окантовка видна по всему периметру и её не может перекрыть
-# ни шапка, ни кнопки «свернуть»/«закрыть».
-$form.BackColor = $C_BORDER
+# (правка 762) Рамку рисует панель контента, а не фон формы: тогда она сама
+# повторяет скруглённые углы (на углах фон формы обрезался и окантовка пропадала).
+$form.BackColor = $C_BG
 $form.ForeColor = $C_TEXT
 $form.FormBorderStyle = 'None'
 $form.MaximizeBox = $false
@@ -189,14 +188,31 @@ $form.MinimizeBox = $false
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-$form.Padding = New-Object System.Windows.Forms.Padding(1)
 if (Test-Path $IconIco) {
     try { $form.Icon = New-Object System.Drawing.Icon($IconIco) } catch { }
+}
+
+# Радиус рамки = радиусу скругления окна: линия идёт по кромке и не срезается DWM.
+$C_BORDER_R = 8
+
+function Draw-WindowBorder {
+    param($g)
+    try {
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $p = New-RoundPath $form.ClientSize.Width $form.ClientSize.Height $C_BORDER_R 0.5
+        if ($p) {
+            $pen = New-Object System.Drawing.Pen($C_BORDER, 1)
+            $g.DrawPath($pen, $p)
+            $pen.Dispose()
+            $p.Dispose()
+        }
+    } catch { }
 }
 
 $body = New-Object System.Windows.Forms.Panel
 $body.Dock = 'Fill'
 $body.BackColor = $C_BG
+$body.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
 $form.Controls.Add($body)
 
 # --- шапка как в приложении (DesktopTitleBar): 36px, лого 16px, тонкий текст
@@ -204,6 +220,9 @@ $header = New-Object System.Windows.Forms.Panel
 $header.Dock = 'Top'
 $header.Height = 36
 $header.BackColor = $C_HEAD
+# шапка закрывает верхнюю часть окна - верхнюю линию и верхние углы рамки
+# дорисовываем в ней (та же кривая в тех же координатах)
+$header.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
 $body.Controls.Add($header)
 
 # (правка 762) Разделительная линия шапки - отдельная полоска поверх кнопок:
@@ -256,7 +275,7 @@ $headerMin.FlatAppearance.MouseOverBackColor = [System.Drawing.ColorTranslator]:
 $headerMin.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#36363c')
 $headerMin.BackColor = $C_HEAD
 $headerMin.ForeColor = $C_HEAD_TEXT
-$headerMin.Location = New-Object System.Drawing.Point(586, 0)
+$headerMin.Location = New-Object System.Drawing.Point(580, 0)
 $headerMin.Size = New-Object System.Drawing.Size(40, 36)
 $headerMin.TabStop = $false
 $header.Controls.Add($headerMin)
@@ -270,7 +289,7 @@ $headerX.FlatAppearance.MouseOverBackColor = $C_ERR
 $headerX.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#dc2626')
 $headerX.BackColor = $C_HEAD
 $headerX.ForeColor = $C_HEAD_TEXT
-$headerX.Location = New-Object System.Drawing.Point(626, 0)
+$headerX.Location = New-Object System.Drawing.Point(620, 0)
 $headerX.Size = New-Object System.Drawing.Size(40, 36)
 $headerX.TabStop = $false
 $header.Controls.Add($headerX)
@@ -315,7 +334,7 @@ $status.AutoSize = $false
 $status.AutoEllipsis = $true
 $status.UseMnemonic = $false
 $status.Location = New-Object System.Drawing.Point(26, 118)
-$status.Size = New-Object System.Drawing.Size(616, 24)
+$status.Size = New-Object System.Drawing.Size(466, 24)
 $body.Controls.Add($status)
 
 $bar = New-Object System.Windows.Forms.Panel
@@ -370,15 +389,16 @@ $pctText.Location = New-Object System.Drawing.Point(546, 166)
 $pctText.Size = New-Object System.Drawing.Size(96, 20)
 $body.Controls.Add($pctText)
 
-# (правка 762) живая скорость загрузки: видно, качается или встало
+# (правка 762) живая скорость загрузки - справа в строке статуса, напротив
+# «[6/9] ffmpeg»: видно, качается или встало
 $speedText = New-Object System.Windows.Forms.Label
 $speedText.Text = ''
-$speedText.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+$speedText.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $speedText.ForeColor = $C_INFO
 $speedText.AutoSize = $false
 $speedText.TextAlign = 'MiddleRight'
-$speedText.Location = New-Object System.Drawing.Point(396, 166)
-$speedText.Size = New-Object System.Drawing.Size(146, 20)
+$speedText.Location = New-Object System.Drawing.Point(496, 118)
+$speedText.Size = New-Object System.Drawing.Size(146, 24)
 $body.Controls.Add($speedText)
 
 # --- лог: тёмная панель + своя тонкая полоса прокрутки
