@@ -173,6 +173,34 @@ function Get-RemoteMeta {
     return $res
 }
 
+# (правка 763) npm ci / npm run build ничего не пишут в окно установщика и
+# молчат минутами - выглядит как зависание. Запускаем таким процессом и
+# каждые 45 с пишем в лог, что работа идёт.
+function Run-AppStep {
+    param([string]$CmdLine, [string]$Title)
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = 'cmd.exe'
+    $psi.Arguments = '/c ' + $CmdLine
+    $psi.WorkingDirectory = (Get-Location).Path
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $p = $null
+    try { $p = [Diagnostics.Process]::Start($psi) } catch { $p = $null }
+    if (-not $p) {
+        & cmd.exe /c $CmdLine
+        return $LASTEXITCODE
+    }
+    $t0 = Get-Date
+    while ($true) {
+        $exited = $true
+        try { $exited = $p.WaitForExit(45000) } catch { }
+        if ($exited) { break }
+        $sec = [int]((Get-Date) - $t0).TotalSeconds
+        Info ($Title + ' - идёт работа, прошло ' + [int]($sec / 60) + ' мин ' + ($sec % 60) + ' с')
+    }
+    try { return $p.ExitCode } catch { return 1 }
+}
+
 function Get-DownloadSegmented {
     param([string]$Url, [string]$Dest, [int64]$Size = 0, [int]$Threads = 6, [int64]$MinSize = 16MB)
     if (-not $script:Curl) { return $false }
@@ -757,11 +785,11 @@ if (-not $SkipApp) {
         }
         if (-not $nmOk) {
             Info 'npm ci - скачивается ~1.2 ГБ, займёт 5-15 минут'
-            & npm.cmd ci --no-audit --no-fund
-            if ($LASTEXITCODE -ne 0) {
+            $rc = Run-AppStep 'npm ci --no-audit --no-fund' 'npm ci'
+            if ($rc -ne 0) {
                 Warn 'npm ci не удался, пробую npm install'
-                & npm.cmd install --no-audit --no-fund
-                if ($LASTEXITCODE -ne 0) { throw 'не удалось установить node-зависимости (npm).' }
+                $rc = Run-AppStep 'npm install --no-audit --no-fund' 'npm install'
+                if ($rc -ne 0) { throw 'не удалось установить node-зависимости (npm).' }
             }
             Push-Location $Root
             try {
@@ -783,12 +811,38 @@ if (-not $SkipApp) {
             if (Test-Path (Join-Path $elDir 'dist\electron.exe')) {
                 Ok 'Electron уже скачан (окно приложения)'
             } else {
-                Info 'скачиваю бинарник Electron (~110 МБ, один раз)...'
-                Push-Location $Root
-                try {
-                    & $nodeExe (Join-Path $elDir 'install.js')
-                } finally {
-                    Pop-Location
+                # (правка 763) штатный install.js качает бинарник с GitHub в одно
+                # соединение и молча - на медленных каналах это выглядит как
+                # зависание («нет данных» минутами). Качаем тот же zip своим
+                # загрузчиком: параллельные сегменты + скорость в окне.
+                $elVer = $null
+                try { $elVer = (Get-Content (Join-Path $elDir 'package.json') -Raw | ConvertFrom-Json).version } catch { }
+                $elReady = $false
+                if ($elVer -and $elVer -match '^\d+\.\d+\.\d+$') {
+                    Info ("скачиваю бинарник Electron v" + $elVer + " (~150 МБ, один раз)...")
+                    $elZip = Join-Path $Cache ("electron-v" + $elVer + "-win32-x64.zip")
+                    try {
+                        Get-Download ('https://github.com/electron/electron/releases/download/v' + $elVer + '/electron-v' + $elVer + '-win32-x64.zip') $elZip
+                        Info 'распаковываю Electron...'
+                        $dist = Join-Path $elDir 'dist'
+                        if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+                        New-Item -ItemType Directory -Force -Path $dist | Out-Null
+                        try { Add-Type -AssemblyName System.IO.Compression.FileSystem } catch { }
+                        [IO.Compression.ZipFile]::ExtractToDirectory($elZip, $dist)
+                        Set-Content -LiteralPath (Join-Path $elDir 'path.txt') -Value 'electron.exe' -NoNewline
+                        $elReady = Test-Path (Join-Path $dist 'electron.exe')
+                    } catch {
+                        Warn ('быстрая загрузка Electron не удалась: ' + $_.Exception.Message)
+                    }
+                }
+                if (-not $elReady) {
+                    Info 'пробую штатный установщик Electron...'
+                    Push-Location $Root
+                    try {
+                        & $nodeExe (Join-Path $elDir 'install.js')
+                    } finally {
+                        Pop-Location
+                    }
                 }
                 if (Test-Path (Join-Path $elDir 'dist\electron.exe')) {
                     Ok 'Electron скачан: приложение откроется в отдельном окне'
@@ -805,8 +859,8 @@ if (-not $SkipApp) {
 
         if (-not (Test-Path '.next\BUILD_ID')) {
             Info 'npm run build - сборка Next.js, займёт 2-5 минут'
-            & npm.cmd run build
-            if ($LASTEXITCODE -ne 0) { throw 'сборка приложения (npm run build) завершилась ошибкой.' }
+            $rc = Run-AppStep 'npm run build' 'сборка Next.js'
+            if ($rc -ne 0) { throw 'сборка приложения (npm run build) завершилась ошибкой.' }
             Ok 'сборка .next готова'
         } else {
             Ok 'сборка .next уже есть'
