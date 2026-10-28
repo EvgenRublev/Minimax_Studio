@@ -36,6 +36,9 @@ exit /b
 :main
 title MiniMax H3 Studio
 cd /d "%~dp0"
+REM (fix 754) ffmpeg/ffprobe: refine, extend (VHS_LoadVideo) and thumbnails
+REM call ffprobe by name - put runtime\ffmpeg on PATH so children find it.
+if exist "%~dp0runtime\ffmpeg\ffprobe.exe" set "PATH=%~dp0runtime\ffmpeg;%PATH%"
 REM (правка 587) Скрытый режим: pause/set /p невозможны (окно скрыто) —
 REM ошибки пишутся в start_error.log, интерактивные вопросы получают
 REM безопасный ответ по умолчанию.

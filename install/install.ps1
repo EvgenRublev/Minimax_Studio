@@ -418,6 +418,30 @@ if (-not $SkipApp) {
         } else {
             Ok 'сборка .next уже есть'
         }
+
+        # (правка 754) ffmpeg + ffprobe: refine («spawn ffprobe.exe ENOENT»),
+        # продление (VHS_LoadVideo «Invalid video file»), превью — всем нужна
+        # пара в runtime\ffmpeg. В офлайн-инсталляторе её нет: качаем статику.
+        $ffDir = Join-Path $Root 'runtime\ffmpeg'
+        if ((Test-Path (Join-Path $ffDir 'ffmpeg.exe')) -and (Test-Path (Join-Path $ffDir 'ffprobe.exe'))) {
+            Ok 'ffmpeg + ffprobe уже на месте'
+        } else {
+            Info 'скачиваю ffmpeg + ffprobe (~130 МБ, один раз)...'
+            $ffZip = Join-Path $Cache 'ffmpeg-win64-gpl.zip'
+            Get-Download 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip' $ffZip
+            $ffTmp = Join-Path $Cache 'ffmpeg-extract'
+            if (Test-Path $ffTmp) { Remove-Item $ffTmp -Recurse -Force -ErrorAction SilentlyContinue }
+            Expand-ZipSafe $ffZip $ffTmp
+            $ffExe = Get-ChildItem $ffTmp -Recurse -Filter 'ffmpeg.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $ffExe) { throw 'в архиве ffmpeg не найден ffmpeg.exe.' }
+            $fpExe = Join-Path $ffExe.DirectoryName 'ffprobe.exe'
+            if (-not (Test-Path $fpExe)) { throw 'в архиве ffmpeg не найден ffprobe.exe.' }
+            New-Item -ItemType Directory -Force -Path $ffDir | Out-Null
+            Copy-Item $ffExe.FullName (Join-Path $ffDir 'ffmpeg.exe') -Force
+            Copy-Item $fpExe (Join-Path $ffDir 'ffprobe.exe') -Force
+            Remove-Item $ffTmp -Recurse -Force -ErrorAction SilentlyContinue
+            Ok 'ffmpeg + ffprobe установлены в runtime\ffmpeg'
+        }
     } finally {
         Pop-Location
     }
