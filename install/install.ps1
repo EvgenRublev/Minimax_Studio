@@ -96,7 +96,7 @@ function Write-Log {
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch { }
 }
 
-function Step { param([int]$N, [int]$Total, [string]$Text) Write-SetupStatus 'running' $N $Total $Text; Write-Log '' ; Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step' }
+function Step { param([int]$N, [int]$Total, [string]$Text) $script:SpeedMBs = 0; $script:SpeedDetail = ''; Write-SetupStatus 'running' $N $Total $Text; Write-Log '' ; Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step' }
 function Info { param([string]$M) Write-Log ("  " + $M) }
 function Ok   { param([string]$M) Write-Log ("  [OK] " + $M) 'ok' }
 function Warn { param([string]$M) $script:Warnings.Add($M); Write-Log ("  [WARN] " + $M) 'warn' }
@@ -107,18 +107,36 @@ function Fail { param([string]$M) $script:Failures.Add($M); Write-Log ("  [ERROR
 # JSON и показывают «шаг N/9». pid — чтобы приложение могло убить
 # установщик кнопкой «закрыть» (в т.ч. запущенный снаружи install.bat).
 $script:StatusStep = 0
+$script:StatusTitle = ''
+$script:StatusState = 'idle'
+$script:SpeedMBs = 0
+$script:SpeedDetail = ''
 function Write-SetupStatus {
     param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '')
     if ($StepN -gt 0) { $script:StatusStep = $StepN }
+    $script:StatusState = $State
+    if ($Title) { $script:StatusTitle = $Title }
     $obj = [ordered]@{
-        state = $State
-        step  = $StepN
-        total = $TotalN
-        title = $Title
-        pid   = $PID
-        ts    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        state  = $State
+        step   = $StepN
+        total  = $TotalN
+        title  = $script:StatusTitle
+        speed  = $script:SpeedMBs
+        detail = $script:SpeedDetail
+        pid    = $PID
+        ts     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
     try { Write-TextFileNoBom $StatusFile (ConvertTo-Json $obj -Compress) } catch { }
+}
+
+# (правка 762) текущая скорость загрузки (МБ/с) + пояснение «загружено X из Y»
+# для окна установки: видно, качается или процесс встал.
+function Set-Speed {
+    param([double]$MBps, [string]$Detail = '')
+    if ($MBps -lt 0) { $MBps = 0 }
+    $script:SpeedMBs = [Math]::Round($MBps, 1)
+    if ($Detail) { $script:SpeedDetail = $Detail }
+    Write-SetupStatus $script:StatusState
 }
 
 # ------------------------------------------------------------- primitives ---
@@ -141,19 +159,25 @@ function Start-CurlProc {
     }
 }
 
-function Get-DownloadSegmented {
-    param([string]$Url, [string]$Dest, [int]$Threads = 6, [int64]$MinSize = 16MB)
-    if (-not $script:Curl) { return $false }
+# (правка 762) HEAD один раз: размер файла и поддержка Range.
+function Get-RemoteMeta {
+    param([string]$Url)
+    $res = [pscustomobject]@{ Size = [int64]0; Ranges = $false }
+    if (-not $script:Curl) { return $res }
     $head = @()
-    try { $head = @(& $script:Curl -sIL --fail --max-time 40 $Url 2>$null) } catch { return $false }
-    if ($head.Count -eq 0) { return $false }
-    $size = [int64]0
-    $ranges = $false
+    try { $head = @(& $script:Curl -sIL --fail --max-time 40 $Url 2>$null) } catch { return $res }
     foreach ($line in $head) {
-        if ($line -match '(?i)^content-length:\s*(\d+)') { $size = [int64]$Matches[1] }
-        if ($line -match '(?i)^accept-ranges:\s*bytes') { $ranges = $true }
+        if ($line -match '(?i)^content-length:\s*(\d+)') { $res.Size = [int64]$Matches[1] }
+        if ($line -match '(?i)^accept-ranges:\s*bytes') { $res.Ranges = $true }
     }
-    if (-not $ranges -or $size -lt $MinSize) { return $false }
+    return $res
+}
+
+function Get-DownloadSegmented {
+    param([string]$Url, [string]$Dest, [int64]$Size = 0, [int]$Threads = 6, [int64]$MinSize = 16MB)
+    if (-not $script:Curl) { return $false }
+    if ($Size -lt $MinSize) { return $false }
+    $start = Get-Date
 
     $n = [int][Math]::Min($Threads, 8)
     $chunk = [int64][Math]::Ceiling($size / $n)
@@ -174,19 +198,30 @@ function Get-DownloadSegmented {
         return $false
     }
 
-    # ждём и раз в ~12 секунд пишем в лог, сколько уже скачано (видно в окне)
+    # ждём: раз в 3 с пишем в статус живую скорость (видно в окне установки,
+    # зависло или качается), раз в 15 с - строку в лог
     $lastLog = Get-Date
+    $lastUpd = (Get-Date).AddSeconds(-2)
+    $totalMb = [Math]::Round($size / 1MB, 0)
     while ($true) {
         $alive = 0
         foreach ($pr in $procs) {
             try { if (-not $pr.HasExited) { $alive++ } } catch { }
         }
         if ($alive -eq 0) { break }
-        if (((Get-Date) - $lastLog).TotalSeconds -ge 12) {
+        if (((Get-Date) - $lastUpd).TotalSeconds -ge 3) {
+            $lastUpd = Get-Date
+            $got = [int64]0
+            foreach ($p in $parts) { if (Test-Path $p) { try { $got += (Get-Item $p).Length } catch { } } }
+            $sec = [Math]::Max(0.6, ((Get-Date) - $start).TotalSeconds)
+            $detail = 'загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ'
+            Set-Speed (($got / 1MB) / $sec) $detail
+        }
+        if (((Get-Date) - $lastLog).TotalSeconds -ge 15) {
             $lastLog = Get-Date
             $got = [int64]0
             foreach ($p in $parts) { if (Test-Path $p) { $got += (Get-Item $p).Length } }
-            Info ('  загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + [Math]::Round($size / 1MB, 0) + ' МБ')
+            Info ('  загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ')
         }
         Start-Sleep -Milliseconds 500
     }
@@ -240,16 +275,55 @@ function Get-Download {
     Info ("скачивание: " + $Url)
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $ok = $false
-    if ($script:Curl) {
-        if (Get-DownloadSegmented -Url $Url -Dest $part) { $ok = $true }
+    $meta = Get-RemoteMeta $Url
+    if ($meta.Ranges -and $meta.Size -ge 16MB) {
+        if (Get-DownloadSegmented -Url $Url -Dest $part -Size $meta.Size) { $ok = $true }
     }
     if (-not $ok) {
         if ($script:Curl) {
-            & $script:Curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 --progress-bar -o $part $Url
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $part) -and (Get-Item $part).Length -gt 0) {
-                $ok = $true
+            # (правка 762) качаем процессом и опрашиваем размер .part - так видно
+            # живую скорость и прогресс, а не просто «ждём непонятно чего»
+            $size = $meta.Size
+            $proc = $null
+            try {
+                $proc = Start-CurlProc ('-L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o "' + $part + '" "' + $Url + '"')
+            } catch { $proc = $null }
+            if ($proc) {
+                $t0 = Get-Date
+                $lastUpd = (Get-Date).AddSeconds(-2)
+                while ($true) {
+                    $alive = $false
+                    try { $alive = -not $proc.HasExited } catch { }
+                    if (-not $alive) { break }
+                    if (((Get-Date) - $lastUpd).TotalSeconds -ge 3) {
+                        $lastUpd = Get-Date
+                        $got = [int64]0
+                        if (Test-Path $part) { try { $got = (Get-Item $part).Length } catch { } }
+                        $sec = [Math]::Max(0.6, ((Get-Date) - $t0).TotalSeconds)
+                        if ($size -gt 0) {
+                            Set-Speed (($got / 1MB) / $sec) ('загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + [Math]::Round($size / 1MB, 0) + ' МБ')
+                        } elseif ($got -gt 0) {
+                            Set-Speed (($got / 1MB) / $sec) ('загружено ' + [Math]::Round($got / 1MB, 0) + ' МБ')
+                        }
+                    }
+                    Start-Sleep -Milliseconds 400
+                }
+                if ((Test-Path $part) -and (Get-Item $part).Length -gt 0) {
+                    $gotLen = (Get-Item $part).Length
+                    if ($size -gt 0 -and $gotLen -ne $size) {
+                        Info ('  размер не совпал: ' + $gotLen + ' из ' + $size + ' байт')
+                        Remove-Item $part -Force -ErrorAction SilentlyContinue
+                    } else {
+                        $ok = $true
+                    }
+                }
             } else {
-                if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
+                & $script:Curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o $part $Url
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $part) -and (Get-Item $part).Length -gt 0) {
+                    $ok = $true
+                } else {
+                    if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
+                }
             }
         } else {
             try {
@@ -457,13 +531,28 @@ function Install-TorchWheels {
     return ($LASTEXITCODE -eq 0)
 }
 
+# (правка 762) размер папки - чтобы мерить скорость скачивания пакетов uv
+# по росту его кэша (uv сначала качает в кэш, потом ставит из него).
+function Get-PathSize {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return [int64]0 }
+    $sum = [int64]0
+    try {
+        foreach ($f in [IO.Directory]::EnumerateFiles($Path, '*', [IO.SearchOption]::AllDirectories)) {
+            try { $sum += (New-Object IO.FileInfo $f).Length } catch { }
+        }
+    } catch { }
+    return $sum
+}
+
 # 288 пакетов из requirements.lock.txt ставим пачками через uv: так видно
 # прогресс в окне и параллельно качается/распаковывается всё сразу.
 function Install-RequirementsUv {
-    param([string]$File, [int]$Batch = 60)
+    param([string]$File, [int]$Batch = 32)
     if (-not $script:UvExe) { return $false }
     $lines = @(Get-Content $File | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
     if ($lines.Count -eq 0) { return $false }
+    $uvCache = Join-Path $Cache 'uv'
     $i = 0
     while ($i -lt $lines.Count) {
         $last = [Math]::Min($i + $Batch - 1, $lines.Count - 1)
@@ -471,9 +560,23 @@ function Install-RequirementsUv {
         $bf = Join-Path $Cache 'uv-batch.txt'
         [IO.File]::WriteAllLines($bf, $chunk, (New-Object Text.ASCIIEncoding))
         Info ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
-        if ((Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf)) -ne 0) {
+        $before = Get-PathSize $uvCache
+        $t0 = Get-Date
+        $rc = (Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf))
+        $sec = [Math]::Max(0.1, ((Get-Date) - $t0).TotalSeconds)
+        $after = Get-PathSize $uvCache
+        $mb = ($after - $before) / 1MB
+        if ($rc -ne 0) {
             Warn ('uv не осилил пакеты ' + ($i + 1) + '-' + ($last + 1) + ' - доустанавливаю через pip')
             return $false
+        }
+        if ($mb -gt 0.5 -and $sec -gt 1) {
+            $rate = $mb / $sec
+            Info ('  ' + [Math]::Round($mb, 0) + ' МБ за ' + [Math]::Round($sec, 1) + ' с (' + [Math]::Round($rate, 1) + ' МБ/с)')
+            Set-Speed $rate ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
+        } else {
+            Info ('  готово за ' + [Math]::Round($sec, 1) + ' с')
+            Set-Speed 0 ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
         }
         $i = $last + 1
     }
@@ -917,6 +1020,8 @@ if (-not $SkipComfy) {
         $gotN = 0
         foreach ($j in $pending) { if (Test-Path $j.Dest) { $gotN += (Get-Item $j.Dest).Length } }
         Info ('ноды: ' + [Math]::Round($gotN / 1MB, 1) + ' МБ за ' + [Math]::Round($swN.Elapsed.TotalSeconds, 1) + ' с')
+        $secN = [Math]::Max(0.5, $swN.Elapsed.TotalSeconds)
+        Set-Speed (($gotN / 1MB) / $secN) ('ноды: ' + $pending.Count + ' архивов')
     }
 
     $idx = 0

@@ -48,6 +48,30 @@ Add-Type -Name Win32Ui -Namespace Gui -MemberDefinition @'
 [StructLayout(LayoutKind.Sequential)] public struct SCROLLINFO { public uint cbSize; public uint fMask; public int nMin; public int nMax; public uint nPage; public int nPos; public int nTrackPos; }
 '@ -ErrorAction SilentlyContinue
 
+# (правка 762) Скругление углов окна. На Windows 11 просим DWM (плавные,
+# со сглаживанием и тенью), на Windows 10 - режем окно по скруглённой области.
+Add-Type -Name DwmApi -Namespace Gui -MemberDefinition @'
+[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+'@ -ErrorAction SilentlyContinue
+$C_ROUND = 8
+
+function New-RoundPath {
+    param([double]$W, [double]$H, [double]$R = 8, [double]$Inset = 0.5)
+    if ($W -le 0 -or $H -le 0) { return $null }
+    $max = [Math]::Min($W, $H) / 2
+    if ($R -gt $max) { $R = $max }
+    $d = 2 * $R
+    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+    try {
+        $p.AddArc($Inset, $Inset, $d, $d, 180, 90)
+        $p.AddArc(($W - $d - $Inset), $Inset, $d, $d, 270, 90)
+        $p.AddArc(($W - $d - $Inset), ($H - $d - $Inset), $d, $d, 0, 90)
+        $p.AddArc($Inset, ($H - $d - $Inset), $d, $d, 90, 90)
+        $p.CloseFigure()
+    } catch { }
+    return $p
+}
+
 if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 $Root = [IO.Path]::GetFullPath($Root)
 if ($Root.Length -gt 3 -and $Root.EndsWith('\')) { $Root = $Root.Substring(0, $Root.Length - 1) }
@@ -67,6 +91,7 @@ $script:state = 'idle'
 $script:monitorOnly = $false
 $script:closing = $false
 $script:barTrackH = 100
+$script:lastLogChange = Get-Date
 
 # --------------------------------------------------------------- palette ---
 # Тёмно-серая тема приложения (.dark-gray), см. src/app/globals.css
@@ -88,6 +113,8 @@ $C_ERR = [System.Drawing.ColorTranslator]::FromHtml('#ef4444')
 $C_OK = [System.Drawing.ColorTranslator]::FromHtml('#34d399')
 $C_A = [System.Drawing.ColorTranslator]::FromHtml('#f59e0b')
 $C_B = [System.Drawing.ColorTranslator]::FromHtml('#a78bfa')
+$C_INFO = [System.Drawing.ColorTranslator]::FromHtml('#22d3ee')
+$C_WARN = [System.Drawing.ColorTranslator]::FromHtml('#fbbf24')
 $C_SB_TRACK = [System.Drawing.ColorTranslator]::FromHtml('#232328')
 $C_SB_THUMB = [System.Drawing.ColorTranslator]::FromHtml('#4a4a52')
 $C_SB_HOVER = [System.Drawing.ColorTranslator]::FromHtml('#5c5c66')
@@ -151,7 +178,10 @@ function Test-PidAlive([int]$ProcessId) {
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'MiniMax H3 Studio 7 - установка зависимостей'
 $form.ClientSize = New-Object System.Drawing.Size(668, 442)
-$form.BackColor = $C_BG
+# (правка 762) Фон формы = цвет рамки, весь контент - в панели с отступом 1px.
+# Так светлая окантовка видна по всему периметру и её не может перекрыть
+# ни шапка, ни кнопки «свернуть»/«закрыть».
+$form.BackColor = $C_BORDER
 $form.ForeColor = $C_TEXT
 $form.FormBorderStyle = 'None'
 $form.MaximizeBox = $false
@@ -159,32 +189,31 @@ $form.MinimizeBox = $false
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$form.Padding = New-Object System.Windows.Forms.Padding(1)
 if (Test-Path $IconIco) {
     try { $form.Icon = New-Object System.Drawing.Icon($IconIco) } catch { }
 }
-$form.Add_Paint({
-    param($s, $e)
-    try {
-        $pen = New-Object System.Drawing.Pen($C_BORDER, 1)
-        $e.Graphics.DrawRectangle($pen, 0, 0, ($s.Width - 1), ($s.Height - 1))
-        $pen.Dispose()
-    } catch { }
-})
+
+$body = New-Object System.Windows.Forms.Panel
+$body.Dock = 'Fill'
+$body.BackColor = $C_BG
+$form.Controls.Add($body)
 
 # --- шапка как в приложении (DesktopTitleBar): 36px, лого 16px, тонкий текст
 $header = New-Object System.Windows.Forms.Panel
 $header.Dock = 'Top'
 $header.Height = 36
 $header.BackColor = $C_HEAD
-$header.Add_Paint({
-    param($s, $e)
-    try {
-        $pen = New-Object System.Drawing.Pen($C_HEAD_LINE, 1)
-        $e.Graphics.DrawLine($pen, 0, ($s.Height - 1), $s.Width, ($s.Height - 1))
-        $pen.Dispose()
-    } catch { }
-})
-$form.Controls.Add($header)
+$body.Controls.Add($header)
+
+# (правка 762) Разделительная линия шапки - отдельная полоска поверх кнопок:
+# раньше кнопки «свернуть»/«закрыть» перекрывали её своим фоном.
+$headLine = New-Object System.Windows.Forms.Panel
+$headLine.Dock = 'Bottom'
+$headLine.Height = 1
+$headLine.BackColor = $C_HEAD_LINE
+$header.Controls.Add($headLine)
+$headLine.BringToFront()
 
 # Логотип: уменьшаем крупный PNG качественно (иначе 16px-кадр .ico рябит)
 $logo = $null
@@ -227,7 +256,7 @@ $headerMin.FlatAppearance.MouseOverBackColor = [System.Drawing.ColorTranslator]:
 $headerMin.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#36363c')
 $headerMin.BackColor = $C_HEAD
 $headerMin.ForeColor = $C_HEAD_TEXT
-$headerMin.Location = New-Object System.Drawing.Point(588, 0)
+$headerMin.Location = New-Object System.Drawing.Point(586, 0)
 $headerMin.Size = New-Object System.Drawing.Size(40, 36)
 $headerMin.TabStop = $false
 $header.Controls.Add($headerMin)
@@ -241,7 +270,7 @@ $headerX.FlatAppearance.MouseOverBackColor = $C_ERR
 $headerX.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#dc2626')
 $headerX.BackColor = $C_HEAD
 $headerX.ForeColor = $C_HEAD_TEXT
-$headerX.Location = New-Object System.Drawing.Point(628, 0)
+$headerX.Location = New-Object System.Drawing.Point(626, 0)
 $headerX.Size = New-Object System.Drawing.Size(40, 36)
 $headerX.TabStop = $false
 $header.Controls.Add($headerX)
@@ -268,7 +297,7 @@ $title.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.Fon
 $title.ForeColor = $C_TEXT
 $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(26, 50)
-$form.Controls.Add($title)
+$body.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
 $subtitle.Text = 'Установка компонентов — первый запуск (один раз)'
@@ -276,7 +305,7 @@ $subtitle.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $subtitle.ForeColor = $C_MUTED
 $subtitle.AutoSize = $true
 $subtitle.Location = New-Object System.Drawing.Point(28, 88)
-$form.Controls.Add($subtitle)
+$body.Controls.Add($subtitle)
 
 $status = New-Object System.Windows.Forms.Label
 $status.Text = 'Подготовка...'
@@ -287,7 +316,7 @@ $status.AutoEllipsis = $true
 $status.UseMnemonic = $false
 $status.Location = New-Object System.Drawing.Point(26, 118)
 $status.Size = New-Object System.Drawing.Size(616, 24)
-$form.Controls.Add($status)
+$body.Controls.Add($status)
 
 $bar = New-Object System.Windows.Forms.Panel
 $bar.Location = New-Object System.Drawing.Point(26, 150)
@@ -321,7 +350,7 @@ $bar.Add_Paint({
         $path.Dispose()
     } catch { }
 })
-$form.Controls.Add($bar)
+$body.Controls.Add($bar)
 
 $stepText = New-Object System.Windows.Forms.Label
 $stepText.Text = ''
@@ -329,7 +358,7 @@ $stepText.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
 $stepText.ForeColor = $C_HEAD_TEXT
 $stepText.AutoSize = $true
 $stepText.Location = New-Object System.Drawing.Point(26, 168)
-$form.Controls.Add($stepText)
+$body.Controls.Add($stepText)
 
 $pctText = New-Object System.Windows.Forms.Label
 $pctText.Text = '0%'
@@ -339,7 +368,18 @@ $pctText.AutoSize = $false
 $pctText.TextAlign = 'MiddleRight'
 $pctText.Location = New-Object System.Drawing.Point(546, 166)
 $pctText.Size = New-Object System.Drawing.Size(96, 20)
-$form.Controls.Add($pctText)
+$body.Controls.Add($pctText)
+
+# (правка 762) живая скорость загрузки: видно, качается или встало
+$speedText = New-Object System.Windows.Forms.Label
+$speedText.Text = ''
+$speedText.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+$speedText.ForeColor = $C_INFO
+$speedText.AutoSize = $false
+$speedText.TextAlign = 'MiddleRight'
+$speedText.Location = New-Object System.Drawing.Point(396, 166)
+$speedText.Size = New-Object System.Drawing.Size(146, 20)
+$body.Controls.Add($speedText)
 
 # --- лог: тёмная панель + своя тонкая полоса прокрутки
 $logWrap = New-Object System.Windows.Forms.Panel
@@ -354,7 +394,7 @@ $logWrap.Add_Paint({
         $pen.Dispose()
     } catch { }
 })
-$form.Controls.Add($logWrap)
+$body.Controls.Add($logWrap)
 
 # TextBox шире панели: нативная белая полоса прокрутки уходит за границу и
 # обрезается панелью. Своя полоса рисуется справа поверх.
@@ -518,6 +558,7 @@ function Update-LogBox {
         [void][Gui.Win32Ui]::SendMessage($logBox.Handle, 0xB6, [IntPtr]::Zero, [IntPtr]($firstVisible - $cur))
     }
     $script:logShown = $txt
+    $script:lastLogChange = Get-Date
     $logBar.Invalidate()
 }
 
@@ -527,7 +568,7 @@ $hint.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $hint.ForeColor = $C_HEAD_TEXT
 $hint.AutoSize = $true
 $hint.Location = New-Object System.Drawing.Point(26, 382)
-$form.Controls.Add($hint)
+$body.Controls.Add($hint)
 
 $closeBtn = New-Object System.Windows.Forms.Button
 $closeBtn.Text = 'Закрыть'
@@ -541,7 +582,7 @@ $closeBtn.ForeColor = $C_SOFT
 $closeBtn.Location = New-Object System.Drawing.Point(538, 398)
 $closeBtn.Size = New-Object System.Drawing.Size(104, 32)
 $closeBtn.TabStop = $false
-$form.Controls.Add($closeBtn)
+$body.Controls.Add($closeBtn)
 
 # ------------------------------------------------------------------- flow ---
 
@@ -584,6 +625,7 @@ function Start-Install {
         $argLine = '-NoProfile -NoLogo -ExecutionPolicy Bypass -File "' + $InstallPs + '" -Root "' + $Root + '" -NoPause'
         $script:child = Start-Process -FilePath $PsExe -ArgumentList $argLine -WorkingDirectory $Root -WindowStyle Hidden -PassThru
         $script:state = 'running'
+        $script:lastLogChange = Get-Date
         $status.Text = 'Запуск установки...'
     } catch {
         $status.Text = ('Не удалось запустить установку: ' + $_.Exception.Message)
@@ -618,6 +660,26 @@ function Update-Ui {
             $stepText.Text = ('шаг ' + $step + ' из ' + $total)
             $pctText.Text = ('' + $script:pct + '%')
             $bar.Invalidate()
+
+            # (правка 762) скорость загрузки + признак «встало»: если лог
+            # молчит больше минуты, показываем, сколько секунд нет данных
+            $sp = 0.0
+            if ($null -ne $st.speed) { $sp = [double]$st.speed }
+            $detail = ''
+            if ($null -ne $st.detail) { $detail = [string]$st.detail }
+            if ($detail) {
+                $stepText.Text = ('шаг ' + $step + ' из ' + $total + ' · ' + $detail)
+            }
+            $idle = ((Get-Date) - $script:lastLogChange).TotalSeconds
+            if ($idle -gt 60) {
+                $speedText.Text = ('нет данных ' + [int][math]::Round($idle) + ' с')
+                $speedText.ForeColor = $C_WARN
+            } elseif ($sp -gt 0.05) {
+                $speedText.Text = ('скорость ' + $sp.ToString('0.0') + ' МБ/с')
+                $speedText.ForeColor = $C_INFO
+            } else {
+                $speedText.Text = ''
+            }
         }
         'done' {
             $script:pct = 100
@@ -625,6 +687,7 @@ function Update-Ui {
             $status.ForeColor = $C_OK
             $stepText.Text = 'шаг 9 из 9'
             $pctText.Text = '100%'
+            $speedText.Text = ''
             $bar.Invalidate()
             $script:state = 'done'
             $script:doneAt = Get-Date
@@ -690,7 +753,27 @@ function Set-LogRect {
     } catch { }
 }
 
-$form.Add_Shown({ Force-Visible; Set-LogRect; Start-Install })
+# (правка 762) Скруглённые углы: Windows 11 умеет сам (DWM), иначе режем
+# форму по скруглённой области - тогда углы скруглены и на Windows 10.
+function Apply-RoundedWindow {
+    $okR = $false
+    try {
+        $v = 2   # DWMWCP_ROUND
+        $rc = [Gui.DwmApi]::DwmSetWindowAttribute($form.Handle, 33, [ref]$v, 4)
+        if ($rc -eq 0) { $okR = $true }
+    } catch { }
+    if (-not $okR) {
+        try {
+            $p = New-RoundPath $form.Width $form.Height $C_ROUND 0
+            if ($p) {
+                $form.Region = New-Object System.Drawing.Region($p)
+                $p.Dispose()
+            }
+        } catch { }
+    }
+}
+
+$form.Add_Shown({ Force-Visible; Apply-RoundedWindow; Set-LogRect; Start-Install })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 800
