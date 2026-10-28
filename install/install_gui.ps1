@@ -275,8 +275,8 @@ $headerMin.FlatAppearance.MouseOverBackColor = [System.Drawing.ColorTranslator]:
 $headerMin.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#36363c')
 $headerMin.BackColor = $C_HEAD
 $headerMin.ForeColor = $C_HEAD_TEXT
-$headerMin.Location = New-Object System.Drawing.Point(580, 0)
-$headerMin.Size = New-Object System.Drawing.Size(40, 36)
+$headerMin.Location = New-Object System.Drawing.Point(576, 2)
+$headerMin.Size = New-Object System.Drawing.Size(40, 33)
 $headerMin.TabStop = $false
 $header.Controls.Add($headerMin)
 
@@ -289,8 +289,8 @@ $headerX.FlatAppearance.MouseOverBackColor = $C_ERR
 $headerX.FlatAppearance.MouseDownBackColor = [System.Drawing.ColorTranslator]::FromHtml('#dc2626')
 $headerX.BackColor = $C_HEAD
 $headerX.ForeColor = $C_HEAD_TEXT
-$headerX.Location = New-Object System.Drawing.Point(620, 0)
-$headerX.Size = New-Object System.Drawing.Size(40, 36)
+$headerX.Location = New-Object System.Drawing.Point(616, 2)
+$headerX.Size = New-Object System.Drawing.Size(40, 33)
 $headerX.TabStop = $false
 $header.Controls.Add($headerX)
 
@@ -604,6 +604,23 @@ $closeBtn.Size = New-Object System.Drawing.Size(104, 32)
 $closeBtn.TabStop = $false
 $body.Controls.Add($closeBtn)
 
+# (правка 764) Запуск программы - только по кнопке и только после успешной
+# установки зависимостей (раньше окно само запускало приложение и закрывалось).
+$runBtn = New-Object System.Windows.Forms.Button
+$runBtn.Text = 'Запустить программу'
+$runBtn.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$runBtn.FlatStyle = 'Flat'
+$runBtn.FlatAppearance.BorderColor = $C_BORDER
+$runBtn.FlatAppearance.MouseOverBackColor = $C_BTN_HOVER
+$runBtn.FlatAppearance.MouseDownBackColor = $C_TRACK
+$runBtn.BackColor = $C_BTN
+$runBtn.ForeColor = $C_SOFT
+$runBtn.Location = New-Object System.Drawing.Point(352, 398)
+$runBtn.Size = New-Object System.Drawing.Size(174, 32)
+$runBtn.TabStop = $false
+$runBtn.Visible = $false
+$body.Controls.Add($runBtn)
+
 # ------------------------------------------------------------------- flow ---
 
 function Stop-Install {
@@ -615,7 +632,7 @@ function Stop-Install {
 }
 
 function Start-App {
-    if ($NoAutoStart) { return }
+    # (правка 764) запуск теперь только по кнопке «Запустить программу»
     try {
         $vbs = Join-Path $Root 'start_hidden.vbs'
         if (Test-Path $vbs) {
@@ -703,14 +720,16 @@ function Update-Ui {
         }
         'done' {
             $script:pct = 100
-            $status.Text = 'Готово. Запускаю приложение...'
+            $status.Text = 'Готово - зависимости установлены'
             $status.ForeColor = $C_OK
             $stepText.Text = 'шаг 9 из 9'
             $pctText.Text = '100%'
             $speedText.Text = ''
+            $hint.Text = 'Установка завершена. Можно закрыть окно или запустить программу'
             $bar.Invalidate()
             $script:state = 'done'
             $script:doneAt = Get-Date
+            $runBtn.Visible = $true
         }
         'error' {
             $script:state = 'error'
@@ -799,13 +818,15 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 800
 $timer.Add_Tick({
     Update-Ui
-    if ($script:state -eq 'done' -and $script:doneAt -and ((Get-Date) - $script:doneAt).TotalMilliseconds -gt 1800) {
-        $timer.Stop()
-        Start-App
-        $form.Close()
-    }
 })
 $timer.Start()
+
+# (правка 764) Кнопка «Запустить программу»: появляется после «Готово»
+$runBtn.Add_Click({
+    Start-App
+    $script:closing = $true
+    $form.Close()
+})
 
 [void]$form.ShowDialog()
 $timer.Stop()
