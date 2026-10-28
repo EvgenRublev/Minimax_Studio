@@ -67,6 +67,13 @@ if ($Force -and (Test-Path $Cache)) {
 # сохранении собранных wheel) — уводим кэш в локальный каталог установки.
 $env:PIP_CACHE_DIR = Join-Path $Cache 'pip'
 
+# (правка 752) остальные кэши - тоже внутрь папки проекта: npm/npx используют
+# npm_config_cache, а загрузчик Electron (@electron/get) - ELECTRON_CACHE.
+# Вся папка .install-cache удаляется в конце установки (см. очистку ниже).
+$env:npm_config_cache = Join-Path $Cache 'npm'
+$env:ELECTRON_CACHE = Join-Path $Cache 'electron'
+$env:electron_config_cache = Join-Path $Cache 'electron'
+
 # ---------------------------------------------------------------- logging ---
 
 function Write-Log {
@@ -779,7 +786,7 @@ if (-not $SkipComfy) {
 
 if (-not $KeepCache) {
     if (Test-Path $Cache) {
-        Info 'удаляю временные архивы и pip-кэш...'
+        Info 'удаляю временные архивы и кэши (pip, npm, electron)...'
         Remove-Item $Cache -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
