@@ -79,6 +79,14 @@ if not defined NODE_CMD (
     echo  [ERROR] Node.js not found: neither runtime\node.exe nor in PATH.
     echo          Copy node.exe into the runtime\ folder next to start.bat.
     echo.
+    REM (fix 749) First run on a clean machine (shortcut, hidden mode):
+    REM instead of a silent dead end, open a visible console that installs
+    REM all dependencies (install.bat -> install.ps1). Then start the app again.
+    if defined HIDDEN (
+        echo [%date% %time%] First run: node missing - launching visible dependency install>> "%~dp0start_error.log"
+        start "MiniMax H3 Studio - dependency install" "%SystemRoot%\System32\cmd.exe" /c call "%~dp0install.bat"
+        exit /b 0
+    )
     call :pause_or_log "[ERROR] Node.js not found: runtime\node.exe and PATH missing"
     exit /b 1
 )
