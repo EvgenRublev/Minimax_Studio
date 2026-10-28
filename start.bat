@@ -87,8 +87,8 @@ if not defined NODE_CMD (
     REM installs all dependencies hidden; no console, no silent dead end.
     if defined HIDDEN (
         echo [%date% %time%] First run: node missing - launching GUI dependency installer>> "%~dp0start_error.log"
-        if exist "%~dp0install\install_gui.ps1" (
-            start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0install\install_gui.ps1" -Root "%~dp0."
+        if exist "%~dp0install\install_gui.vbs" (
+            start "" wscript.exe "%~dp0install\install_gui.vbs"
         ) else (
             start "MiniMax H3 Studio - dependency install" "%SystemRoot%\System32\cmd.exe" /c call "%~dp0install.bat"
         )
@@ -153,9 +153,9 @@ if exist "node_modules" (
     )
     REM (fix 753) No node_modules: use the themed setup window (installs Node
     REM itself if needed) instead of a silent console npm install.
-    if exist "%~dp0install\install_gui.ps1" (
+    if exist "%~dp0install\install_gui.vbs" (
         echo  [INSTALL] Dependencies missing - launching setup window...
-        start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0install\install_gui.ps1" -Root "%~dp0."
+        start "" wscript.exe "%~dp0install\install_gui.vbs"
         exit /b 0
     )
     echo  [INSTALL] node_modules not found - running npm install...
