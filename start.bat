@@ -82,12 +82,16 @@ if not defined NODE_CMD (
     echo  [ERROR] Node.js not found: neither runtime\node.exe nor in PATH.
     echo          Copy node.exe into the runtime\ folder next to start.bat.
     echo.
-    REM (fix 749) First run on a clean machine (shortcut, hidden mode):
-    REM instead of a silent dead end, open a visible console that installs
-    REM all dependencies (install.bat -> install.ps1). Then start the app again.
+    REM (fix 749/753) First run on a clean machine (shortcut, hidden mode):
+    REM show the themed loader window (install\install_gui.ps1) that
+    REM installs all dependencies hidden; no console, no silent dead end.
     if defined HIDDEN (
-        echo [%date% %time%] First run: node missing - launching visible dependency install>> "%~dp0start_error.log"
-        start "MiniMax H3 Studio - dependency install" "%SystemRoot%\System32\cmd.exe" /c call "%~dp0install.bat"
+        echo [%date% %time%] First run: node missing - launching GUI dependency installer>> "%~dp0start_error.log"
+        if exist "%~dp0install\install_gui.ps1" (
+            start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0install\install_gui.ps1" -Root "%~dp0."
+        ) else (
+            start "MiniMax H3 Studio - dependency install" "%SystemRoot%\System32\cmd.exe" /c call "%~dp0install.bat"
+        )
         exit /b 0
     )
     call :pause_or_log "[ERROR] Node.js not found: runtime\node.exe and PATH missing"
@@ -146,6 +150,13 @@ if exist "node_modules" (
         echo.
         call :pause_or_log "[ERROR] node_modules not found and npm is unavailable"
         exit /b 1
+    )
+    REM (fix 753) No node_modules: use the themed setup window (installs Node
+    REM itself if needed) instead of a silent console npm install.
+    if exist "%~dp0install\install_gui.ps1" (
+        echo  [INSTALL] Dependencies missing - launching setup window...
+        start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0install\install_gui.ps1" -Root "%~dp0."
+        exit /b 0
     )
     echo  [INSTALL] node_modules not found - running npm install...
     call npm install
