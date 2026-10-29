@@ -277,6 +277,13 @@ function llmMmprojPath(): string | null {
   return resolveModelFilePath(p)
 }
 
+/** (правка 771) Есть ли у текущей модели зрение (mmproj найден). Без mmproj
+ *  llama-server принимает картинки, но модель их НЕ видит — дайджесты тогда
+ *  фабрируются. Маршрут дайджестов и ассистент сверяются с этим флагом. */
+export function llmVisionAvailable(): boolean {
+  try { return llmMmprojPath() !== null } catch { return false }
+}
+
 export function llmModelExists(): boolean {
   try {
     // (правка 257) Своя модель: файл пользователя — порог всего 1 МБ

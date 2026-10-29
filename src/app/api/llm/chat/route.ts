@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
-import { ensureLlm, LLM_PORT, actualLlmContextSize, activeLlmModelId, llmBackend, noteLlmActivity } from '@/lib/llm-runner'
+import { ensureLlm, LLM_PORT, actualLlmContextSize, activeLlmModelId, llmBackend, llmVisionAvailable, noteLlmActivity } from '@/lib/llm-runner'
 import { samplingForModel } from '@/lib/llm-sampling'
 import { startChat, noteLlmStreaming } from '@/lib/vram-arbiter'
 import { getAppConfig } from '@/lib/app-config'
 import { prepVideoForLlm, extractVideoFrames } from '@/lib/llm-media'
-import { getReferenceDigest } from '@/lib/llm-ref-digest'
+import { findPriorDigest, getReferenceDigest } from '@/lib/llm-ref-digest'
 import { toOpenAiMessages, openAiSseToDelta } from '@/lib/llm-bonsai'
 import { LLM_STOP_TOKENS, probeAudioAnswer } from '@/lib/llm-audio-guard'
 import {
@@ -181,6 +181,9 @@ export async function POST(req: NextRequest) {
         // identity; the main chat receives only the compact text. If a digest
         // fails, the old raw-media path below is kept as a fallback.
         const digestByTrigger = new Map<string, string>()
+        // (правка 771) прошлые дайджесты из индекса путей: файл удалён или
+        // дайджест не сгенерировать — тег ВСЁ РАВНО приходит с описанием
+        const priorDigestByTrigger = new Map<string, string>()
         let digestUsed = false
         const useRefDigest = body?.useRefDigest !== false
         // Model fingerprint for cache invalidation: switching Qwen/Bonsai,
@@ -235,7 +238,16 @@ export async function POST(req: NextRequest) {
             if (kind === 'audio') continue
             if (kind === 'video' && !cfg.llmVideoVision) continue
             const resolved = await resolveRefPath(ref.path, ref.intent === 'control_source')
-            if (!resolved) continue
+            if (!resolved) {
+              // (правка 771) файл исчез с диска («чистка input», перезапись) —
+              // берём последнее созданное описание этого имени
+              const prior = await findPriorDigest(ref.path, digestModelKey)
+              if (prior) {
+                priorDigestByTrigger.set(ref.trigger, prior)
+                digestUsed = true
+              }
+              continue
+            }
             const result = await getReferenceDigest({
               ref,
               resolvedPath: resolved,
@@ -248,7 +260,15 @@ export async function POST(req: NextRequest) {
               digestByTrigger.set(ref.trigger, result.digest)
               digestUsed = true
             } else {
-              console.warn(`[llm] ref digest unavailable for ${ref.trigger}: ${result.error ?? 'unknown error'} — falling back to raw media`)
+              // (правка 771) генерация не удалась (нет зрения / таймаут / LLM
+              // недоступен / вышел бюджет) — фолбэк на прошлое описание
+              const prior = await findPriorDigest(ref.path, digestModelKey)
+              if (prior) {
+                priorDigestByTrigger.set(ref.trigger, prior)
+                digestUsed = true
+              } else {
+                console.warn(`[llm] ref digest unavailable for ${ref.trigger}: ${result.error ?? 'unknown error'} — falling back to raw media`)
+              }
             }
           }
         }
@@ -269,6 +289,15 @@ export async function POST(req: NextRequest) {
           // (подход safeAttachPath) и делает fallback на staging.
           const resolvedPath = await resolveRefPath(ref.path, ref.intent === 'control_source')
           if (!resolvedPath) {
+            // (правка 771) файла нет, но описание уже создавалось — тег
+            // остаётся с описанием, модель НЕ получает пустую ссылку
+            const prior = priorDigestByTrigger.get(ref.trigger)
+            if (prior) {
+              digestTextParts.push(
+                `[${ref.trigger}] file="${ref.path}" (description from a PREVIOUS analysis of this reference — the file is currently NOT on disk; treat the text below as what you saw earlier; if the actual file matters for the generation, ask the user to re-attach it):\n${prior}`,
+              )
+              continue
+            }
             // ПРАВКА 36: файл рефа отсутствует на диске — явно сообщаем модели,
             // чтобы она НЕ выдумывала его содержимое. Раньше тихий `continue`
             // давал расхождение: системный промпт реф перечислял, а медиа не
@@ -286,6 +315,14 @@ export async function POST(req: NextRequest) {
             if (digest) {
               digestTextParts.push(
                 `[${ref.trigger}] file="${ref.path}" (reference digest generated from the actual video frames — treat it as what you observed${ref.includeAudio !== false ? '; it has an audio track for MiniMax — reference it as <Video N> and do NOT invent what is "heard" in it' : ''}):\n${digest}`,
+              )
+              continue
+            }
+            // (правка 771) свежий дайджест недоступен — прошлое описание этого же имени
+            const priorVideo = priorDigestByTrigger.get(ref.trigger)
+            if (priorVideo) {
+              digestTextParts.push(
+                `[${ref.trigger}] file="${ref.path}" (description from a PREVIOUS analysis of this video — it could not be re-analyzed right now; treat the text below as what you saw earlier; it may be outdated if the file changed${ref.includeAudio !== false ? '; it has an audio track for MiniMax — reference it as <Video N> and do NOT invent what is "heard" in it' : ''}):\n${priorVideo}`,
               )
               continue
             }
@@ -368,6 +405,14 @@ export async function POST(req: NextRequest) {
             )
             continue
           }
+          // (правка 771) свежий дайджест недоступен — прошлое описание этого же имени
+          const priorImage = priorDigestByTrigger.get(ref.trigger)
+          if (priorImage) {
+            digestTextParts.push(
+              `[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'}; description from a PREVIOUS analysis of this image — it could not be re-analyzed right now; treat the text below as what you saw earlier; it may be outdated if the file changed):\n${priorImage}`,
+            )
+            continue
+          }
 
           // Image: resize to max 512px longest side — keeps vision tokens low
           const outPath = path.join(tmpDir, `vision_${uid()}_${safeName}`)
@@ -382,7 +427,13 @@ export async function POST(req: NextRequest) {
             // Fallback: use original (might be slow)
             mediaParts.push({ type: 'image', image: resolvedPath }) // (правка 697)
           }
-          textParts.push(`[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'})`)
+          // (правка 771) без mmproj прикреплённая картинка для модели пустое
+          // место — она её НЕ видит; запрещаем выдумывать содержимое.
+          if (!llmVisionAvailable()) {
+            textParts.push(`[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'}; vision is NOT available for this model — the mmproj file is missing, so you CANNOT see this image: do NOT describe or invent its content; if visuals matter, tell the user to download the vision file (mmproj) in Settings → LLM)`)
+          } else {
+            textParts.push(`[${ref.trigger}] file="${ref.path}" (intent: ${ref.intent || 'identity'})`)
+          }
         }
 
         // Digests go into the SYSTEM context, never into the last user

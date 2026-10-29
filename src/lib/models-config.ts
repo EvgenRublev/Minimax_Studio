@@ -351,3 +351,30 @@ export const MODEL_CATEGORIES: { key: ModelDef['category']; label: string }[] = 
   // (правка 722) Детекторы лиц/человека для вкладки Face Refine
   { key: 'face', label: 'Face Refine (детекторы)' },
 ]
+
+/**
+ * (правка 769) Имя файла, которое получится при РУЧНОЙ загрузке по url,
+ * против имени, которое ждёт приложение (relPath). Автозагрузка всегда
+ * сохраняет файл под именем из relPath (переименование делает загрузчик),
+ * а человек, скачающий по ссылке из вкладки «Ссылки», получит файл с именем
+ * из URL. Если они различаются — нужен явный сигнал «переименуйте».
+ * Пример: upscaler качается как ..._3d_conv_v1_fp16.safetensors, а графы
+ * загружают ..._3d_fp16.safetensors.
+ * Для ZIP-моделей (extractFiles) сопоставление не имеет смысла — null.
+ */
+export function getManualRenameHint(
+  m: ModelDef,
+): { downloaded: string; expected: string } | null {
+  if (m.extractFiles?.length) return null
+  let urlName = ''
+  try {
+    const p = new URL(m.url).pathname
+    urlName = decodeURIComponent(p.slice(p.lastIndexOf('/') + 1))
+  } catch {
+    return null
+  }
+  const rp = m.relPath.replace(/\\/g, '/')
+  const localName = rp.endsWith('/') ? '' : rp.slice(rp.lastIndexOf('/') + 1)
+  if (!urlName || !localName || urlName === localName) return null
+  return { downloaded: urlName, expected: localName }
+}

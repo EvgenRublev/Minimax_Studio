@@ -588,6 +588,13 @@ function Install-RequirementsUv {
         $bf = Join-Path $Cache 'uv-batch.txt'
         [IO.File]::WriteAllLines($bf, $chunk, (New-Object Text.ASCIIEncoding))
         Info ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
+        # (правка 765) статус в окне показывал пачку, которая УЖЕ закончилась
+        # (detail обновлялся только после замера), а в логе шла текущая —
+        # два разных значения одновременно. Теперь detail ставится до запуска
+        # uv: окно и лог всегда показывают одну и ту же текущую пачку.
+        # Скорость до замера новой пачки остаётся от предыдущей.
+        $batchRange = 'пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count
+        Set-Speed $script:SpeedMBs $batchRange
         $before = Get-PathSize $uvCache
         $t0 = Get-Date
         $rc = (Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf))
@@ -601,10 +608,10 @@ function Install-RequirementsUv {
         if ($mb -gt 0.5 -and $sec -gt 1) {
             $rate = $mb / $sec
             Info ('  ' + [Math]::Round($mb, 0) + ' МБ за ' + [Math]::Round($sec, 1) + ' с (' + [Math]::Round($rate, 1) + ' МБ/с)')
-            Set-Speed $rate ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
+            Set-Speed $rate $batchRange
         } else {
             Info ('  готово за ' + [Math]::Round($sec, 1) + ' с')
-            Set-Speed 0 ('пакеты ' + ($i + 1) + '-' + ($last + 1) + ' из ' + $lines.Count)
+            Set-Speed 0 $batchRange
         }
         $i = $last + 1
     }
@@ -857,13 +864,31 @@ if (-not $SkipApp) {
             Remove-Item '.next' -Recurse -Force
         }
 
-        if (-not (Test-Path '.next\BUILD_ID')) {
+        # (правка 770) Раньше сборка переиспользовалась, если .next\BUILD_ID просто
+        # есть. При обновлении поверх старой установки установщик кладёт свежие
+        # исходники, а старый .next остаётся нетронутым — и юзер продолжает
+        # запускать ПРЕЖНИЙ фронтенд: исправления (например, 741 про масштаб) до
+        # него так и не доходят. Теперь сборка считается свежей только если её
+        # версия совпадает с версией из package.json; после успешной сборки
+        # версия пишется в .next\H3_APP_VERSION.
+        $appVer = $null
+        try { $appVer = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version } catch { }
+        $buildVer = $null
+        try { $buildVer = ((Get-Content '.next\H3_APP_VERSION' -Raw) -as [string]).Trim() } catch { }
+        $buildFresh = ((Test-Path '.next\BUILD_ID') -and $appVer -and ($buildVer -eq $appVer))
+        if (-not $buildFresh) {
+            if (Test-Path '.next') {
+                Info 'сборка .next устарела (в ней ' + ($(if ($buildVer) { $buildVer } else { 'нет штампа' }) ) + ', нужно ' + $appVer + ') - пересобираю'
+                # rmdir через cmd: Remove-Item падает на длинных путях .next
+                & cmd.exe /c "rmdir /s /q `"$(Join-Path $Root '.next')`""
+            }
             Info 'npm run build - сборка Next.js, займёт 2-5 минут'
             $rc = Run-AppStep 'npm run build' 'сборка Next.js'
             if ($rc -ne 0) { throw 'сборка приложения (npm run build) завершилась ошибкой.' }
-            Ok 'сборка .next готова'
+            if ($appVer) { Set-Content -Path '.next\H3_APP_VERSION' -Value $appVer -NoNewline }
+            Ok ('сборка .next готова (версия ' + $appVer + ')')
         } else {
-            Ok 'сборка .next уже есть'
+            Ok ('сборка .next уже есть, версия ' + $buildVer)
         }
 
         # (правка 754) ffmpeg + ffprobe: refine («spawn ffprobe.exe ENOENT»),

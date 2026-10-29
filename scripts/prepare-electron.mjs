@@ -100,12 +100,12 @@ try {
 
   // Версия приложения — из package.json, чтобы «Свойства файла» и
   // «О программе» показывали то же, что и сам релиз.
-  let fileVer = 7_00_00;
+  let fileVer = 7_01_00;
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-    const [maj, min, pat] = String(pkg.version || '7.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+    const [maj, min, pat] = String(pkg.version || '7.1.0').split('.').map((n) => parseInt(n, 10) || 0);
     fileVer = ((maj & 0xffff) << 16) | ((min & 0xffff) << 8) | (pat & 0xff);
-  } catch { /* версия из package.json недоступна — оставляем 7.0.0 */ }
+  } catch { /* версия из package.json недоступна — оставляем 7.1.0 */ }
 
   const vi = buildVersionInfo(
     [

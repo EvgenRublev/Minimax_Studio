@@ -1,4 +1,4 @@
-﻿# (правки 753/756) Тематический загрузчик установки зависимостей.
+﻿# (правки 753/756/766) Тематический загрузчик установки зависимостей.
 #
 # Окно повторяет «хром» приложения (тёмно-серая тема .dark-gray):
 #   - шапка 36px #1c1c20, логотип 16px, название 11px #8b8b94,
@@ -44,8 +44,13 @@ Add-Type -Name Win32Ui -Namespace Gui -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, ref RECT lParam);
 [DllImport("user32.dll")] public static extern bool GetScrollInfo(IntPtr hWnd, int nBar, ref SCROLLINFO si);
+[DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+[DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+[DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 [StructLayout(LayoutKind.Sequential)] public struct SCROLLINFO { public uint cbSize; public uint fMask; public int nMin; public int nMax; public uint nPage; public int nPos; public int nTrackPos; }
+[DllImport("shell32.dll")] public static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
 '@ -ErrorAction SilentlyContinue
 
 # (правка 762) Скругление углов окна. На Windows 11 просим DWM (плавные,
@@ -54,6 +59,27 @@ Add-Type -Name DwmApi -Namespace Gui -MemberDefinition @'
 [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 '@ -ErrorAction SilentlyContinue
 $C_ROUND = 8
+
+# (правка 767) В панели задач окно показывало СИНИЙ ЗНАК POWERSHELL: кнопка
+# панели задач принадлежит процессу powershell.exe и без собственного
+# AppUserModelID Windows рисует иконку процесса, игнорируя иконку окна.
+# Своя AppID даёт окну отдельную кнопку панели задач с нашей иконкой.
+try { [void][Gui.Win32Ui]::SetCurrentProcessExplicitAppUserModelID('MiniMax.H3Studio.Setup') } catch { }
+
+# (правка 766) Окно иногда «моргает»: панели с самокраской (рамка, прогресс,
+# полоса прокрутки) при перерисовке сначала стирают фон, потом рисуют —
+# на глазах вспышка. Лечим двойной буферизацией контролов + комpositing
+# всего окна (WS_EX_COMPOSITED: Windows перерисовывает окно в offscreen-буфер).
+$script:SetStyleMethod = [System.Windows.Forms.Control].GetMethod(
+    'SetStyle',
+    [System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+function Enable-DoubleBuffering($ctrl) {
+    try {
+        $st = [System.Windows.Forms.ControlStyles]::OptimizedDoubleBuffer -bor `
+              [System.Windows.Forms.ControlStyles]::AllPaintingInWmPaint
+        [void]$script:SetStyleMethod.Invoke($ctrl, [object[]]@($st, $true))
+    } catch { }
+}
 
 function New-RoundPath {
     param([double]$W, [double]$H, [double]$R = 8, [double]$Inset = 0.5)
@@ -188,6 +214,7 @@ $form.MinimizeBox = $false
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+Enable-DoubleBuffering $form
 if (Test-Path $IconIco) {
     try { $form.Icon = New-Object System.Drawing.Icon($IconIco) } catch { }
 }
@@ -213,6 +240,7 @@ $body = New-Object System.Windows.Forms.Panel
 $body.Dock = 'Fill'
 $body.BackColor = $C_BG
 $body.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
+Enable-DoubleBuffering $body
 $form.Controls.Add($body)
 
 # --- шапка как в приложении (DesktopTitleBar): 36px, лого 16px, тонкий текст
@@ -223,6 +251,7 @@ $header.BackColor = $C_HEAD
 # шапка закрывает верхнюю часть окна - верхнюю линию и верхние углы рамки
 # дорисовываем в ней (та же кривая в тех же координатах)
 $header.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
+Enable-DoubleBuffering $header
 $body.Controls.Add($header)
 
 # (правка 762) Разделительная линия шапки - отдельная полоска поверх кнопок:
@@ -369,6 +398,7 @@ $bar.Add_Paint({
         $path.Dispose()
     } catch { }
 })
+Enable-DoubleBuffering $bar
 $body.Controls.Add($bar)
 
 $stepText = New-Object System.Windows.Forms.Label
@@ -414,6 +444,7 @@ $logWrap.Add_Paint({
         $pen.Dispose()
     } catch { }
 })
+Enable-DoubleBuffering $logWrap
 $body.Controls.Add($logWrap)
 
 # TextBox шире панели: нативная белая полоса прокрутки уходит за границу и
@@ -439,6 +470,7 @@ $logBar.Size = New-Object System.Drawing.Size(6, 158)
 $logBar.BackColor = $C_LOG_BG
 $logWrap.Controls.Add($logBar)
 $logBar.BringToFront()
+Enable-DoubleBuffering $logBar
 
 function Fill-Round($g, $brush, $x, $y, $w, $h, $r) {
     if ($w -le 0 -or $h -le 0) { return }
@@ -568,7 +600,16 @@ function Update-LogBox {
             $firstVisible = [Gui.Win32Ui]::SendMessage($logBox.Handle, 0xCE, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
         }
     }
-    $logBox.Text = $txt
+    # (правка 766) Дописываем новые строки (AppendText), а не заменяем весь
+    # текст: полная замена (WM_SETTEXT) стирает и заново рисует весь лог —
+    # при частых строках окна это заметно моргает. Полная замена остаётся
+    # только при обрезке буфера.
+    if ($script:logShown.Length -gt 0 -and $txt.Length -gt $script:logShown.Length -and
+        $txt.StartsWith($script:logShown, [System.StringComparison]::Ordinal)) {
+        $logBox.AppendText($txt.Substring($script:logShown.Length))
+    } else {
+        $logBox.Text = $txt
+    }
     if ($follow) {
         $logBox.SelectionStart = $logBox.TextLength
         $logBox.SelectionLength = 0
@@ -698,8 +739,10 @@ function Update-Ui {
             $pctText.Text = ('' + $script:pct + '%')
             $bar.Invalidate()
 
-            # (правка 762) скорость загрузки + признак «встало»: если лог
-            # молчит больше минуты, показываем, сколько секунд нет данных
+            # (правка 762) скорость загрузки
+            # (правка 766) убрал предупреждение «нет данных N с»: тишина в логе
+            # во время установки — нормальное явление (шаги без строк лога),
+            # оно пугало юзера. Скорость показываем только когда она есть.
             $sp = 0.0
             if ($null -ne $st.speed) { $sp = [double]$st.speed }
             $detail = ''
@@ -707,11 +750,7 @@ function Update-Ui {
             if ($detail) {
                 $stepText.Text = ('шаг ' + $step + ' из ' + $total + ' · ' + $detail)
             }
-            $idle = ((Get-Date) - $script:lastLogChange).TotalSeconds
-            if ($idle -gt 60) {
-                $speedText.Text = ('нет данных ' + [int][math]::Round($idle) + ' с')
-                $speedText.ForeColor = $C_WARN
-            } elseif ($sp -gt 0.05) {
+            if ($sp -gt 0.05) {
                 $speedText.Text = ('скорость ' + $sp.ToString('0.0') + ' МБ/с')
                 $speedText.ForeColor = $C_INFO
             } else {
@@ -812,11 +851,108 @@ function Apply-RoundedWindow {
     }
 }
 
-$form.Add_Shown({ Force-Visible; Apply-RoundedWindow; Set-LogRect; Start-Install })
+# (правка 766) WS_EX_COMPOSITED: всё окно целиком перерисовывается в скрытый
+# буфер и выводится одним кадром — пропадают вспышки при перерисовках рамок,
+# лога и перетаскивании окна (гладный лечит «морганье» безрамочных окон).
+# (правка 768) У этого флага есть побочный эффект: при сворачивании буфер
+# сбрасывается, и после развертывания окно «раскрывается» полупустым (лог
+# дорисован частично, рамки пропали). Лечим так: при сворачивании флаг снимаем
+# (окно всё равно не рисуется), при возврате — ставим обратно и принудительно
+# перерисовываем всё окно целиком.
+function Set-Composited([bool]$On, [switch]$FrameChange) {
+    try {
+        if (-not $form.IsHandleCreated) { return }
+        $ex = [Gui.Win32Ui]::GetWindowLong($form.Handle, -20)   # GWL_EXSTYLE
+        $newEx = $ex
+        if ($On) { $newEx = ($ex -bor 0x02000000) } else { $newEx = ($ex -band (-bnot 0x02000000)) }
+        if ($newEx -eq $ex) { return }
+        [void][Gui.Win32Ui]::SetWindowLong($form.Handle, -20, $newEx)
+        if ($FrameChange) {
+            # (правка 772) Смена ex-стиля у ВИДИМОГО окна без SWP_FRAMECHANGED
+            # оставляет в композитном буфере старый (свёрнутый) кадр: после
+            # разворота окно «полупустое», пока не придёт следующая перерисовка.
+            # После завершения установки перерисовок больше нет — баг оставался
+            # видимым. Просим Windows пересобрать кадр немедленно.
+            [void][Gui.Win32Ui]::SetWindowPos(
+                $form.Handle, [IntPtr]::Zero, 0, 0, 0, 0,
+                (0x0001 -bor 0x0002 -bor 0x0004 -bor 0x0010 -bor 0x0020))
+        }
+    } catch { }
+}
+
+# (правка 772) Полная перерисовка окна и ВСЕХ дочерних контролов: после
+# разворота самокрасочные панели (рамка, прогресс, лог, скроллбар) иначе
+# остаются в состоянии «стёрто/недорисовано».
+function Force-RepaintAll {
+    try {
+        [void][Gui.Win32Ui]::RedrawWindow(
+            $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero,
+            (0x0001 -bor 0x0004 -bor 0x0080 -bor 0x0100 -bor 0x0400))
+    } catch { }
+    try {
+        $form.Invalidate($true)
+        $form.Update()
+        $logBar.Invalidate()
+        $bar.Invalidate()
+    } catch { }
+}
+
+function Apply-NoFlicker { Set-Composited $true }
+
+$form.Add_Shown({ Force-Visible; Apply-RoundedWindow; Apply-NoFlicker; Set-LogRect; Start-Install })
+
+# (правка 768) Возврат из свернутого состояния: снимаем/ставим комpositing и
+# заново заполняем лог — иначе после развертывания окно выглядит «сломанным»
+# (полупустое поле лога, пропавшая рамка), пока не придут новые строки.
+$script:wasMinimized = $false
+$script:restoreRepaint = 0
+
+# (правка 772) Разворот из свёрнутого состояния. Правка 768 снимала/ставила
+# WS_EX_COMPOSITED и перерисовывала окно один раз — этого не хватало, когда
+# установка уже ЗАВЕРШЕНА: во время установки каждые 800 мс приходят новые
+# строки лога и перерисовки «залечивают» кадр, а после «Готово» обновлений
+# нет, и артефакт разворота оставался навсегда. Теперь: пересборка кадра
+# (SWP_FRAMECHANGED) + немедленная полная перерисовка + несколько добивочных
+# проходов в таймере. Заодно лечится смена видимости кнопки «Запустить
+# программу», если установка финишировала при свёрнутом окне.
+function Restore-FromMinimized {
+    try {
+        if ($form.WindowState -ne 'Normal') { return }
+        $script:logShown = ''
+        Update-LogBox
+        $logBox.SelectionStart = $logBox.TextLength
+        $logBox.SelectionLength = 0
+        $logBox.ScrollToCaret()
+        Set-LogRect
+        Apply-RoundedWindow
+        Set-Composited $true -FrameChange
+        Force-RepaintAll
+        $script:restoreRepaint = 4
+    } catch { }
+}
+
+$form.Add_Resize({
+    try {
+        if ($form.WindowState -eq 'Minimized') {
+            $script:wasMinimized = $true
+            Set-Composited $false
+        } elseif ($script:wasMinimized) {
+            $script:wasMinimized = $false
+            Restore-FromMinimized
+        }
+    } catch { }
+})
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 800
 $timer.Add_Tick({
+    # (правка 772) добивочные проходы после разворота — работают и в состоянии
+    # «Готово», когда обычных обновлений UI больше не происходит
+    if ($script:restoreRepaint -gt 0) {
+        $script:restoreRepaint--
+        Apply-RoundedWindow
+        Force-RepaintAll
+    }
     Update-Ui
 })
 $timer.Start()

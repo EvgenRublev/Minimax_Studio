@@ -21,7 +21,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import sharp from 'sharp'
 import { getAppConfig } from './app-config'
-import { LLM_PORT, actualLlmContextSize, noteLlmActivity, type LlmBackend } from './llm-runner'
+import { LLM_PORT, actualLlmContextSize, llmVisionAvailable, noteLlmActivity, type LlmBackend } from './llm-runner'
 import { toOpenAiMessages } from './llm-bonsai'
 import { LLM_STOP_TOKENS } from './llm-audio-guard'
 import { extractVideoFrames } from './llm-media'
@@ -158,6 +158,77 @@ async function writeCachedDigest(entry: DigestCacheFile): Promise<void> {
     }
   } catch (e) {
     console.warn('[llm-ref-digest] cache write failed:', e instanceof Error ? e.message : e)
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * (правка 771) Индекс «путь → дайджест».
+ *
+ * Кэш по хэшу содержимого требует, чтобы файл был на диске (хэш считается из
+ * файла). Файлы в ComfyUI input/ недолговечны: «чистка input», перезапись,
+ * очистка .local-input — и тогда у модели пропадает описание, хотя оно уже
+ * однажды было создано. Индекс хранит последний дайджест для каждого ref.path
+ * (имени, которым клиент вызывает реф), поэтому тег <Picture N> / <Video N>
+ * ВСЕГДА сопровождается описанием: свежий кэш → индекс → честная пометка.
+ * Запись валидна только для той же модели (modelId в ключах) — смена модели
+ * обязывает переписывать описание заново.
+ * ────────────────────────────────────────────────────────────────────────── */
+const PATH_INDEX_FILE = path.join(CACHE_DIR, '_path-index.json')
+
+interface PathIndexEntry {
+  key: string
+  digest: string
+  modelId: string
+  refPath: string
+  updatedAt: string
+}
+
+function normalizeRefPath(refPath: string): string {
+  return String(refPath || '').replace(/\\/g, '/').trim().toLowerCase()
+}
+
+async function recordDigestForPath(
+  refPath: string,
+  entry: Omit<PathIndexEntry, 'refPath' | 'updatedAt'>,
+): Promise<void> {
+  const norm = normalizeRefPath(refPath)
+  if (!norm) return
+  try {
+    await fs.mkdir(CACHE_DIR, { recursive: true })
+    let index: Record<string, PathIndexEntry> = {}
+    try {
+      const raw = await fs.readFile(PATH_INDEX_FILE, 'utf8')
+      const parsed = JSON.parse(raw) as Record<string, PathIndexEntry>
+      if (parsed && typeof parsed === 'object') index = parsed
+    } catch { /* первый раз или поврежденный индекс — начинаем заново */ }
+    index[norm] = { ...entry, refPath, updatedAt: new Date().toISOString() }
+    const tmp = `${PATH_INDEX_FILE}.${process.pid}.${Date.now()}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(index, null, 1), 'utf8')
+    try {
+      await fs.rename(tmp, PATH_INDEX_FILE)
+    } catch {
+      await fs.unlink(tmp).catch(() => {})
+    }
+  } catch (e) {
+    console.warn('[llm-ref-digest] path index write failed:', e instanceof Error ? e.message : e)
+  }
+}
+
+/**
+ * Последний созданный дайджест для имени референса (когда файл недоступен или
+ * дайджест не сгенерировать: нет зрения, LLM недоступен, вышел бюджет).
+ * null — индекс пуст, модель другая или записи нет.
+ */
+export async function findPriorDigest(refPath: string, modelId: string): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(PATH_INDEX_FILE, 'utf8')
+    const index = JSON.parse(raw) as Record<string, PathIndexEntry>
+    const entry = index?.[normalizeRefPath(refPath)]
+    if (!entry || entry.modelId !== modelId) return null
+    if (typeof entry.digest !== 'string' || !entry.digest.trim()) return null
+    return entry.digest.trim()
+  } catch {
+    return null
   }
 }
 
@@ -398,7 +469,17 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
   const cached = await readCachedDigest(key)
   if (cached) {
     console.log(`[llm-ref-digest] cache hit: ${input.ref.trigger}`)
+    // (правка 771) обновляем индекс путей — описание переживёт удаление файла
+    await recordDigestForPath(input.ref.path, { key, digest: cached, modelId: input.modelId })
     return { ok: true, digest: cached, cached: true }
+  }
+
+  // (правка 771) Без mmproj модель НЕ видит медиа: llama-server принимает
+  // картинки, но текст ответа фабкуется. Дайджест в этом случае не генерируем
+  // вовсе — маршрут использует findPriorDigest или честную пометку.
+  if (!llmVisionAvailable()) {
+    console.warn(`[llm-ref-digest] vision unavailable (mmproj missing) — skip digest: ${input.ref.trigger}`)
+    return { ok: false, error: 'vision unavailable (mmproj file missing)' }
   }
 
   let prepared: PreparedDigestMedia | null = null
@@ -448,6 +529,9 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
       contentTag: tag,
       createdAt: new Date().toISOString(),
     })
+    // (правка 771) индекс путей — тег останется с описанием, даже если файл
+    // потом удалят из input/ («чистка input», перезапись, снятие staged-копий)
+    await recordDigestForPath(input.ref.path, { key, digest, modelId: input.modelId })
     console.log(`[llm-ref-digest] generated: ${input.ref.trigger} (${digest.length} chars, ${prepared.note})`)
     return { ok: true, digest }
   } catch (e) {

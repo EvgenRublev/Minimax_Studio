@@ -53,7 +53,7 @@ import { DiffusionModelSelector } from './diffusion-model-selector'
 import { ModelMigrationPanel } from './model-migration-panel'
 import { LlmModelSelector } from './llm-model-selector'
 import { VoiceSettingsPanel } from './voice-settings-panel'
-import { MODELS, MODEL_CATEGORIES } from '@/lib/models-config'
+import { MODELS, MODEL_CATEGORIES, getManualRenameHint } from '@/lib/models-config'
 import { useGenStore, DEFAULT_VIDEO_STATE } from '@/lib/gen-store'
 import { usePromptHistory } from '@/lib/prompt-history-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
@@ -1428,7 +1428,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <img src="/logo.svg" alt="" className="w-10 h-10" />
               <div>
                 <div className="text-sm font-medium">Minimax H3 Studio</div>
-                <div className="text-xs text-muted-foreground">Версия 7.0.2</div>
+                <div className="text-xs text-muted-foreground">Версия 7.1.0</div>
               </div>
             </div>
             {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}
@@ -1889,6 +1889,10 @@ function ManualDownloadPanel() {
               const isBonsai = m.target === 'bonsai'
               const fullRoot = isBonsai ? bonsaiModelsRoot : comfyModelsRoot
               const fullPath = fullRoot + m.relPath
+              // (правка 769) если по ссылке скачается файл с ДРУГИМ именем, чем
+              // ждёт приложение — подсказать юзеру переименовать (автозагрузка
+              // переименовывает сама, ручной способ — нет).
+              const renameHint = getManualRenameHint(m)
               return (
               <div
                 key={m.id}
@@ -1932,6 +1936,25 @@ function ManualDownloadPanel() {
                     <CopyIcon className="w-3 h-3" />
                   </button>
                 </div>
+                {/* (правка 769) имена в URL и в пути различаются — подсказка */}
+                {renameHint && (
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="flex-1 min-w-0 text-[10px] text-amber-300/90"
+                      title="Скачанный по ссылке файл нужно переименовать, иначе приложение его не увидит"
+                    >
+                      ⚠ по ссылке скачается «{renameHint.downloaded}» — переименуйте файл в «{renameHint.expected}»
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void copy(renameHint.expected, 'Имя файла')}
+                      className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
+                      title="Скопировать нужное имя файла"
+                    >
+                      <CopyIcon className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
               )
             })}
