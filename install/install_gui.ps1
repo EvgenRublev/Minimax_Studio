@@ -106,6 +106,10 @@ $Cache = Join-Path $Root '.install-cache'
 $StatusFile = Join-Path $Cache 'setup_status.json'
 $InstallPs = Join-Path $Root 'install\install.ps1'
 $LogFile = Join-Path $Root 'install.log'
+# (правка 789) stderr скрытого powershell-процесса install.ps1: если скрипт
+# умирает от ошибки до записи статуса, его вывод сохраняется здесь, и окно
+# показывает причину вместо «смотрите лог вручную».
+$ErrLog = Join-Path $Cache 'install_stderr.txt'
 $IconIco = Join-Path $Root 'electron\icons\icon.ico'
 $IconPng = Join-Path $Root 'electron\icons\icon-128.png'
 $PsExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -685,6 +689,30 @@ function Start-App {
     } catch { }
 }
 
+# (правка 789) install.ps1 завершился, не оставив финального статуса (файл
+# статуса отсутствует/не читается или в нём завис «running» с мёртвым
+# процессом) — значит скрипт умер молча. Показываем код выхода, приклеиваем
+# к лог-панели хвост stderr и даём подсказку про VPN/прокси: типовая причина
+# тихого обрыва скачиваний (проверено на реальном случае с VPN).
+function Show-Crash {
+    $code = -1
+    if ($script:child) { try { $code = $script:child.ExitCode } catch { } }
+    $script:state = 'error'
+    $status.Text = ('Установка прервалась (код ' + $code + ') без отчёта')
+    $status.ForeColor = $C_ERR
+    $hint.Text = 'Частая причина — VPN или прокси мешают загрузке. Отключите их и запустите программу снова: установка продолжится с места обрыва.'
+    try {
+        if (Test-Path $ErrLog) {
+            $tail = @(Get-Content -LiteralPath $ErrLog -Tail 20 -ErrorAction SilentlyContinue)
+            if ($tail.Count -gt 0) {
+                if ($script:logBuf.Length -eq 0) { [void]$script:logBuf.AppendLine('--- вывод install.ps1 (stderr) ---') }
+                foreach ($l in $tail) { [void]$script:logBuf.AppendLine([string]$l) }
+            }
+        }
+    } catch { }
+    $script:child = $null
+}
+
 function Start-Install {
     $st = Get-Status
     if ($st -and $st.state -eq 'running' -and (Test-PidAlive ([int]$st.pid))) {
@@ -701,7 +729,10 @@ function Start-Install {
     }
     try {
         $argLine = '-NoProfile -NoLogo -ExecutionPolicy Bypass -File "' + $InstallPs + '" -Root "' + $Root + '" -NoPause'
-        $script:child = Start-Process -FilePath $PsExe -ArgumentList $argLine -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+        # (правка 789) stderr ребёнка в файл: без него вывод упавшего
+        # install.ps1 пропадал в скрытом окне, и «без отчёта» было непонятно.
+        try { New-Item -ItemType Directory -Force -Path $Cache | Out-Null } catch { }
+        $script:child = Start-Process -FilePath $PsExe -ArgumentList $argLine -WorkingDirectory $Root -WindowStyle Hidden -RedirectStandardError $ErrLog -PassThru
         $script:state = 'running'
         $script:lastLogChange = Get-Date
         $status.Text = 'Запуск установки...'
@@ -718,15 +749,15 @@ function Update-Ui {
 
     if ($script:state -eq 'done' -or $script:state -eq 'error') { return }
     $st = Get-Status
-    if (-not $st) {
-        if (-not $script:monitorOnly -and $script:child -and $script:child.HasExited) {
-            $script:state = 'error'
-            $status.Text = 'Установка завершилась без отчёта — смотрите лог и install.log'
-            $status.ForeColor = $C_ERR
-            $script:child = $null
-        }
+    # (правка 789) раньше «без отчёта» срабатывало только если файл статуса
+    # вовсе пропал; зависший «running» с мёртвым процессом показывался как
+    # вечные 0%. Теперь оба варианта ведут в Show-Crash.
+    if (-not $script:monitorOnly -and $script:child -and $script:child.HasExited -and
+        (-not $st -or $st.state -eq 'running')) {
+        Show-Crash
         return
     }
+    if (-not $st) { return }
 
     switch ($st.state) {
         'running' {
@@ -774,6 +805,8 @@ function Update-Ui {
             $script:state = 'error'
             $status.Text = ('Ошибка: ' + $st.title)
             $status.ForeColor = $C_ERR
+            # (правка 789) та же подсказка, что и при тихом обрыве
+            $hint.Text = 'Попробуйте запустить программу снова: скачанное не потеряется. Если мешает VPN или прокси — отключите его.'
         }
     }
 }

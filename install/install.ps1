@@ -150,6 +150,21 @@ function Set-Speed {
     Write-SetupStatus $script:StatusState
 }
 
+# (правка 789) Глобальная страховка: ErrorActionPreference='Stop', и любая
+# непойманная ошибка (например, скачивание, окончательно упавшее после всех
+# повторов) раньше просто обрывала скрипт: окно установки показывало
+# «завершилась без отчёта», а причину искали вручную в install.log. Теперь
+# ошибка пишется в лог и в статус (state=error) — окно сразу видит причину.
+trap {
+    $where = ''
+    if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+        $where = ' (' + ($_.InvocationInfo.PositionMessage -replace '\s+', ' ') + ')'
+    }
+    try { Write-Log ('НЕПРЕДВЗЯТАЯ ОШИБКА: ' + $_.Exception.Message + $where) 'err' } catch { }
+    try { Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) } catch { }
+    exit 1
+}
+
 # ------------------------------------------------------------- primitives ---
 
 $script:Curl = Join-Path $env:SystemRoot 'System32\curl.exe'
