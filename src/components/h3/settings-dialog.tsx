@@ -65,6 +65,7 @@ import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
 import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { useFpsJob } from '@/lib/fps-job-store'
 import { SettingSlider } from './setting-slider'
+import { UpdatePanel } from './update-panel' // (правка 790)
 import { Label } from '@/components/ui/label'
 
 /* ─── Types ─── */
@@ -1424,11 +1425,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         {/* ─────────── О программе ─────────── */}
         {tab === 'about' && (
           <div className="space-y-4 py-2">
+            {/* (правка 790) Автосредство обновления — выше остального, чтобы
+                про него не «забыли» прокруткой. */}
+            <UpdatePanel />
             <div className="flex items-center gap-3">
               <img src="/logo.svg" alt="" className="w-10 h-10" />
               <div>
                 <div className="text-sm font-medium">Minimax H3 Studio</div>
-                <div className="text-xs text-muted-foreground">Версия 7.1.1</div>{/* (правка 788) версия релиза */}
+                <div className="text-xs text-muted-foreground">Версия 7.1.2</div>{/* (правка 790) версия релиза */}
               </div>
             </div>
             {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}

@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('h3desktop', {
   minimize: () => ipcRenderer.send('h3:window-minimize'),
   maximizeToggle: () => ipcRenderer.send('h3:window-maximize-toggle'),
   close: () => ipcRenderer.send('h3:window-close'),
+  // (правка 790) «Перезапустить и установить»: main-процесс запускает
+  // install\apply_update.ps1 отдельным процессом и закрывает приложение.
+  applyUpdate: () => ipcRenderer.invoke('h3:apply-update'),
   // (правка 567) Панель «Консоль»: буфер вывода всех процессов приложения.
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */

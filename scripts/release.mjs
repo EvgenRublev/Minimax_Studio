@@ -115,6 +115,22 @@ check(existsSync(join(ROOT, 'config', 'config.ini')), 'config/config.ini');
 // (правка 740) GPL-3.0 требует передавать лицензию вместе с программой.
 check(existsSync(join(ROOT, 'LICENSE')), 'LICENSE (GPL-3.0)');
 
+// (правка 790) Метка версии в «О программе» обязана совпадать с package.json:
+// автосредство обновления (src/lib/app-update.ts) сравнивает релизы GitHub
+// именно с версией из package.json, а пользователь видит метку из диалога.
+try {
+  const pkgVersion = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8')).version;
+  const dialogSrc = readFileSync(join(ROOT, 'src', 'components', 'h3', 'settings-dialog.tsx'), 'utf-8');
+  const labelMatch = dialogSrc.match(/Версия\s+(\d+\.\d+\.\d+)/);
+  check(
+    !!labelMatch && labelMatch[1] === pkgVersion,
+    `метка «Версия ...» в настройках = package.json (${pkgVersion})`,
+    labelMatch ? `в settings-dialog.tsx написано «Версия ${labelMatch[1]}» — обновите обе метки` : 'в settings-dialog.tsx нет метки «Версия X.Y.Z»',
+  );
+} catch (e) {
+  check(false, 'метка версии в настройках', `не удалось прочитать package.json/settings-dialog: ${e}`);
+}
+
 // Мусор в корне.
 const junk = [];
 for (const e of readdirSync(ROOT, { withFileTypes: true })) {

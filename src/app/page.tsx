@@ -32,6 +32,7 @@ import { sweepOrphanRefineItems } from '@/lib/refine-queue'
 // (правка 442) Ассистент — не вкладка, а правая панель на «Генерации» и
 // «Продлении»; событие «открыть ассистента» разворачивает панель через стор.
 import { useAssistantPanel } from '@/lib/assistant-panel-store'
+import { toast } from 'sonner' // (правка 790) тосты проверки обновлений
 
 const TAB_CONTENT = {
   generate: GenerateView,
@@ -141,6 +142,47 @@ export default function Home() {
     initComfyTurn()
     void reconcileGenerationOnStartup()
     return () => cancelReconcile()
+  }, [])
+
+  // (правка 790) Стартовая проверка обновлений студии: тост «доступно
+  // обновление» с кнопкой «Скачать», и «обновление готово» с кнопкой
+  // «Перезапустить», если прошлый раз обновление было скачано и разложено.
+  // Сервер кэширует фид GitHub на 10 минут — лишнего внимания API не будет.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/update')
+        const j = await res.json()
+        if (j.armed) {
+          toast.info(`Обновление до v${j.armed.version} готово — перезапустите студию для установки`, {
+            duration: 15000,
+            action: window.h3desktop?.applyUpdate
+              ? {
+                  label: 'Перезапустить',
+                  onClick: () => void window.h3desktop?.applyUpdate?.(),
+                }
+              : undefined,
+          })
+        } else if (j.update) {
+          toast.warning(`Доступно обновление студии: v${j.update.version}`, {
+            duration: 12000,
+            action: {
+              label: 'Скачать',
+              onClick: () => {
+                void fetch('/api/update/download', { method: 'POST' })
+                  .then((r) => r.json())
+                  .then((d) => {
+                    if (!d.ok) toast.error(d.error || 'Не удалось начать загрузку')
+                    else toast.success(`Загрузка v${j.update.version} началась — прогресс в Настройках → О программе`)
+                  })
+                  .catch(() => toast.error('Ошибка запроса к серверу'))
+              },
+            },
+          })
+        }
+      } catch { /* сеть/сервер недоступны — молча пропускаем */ }
+    }, 5000)
+    return () => clearTimeout(t)
   }, [])
 
   const ContentComponent = TAB_CONTENT[activeTab]

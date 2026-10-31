@@ -10,6 +10,8 @@ export interface H3DesktopBridge {
   minimize: () => void
   maximizeToggle: () => void
   close: () => void
+  /** (правка 790) «Перезапустить и установить»: запуск apply_update.ps1 и выход. */
+  applyUpdate?: () => Promise<{ ok: boolean; error?: string }>
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */
     get: () => Promise<string>

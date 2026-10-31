@@ -472,6 +472,10 @@ async function waitHttp(url, timeoutMs) {
 /* ── Окно ── */
 let win = null
 
+/* (правка 790) Дочерний web-сервер (server.js) — PID нужен apply_update.ps1,
+ * чтобы дождаться полной остановки приложения перед заменой файлов. */
+let webServerChild = null
+
 /* (правка 563) Кнопки окна из рендерера (preload → IPC): свои HTML-кнопки
  * в DesktopTitleBar вместо нативных. */
 ipcMain.on('h3:window-minimize', () => win?.minimize())
@@ -500,6 +504,55 @@ ipcMain.handle('h3:console-save', async (_e, text) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) }
   }
+})
+
+/* (правка 790) «Перезапустить и установить»: web-сервер уже разложил staged-
+ * файлы в .update\staging и записал .update\armed.json. Здесь запускаем
+ * install\apply_update.ps1 ОТДЕЛЁННЫМ процессом (detached, НЕ spawnChild!) —
+ * before-quit убивает всё дерево children, а апдейтер обязан пережить выход
+ * Electron и заменить файлы после остановки всех процессов приложения.
+ * Скрипт ждёт завершения перечисленных PID (Electron, web-сервер, cmd-родитель),
+ * делает бэкап подменяемых файлов и при срыве откатывается из .update\backup. */
+ipcMain.handle('h3:apply-update', () => {
+  const armedFile = path.join(APP_ROOT, '.update', 'armed.json')
+  let armed = null
+  try {
+    armed = JSON.parse(readFileSync(armedFile, 'utf8'))
+  } catch { /* нет armed.json — применять нечего */ }
+  if (!armed || !armed.version) return { ok: false, error: 'Обновление не подготовлено' }
+  const staging = path.join(APP_ROOT, '.update', 'staging')
+  if (!existsSync(staging)) return { ok: false, error: 'Папка staging не найдена — подготовка обновления потеряна' }
+
+  const waitPids = [String(process.pid)]
+  if (webServerChild && webServerChild.pid) waitPids.push(String(webServerChild.pid))
+  // Скрытая cmd-оболочка от start_hidden.vbs/start.bat — родитель node-cli.
+  if (process.ppid) waitPids.push(String(process.ppid))
+
+  try {
+    const updater = spawn(POWERSHELL, [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-File', path.join(APP_ROOT, 'install', 'apply_update.ps1'),
+      '-Root', APP_ROOT,
+      '-Version', String(armed.version),
+      '-DepsChanged', String(Boolean(armed.depsChanged)),
+      '-WaitPids', waitPids.join(','),
+    ], {
+      cwd: APP_ROOT,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    updater.unref()
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) }
+  }
+
+  // Штатный выход: before-quit само убьёт сервер/ComfyUI/дочерние.
+  quitting = true
+  app.quit()
+  return { ok: true }
 })
 
 function createWindow() {
@@ -722,7 +775,7 @@ if (!app.requestSingleInstanceLock()) {
     killPortListeners(PORT)
     killPortListeners(COMFY_PORT)
 
-    const server = startWebServer()
+    const server = (webServerChild = startWebServer())
     if (existsSync(COMFY_PY)) {
       startComfy()
     } else {
