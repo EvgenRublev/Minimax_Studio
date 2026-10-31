@@ -462,6 +462,22 @@ function extractZip(zip: string, dest: string): Promise<void> {
  * Сама замена файлов — дело install\apply_update.ps1 (его запускает Electron).
  */
 export async function prepareApply(): Promise<{ ok: boolean; error?: string; armed?: ArmedUpdate; depsChanged?: boolean }> {
+  // (правка 791) Идемпотентность: автоподготовка после скачивания уже раскладывала
+  // staging и записала armed.json, а zip с мета удалила (экономия места). Повторный
+  // вызов кнопки «Перезапустить и установить» не должен требовать zip — иначе
+  // взведённое обновление нельзя установить (баг теста 7.1.3).
+  const armedNow = readJsonSafe<ArmedUpdate>(ARMED)
+  if (armedNow) {
+    if (existsSync(join(STAGING, 'package.json')) && existsSync(join(STAGING, '.next', 'BUILD_ID'))) {
+      return { ok: true, armed: armedNow, depsChanged: armedNow.depsChanged }
+    }
+    // Staging потерян (ручная чистка и т.п.). Без zip раскладывать нечего.
+    try { unlinkSync(ARMED) } catch { /* ignore */ }
+    if (!existsSync(ZIP_PATH)) {
+      return { ok: false, error: 'Подготовленные файлы обновления потеряны — скачайте обновление заново' }
+    }
+  }
+
   const meta = readJsonSafe<ZipMeta>(ZIP_META)
   if (!meta || !existsSync(ZIP_PATH)) {
     return { ok: false, error: 'Обновление ещё не скачано — сначала нажмите «Скачать»' }

@@ -66,6 +66,23 @@ import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { useFpsJob } from '@/lib/fps-job-store'
 import { SettingSlider } from './setting-slider'
 import { UpdatePanel } from './update-panel' // (правка 790)
+
+/* (правка 791) Метка версии динамическая: берётся с сервера (package.json),
+ * а не зашита в код — иначе после самообновления пользователь видел бы
+ * старую версию (метка живёт в собранном .next, который тоже подменяется,
+ * но при следующем релизе её пришлось бы править руками). */
+function AboutVersion() {
+  const [ver, setVer] = useState<string | null>(null)
+  useEffect(() => {
+    fetch('/api/update')
+      .then((r) => r.json())
+      .then((j) => setVer(typeof j?.current === 'string' ? j.current : null))
+      .catch(() => { /* сервер недоступен — метка останется прочерком */ })
+  }, [])
+  return (
+    <div className="text-xs text-muted-foreground">{ver ? `Версия ${ver}` : 'Версия …'}</div>
+  )
+}
 import { Label } from '@/components/ui/label'
 
 /* ─── Types ─── */
@@ -1432,7 +1449,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <img src="/logo.svg" alt="" className="w-10 h-10" />
               <div>
                 <div className="text-sm font-medium">Minimax H3 Studio</div>
-                <div className="text-xs text-muted-foreground">Версия 7.1.2</div>{/* (правка 790) версия релиза */}
+                <AboutVersion />{/* (правка 791) версия с сервера, не хардкод */}
               </div>
             </div>
             {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}
