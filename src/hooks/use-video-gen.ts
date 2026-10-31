@@ -1290,6 +1290,11 @@ export function useVideoGen() {
               type: r.kind,
               path: transfers[r.path] ?? r.path,
               role: r.imageIntent || '',
+              // (правка 785) include_audio для видео-рефов: без него сайдкар
+              // не запоминал снятую галочку «использовать звук», и «Повторить»
+              // возвращал её включённой — генерация падала на видео без звука.
+              ...(r.kind === 'video' && { include_audio: r.includeAudio !== false }),
+              ...(r.kind === 'video' && r.compress === true && { compress: true }),
             }))
         // (правка 470) flf: первый кадр — в references сайдкара (якорь
         // идентичности для рефайна; раньше references у flf-видео были пусты

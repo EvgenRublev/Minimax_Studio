@@ -7,8 +7,7 @@ import { createWriteStream, promises as fs } from 'fs'
 import { openAsBlob } from 'node:fs'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { getAppConfig } from '@/lib/app-config'
-import { probeVideoFile } from '@/lib/video-probe'
+import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import {
   readFirstMultipartPart,
   MultipartParseError,
@@ -85,33 +84,46 @@ export async function POST(req: NextRequest) {
     // (правка 291) Для видео-файлов возвращаем durationSec (ffprobe на сервере)
     // — клиент (extend-view) сразу знает длительность исходника и показывает
     // «итого ~X с» в badges/карточках клипов. Для изображений — нет.
+    // (правка 783) Заодно определяем наличие аудиодорожки (hasAudio) — клиент
+    // (generate-view) сам снимает «использовать звук» у видео без звука, иначе
+    // LoadAudio роняет задачу в очереди ComfyUI. Зондим временный файл ДО
+    // загрузки: тот же результат и для загруженного, и для staged файла.
     const ext = path.extname(safeName).toLowerCase()
     const isVideo = ['.mp4', '.m4v', '.mov', '.mkv', '.avi', '.webm', '.m2ts',
       '.mts', '.mxf', '.vob', '.wmv', '.flv', '.mpg', '.mpeg', '.ogv'].includes(ext)
+    let durationSec: number | undefined
+    let hasAudio: boolean | null = null
+    if (isVideo) {
+      try {
+        const pr = await probeVideoFile(tmpPath)
+        if (Number.isFinite(pr.durationSec) && pr.durationSec > 0) {
+          durationSec = Math.round(pr.durationSec * 10) / 10
+        }
+      } catch { /* ffprobe недоступен — не критично, UI обработает 0 */ }
+      hasAudio = await probeHasAudio(tmpPath)
+    }
     try {
       const blob = await openAsBlob(tmpPath)
       const name = await uploadImage(blob, safeName)
       await fs.unlink(tmpPath).catch(() => {})
       tmpPath = null
-      let durationSec: number | undefined
-      if (isVideo) {
-        try {
-          const cfg = getAppConfig()
-          const p = path.join(cfg.inputDir, name)
-          const pr = await probeVideoFile(p)
-          if (Number.isFinite(pr.durationSec) && pr.durationSec > 0) {
-            durationSec = Math.round(pr.durationSec * 10) / 10
-          }
-        } catch { /* ffprobe недоступен — не критично, UI обработает 0 */ }
-      }
-      return NextResponse.json({ name, ...(durationSec !== undefined ? { durationSec } : {}) })
+      return NextResponse.json({
+        name,
+        ...(durationSec !== undefined ? { durationSec } : {}),
+        ...(hasAudio !== null ? { hasAudio } : {}),
+      })
     } catch (comfyErr) {
       // ComfyUI unreachable — stage locally instead of failing hard
       try {
         const stagedTmp = tmpPath
         tmpPath = null // владение передаём stageFileFromPath (move)
         const name = await stageFileFromPath(stagedTmp!, safeName)
-        return NextResponse.json({ name, staged: true })
+        return NextResponse.json({
+          name,
+          staged: true,
+          ...(durationSec !== undefined ? { durationSec } : {}),
+          ...(hasAudio !== null ? { hasAudio } : {}),
+        })
       } catch {
         const msg = comfyErr instanceof Error ? comfyErr.message : String(comfyErr)
         return NextResponse.json({ error: msg }, { status: 500 })

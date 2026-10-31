@@ -1,10 +1,20 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CpuIcon, MemoryStickIcon, MonitorCogIcon, Trash2Icon } from 'lucide-react'
+import { AlertTriangleIcon, CpuIcon, MemoryStickIcon, MonitorCogIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
 const POLL_INTERVAL = 5000 // 5 seconds
+
+// (правка 787) ComfyUI sometimes keeps its cache in VRAM between tasks ("garbage"),
+// so the bar can sit near 100% even when nothing runs — long generations then hang
+// a long time before OOM. Warn the user (amber bar + exclamation) so they can
+// press "Выгрузить кэш VRAM" or restart before launching a heavy task.
+const VRAM_WARN_PCT = 95
+const VRAM_WARN_TEXT =
+  'Память видеокарты почти заполнена. ComfyUI иногда не освобождает VRAM между ' +
+  'задачами — новая генерация может идти очень долго или зависнуть. ' +
+  'Нажмите «Выгрузить кэш VRAM» ниже (или перезапустите программу).'
 
 interface StatsData {
   cpu_percent: number
@@ -41,12 +51,12 @@ function parseStats(data: unknown): StatsData | null {
   }
 }
 
-function StatBar({ value, max, color, label }: { value: number; max: number; color: string; label: string }) {
+function StatBar({ value, max, color, label, titleSuffix }: { value: number; max: number; color: string; label: string; titleSuffix?: string }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
   return (
     <div
       className="flex-1 h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden"
-      title={`${label}: ${value.toFixed(1)} / ${max.toFixed(1)} GB (${pct.toFixed(0)}%)`}
+      title={`${label}: ${value.toFixed(1)} / ${max.toFixed(1)} GB (${pct.toFixed(0)}%)${titleSuffix ? '\n' + titleSuffix : ''}`}
     >
       <div
         className="h-full rounded-full transition-all duration-700"
@@ -84,13 +94,17 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
 
   if (!stats) return null
 
+  // (правка 787) high-VRAM warning state
+  const vramPct = stats.vram_total_gb > 0 ? (stats.vram_used_gb / stats.vram_total_gb) * 100 : 0
+  const vramWarn = stats.gpu_available && vramPct >= VRAM_WARN_PCT
+
   if (collapsed) {
     // Collapsed: only colored bars, no icons or labels
     return (
       <div className="px-2 py-1 space-y-0.5 border-t border-border">
         {stats.gpu_available && stats.vram_total_gb > 0 && (
-          <div className="h-1 bg-[var(--surface-3)] rounded-full overflow-hidden" title={`VRAM: ${(stats.vram_used_gb / stats.vram_total_gb * 100).toFixed(0)}%`}>
-            <div className="h-full rounded-full" style={{ width: `${(stats.vram_used_gb / stats.vram_total_gb * 100)}%`, backgroundColor: '#06B6D4' }} />
+          <div className="h-1 bg-[var(--surface-3)] rounded-full overflow-hidden" title={`VRAM: ${vramPct.toFixed(0)}%${vramWarn ? '\n' + VRAM_WARN_TEXT : ''}`}>
+            <div className="h-full rounded-full" style={{ width: `${vramPct}%`, backgroundColor: vramWarn ? '#F59E0B' : '#06B6D4' }} />
           </div>
         )}
         {stats.gpu_available && (
@@ -112,14 +126,25 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
 
   return (
     <div className="px-3 py-2 space-y-1.5 border-t border-border">
-      {/* GPU VRAM */}
+      {/* GPU VRAM — (правка 787) turns amber with an exclamation when nearly full */}
       {stats.gpu_available && stats.vram_total_gb > 0 && (
         <div className="flex items-center gap-1.5">
-          <MonitorCogIcon className="w-3 h-3 text-cyan-400 shrink-0" />
-          <span className="text-[10px] text-muted-foreground w-7 shrink-0">VRAM</span>
-          <StatBar value={stats.vram_used_gb} max={stats.vram_total_gb} color="#06B6D4" label="VRAM" />
-          <span className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
-            {((stats.vram_used_gb / stats.vram_total_gb) * 100).toFixed(0)}%
+          <MonitorCogIcon className={`w-3 h-3 shrink-0 ${vramWarn ? 'text-amber-400' : 'text-cyan-400'}`} />
+          <span className={`text-[10px] w-7 shrink-0 ${vramWarn ? 'text-amber-400' : 'text-muted-foreground'}`}>VRAM</span>
+          <StatBar
+            value={stats.vram_used_gb}
+            max={stats.vram_total_gb}
+            color={vramWarn ? '#F59E0B' : '#06B6D4'}
+            label="VRAM"
+            titleSuffix={vramWarn ? VRAM_WARN_TEXT : undefined}
+          />
+          {vramWarn && (
+            <span title={VRAM_WARN_TEXT} className="shrink-0 inline-flex">
+              <AlertTriangleIcon className="w-3 h-3 text-amber-400" />
+            </span>
+          )}
+          <span className={`text-[10px] font-mono tabular-nums shrink-0 ${vramWarn ? 'text-amber-400' : 'text-muted-foreground'}`}>
+            {vramPct.toFixed(0)}%
           </span>
         </div>
       )}
@@ -197,7 +222,7 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
               toast.error('Сервисы недоступны')
             }
           }}
-          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-red-400 transition-colors"
+          className={`flex items-center gap-1 text-[10px] transition-colors ${vramWarn ? 'text-amber-400 hover:text-red-400 font-medium' : 'text-muted-foreground hover:text-red-400'}`}
           title="Выгрузить модели ComfyUI и LLM из VRAM"
         >
           <Trash2Icon className="w-3 h-3" />

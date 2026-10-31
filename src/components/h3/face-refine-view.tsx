@@ -101,6 +101,8 @@ export function FaceRefineView() {
   const [prompt, setPrompt] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  // (правка 780) Отдельная подсветка для зоны фото-референса (Face Refine).
+  const [refDragOver, setRefDragOver] = useState(false)
   const [uploadingSrc, setUploadingSrc] = useState(false)
   const [uploadingRef, setUploadingRef] = useState(false)
   // (правка 722) Есть ли в комбо H3FaceTrackCrop детектор человека.
@@ -303,6 +305,17 @@ export function FaceRefineView() {
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadLocalFile(f)
     else toast.error('Нужно видео')
+  }
+
+  // (правка 780) На «Загрузить фото человека» дроп не был навешан — фото с
+  // диска приходилось только кликать через диалог. Теперь файл (png/jpg/…),
+  // сброшенный прямо на эту зону, загружается как референс лица.
+  const refDropHandler = (e: React.DragEvent) => {
+    e.preventDefault()
+    setRefDragOver(false)
+    const f = e.dataTransfer.files?.[0]
+    if (f) void uploadIdentityRef(f)
+    else toast.error('Нужно фото человека')
   }
 
   const identityPreview = identityRef
@@ -508,11 +521,17 @@ export function FaceRefineView() {
                 Референс конкретного человека (необязательно)
               </Label>
               {identityRef ? (
-                <div className={cn(
-                  'flex items-center gap-2 rounded-lg border border-border bg-[var(--surface-2)] p-2',
-                  // (правка 723) С точкой клика фото в воркфлоу не идёт.
-                  facePoint && 'opacity-60',
-                )}>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setRefDragOver(true) }}
+                  onDragLeave={() => setRefDragOver(false)}
+                  onDrop={refDropHandler}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border bg-[var(--surface-2)] p-2',
+                    // (правка 723) С точкой клика фото в воркфлоу не идёт.
+                    facePoint && 'opacity-60',
+                    // (правка 780) Дроп нового фото поверх карточки заменяет референс.
+                    refDragOver ? 'border-yellow-400 ring-1 ring-yellow-400/50' : 'border-border',
+                  )}>
                   {identityPreview && (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
@@ -535,13 +554,19 @@ export function FaceRefineView() {
                 <button
                   type="button"
                   onClick={() => refInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setRefDragOver(true) }}
+                  onDragLeave={() => setRefDragOver(false)}
+                  onDrop={refDropHandler}
                   disabled={busy}
-                  className="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-yellow-500/40 hover:bg-[var(--surface-2)] transition-all disabled:opacity-50"
+                  className={cn(
+                    'w-full flex items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-all disabled:opacity-50',
+                    refDragOver ? 'border-yellow-400 bg-yellow-500/10' : 'border-border hover:border-yellow-500/40 hover:bg-[var(--surface-2)]',
+                  )}
                 >
                   {uploadingRef
                     ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
                     : <ImageIcon className="w-3.5 h-3.5" />}
-                  Загрузить фото человека
+                  Загрузить фото человека — клик или перетащите файл
                 </button>
               )}
               <input

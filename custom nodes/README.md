@@ -20,4 +20,21 @@ ComfyUI. Ничего дополнительно настраивать не н�
 - `MiniMaxSparseAttn` — `comfy_kitchen` с `sol_attn` (в этой сборке есть). На
   другом ComfyUI без него нода просто не патчит модель — генерация идёт dense.
 
+## Оверрайд чужой ноды: `ComfyUI-Frame-Interpolation`
+
+Это НЕ самописная нода, а частичная копия GitHub-ноды
+`Fannovel16/ComfyUI-Frame-Interpolation` (pin в `install/nodes.json`).
+Установщик скачивает оригинальный зип (шаг 6), а папки из `custom nodes/`
+копируются ПОСЛЕГО и перекрывают одноимённые файлы. Здесь лежат только
+изменённые файлы:
+
+| Файл | Правка |
+| --- | --- |
+| `vfi_utils.py` | зеркала для RIFE-чекпоинтов (`CKPT_FALLBACK_URLS`); «Opt 7» — пакетная обработка пар кадров + параметр `batch_size`; **чекпоинты прерывания** `throw_exception_if_processing_interrupted()` в циклах кадров — без них «Отмена» не останавливала RIFE/прочие VFI до конца узла |
+| `vfi_models/film/film_arch.py` | eager-версия FILM с явными padding-слоями (`SamePadConv`) вместо TorchScript-графa |
+| `vfi_models/film/__init__.py` | загрузка eager-модели (`_load_film_eager`); **чекпоинты прерывания** в собственном цикле FILM (правка 786) —FILM не использует `generic_frame_loop`, и «Стоп» на вкладке FPS его не останавливал |
+
+При смене sha в `install/nodes.json` эти три файла нужно сверить с новой
+версией ноды и перенести правки заново.
+
 Подробности по каждой ноде — в шапке её `__init__.py`.

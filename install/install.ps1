@@ -67,10 +67,21 @@ if ($Force -and (Test-Path $Cache)) {
 # сохранении собранных wheel) — уводим кэш в локальный каталог установки.
 $env:PIP_CACHE_DIR = Join-Path $Cache 'pip'
 
+# (правка 776) pip по умолчанию ждёт ответа 15 с: на медленном/нестабильном
+# канале один «тугой» пакет роняет установку или заставляет pip перекачивать
+# его заново. Даём терпеливый таймаут и явные повторы.
+$env:PIP_DEFAULT_TIMEOUT = '60'
+$env:PIP_RETRIES = '5'
+
 # (правка 752) остальные кэши - тоже внутрь папки проекта: npm/npx используют
 # npm_config_cache, а загрузчик Electron (@electron/get) - ELECTRON_CACHE.
 # Вся папка .install-cache удаляется в конце установки (см. очистку ниже).
 $env:npm_config_cache = Join-Path $Cache 'npm'
+
+# (правка 776) npm по умолчанию делает всего 2 попытки на каждый запрос в registry:
+# на нестабильном канале 5xx с npm-реестра роняет всё npm ci после минут ожидания.
+$env:npm_config_fetch_retries = '5'
+$env:npm_config_fetch_retry_maxtimeout = '120000'
 $env:ELECTRON_CACHE = Join-Path $Cache 'electron'
 $env:electron_config_cache = Join-Path $Cache 'electron'
 
@@ -145,6 +156,24 @@ $script:Curl = Join-Path $env:SystemRoot 'System32\curl.exe'
 if (-not (Test-Path $script:Curl)) { $script:Curl = $null }
 $script:UvExe = $null
 
+# (правка 777) мелкие, но медленно качающиеся архивы (uv, node, python, get-pip,
+# ComfyUI, кастомные ноды, бинарник Electron) приложены прямо к установщику в
+# install\cache - раскладываем их в .install-cache и не качаем с сети вовсе.
+$bundle = Join-Path $InstallDir 'cache'
+if (Test-Path $bundle) {
+    $seeded = 0
+    Get-ChildItem $bundle -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($bundle.Length).TrimStart('\', '/')
+        $dst = Join-Path $Cache $rel
+        if (-not ((Test-Path $dst) -and (Get-Item $dst).Length -gt 0)) {
+            $d = Split-Path -Parent $dst
+            if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+            try { Copy-Item $_.FullName $dst -Force; $seeded++ } catch { }
+        }
+    }
+    if ($seeded -gt 0) { Info ($seeded + ' архивов взято из установщика (без скачивания)') }
+}
+
 # (правка 761) Быстрые загрузки.
 # Один поток curl на файл 1.8 ГБ (torch) или 1 ГБ (ComfyUI) часто получает от
 # сервера лишь часть полосы. Режем файл на 6 диапазонов и качаем параллельно;
@@ -209,67 +238,98 @@ function Get-DownloadSegmented {
 
     $n = [int][Math]::Min($Threads, 8)
     $chunk = [int64][Math]::Ceiling($size / $n)
-    $parts = New-Object System.Collections.ArrayList
-    $procs = New-Object System.Collections.ArrayList
+    $totalMb = [Math]::Round($size / 1MB, 0)
+    $segs = New-Object System.Collections.ArrayList
     for ($i = 0; $i -lt $n; $i++) {
         $from = [int64]($i * $chunk)
         $to = [int64][Math]::Min($size - 1, ($from + $chunk - 1))
         if ($from -gt $to) { break }
         $p = $Dest + '.' + $i
-        if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
-        [void]$parts.Add($p)
-        $argStr = '-sL --fail --retry 3 --retry-delay 2 --connect-timeout 30 -r ' + $from + '-' + $to + ' -o "' + $p + '" "' + $Url + '"'
-        [void]$procs.Add((Start-CurlProc $argStr))
+        $len = $to - $from + 1
+        $have = 0
+        if (Test-Path $p) {
+            try { $have = (Get-Item $p).Length } catch { }
+            if ($have -le 0 -or $have -gt $len) {
+                Remove-Item $p -Force -ErrorAction SilentlyContinue
+                $have = 0
+            }
+        }
+        [void]$segs.Add([pscustomobject]@{ Path = $p; From = $from; To = $to; Len = $len; Have = [int64]$have })
     }
-    if ($procs.Count -lt 2) {
-        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
-        return $false
-    }
-
-    # ждём: раз в 3 с пишем в статус живую скорость (видно в окне установки,
-    # зависло или качается), раз в 15 с - строку в лог
-    $lastLog = Get-Date
-    $lastUpd = (Get-Date).AddSeconds(-2)
-    $totalMb = [Math]::Round($size / 1MB, 0)
+    if ($segs.Count -lt 2) { return $false }
+    # (правка 775) готовые сегменты прошлого запуска бережём, отставшие
+    # докачиваем range'ом со сдвигом начала, до 3 заходов
+    $round = 0
     while ($true) {
-        $alive = 0
-        foreach ($pr in $procs) {
-            try { if (-not $pr.HasExited) { $alive++ } } catch { }
+        $todo = @($segs | Where-Object { $_.Have -lt $_.Len })
+        if ($todo.Count -eq 0 -or $round -ge 3) { break }
+        $round++
+        if ($round -gt 1) { Info ('  докачиваю ' + $todo.Count + ' отставших сегментов') }
+        $procs = New-Object System.Collections.ArrayList
+        foreach ($s in $todo) {
+            $np = $s.Path + '.new'
+            if (Test-Path $np) { Remove-Item $np -Force -ErrorAction SilentlyContinue }
+            $f = $s.From + $s.Have
+            $argStr = '-sL --fail --retry 3 --retry-delay 2 --connect-timeout 30 -r ' + $f + '-' + $s.To + ' -o "' + $np + '" "' + $Url + '"'
+            [void]$procs.Add((Start-CurlProc $argStr))
         }
-        if ($alive -eq 0) { break }
-        if (((Get-Date) - $lastUpd).TotalSeconds -ge 3) {
-            $lastUpd = Get-Date
-            $got = [int64]0
-            foreach ($p in $parts) { if (Test-Path $p) { try { $got += (Get-Item $p).Length } catch { } } }
-            $sec = [Math]::Max(0.6, ((Get-Date) - $start).TotalSeconds)
-            $detail = 'загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ'
-            Set-Speed (($got / 1MB) / $sec) $detail
-        }
-        if (((Get-Date) - $lastLog).TotalSeconds -ge 15) {
-            $lastLog = Get-Date
-            $got = [int64]0
-            foreach ($p in $parts) { if (Test-Path $p) { $got += (Get-Item $p).Length } }
-            Info ('  загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ')
-        }
-        Start-Sleep -Milliseconds 500
-    }
 
-    $got = [int64]0
+        # ждём: раз в 3 с пишем в статус живую скорость (видно в окне установки,
+        # зависло или качается), раз в 15 с - строку в лог
+        $lastLog = Get-Date
+        $lastUpd = (Get-Date).AddSeconds(-2)
+        while ($true) {
+            $alive = 0
+            foreach ($pr in $procs) {
+                try { if (-not $pr.HasExited) { $alive++ } } catch { }
+            }
+            if ($alive -eq 0) { break }
+            if (((Get-Date) - $lastUpd).TotalSeconds -ge 3) {
+                $lastUpd = Get-Date
+                $got = [int64]0
+                foreach ($s in $segs) {
+                    $got += $s.Have
+                    $np = $s.Path + '.new'
+                    if (Test-Path $np) { try { $got += (Get-Item $np).Length } catch { } }
+                }
+                $sec = [Math]::Max(0.6, ((Get-Date) - $start).TotalSeconds)
+                $detail = 'загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ'
+                Set-Speed (($got / 1MB) / $sec) $detail
+            }
+            if (((Get-Date) - $lastLog).TotalSeconds -ge 15) {
+                $lastLog = Get-Date
+                $got = [int64]0
+                foreach ($s in $segs) {
+                    $got += $s.Have
+                    $np = $s.Path + '.new'
+                    if (Test-Path $np) { try { $got += (Get-Item $np).Length } catch { } }
+                }
+                Info ('  загружено ' + [Math]::Round($got / 1MB, 0) + ' из ' + $totalMb + ' МБ')
+            }
+            Start-Sleep -Milliseconds 500
+        }
+
+        foreach ($s in $todo) {
+            # сшиваем докачанное (.new) с тем, что уже было в сегменте
+            $np = $s.Path + '.new'
+            $nl = [int64]0
+            if (Test-Path $np) { try { $nl = (Get-Item $np).Length } catch { } }
+            if ($nl -gt 0 -and ($s.Have + $nl) -eq $s.Len) {
+                try {
+                    $out = [IO.File]::Open($s.Path, 'Append', 'Write')
+                    try {
+                        $in = [IO.File]::OpenRead($np)
+                        try { $in.CopyTo($out) } finally { $in.Dispose() }
+                    } finally { $out.Dispose() }
+                    $s.Have = $s.Len
+                } catch { }
+            }
+            Remove-Item $np -Force -ErrorAction SilentlyContinue
+        }
+    }
     $bad = $false
-    foreach ($p in $parts) {
-        if (Test-Path $p) { $got += (Get-Item $p).Length } else { $bad = $true }
-    }
-    foreach ($pr in $procs) {
-        # у процессов, запущенных через Start-Process -PassThru, ExitCode бывает
-        # пустым - тогда верим только размеру (сумма частей = Content-Length)
-        try {
-            $code = $pr.ExitCode
-            if ($null -ne $code -and $code -ne 0) { $bad = $true }
-        } catch { }
-    }
-    if ($got -ne $size) { $bad = $true }
+    foreach ($s in $segs) { if ($s.Have -ne $s.Len) { $bad = $true } }
     if ($bad) {
-        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
         Info '  параллельная загрузка не удалась - качаю обычным способом'
         return $false
     }
@@ -277,16 +337,15 @@ function Get-DownloadSegmented {
     try {
         $out = [IO.File]::Open($Dest, 'Create', 'Write')
         try {
-            foreach ($p in $parts) {
-                $in = [IO.File]::OpenRead($p)
+            foreach ($s in $segs) {
+                $in = [IO.File]::OpenRead($s.Path)
                 try { $in.CopyTo($out) } finally { $in.Dispose() }
             }
         } finally { $out.Dispose() }
     } catch {
-        foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
         return $false
     }
-    foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+    foreach ($s in $segs) { Remove-Item $s.Path -Force -ErrorAction SilentlyContinue }
     return $true
 }
 
@@ -299,22 +358,33 @@ function Get-Download {
     $dir = Split-Path -Parent $Dest
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     $part = $Dest + '.part'
-    if (Test-Path $part) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
     Info ("скачивание: " + $Url)
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $ok = $false
     $meta = Get-RemoteMeta $Url
-    if ($meta.Ranges -and $meta.Size -ge 16MB) {
-        if (Get-DownloadSegmented -Url $Url -Dest $part -Size $meta.Size) { $ok = $true }
-    }
+    # (правка 774) оборванное качание не начинаем с нуля: .part и сегменты
+    # остаются в кэше, повторные попытки и следующий запуск продолжают качать
+    # с места обрыва; начисто стартует только третья попытка
+    for ($attempt = 1; $attempt -le 3 -and -not $ok; $attempt++) {
+        if ($attempt -eq 1 -and $meta.Ranges -and $meta.Size -ge 16MB) {
+            if (Get-DownloadSegmented -Url $Url -Dest $part -Size $meta.Size) { $ok = $true }
+        }
     if (-not $ok) {
         if ($script:Curl) {
             # (правка 762) качаем процессом и опрашиваем размер .part - так видно
             # живую скорость и прогресс, а не просто «ждём непонятно чего»
             $size = $meta.Size
+            if ($attempt -ge 3) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
+            $have = [int64]0
+            if (Test-Path $part) { try { $have = (Get-Item $part).Length } catch { } }
+            $resume = ''
+            if ($have -gt 0 -and ($size -le 0 -or $have -lt $size)) {
+                $resume = '-C - '
+                if ($attempt -ge 2) { Info ('  продолжаю с ' + [Math]::Round($have / 1MB, 1) + ' МБ') }
+            }
             $proc = $null
             try {
-                $proc = Start-CurlProc ('-L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o "' + $part + '" "' + $Url + '"')
+                $proc = Start-CurlProc ($resume + '-L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o "' + $part + '" "' + $Url + '"')
             } catch { $proc = $null }
             if ($proc) {
                 $t0 = Get-Date
@@ -340,7 +410,6 @@ function Get-Download {
                     $gotLen = (Get-Item $part).Length
                     if ($size -gt 0 -and $gotLen -ne $size) {
                         Info ('  размер не совпал: ' + $gotLen + ' из ' + $size + ' байт')
-                        Remove-Item $part -Force -ErrorAction SilentlyContinue
                     } else {
                         $ok = $true
                     }
@@ -362,8 +431,12 @@ function Get-Download {
             }
         }
     }
+    }
     $sw.Stop()
-    if (-not $ok) { throw ('не удалось скачать: ' + $Url) }
+    if (-not $ok) {
+        Info 'скачивание прервано - продолжу с этого места при следующем запуске'
+        throw ('не удалось скачать: ' + $Url)
+    }
     Move-Item -Force $part $Dest
     $mb = (Get-Item $Dest).Length / 1MB
     $sec = [Math]::Max(0.5, $sw.Elapsed.TotalSeconds)
@@ -475,7 +548,17 @@ function Install-Uv {
             Get-Download 'https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-pc-windows-msvc.zip' $zip
             Expand-ZipSafe $zip $dir
         } catch {
-            Warn ('uv не скачался (' + $_.Exception.Message + ') - ставлю пакеты через pip, это медленнее')
+            Warn ('uv не скачался с github (' + $_.Exception.Message + ') - ставлю колесо uv с pypi')
+        }
+        # (правка 773) запасной канал: колесо uv лежит и на pypi (тот же бинарник),
+        # а доступность pypi.org установщик проверяет ещё на шаге 1. при задубевшем
+        # GitHub установка остаётся быстрой (uv), а не деградирует в построчный pip.
+        if (-not (Test-Path $exe) -and $script:Python) {
+            try {
+                & $script:Python -m pip install --quiet uv --no-warn-script-location --disable-pip-version-check
+            } catch { }
+            $shim = Join-Path (Split-Path $script:Python -Parent) 'Scripts\uv.exe'
+            if (Test-Path $shim) { $exe = $shim }
         }
     }
     if (Test-Path $exe) {
@@ -483,6 +566,7 @@ function Install-Uv {
         Ok 'uv готов (параллельная установка пакетов)'
     } else {
         $script:UvExe = $null
+        Warn 'uv недоступен ни с github, ни с pypi - ставлю пакеты через pip, это медленнее'
     }
     return $script:UvExe
 }
@@ -690,6 +774,17 @@ Ok 'github.com доступен'
 if (-not (Test-Host 'https://download.pytorch.org/whl/cu130/')) {
     Warn 'download.pytorch.org недоступен — шаг установки torch может не пройти (VPN/прокси).'
 }
+
+# (правка 778) антивирус проверяет каждый скачанный и распакованный файл;
+# на медленном диске это превращает шаг пакетов в часы. подсказываем про
+# исключение один раз, в самом начале установки.
+try {
+    $mp = Get-MpComputerStatus -ErrorAction SilentlyContinue
+    if ($mp -and $mp.RealTimeProtectionEnabled) {
+        Info ('защитник Windows включён - если установка будет очень медленной, добавьте папку в исключения:')
+        Info ('  Безопасность Windows -> Защита от вирусов -> Исключения -> ' + $Root)
+    }
+} catch { }
 
 $nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 if ($nvidia) {

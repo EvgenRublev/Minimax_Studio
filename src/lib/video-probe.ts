@@ -28,6 +28,28 @@ export interface VideoProbe {
   fps?: number
 }
 
+/**
+ * (правка 783) Есть ли в файле аудиопоток. Возвращает null, если определить
+ * не удалось (ffprobe недоступен/файл повреждён) — вызывающий должен считать
+ * это «неизвестно» и сохранять прежнее поведение, а не «звука нет».
+ * Нужен для видео-референсов H3: LoadAudio на видео без дорожки роняет
+ * задачу уже в очереди ComfyUI (жалоба из чата).
+ */
+export async function probeHasAudio(file: string): Promise<boolean | null> {
+  try {
+    const ffprobe = await resolveFfprobe()
+    const { stdout } = await execFileAsync(
+      ffprobe,
+      ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'json', file],
+      { timeout: 15_000 },
+    )
+    const data = JSON.parse(stdout) as { streams?: unknown[] }
+    return Array.isArray(data.streams) ? data.streams.length > 0 : false
+  } catch {
+    return null
+  }
+}
+
 export async function probeVideoFile(file: string): Promise<VideoProbe> {
   const ffprobe = await resolveFfprobe()
   const { stdout } = await execFileAsync(

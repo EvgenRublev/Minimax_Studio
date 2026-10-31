@@ -14,7 +14,7 @@ import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveSourceLatent } from '@/lib/refine-meta' // (правка 420)
 import { resolveFfmpeg } from '@/lib/thumb'
-import { probeVideoFile } from '@/lib/video-probe'
+import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
@@ -131,6 +131,22 @@ export async function POST(req: NextRequest) {
     if (body.refVideos?.length) {
       for (let i = 0; i < body.refVideos.length; i++) {
         body.refVideos[i].path = await transferStaged(body.refVideos[i].path)
+      }
+    }
+    // (правка 784) Страховка от «ошибка останавливает очередь»: если у
+    // видео-рефа нет аудиопотка, принудительно выключаем «использовать звук»
+    // — LoadAudio на видео без дорожки падал уже в очереди ComfyUI. Ловятся
+    // все пути: старые сайдкары («Повторить» до правки 785 возвращал
+    // включённую галочку), ассистент, рефы добавленные до правки 783.
+    // hasAudio === null (ffprobe недоступен) — не трогаем.
+    if (body.refVideos?.length) {
+      const cfgGen = getAppConfig()
+      for (const v of body.refVideos) {
+        if (v.includeAudio === false) continue
+        const vp = path.join(cfgGen.inputDir, path.basename(v.path))
+        if (fs.existsSync(vp) && (await probeHasAudio(vp)) === false) {
+          v.includeAudio = false
+        }
       }
     }
     // (правка 493) «Сжать видео»: референсы с флагом compress ресайзятся до

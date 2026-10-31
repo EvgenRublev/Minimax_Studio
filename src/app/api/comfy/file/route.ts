@@ -197,3 +197,52 @@ export async function GET(req: NextRequest) {
     return new Response('Failed to fetch from ComfyUI', { status: 502 })
   }
 }
+
+/**
+ * (правка 782) HEAD /api/comfy/file — лёгкая проверка существования файла.
+ * «Повторить генерацию» (restore-from-meta) проверяет так, живы ли рефы в
+ * input/, перед восстановлением. Роут экспортировал только GET, и HEAD-запрос
+ * не проходил — все рефы отбрасывались с тостом «не найдены в ComfyUI», хотя
+ * файлы лежали на диске. Даже если GET и отработал бы, для input-файлов он
+ * ходит в ComfyUI /view и при выключенном ComfyUI давал 502 (файл-то на диске).
+ * HEAD проверяет локальные диски (стейдж, input/ ComfyUI, output галереи), и
+ * только если нигде не нашли — спрашивает /view. 502 при недоступном ComfyUI
+ * клиент трактует как «не отбрасывать» (restore-from-meta, правка 587).
+ */
+export async function HEAD(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const filename = searchParams.get('filename')
+  if (!filename) return new Response(null, { status: 400 })
+  const subfolder = sanitizeFolderPath(searchParams.get('subfolder') ?? '')
+  const type = searchParams.get('type') ?? 'output'
+
+  // output: локальная папка галереи
+  if (type === 'output') {
+    const local = safeOutputPath(subfolder ? path.join(subfolder, filename) : filename)
+    if (local && existsSync(local)) return new Response(null, { status: 200 })
+  }
+  // input: стейдж-копия, затем настоящий input/ ComfyUI на диске
+  if (type === 'input' && !subfolder) {
+    if (await stagedPath(filename)) return new Response(null, { status: 200 })
+    const cfg = getAppConfig()
+    const candidate = path.join(cfg.comfyRoot, 'ComfyUI', 'input', path.basename(filename))
+    if (existsSync(candidate)) return new Response(null, { status: 200 })
+  }
+  // Не нашли локально — HEAD в ComfyUI /view (файл мог лежать в подпапке input).
+  try {
+    const signal =
+      typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([req.signal, AbortSignal.timeout(8000)])
+        : AbortSignal.timeout(8000)
+    const res = await fetch(fileUrl(path.basename(filename), subfolder, type), {
+      method: 'HEAD',
+      signal,
+    })
+    if (res.ok) return new Response(null, { status: 200 })
+    if (res.status === 404) return new Response(null, { status: 404 })
+    return new Response(null, { status: 502 })
+  } catch {
+    // ComfyUI недоступен — «неизвестно», клиент не должен отбрасывать реф.
+    return new Response(null, { status: 502 })
+  }
+}

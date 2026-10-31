@@ -5,7 +5,9 @@
  * transferred to ComfyUI automatically at generation time.
  */
 
-export async function uploadInputFile(file: File): Promise<{ path: string; staged?: boolean }> {
+export async function uploadInputFile(
+  file: File,
+): Promise<{ path: string; staged?: boolean; durationSec?: number; hasAudio?: boolean }> {
   const form = new FormData()
   form.append('image', file)
   const res = await fetch('/api/comfy/upload', { method: 'POST', body: form })
@@ -14,8 +16,14 @@ export async function uploadInputFile(file: File): Promise<{ path: string; stage
     throw new Error(`Upload failed (${res.status}): ${text.slice(0, 200)}`)
   }
   const data = await res.json()
-  // Server returns { name: "filename", staged?: boolean }
-  return { path: data.name as string, staged: data.staged === true }
+  // Server returns { name: "filename", staged?: boolean, durationSec?: number,
+  // hasAudio?: boolean } (правка 783 — hasAudio для видео-референсов)
+  return {
+    path: data.name as string,
+    staged: data.staged === true,
+    ...(typeof data.durationSec === 'number' ? { durationSec: data.durationSec } : {}),
+    ...(typeof data.hasAudio === 'boolean' ? { hasAudio: data.hasAudio } : {}),
+  }
 }
 
 /**

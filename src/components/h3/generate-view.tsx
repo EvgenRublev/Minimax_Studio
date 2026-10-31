@@ -342,17 +342,28 @@ export function GenerateView() {
       let anyStaged = false
       for (const file of accepted) {
         try {
-          const { path, staged } = await uploadInputFile(file)
+          const { path, staged, hasAudio } = await uploadInputFile(file)
           if (staged) anyStaged = true
+          const kind = detectKind(file.name)!
+          // (правка 783) Видео без аудиодорожки: галочка «использовать звук»
+          // по умолчанию вела к LoadAudio без потока — задача падала уже в
+          // очереди ComfyUI. Сервер определяет наличие звука при загрузке;
+          // если звука нет — сразу снимаем галочку и говорим почему.
+          const noAudio = kind === 'video' && hasAudio === false
+          if (noAudio) {
+            toast.info(`В видео «${file.name}» нет аудиодорожки`, {
+              description: 'Галочка «использовать звук» снята автоматически.',
+            })
+          }
           items.push({
             id: newId(),
-            kind: detectKind(file.name)!,
+            kind,
             path,
             name: file.name,
             previewUrl: URL.createObjectURL(file),
             role: '',
             imageIntent: 'identity',
-            includeAudio: true,
+            includeAudio: !noAudio,
             compress: false, // (правка 493)
           })
         } catch (err) {

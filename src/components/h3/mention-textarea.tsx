@@ -313,6 +313,49 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
       }
     }, [])
 
+    // (правка 781) Рассинхрон каретки: «после ручной правки текст начинает
+    // вбиваться не там, где курсор / выделение съехало» (жалоба из чата,
+    // лечилось только открытием-закрытием полноэкранного редактора =
+    // перемонтированием). Причина — controlled <textarea>: если родитель
+    // обновляет `value` с задержкой или из другого источника, следующий
+    // рендер принудительно возвращает в DOM СТАРОЕ значение, а каретка и
+    // выделение остаются на позициях нового текста — и дальше всё «съезжает».
+    // Лечим так: запоминаем реальный DOM-текст и выделение при каждом
+    // локальном редактировании, и после коммита React возвращаем их, если
+    // пропс `value` оказался устаревшим. Внешние вставки (полноэкранный
+    // редактор, автосовместимость с expected) при этом не ломаются.
+    const domValueRef = useRef(value)
+    const selRef = useRef<{ start: number; end: number } | null>(null)
+    const composingRef = useRef(false)
+
+    const recordSelection = useCallback(() => {
+      const el = textareaRef.current
+      if (el) selRef.current = { start: el.selectionStart, end: el.selectionEnd }
+    }, [])
+
+    useEffect(() => {
+      const el = textareaRef.current
+      if (!el) return
+      if (composingRef.current) return // не мешаем IME-вводу (кириллица)
+      if (value !== domValueRef.current && value !== el.value) {
+        // Пропис в DOM и в «ожидаемом» значении расходится со старым пропсом —
+        // React только что перезаписал поле устаревшим текстом. Возвращаем
+        // актуальный текст и позицию каретки/выделения.
+        el.value = domValueRef.current
+        const s = selRef.current
+        if (s) {
+          const start = Math.min(s.start, el.value.length)
+          const end = Math.min(s.end, el.value.length)
+          el.setSelectionRange(start, end)
+        }
+      } else if (value !== el.value) {
+        // Значение осознанно заменено извне (например, вставка из
+        // полноэкранного редактора) — принимаем его, каретку в конец.
+        domValueRef.current = value
+        selRef.current = null
+      }
+    }, [value])
+
     // Filtered mentions based on current filter text (tag or file name)
     const filteredMentions = mentions.filter(
       (m) =>
@@ -431,6 +474,9 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
 
     const handleChange = useCallback(
       (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        // (правка 781) фиксируем актуальное состояние DOM-поля и каретки
+        domValueRef.current = e.target.value
+        selRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd }
         onChange(e.target.value)
         evaluateAtCaret()
       },
@@ -570,14 +616,25 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
           ref={textareaRef}
           value={value}
           onChange={handleChange}
+          onSelect={recordSelection}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => {
+            composingRef.current = false
+            const el = textareaRef.current
+            if (el) {
+              domValueRef.current = el.value
+              selRef.current = { start: el.selectionStart, end: el.selectionEnd }
+            }
+          }}
           onKeyDown={handleKeyDownLocal}
           onKeyUp={(e) => {
+            recordSelection() // (правка 781) запоминаем позицию каретки
             // Caret moved with arrows / Home / End — keep the popup anchored
             if (!e.ctrlKey && !e.metaKey && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
               evaluateAtCaret()
             }
           }}
-          onClick={evaluateAtCaret}
+          onClick={() => { recordSelection(); evaluateAtCaret() }}
           onScroll={syncScroll}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}

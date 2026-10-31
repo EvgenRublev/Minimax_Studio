@@ -372,7 +372,10 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
               method: 'HEAD',
               signal: AbortSignal.timeout(5000),
             })
-            return res.ok
+            // (правка 782) Роут теперь отвечает на HEAD. Отбрасываем реф только
+            // при точном 404 (файла нет ни на диске, ни в ComfyUI); 502 =
+            // ComfyUI недоступен и на диске не нашли — не отбрасываем молча.
+            return res.status !== 404
           } catch {
             return true // сервер недоступен — не отбрасываем молча
           }

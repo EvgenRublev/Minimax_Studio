@@ -38,6 +38,10 @@ next-env.d.ts
 # installer cache (скачанные архивы установщика)
 /.install-cache/
 
+# (правка 777) архивы, приложенные к установщику (в setup.exe, не в git:
+# GitHub не принимает файлы >100 МБ, а папка весит ~800 МБ)
+/install/cache/
+
 # ComfyUI portable install (copied separately, huge)
 /ComfyUI-Easy-Install
 

@@ -282,11 +282,20 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
   const resH = draftCanvas ? draftCanvas.h : h
   // (правка 2) Аудио-рефы: сохраняем обрезку (trim_start/trim_end) —
   // восстановление из меты вернёт её в UI.
-  const references: Array<{ type: string; path: string; role: string; trim_start?: number; trim_end?: number | null; /** (правка 493) видео-реф сжимался до 480p */ compress?: boolean }> = [
+  const references: Array<{ type: string; path: string; role: string; trim_start?: number; trim_end?: number | null; /** (правка 493) видео-реф сжимался до 480p */ compress?: boolean; /** (правка 785) видео-реф: «использовать звук» */ include_audio?: boolean }> = [
     ...(body.refImages ?? []).map((p) => ({ type: 'image', path: p, role: '' })),
     // (правка 493) path — ОРИГИНАЛ (роут подменяет путь только для сабмита),
     // флаг compress — «Повторить» сожмёт заново (сжатие кэшируется).
-    ...(body.refVideos ?? []).map((r) => ({ type: 'video', path: r.path, role: '', ...(r.compress === true && { compress: true }) })),
+    // (правка 785) include_audio — без него «Повторить» возвращал включённую
+    // галочку «использовать звук» даже у видео без дорожки (restore-from-meta
+    // читает include_audio !== false → дефолт «вкл») и генерация падала.
+    ...(body.refVideos ?? []).map((r) => ({
+      type: 'video',
+      path: r.path,
+      role: '',
+      include_audio: r.includeAudio !== false,
+      ...(r.compress === true && { compress: true }),
+    })),
     ...(body.refAudios ?? []).map((p, i) => {
       const t = body.refAudioTrims?.[i]
       return t

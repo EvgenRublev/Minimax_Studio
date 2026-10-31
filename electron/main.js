@@ -19,7 +19,7 @@
  * Запуск: node_modules\.bin\electron electron\main.js (скрипт `npm run desktop`,
  * либо автоматически из start.bat — там же фолбэк на старый браузерный режим).
  */
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, MenuItem, dialog, shell, ipcMain } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const { existsSync, readFileSync, mkdirSync, writeFileSync } = require('node:fs')
 const fsPromises = require('node:fs').promises
@@ -527,6 +527,30 @@ function createWindow() {
   })
   // Настоящее десктоп-ощущение: без меню-бара (Alt показывать не нужно).
   Menu.setApplicationMenu(null)
+
+  // Контекстное меню по правому клику (правка 779): в приложении контекстного
+  // меню не было вообще — были недоступны «Вырезать/Копировать/Вставить» в
+  // полях ввода; плюс «Сохранить картинку как…» для изображений (галерея).
+  win.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu()
+    if (params.mediaType === 'image') {
+      menu.append(new MenuItem({
+        label: 'Сохранить картинку как…',
+        click: () => { win.webContents.downloadURL(params.srcURL) },
+      }))
+      menu.append(new MenuItem({ type: 'separator' }))
+    }
+    if (params.isEditable) {
+      menu.append(new MenuItem({ label: 'Вырезать', role: 'cut' }))
+      menu.append(new MenuItem({ label: 'Копировать', role: 'copy' }))
+      menu.append(new MenuItem({ label: 'Вставить', role: 'paste' }))
+      menu.append(new MenuItem({ type: 'separator' }))
+      menu.append(new MenuItem({ label: 'Выделить всё', role: 'selectAll' }))
+    } else if (params.selectionText) {
+      menu.append(new MenuItem({ label: 'Копировать', role: 'copy' }))
+    }
+    if (menu.items.length > 0) menu.popup()
+  })
 
   // Заставка открывается в обычном размере (правка 565 — НЕ максимизируем
   // при показе). Окно разворачивается на весь экран только при входе в САМО
