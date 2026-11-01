@@ -120,14 +120,11 @@ export function ControlNetView() {
   const [folderMenuOpen, setFolderMenuOpen] = useState(false)
 
   // (правка 511) Доп. параметры — как на вкладке «Генерация»:
-  // шаги (draft: 1 слайдер, full: 2), сэмплер + планировщик (Pass 1),
-  // Sigma-профиль + сэмплер (Pass 2).
+  // шаги (один слайдер, правка 802 — сплита сигм нет), сэмплер + планировщик
+  // (Pass 1), Sigma-профиль + сэмплер (Pass 2).
   const isDraft = params.pipeline === 'draft'
-  // (правка 719) Сводка по сплиту pass 1 — как на вкладке «Генерация».
+  // (правка 802) Сплита нет: шаги pass 1 — длина расписания.
   const cnSplit = Math.max(1, Math.round(params.firstSamplerSteps ?? 6))
-  const cnTotal = Math.max(2, Math.min(64, Math.round(params.firstSamplerTotalSteps ?? cnSplit)))
-  const cnEffSplit = Math.min(cnSplit, cnTotal)
-  const cnSigmaEnd = 1 - (cnEffSplit - 1) / cnTotal
   const cnPass2Steps =
     params.sigmaVariant === '7step' ? 7
       : params.sigmaVariant === '6step' ? 6
@@ -900,13 +897,13 @@ export function ControlNetView() {
                         </div>
                       )}
 
-                      {/* Шаги */}
+                      {/* Шаги (правка 802: один слайдер — сплита сигм нет) */}
                       <div className="space-y-1">
                         <SettingSlider
-                          label={isDraft ? 'Шаги драфта' : 'Шаги сэмплера (Pass 1)'}
+                          label={isDraft ? 'Шаги драфта' : 'Шаги (Pass 1)'}
                           labelTitle={isDraft
                             ? 'Сколько шагов делает модель, рисуя видео. 4 — стандарт: быстро и хорошо; больше — аккуратнее, но медленнее.'
-                            : 'Сколько шагов делает черновой проход. Больше — точнее, но медленнее.'}
+                            : 'Сколько шагов делает черновой проход (low-res). Больше — точнее, но медленнее.'}
                           value={isDraft ? params.draftSteps : params.firstSamplerSteps}
                           onChange={(v) => {
                             const n = Math.round(v)
@@ -916,38 +913,16 @@ export function ControlNetView() {
                           min={2}
                           max={isDraft ? 16 : 30}
                           step={1}
-                          inputMin={1}
-                          inputMax={128}
-                          inputHint={isDraft ? '2–30 шагов единственного прохода (стандарт — 4)' : '1–128 шагов. Выше 30 — заметно дольше генерация'}
+                          inputMin={2}
+                          inputMax={isDraft ? 30 : 128}
+                          inputHint={isDraft ? '2–30 шагов единственного прохода (стандарт — 4)' : '2–128 шагов pass 1. Выше 30 — заметно дольше генерация'}
                         />
-                      </div>
-
-                      {/* Всего шагов в расписании pass 1 — задаётся отдельно
-                          от точки сплита: по умолчанию «6 из 6». */}
-                      {!isDraft && (
-                        <div className="space-y-1">
-                          <SettingSlider
-                            label="Всего шагов (pass 1)"
-                            labelTitle={
-                              'Длина расписания BasicScheduler, из которого SplitSigmas берёт ' +
-                              'верхнюю часть для чернового прохода. По умолчанию — столько же, ' +
-                              'сколько у сплита («6 из 6»).'
-                            }
-                            value={cnTotal}
-                            onChange={(v) => patchParams({ firstSamplerTotalSteps: Math.round(v) })}
-                            min={2}
-                            max={64}
-                            step={1}
-                            inputMin={2}
-                            inputMax={128}
-                            inputHint="2–128 шагов расписания. По умолчанию — как у сплита (6/6)"
-                          />
+                        {!isDraft && (
                           <p className="text-[10px] text-muted-foreground/70 leading-snug">
-                            Pass 1: {cnSplit} из {cnTotal} · σ 1.0 → {cnSigmaEnd.toFixed(3)} ·
-                            Pass 2: σ {cnPass2Start} → 0 ({cnPass2Steps} шага)
+                            Pass 1: σ 1.0 → 0 ({cnSplit} шагов) · Pass 2: σ {cnPass2Start} → 0 ({cnPass2Steps} шага)
                           </p>
-                        </div>
-                      )}
+                        )}
+                      </div>
 
                       {/* Сэмплер Pass 1 */}
                       <div className="space-y-1">
@@ -1415,6 +1390,7 @@ export function ControlNetView() {
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}
             onDeleteFile={gallery.deleteFile}
+            onToggleLike={gallery.toggleLike}
             emptyHint="Результаты ControlNet появятся здесь"
           />
         </div>

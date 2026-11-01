@@ -398,7 +398,7 @@ export function UpscaleView() {
   const [opts, setOpts] = useState<Record<string, Record<string, unknown>>>({})
 
   /* Общая галерея (та же, что во вкладке «Генерация» и «Галерея») */
-  const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile } = useVideoGallery()
+  const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile, toggleLike } = useVideoGallery()
 
   const svcRunning = st?.service.running ?? false
   const svcStarting = st?.service.starting ?? false
@@ -412,18 +412,13 @@ export function UpscaleView() {
 
   const isBusy = isUpscaleJobActive(job)
 
-  /* (правка 267) Защита от дурака: апскейл — только УВЕЛИЧЕНИЕ. Если исходник
-   * уже выше или равен 4K (короткая сторона >= 2160), любой множитель (1–4×)
-   * даст >= 2160p — результат выше исходника. Если исходник меньше 2160p,
-   * множитель 1× уже не увеличит его (1× — «как есть»), а меньших
-   * значений в схеме нет — значит, апскейл без повышения невозможен и
-   * запуск запрещён (иначе DLSS «улучшит» уже высокое видео вхолостую). */
-  const srcShortSide = probe?.width && probe?.height ? Math.min(probe.width, probe.height) : null
-  const upscaleBlocked = !!srcShortSide && srcShortSide >= 2160
+  /* (правка 801) Ограничение «исходник уже 4K+ — запуск запрещён» убрано:
+   * исходник может быть любым, в том числе 4K/8K. Причина — нейрофильтры
+   * (NR) DLSS работают и на 4K: меняют картинку, а не только разрешение.
+   * Разрешение результата контролирует пользователь множителем/схемой. */
 
   // (правка 262) canRun не зависит от isBusy — можно ставить в очередь
-  // (правка 267) + запрет, если исходник уже 4K и выше
-  const canRun = !disabled && svcRunning && runtimeReady && !!file && !uploading && !upscaleBlocked
+  const canRun = !disabled && svcRunning && runtimeReady && !!file && !uploading
 
   /* (правка 77) Последняя строка лога моста — живая строка во время запуска. */
   const startLog = (() => {
@@ -1022,12 +1017,6 @@ export function UpscaleView() {
                       Результат: {file.subfolder ? `папка «${file.subfolder}»` : 'общая папка'}
                     </span>
                   </div>
-                  {upscaleBlocked && (
-                    <p className="text-xs text-amber-300/90 flex items-center gap-1.5">
-                      <AlertTriangleIcon className="w-3 h-3 shrink-0" />
-                      Исходник уже 4K и выше — апскейл только увеличивает, запуск запрещён
-                    </p>
-                  )}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Button
@@ -1095,11 +1084,9 @@ export function UpscaleView() {
               title={
                 isBusy
                   ? 'Идёт обработка'
-                  : upscaleBlocked
-                    ? `Исходник ${probe!.width}×${probe!.height} уже 4K и выше — апскейл только увеличивает, поэтому запуск запрещён`
-                    : file
-                      ? 'Запустить обработку (DLSS 5)'
-                      : 'Сначала загрузите видео'
+                  : file
+                    ? 'Запустить обработку (DLSS 5)'
+                    : 'Сначала загрузите видео'
               }
               className="h-11 px-6 bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white border-0 text-sm font-semibold shadow-lg shadow-violet-500/20"
             >
@@ -1116,6 +1103,7 @@ export function UpscaleView() {
             loading={galleryLoading}
             onRefresh={loadGallery}
             onDeleteFile={deleteFile}
+            onToggleLike={toggleLike}
             emptyHint="Здесь появятся сгенерированные и апскейл-видео. Выберите режим, загрузите видео и нажмите «Запустить»."
           />
         </div>

@@ -503,6 +503,7 @@ export function TileUpscaleView() {
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}
             onDeleteFile={gallery.deleteFile}
+            onToggleLike={gallery.toggleLike}
             emptyHint="Результаты Tile Upscale появятся здесь"
           />
         </div>

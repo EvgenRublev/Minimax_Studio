@@ -852,6 +852,7 @@ export function FaceRefineView() {
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}
             onDeleteFile={gallery.deleteFile}
+            onToggleLike={gallery.toggleLike}
             emptyHint="Результаты Face Refine появятся здесь"
           />
         </div>

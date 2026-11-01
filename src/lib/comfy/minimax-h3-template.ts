@@ -3,7 +3,7 @@ import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (
  * MiniMax H3 Reference-to-Video — Two-Pass Latent Upscaler workflow.
  *
  * Architecture:
- *   Pass 1: Low-res generation (0.2 MP, 6 total steps → SplitSigmas → 6 effective, «6/6»)
+ *   Pass 1: Low-res generation (0.2 MP, steps задаются одним слайдером)
  *   Upscale: MinimaxH3LatentUpscaler3D to target resolution (default 0.7 MP)
  *   Pass 2: High-res refinement (3 steps via ManualSigmas)
  *   Decode: Separate VAEDecode (video) + VAEDecodeAudio (audio)
@@ -15,7 +15,7 @@ import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (
  * Defaults (overridable via MiniMaxH3Params):
  *   - LoRA: customLoras из loras.json; встроенная турбо-лора включена по умолчанию
  *   - Pass 1: сэмплер + планировщик на выбор (default euler / simple, правки 67, 70)
- *     BasicScheduler (steps) → SplitSigmas
+ *     BasicScheduler (steps) — (правка 802) без SplitSigmas, полное расписание
  *   - Pass 2: сэмплер на выбор (default euler, правки 68–69) / ManualSigmas
  *   - Latent Upscaler: «target dimensions» (правка 124), enable_chunking: true (правка 68)
  *   - Pass 2: ManualSigmas (0.9035, 0.6316, 0.3158, 0.0000)
@@ -170,16 +170,15 @@ export interface MiniMaxH3Params {
   targetDimensions?: { width: number; height: number }
   /** Low-res pass 1 resolution in MP (default 0.2, диапазон 0.2–2, правка 70). */
   lowResMP?: number
-  /** Pass 1 effective sampling steps (SplitSigmas split point, default 6, max 30). */
+  /**
+   * (правка 802) Шаги Pass 1 — единственный счётчик: расписание
+   * BasicScheduler строится ровно на столько сигм, сплита больше нет.
+   * Default 6, max 30.
+   */
   firstSamplerSteps?: number
   /**
-   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   *
-   * Число шагов расписания задаётся независимо от точки сплита — это
-   * позволяет, например, взять 6 сигм из 8-шаговой лестницы.
-   *
-   * undefined = столько же, сколько забирает сплит (firstSteps) — «6 из 6»
-   * по умолчанию. Раньше здесь было firstSteps × 2 («6 из 12»).
+   * @deprecated (правка 802) Сплит сигм убран — параметр игнорируется.
+   * Оставлен, чтобы не ломать сохранённые состояния/метаданные.
    */
   firstSamplerTotalSteps?: number
   /**
@@ -608,17 +607,10 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   const vhsEnc = vhsEncodeInputs(p.videoFormat)
   const finalRes = p.finalResolution ?? 0.7
   const lowResMP = clampLowResMP(p.lowResMP ?? 0.2, finalRes)
-  // Дефолт точки сплита = 6. Прежний дефолт был 4.
-  const firstSteps = p.firstSamplerSteps ?? 6
-  // Всего шагов в расписании pass 1. По умолчанию — столько же, сколько
-  // забирает сплит («6 из 6»). Задаётся независимо → можно взять «6 из 8».
-  const totalSteps = Math.max(
-    2,
-    Math.min(64, Math.round(p.firstSamplerTotalSteps ?? firstSteps)),
-  )
-  // Сплит не может превышать число доступных сигм (steps+1) — иначе нода
-  // SplitSigmas получит несуществующий индекс.
-  const splitStep = Math.max(1, Math.min(firstSteps, totalSteps))
+  // (правка 802) Pass 1 — единственный счётчик шагов. Сплита сигм больше нет:
+  // BasicScheduler отдаёт полное расписание прямо в сэмплер pass 1, а Pass 2
+  // дорисовывает по своему sigma-профилю (ManualSigmas) после апскейла.
+  const firstSteps = Math.max(1, Math.min(128, Math.round(p.firstSamplerSteps ?? 6)))
 
   // (правка 258) Ограничение: pass 1 (low-res) максимум min(2.0, finalResolution).
   // Это черновик — не должен быть больше финального разрешения.
@@ -800,9 +792,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // Без пресета — finalRes MP (по умолчанию 0.7).
   const flfSinglePass = mode === 'flf'
   // Пайплайн «Драфт»: ОДИН проход по ПОЛНОМУ графику BasicScheduler
-  // (шаги = draftSteps, без SplitSigmas — в 'full' сплит отрезает верхнюю
-  // половину траектории под Pass 2, здесь Pass 2 нет). Без апскейлера и
-  // второго прохода. Выход = черновик для отбора; апгрейд — вкладка Refine.
+  // (шаги = draftSteps). Без апскейлера и второго прохода. Выход = черновик
+  // для отбора; апгрейд — вкладка Refine.
   const draft = p.pipeline === 'draft'
   const draftSteps = Math.min(30, Math.max(2, Math.round(p.draftSteps ?? 4)))
   // Канва одиночного прохода (flf и draft) берётся из ОСНОВНЫХ настроек
@@ -1208,35 +1199,24 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     },
 
     // ═══════════════════════════════════════════════
-    //  PASS 1: Low-res (0.2 MP, totalSteps → SplitSigmas)
+    //  PASS 1: Low-res (0.2 MP, firstSteps/draftSteps)
     // ═══════════════════════════════════════════════
 
-    // BasicScheduler: 'full' — totalSteps (по умолчанию = точке сплита,
-    // «6 из 6»), SplitSigmas отдаёт Pass 1 верхнюю часть; 'draft' — график
-    // единственного прохода длиной draftSteps, полный, без сплита.
+    // BasicScheduler: (правка 802) полное расписание на firstSteps сигм —
+    // SplitSigmas убран, pass 1 использует расписание целиком.
+    // 'draft' — тот же путь, просто со своими шагами (draftSteps).
     '46:24': {
       inputs: {
         scheduler: pass1Scheduler,
-        steps: draft ? draftSteps : totalSteps,
+        steps: draft ? draftSteps : firstSteps,
         denoise: 1,
         model: ['46:30', 0],
       },
       class_type: 'BasicScheduler',
       _meta: {
-        title: `Pass 1 Scheduler (${draft ? `${draftSteps} steps (draft)` : `${totalSteps} steps`}, ${pass1Scheduler})`,
+        title: `Pass 1 Scheduler (${draft ? `${draftSteps} steps (draft)` : `${firstSteps} steps`}, ${pass1Scheduler})`,
       },
     },
-    // SplitSigmas: take first splitStep of the total — только 'full'
-    ...(!draft && {
-      '46:13': {
-        inputs: {
-          step: splitStep,
-          sigmas: ['46:24', 0],
-        },
-        class_type: 'SplitSigmas',
-        _meta: { title: `Split Sigmas (take ${splitStep} of ${totalSteps})` },
-      },
-    }),
     // BasicGuider (pass 1 — uses Preview model)
     '46:29': {
       inputs: {
@@ -1246,20 +1226,20 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       class_type: 'BasicGuider',
       _meta: { title: 'Pass 1 Guider' },
     },
-    // SamplerCustomAdvanced (pass 1). 'full': split-сигмы (верхняя ПОЛОВИНА
-    // траектории — компоновка; хвост дорисует Pass 2). 'draft': полный
-    // график BasicScheduler ('46:24') — единственный проход с нуля, выход
-    // сразу в decode.
+    // SamplerCustomAdvanced (pass 1). (правка 802) Полное расписание
+    // BasicScheduler ('46:24') в обоих пайплайнах: 'full' — pass 1 рисует
+    // весь график от σ=1 до 0, хвост детализации делает Pass 2 после апскейла;
+    // 'draft' — единственный проход, выход сразу в decode.
     '46:21': {
       inputs: {
         noise: ['46:31', 0],
         guider: ['46:29', 0],
         sampler: ['46:18a', 0],
-        sigmas: draft ? ['46:24', 0] : ['46:13', 0],
+        sigmas: ['46:24', 0],
         latent_image: ['46:11', 1],
       },
       class_type: 'SamplerCustomAdvanced',
-      _meta: { title: draft ? 'Draft Sampler (single pass, full schedule)' : 'Pass 1 Sampler (low-res, split sigmas)' },
+      _meta: { title: draft ? 'Draft Sampler (single pass, full schedule)' : 'Pass 1 Sampler (low-res, full schedule)' },
     },
 
     // ═══════════════════════════════════════════════

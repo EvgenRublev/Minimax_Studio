@@ -592,7 +592,7 @@ export function GenerateView() {
 
   /* ──────────── Gallery ──────────── */
 
-  const { files: galleryFiles, folders: galleryFolders, loading: galleryLoading, load: loadGallery, deleteFile } = useVideoGallery({ phase })
+  const { files: galleryFiles, folders: galleryFolders, loading: galleryLoading, load: loadGallery, deleteFile, toggleLike } = useVideoGallery({ phase })
 
   /* (правка 91) Активная папка проекта: галерея вкладки фильтруется по ней,
    * новые видео складываются в неё. '' = общая папка.
@@ -1595,18 +1595,9 @@ export function GenerateView() {
                 {/* Драфт-пайплайн: настройки единственного прохода; Pass 2 нет */}
                 {(() => {
                   const isDraft = video.pipeline === 'draft' && video.mode !== 'extend'
-                  // (правка 719) Сводка по сплиту pass 1: «N из M» + σ-границы.
-                  // Показывает ровно то, что уйдёт в SplitSigmas/BasicScheduler,
-                  // чтобы можно было сравнивать качество, не вычисляя вручную.
+                  // (правка 802) Сплита сигм больше нет: шаги pass 1 — это и есть
+                  // длина расписания, поэтому сводка простая.
                   const pass1Split = Math.max(1, Math.round(video.firstSamplerSteps ?? 6))
-                  const pass1TotalSteps = Math.max(
-                    2,
-                    Math.min(64, Math.round(video.firstSamplerTotalSteps ?? pass1Split)),
-                  )
-                  const effSplit = Math.min(pass1Split, pass1TotalSteps)
-                  // Конечная сигма pass 1: linspace(1.0, 0.0, steps+1)[split-1]
-                  // = 1 − (split−1)/steps.
-                  const pass1SigmaEnd = 1 - (effSplit - 1) / pass1TotalSteps
                   const pass2Steps =
                     (video.sigmaVariant || '3step') === '3step'
                       ? 3
@@ -1719,15 +1710,15 @@ export function GenerateView() {
                             </div>
                             )}
 
-                            {/* Шаги: драфт — прямой счётчик единственного прохода;
-                                'full' — точка сплита Pass 1 (эффективные шаги). */}
+                            {/* (правка 802) Шаги Pass 1 — один слайдер: сплита
+                                сигм больше нет, это ровно число шагов pass 1. */}
                             <div className="space-y-1">
                               <SettingSlider
-                                label={isDraft ? 'Шаги драфта' : 'Шаги сэмплера'}
+                                label={isDraft ? 'Шаги драфта' : 'Шаги (pass 1)'}
                                 labelTitle={
                                   isDraft
                                     ? 'Сколько шагов делает модель, рисуя видео. 4 — стандарт: быстро и хорошо; больше — аккуратнее, но медленнее.'
-                                    : 'Сколько сигм забирает черновой проход (точка сплита). Больше — точнее, но медленнее.'
+                                    : 'Сколько шагов делает черновой проход (low-res). Больше — точнее композиция, но дольше; списка сигм и сплита больше нет.'
                                 }
                                 value={isDraft ? (video.draftSteps ?? 4) : (video.firstSamplerSteps ?? 6)}
                                 onChange={(v) =>
@@ -1737,51 +1728,25 @@ export function GenerateView() {
                                       : { firstSamplerSteps: Math.round(v) },
                                   )
                                 }
-                                min={isDraft ? 2 : 2}
+                                min={2}
                                 max={isDraft ? 16 : 30}
                                 step={1}
-                                inputMin={isDraft ? 2 : 1}
+                                inputMin={2}
                                 inputMax={isDraft ? 30 : 128}
                                 inputHint={
                                   isDraft
                                     ? '2–30 шагов единственного прохода (стандарт — 4)'
-                                    : '1–128 шагов. Выше 30 — заметно дольше генерация'
+                                    : '2–128 шагов pass 1. Выше 30 — заметно дольше генерация'
                                 }
                               />
-                            </div>
-
-                            {/* Всего шагов в расписании pass 1 — задаётся отдельно
-                                от точки сплита: по умолчанию «6 из 6», можно взять
-                                «6 из 8». */}
-                            {!isDraft && (
-                              <div className="space-y-1">
-                                <SettingSlider
-                                  label="Всего шагов (pass 1)"
-                                  labelTitle={
-                                    'Длина расписания BasicScheduler, из которого SplitSigmas ' +
-                                    'берёт верхнюю часть для чернового прохода. По умолчанию — ' +
-                                    'столько же, сколько у сплита («6 из 6»). Увеличьте, чтобы ' +
-                                    'взять, например, «6 из 8».'
-                                  }
-                                  value={pass1TotalSteps}
-                                  onChange={(v) =>
-                                    patchVideo({ firstSamplerTotalSteps: Math.round(v) })
-                                  }
-                                  min={2}
-                                  max={64}
-                                  step={1}
-                                  inputMin={2}
-                                  inputMax={128}
-                                  inputHint="2–128 шагов расписания. По умолчанию — как у сплита (6/6)"
-                                />
-                                {/* Живая сводка: что реально получится — чтобы сравнивать
-                                    качество, не считая формулы в голове. */}
+                              {/* Живая сводка: pass 1 рисует весь график, pass 2
+                                  детализирует после апскейла своим sigma-профилем. */}
+                              {!isDraft && (
                                 <p className="text-[10px] text-muted-foreground/70 leading-snug">
-                                  Pass 1: {pass1Split} из {pass1TotalSteps} · σ 1.0 → {pass1SigmaEnd.toFixed(3)} ·
-                                  Pass 2: σ {pass2SigmaStart} → 0 ({pass2Steps} шага)
+                                  Pass 1: σ 1.0 → 0 ({pass1Split} шагов) · Pass 2: σ {pass2SigmaStart} → 0 ({pass2Steps} шага)
                                 </p>
-                              </div>
-                            )}
+                              )}
+                            </div>
 
                       <div className="space-y-1">
                         <Label
@@ -2244,6 +2209,7 @@ export function GenerateView() {
             loading={galleryLoading}
             onRefresh={loadGallery}
             onDeleteFile={deleteFile}
+            onToggleLike={toggleLike}
             emptyHint={
               outputFolder
                 ? `В папке «${outputFolder}» пока нет видео. Новые генерации лягут в неё.`

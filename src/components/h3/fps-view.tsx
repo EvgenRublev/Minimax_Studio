@@ -523,6 +523,7 @@ export function FpsView() {
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}
             onDeleteFile={gallery.deleteFile}
+            onToggleLike={gallery.toggleLike}
             emptyHint="Результаты FPS появятся здесь"
           />
         </div>

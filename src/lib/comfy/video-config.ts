@@ -111,12 +111,9 @@ export interface VideoGenerateParams {
   finalResolution?: number
   /** Low-res pass 1 resolution in MP (default 0.2). */
   lowResMP?: number
-  /** Pass 1 effective sampling steps (SplitSigmas split point, default 6, max 30). */
+  /** (правка 802) Шаги pass 1 — единственный счётчик, сплита сигм нет (default 6, max 30). */
   firstSamplerSteps?: number
-  /**
-   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   * undefined = firstSteps — «6 из 6» по умолчанию.
-   */
+  /** @deprecated (правка 802) Сплит убран — параметр игнорируется. */
   firstSamplerTotalSteps?: number
   /** Pass 2 sigma variant: '3step' | '4step' | '5step' | '6step' | '7step'. */
   sigmaVariant?: string

@@ -55,12 +55,9 @@ export interface ControlNetGenParams {
   pipeline?: 'draft' | 'full'
   /** Low-res MP (для full pipeline, Pass 1). */
   lowResMP?: number
-  /** Pass 1 эффективные шаги (SplitSigmas split point, default 6, max 30). */
+  /** (правка 802) Шаги pass 1 — единственный счётчик, сплита сигм нет (default 6, max 30). */
   firstSamplerSteps?: number
-  /**
-   * Всего шагов в расписании BasicScheduler для pass 1.
-   * undefined = firstSamplerSteps — «6 из 6» по умолчанию.
-   */
+  /** @deprecated (правка 802) Сплит убран — параметр игнорируется. */
   firstSamplerTotalSteps?: number
   /** Custom LoRAs. */
   customLoras?: Array<{ name: string; strength: number }>

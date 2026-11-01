@@ -1010,6 +1010,7 @@ export function RefineView() {
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}
             onDeleteFile={gallery.deleteFile}
+            onToggleLike={gallery.toggleLike}
             emptyHint="Результаты Refine появятся здесь"
           />
         </div>

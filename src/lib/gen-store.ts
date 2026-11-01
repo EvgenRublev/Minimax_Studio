@@ -111,13 +111,9 @@ export interface VideoGenState {
   freeResolution: boolean
   /** Pass 1 low-res resolution in MP (default 0.2). */
   lowResMP: number
-  /** Pass 1 effective sampling steps (SplitSigmas split point, default 6, max 30). */
+  /** (правка 802) Шаги pass 1 — единственный счётчик, сплита сигм нет (default 6, max 30). */
   firstSamplerSteps: number
-  /**
-   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   * По умолчанию 6 — столько же, сколько забирает сплит («6 из 6»).
-   * Задаётся отдельно, чтобы можно было взять, например, «6 из 8».
-   */
+  /** @deprecated (правка 802) Сплит убран — поле игнорируется, оставлено для старых состояний. */
   firstSamplerTotalSteps?: number
   /**
    * (правка 719) Шаги клипа в режиме продления.

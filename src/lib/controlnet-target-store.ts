@@ -50,12 +50,9 @@ export interface ControlNetUiParams {
   // ── Доп. параметры (правка 511) — как на вкладке «Генерация» ──
   /** Draft pipeline: шаги единственного прохода (default 4, min 2, max 30). */
   draftSteps: number
-  /** Full pipeline, Pass 1: эффективные шаги (SplitSigmas split, default 6). */
+  /** (правка 802) Full pipeline, Pass 1: шаги (single slider, сплита сигм нет). */
   firstSamplerSteps: number
-  /**
-   * ВСЕГО шагов в расписании BasicScheduler для pass 1.
-   * По умолчанию 6 — столько же, сколько забирает сплит («6 из 6»).
-   */
+  /** @deprecated (правка 802) Сплит убран — поле игнорируется. */
   firstSamplerTotalSteps?: number
   /** Pass 1 sampler (default 'euler'). */
   pass1Sampler: string

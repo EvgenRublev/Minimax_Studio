@@ -593,7 +593,7 @@ export function ExtendView() {
   }, [generate, assistantBusy, uploadingVideo, autoClipSteps])
 
   /* ──────────── Gallery ──────────── */
-  const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile } = useVideoGallery({ phase })
+  const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile, toggleLike } = useVideoGallery({ phase })
 
   /* ──────────── Badges ──────────── */
   // (правка 291) Итоговая длительность = исходник + все клипы (без учёта
@@ -1385,6 +1385,7 @@ export function ExtendView() {
             loading={galleryLoading}
             onRefresh={loadGallery}
             onDeleteFile={deleteFile}
+            onToggleLike={toggleLike}
             emptyHint="Здесь появятся сгенерированные видео продления. Опишите сцену, добавьте клипы и нажмите «Сгенерировать продление»."
           />
         </div>
