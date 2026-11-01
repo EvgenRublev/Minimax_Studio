@@ -186,7 +186,9 @@ if (Test-Path $bundle) {
             try { Copy-Item $_.FullName $dst -Force; $seeded++ } catch { }
         }
     }
-    if ($seeded -gt 0) { Info ($seeded + ' архивов взято из установщика (без скачивания)') }
+    # (правка 792) $seeded - число, а int + 'строка' в PowerShell пытается привести
+    # строку к Int32 и падает. Интерполяция "$seeded ..." безопасна.
+    if ($seeded -gt 0) { Info ("$seeded архивов взято из установщика (без скачивания)") }
 }
 
 # (правка 761) Быстрые загрузки.
@@ -988,7 +990,9 @@ if (-not $SkipApp) {
         $buildFresh = ((Test-Path '.next\BUILD_ID') -and $appVer -and ($buildVer -eq $appVer))
         if (-not $buildFresh) {
             if (Test-Path '.next') {
-                Info 'сборка .next устарела (в ней ' + ($(if ($buildVer) { $buildVer } else { 'нет штампа' }) ) + ', нужно ' + $appVer + ') - пересобираю'
+                # (правка 792) без скобок вокруг всей строки Info получал кучу
+                # отдельных аргументов и падал на повторном ремонте установки.
+                Info ('сборка .next устарела (в ней ' + $(if ($buildVer) { $buildVer } else { 'нет штампа' }) + ', нужно ' + $appVer + ') - пересобираю')
                 # rmdir через cmd: Remove-Item падает на длинных путях .next
                 & cmd.exe /c "rmdir /s /q `"$(Join-Path $Root '.next')`""
             }
