@@ -97,6 +97,17 @@ let consoleTimer = null
  */
 let quitting = false
 
+/**
+ * (правка 795) Флаг «применяем обновление». Ставится в ipc h3:apply-update
+ * перед app.quit(). Нужен потому, что before-quit вызывает killAncestorCmd(),
+ * который бьёт taskkill /T /F по cmd-родителю — а апдейтер (PowerShell),
+ * порождённый нами же, остаётся в ЭТОМ ДЕРЕВЕ (detached:true не разрывает
+ * связь родитель-потомок для taskkill /T) и погибал на старте, не успев
+ * написать ни строки в .update\apply_update.log. При applyingUpdate
+ * родительский cmd не трогаем: его снимает сам apply_update.ps1 (WaitPids).
+ */
+let applyingUpdate = false
+
 function consoleBroadcast() {
   if (consoleTimer) return
   consoleTimer = setTimeout(() => {
@@ -545,6 +556,9 @@ ipcMain.handle('h3:apply-update', () => {
       windowsHide: true,
     })
     updater.unref()
+    // (правка 795) Апдейтер живёт в нашем дереве процессов — запрещаем
+    // before-quit убивать предка-cmd.exe вместе со всем деревом.
+    applyingUpdate = true
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) }
   }
@@ -741,7 +755,14 @@ app.on('before-quit', () => {
   // проверка «ppid — это cmd.exe» всегда проваливалась, и скрытая консоль
   // оставалась висеть. Поднимаемся по дереву предков (до 6 уровней) и убиваем
   // ближайший cmd.exe деревом (/T /F).
-  killAncestorCmd()
+  // (правка 795) При применении обновления НЕ убиваем: PowerShell-апдейтер
+  // порождён нами и висит в этом же дереве — taskkill /T снёс бы его вместе
+  // с нами. Cmd-предок после нашей гибели сам завершает start.bat.
+  if (applyingUpdate) {
+    console.log('[desktop] применяем обновление — родительский cmd не убиваем')
+  } else {
+    killAncestorCmd()
+  }
 })
 
 // Вторая копия — фокусирует существующее окно вместо нового процесса.
