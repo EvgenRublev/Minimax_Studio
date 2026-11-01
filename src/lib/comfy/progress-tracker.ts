@@ -8,7 +8,6 @@
  * ComfyUI ModelPreviewOverrideKJ events are delivered to us.
  */
 import WebSocket from 'ws'
-import { onQueueDrained } from '@/lib/vram-arbiter'
 
 const COMFY_BASE_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/+$/, '')
 const COMFY_WS_URL = COMFY_BASE_URL.replace(/^http/, 'ws') + '/ws'
@@ -190,8 +189,6 @@ let connecting = false
 let activePromptId: string | null = null
 /** The prompt_id currently executing (from 'executing' WS event). */
 let executingPromptId: string | null = null
-/** Предыдущее значение queue_remaining из status-событий ComfyUI. */
-let lastQueueRemaining = 0
 
 /** Set the active prompt_id (called when we submit a job). */
 export function setActivePrompt(id: string) {
@@ -259,24 +256,9 @@ export function applyTrackerMessage(msg: {
   data?: Record<string, unknown> & { prompt_id?: string; node?: string | null }
 }) {
   try {
-    // Опустошение очереди → фоновая выгрузка моделей MiniMax из VRAM
-    // (vram-arbiter: GPU освобождается сразу после завершения генераций)
-    if (msg.type === 'status') {
-      const remaining = (msg.data as { status?: { exec_info?: { queue_remaining?: number } } } | undefined)
-        ?.status?.exec_info?.queue_remaining
-      if (typeof remaining === 'number') {
-        if (remaining === 0 && lastQueueRemaining > 0) {
-          // (правка 716) .catch обязателен: onQueueDrained внутри ждёт
-          // мьютекс VRAM-диспетчера, который может быть занят дольше
-          // таймаута — без обработчика это необработанный rejection, а Node
-          // по умолчанию завершает процесс на unhandled rejection.
-          void onQueueDrained().catch((err) => {
-            console.warn('[progress-tracker] onQueueDrained failed:', err instanceof Error ? err.message : String(err))
-          })
-        }
-        lastQueueRemaining = remaining
-      }
-    }
+    // (правка 799) Модели MiniMax БОЛЬШЕ НЕ выгружаются автоматически после
+    // окончания генерации: они держатся в VRAM до запроса к ассистенту
+    // (startChat в vram-arbiter сам выгружает ComfyUI перед загрузкой LLM).
 
     // Standard progress events (one per sampler node/pass)
     if (msg.type === 'progress' && msg.data?.prompt_id) {

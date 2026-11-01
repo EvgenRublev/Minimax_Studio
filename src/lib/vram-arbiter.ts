@@ -590,56 +590,9 @@ export async function startChat<T>(start: () => Promise<T>): Promise<GateResult<
   }
 }
 
-/* ── Фоновая выгрузка после завершения всех генераций ── */
-
-let lastDrainAt = 0
-
-/**
- * Вызывается progress-tracker'ом, когда очередь ComfyUI опустела:
- * сразу выкидываем модели MiniMax из VRAM, чтобы GPU был свободен для LLM.
- * Минимум 5 с между попытками (защита от повторных status-событий).
- *
- * (фикс Phase 4) Раньше эта функция ДЕРЖАЛА mutex до 90 секунд
- * (evictComfyVerified(90_000)). Если пользователь нажал «Генерация» во время
- * фоновой выгрузки, его запрос ждал в очереди mutex до 90 с — а клиентский
- * AbortSignal.timeout(60_000) убивал запрос раньше. Теперь: проверка занятости
- * ComfyUI (быстрая) идёт под замком, а сама выгрузка — БЕЗ замка. Если
- * параллельно стартует генерация, она просто не найдёт ComfyUI «пустым» —
- * модели выгрузятся на лету при следующем free-запросе ComfyUI.
- */
-export async function onQueueDrained(): Promise<void> {
-  if (Date.now() - lastDrainAt < 5_000) return
-  lastDrainAt = Date.now()
-  console.log('[vram] очередь пуста — фоновая выгрузка моделей MiniMax')
-
-  // Быстрая проверка под замком: не конкурируем со стартом чата/генерации.
-  // (правка 716) withLock ОТКЛОНЯЕТСЯ при превышении LOCK_WAIT_TIMEOUT_MS
-  // (120 с) — а замок штатно удерживает startChat на время загрузки модели
-  // (до 6 мин, правка 730). Раньше этот await был вне try/catch, а вызов шёл
-  // как `void onQueueDrained()` — необработанный rejection в процессе Next.js →
-  // падение сервера. Теперь ловим и логируем.
-  let shouldEvict = false
-  try {
-    shouldEvict = await withLock(async () => {
-      if (await comfyBusy()) return false
-      if (llmPid() !== null || chatActive) return false
-      return true
-    })
-  } catch (err) {
-    console.log(`[vram] фоновая выгрузка: не дождались замка — ${err instanceof Error ? err.message : String(err)}`)
-    return
-  }
-  if (!shouldEvict) return
-
-  // Выгрузка БЕЗ замка: не блокируем генерацию на 90 секунд.
-  // Если параллельно стартует генерация — ComfyUI сам выгрузит модели
-  // при загрузке нового checkpoint (dynamic VRAM).
-  try {
-    const r = await evictComfyVerified(90_000)
-    if (!r.ok) {
-      console.log(`[vram] фоновая выгрузка: VRAM ещё не освободился (${r.error}) — повторится при следующем обращении к чату`)
-    }
-  } catch (err) {
-    console.log(`[vram] фоновая выгрузка: ошибка — ${err instanceof Error ? err.message : err}`)
-  }
-}
+/* ── (правка 799) Фоновой выгрузки после генерации больше нет ──
+ * Модели MiniMax держатся в VRAM до запроса к ассистенту: startChat под
+ * мьютексом выгружает ComfyUI (evictComfyVerified) и только потом грузит LLM.
+ * Так подряд идущие генерации не платят повторную загрузку checkpoint'ов.
+ * Ручное освобождение VRAM осталось — кнопка в панели системных метрик
+ * (/api/comfy/free). */

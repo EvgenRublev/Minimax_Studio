@@ -351,45 +351,22 @@ export function llmPid(): number | null {
   return child?.pid ?? null
 }
 
-/* ── (правка 136 / Bonsai) Idle-автостоп ──
- * llm_server.py останавливает сам себя по --idle-sec 600; у llama-server
- * такой функции нет — сторожим из раннера: 10 минут без запросов к чату
- * → stopLlm() (VRAM освобождается для MiniMax/системы). */
+/* ── (правка 799) Idle-автостоп LLM отключён ──
+ * Раньше LLM выгружался сам через 10 минут простоя: llm_server.py по
+ * --idle-sec 600 и сторож в раннере для llama-server/bonsai. Теперь модель
+ * держится в VRAM до запроса к MiniMax — его выгружает runGeneration
+ * (evictLlmVerified) прямо перед постановкой генерации в очередь.
+ * noteLlmActivity остаётся как точка отметки обращений (диагностика). */
 let lastLlmActivity = 0
-let bonsaiIdleTimer: ReturnType<typeof setInterval> | null = null
 
 /** Отметить обращение к ассистенту (вызывается чат-роутом на каждый запрос). */
 export function noteLlmActivity(): void {
   lastLlmActivity = Date.now()
 }
 
-function startBonsaiIdleWatchdog(): void {
-  lastLlmActivity = Date.now()
-  if (bonsaiIdleTimer) return
-  bonsaiIdleTimer = setInterval(() => {
-    if (!child || child.exitCode !== null || child.signalCode !== null) {
-      stopBonsaiIdleWatchdog()
-      return
-    }
-    if (Date.now() - lastLlmActivity > 600_000) {
-      console.log('[llm] Bonsai: 10 мин без запросов — выгружаю (idle)')
-      // (правка 716) .catch обязателен: stopLlm — async, и его отклонение
-      // без обработчика стало бы unhandled rejection (Node по умолчанию
-      // завершает процесс).
-      void stopLlm().catch((err) => {
-        console.warn('[llm] idle-выгрузка не удалась:', err instanceof Error ? err.message : String(err))
-      })
-    }
-  }, 60_000)
-  // Держим event-loop живым честно: таймер периодический, интервал не мешает.
-  bonsaiIdleTimer.unref?.()
-}
-
-function stopBonsaiIdleWatchdog(): void {
-  if (bonsaiIdleTimer) {
-    clearInterval(bonsaiIdleTimer)
-    bonsaiIdleTimer = null
-  }
+/** Диагностика: сколько мс назад было последнее обращение к ассистенту. */
+export function llmIdleMs(): number {
+  return lastLlmActivity ? Date.now() - lastLlmActivity : 0
 }
 
 /**
@@ -644,7 +621,6 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
           windowsHide: true,
           env: process.env,
         })
-        startBonsaiIdleWatchdog()
       } else {
         const args = [
           path.join(process.cwd(), 'tools', 'llm_server.py'),
@@ -656,7 +632,9 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
           // (правка 109) квантизация KV-кэша: off (fp16) / q8_0 / q5_1 / q4_0
           '--kv-cache', cfg.llmKvCache,
           '--threads', '6',
-          '--idle-sec', '600',
+          // (правка 799) 0 = без idle-автостопа: модель держится в VRAM до
+          // запроса на генерацию (его выгружает runGeneration).
+          '--idle-sec', '0',
         ]
         if (mmproj) args.push('--mmproj', mmproj)
 
@@ -679,7 +657,6 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
           actualCtx = null
           spawnSig = null
         }
-        stopBonsaiIdleWatchdog()
       })
 
       const up = await healthUp(COLD_START_TIMEOUT_MS)

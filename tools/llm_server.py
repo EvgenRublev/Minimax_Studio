@@ -15,7 +15,7 @@ Endpoints (127.0.0.1 only):
   POST /abort     -> stop the current generation (best effort)
   POST /shutdown  -> graceful shutdown (releases VRAM, then exits)
 
-Auto-exits after --idle-sec without requests (frees RAM/VRAM).
+Auto-exits after --idle-sec without requests (frees RAM/VRAM); 0 disables it.
 """
 
 import argparse
@@ -57,7 +57,8 @@ ap.add_argument('--ctx', type=int, default=4096)
 ap.add_argument('--kv-cache', default='off', choices=['off', 'q8_0', 'q5_1', 'q4_0'],
                help='KV cache quantization (off=fp16, default)')
 ap.add_argument('--threads', type=int, default=6)
-ap.add_argument('--idle-sec', type=int, default=600)
+ap.add_argument('--idle-sec', type=int, default=600,
+                help='exit after N sec without requests; 0 = stay resident (hold VRAM)')
 # (правка 716) parse_known_args — лишние аргументы не должны ронять сервер.
 args, _unknown_args = ap.parse_known_args()
 
@@ -916,6 +917,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def idle_watchdog():
+    if args.idle_sec <= 0:
+        return  # (правка 799) автостоп отключён — держим модель в VRAM
     while True:
         time.sleep(10)
         if time.time() - last_activity > args.idle_sec:
@@ -956,6 +959,9 @@ if __name__ == '__main__':
             flush=True,
         )
         raise SystemExit(2)
-    threading.Thread(target=idle_watchdog, daemon=True).start()
+    # (правка 799) idle-sec 0 = не выгружаться по простою: модель держится в
+    # VRAM до запроса на генерацию (студия сама останавливает LLM перед ней).
+    if args.idle_sec > 0:
+        threading.Thread(target=idle_watchdog, daemon=True).start()
     print(f'[llm] listening on 127.0.0.1:{args.port}', flush=True)
     server.serve_forever()
