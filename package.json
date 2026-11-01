@@ -1,6 +1,6 @@
 {
   "name": "minimax-h3-studio",
-  "version": "7.1.3",
+  "version": "7.1.4",
   "private": true,
   "productName": "Minimax H3 Studio",
   "description": "Р›РѕРєР°Р»СЊРЅР°СЏ СЃС‚СѓРґРёСЏ РіРµРЅРµСЂР°С†РёРё РєРёРЅРµРјР°С‚РѕРіСЂР°С„РёС‡РЅС‹С… РІРёРґРµРѕ СЃРѕ Р·РІСѓРєРѕРј РЅР° Р±Р°Р·Рµ РјРѕРґРµР»Рё MiniMax H3 (ComfyUI + Electron).",
