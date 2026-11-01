@@ -563,28 +563,59 @@ ipcMain.handle('h3:apply-update', () => {
   updateDiag('apply requested: version=' + armed.version +
     ' depsChanged=' + Boolean(armed.depsChanged) + ' waitPids=' + waitPids.join(','))
 
+  const psArgs = [
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-WindowStyle', 'Hidden',
+    '-File', psScript,
+    '-Root', APP_ROOT,
+    '-Version', String(armed.version),
+    '-DepsChanged', String(Boolean(armed.depsChanged)),
+    '-WaitPids', waitPids.join(','),
+  ]
+
   try {
-    const updater = spawn(POWERSHELL, [
-      '-NoProfile',
-      '-ExecutionPolicy', 'Bypass',
-      '-WindowStyle', 'Hidden',
-      '-File', psScript,
-      '-Root', APP_ROOT,
-      '-Version', String(armed.version),
-      '-DepsChanged', String(Boolean(armed.depsChanged)),
-      '-WaitPids', waitPids.join(','),
-    ], {
-      cwd: APP_ROOT,
-      // (правка 797) detached УБРАН. Замер на живой машине: powershell.exe 5.1,
-      // порождённый с detached:true, завершается КОДОМ 0 за ~50 мс, даже не
-      // начав выполнять скрипт (ни строки в логе), при любом stdio. Без
-      // detached скрипт стартует и отрабатывает (~170 мс на пробе).
-      // На Windows это безопасно: выход родителя НЕ убивает дочерний процесс
-      // (в отличие от Unix), а before-quit трогает только список children,
-      // куда апдейтер не входит. Окна не мелькает — windowsHide:true.
-      stdio: 'ignore',
-      windowsHide: true,
-    })
+    /* (правка 798) Настоящая причина срыва: Electron (Chromium) держит свой
+     * процесс в Windows Job Object с kill-on-close, и ЛЮБОЙ прямой потомок
+     * (spawn/powershell) наследует этот job и умирает вместе с приложением —
+     * на живой машине апдейтер успевал записать только «apply_update start»
+     * и гиб, не заменив ни одного файла. Замер: ps в job (inJob=True),
+     * живёт ровно 2 с = момент выхода Electron.
+     * Обход: explorer.exe передаёт .vbs уже работающей оболочке, PowerShell
+     * стартует вне job'а (inJob=False) и переживает выход приложения; проверено
+     * полным проходом скрипта при закрытом Electron. Команда передаётся через
+     * .update\apply_cmd.txt (UTF-16LE), сам .vbs окно не показывает. */
+    const cmdFile = path.join(APP_ROOT, '.update', 'apply_cmd.txt')
+    const vbsLauncher = path.join(APP_ROOT, 'install', 'run_apply_update.vbs')
+    let updater = null
+    let how = 'powershell'
+    if (existsSync(vbsLauncher)) {
+      try {
+        const cmdLine = [POWERSHELL, ...psArgs]
+          .map((a) => '"' + String(a).replace(/"/g, '""') + '"')
+          .join(' ')
+        writeFileSync(cmdFile, cmdLine, 'utf16le')
+        updater = spawn('explorer.exe', [vbsLauncher], {
+          cwd: APP_ROOT,
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+        how = 'explorer+vbs'
+      } catch (e) {
+        updateDiag('explorer dispatch failed, falling back to direct spawn: ' + String(e && e.message ? e.message : e))
+        updater = null
+      }
+    }
+    if (!updater) {
+      // Fallback (старый payload без run_apply_update.vbs): прямой запуск.
+      // Работает, только если приложение не в job'е — лучше, чем ничего.
+      updater = spawn(POWERSHELL, psArgs, {
+        cwd: APP_ROOT,
+        // (правка 797) detached — причина мгновенной «тихой» смерти powershell.
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+    }
     // (правка 796) Ошибки spawn приходят АСИНХРОННО: без слушателя 'error'
     // приложение молча выходило, а апдейтер так и не стартовал.
     updater.on('error', (e) => updateDiag('updater spawn error: ' + (e && e.message ? e.message : String(e))))
@@ -593,7 +624,7 @@ ipcMain.handle('h3:apply-update', () => {
     // (правка 795) Апдейтер живёт в нашем дереве процессов — запрещаем
     // before-quit убивать предка-cmd.exe вместе со всем деревом.
     applyingUpdate = true
-    updateDiag('updater spawned: pid=' + updater.pid + ' exe=' + POWERSHELL)
+    updateDiag('updater spawned: pid=' + updater.pid + ' via=' + how)
   } catch (err) {
     updateDiag('spawn threw: ' + String(err && err.message ? err.message : err))
     return { ok: false, error: String(err && err.message ? err.message : err) }
