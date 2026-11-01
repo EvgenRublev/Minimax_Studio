@@ -21,7 +21,7 @@
  */
 const { app, BrowserWindow, Menu, MenuItem, dialog, shell, ipcMain } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
-const { existsSync, readFileSync, mkdirSync, writeFileSync } = require('node:fs')
+const { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } = require('node:fs')
 const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
@@ -519,11 +519,27 @@ ipcMain.handle('h3:console-save', async (_e, text) => {
 
 /* (правка 790) «Перезапустить и установить»: web-сервер уже разложил staged-
  * файлы в .update\staging и записал .update\armed.json. Здесь запускаем
- * install\apply_update.ps1 ОТДЕЛЁННЫМ процессом (detached, НЕ spawnChild!) —
- * before-quit убивает всё дерево children, а апдейтер обязан пережить выход
- * Electron и заменить файлы после остановки всех процессов приложения.
- * Скрипт ждёт завершения перечисленных PID (Electron, web-сервер, cmd-родитель),
- * делает бэкап подменяемых файлов и при срыве откатывается из .update\backup. */
+ * install\apply_update.ps1 ПРЯМЫМ spawn (НЕ spawnChild!) — before-quit убивает
+ * всё дерево children, а апдейтер обязан пережить выход Electron. На Windows
+ * дочерний процесс переживает родителя сам, отдельный (detached) процесс для
+ * этого не нужен — более того, powershell с detached вообще не стартует
+ * (правка 797). Скрипт ждёт завершения перечисленных PID (Electron, web-сервер,
+ * cmd-родитель), делает бэкап подменяемых файлов и при срыве откатывается из
+ * .update\backup. */
+/* (правка 796) Все шаги апдейтера пишутся в тот же .update\apply_update.log,
+ * что и сам PowerShell-скрипт. Без этого сорванное обновление выглядело как
+ * «ничего не произошло»: ни одной строки в логе, ни ошибки — spawn() падает
+ * асинхронно (исключение не ловится try/catch), а процесс-апдейтер мог быть
+ * убит ещё до первой строки своего лога. */
+function updateDiag(msg) {
+  try {
+    const dir = path.join(APP_ROOT, '.update')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    appendFileSync(path.join(dir, 'apply_update.log'),
+      new Date().toISOString() + ' [electron] ' + msg + '\n')
+  } catch { /* лог диагностики не важнее работы */ }
+}
+
 ipcMain.handle('h3:apply-update', () => {
   const armedFile = path.join(APP_ROOT, '.update', 'armed.json')
   let armed = null
@@ -533,33 +549,53 @@ ipcMain.handle('h3:apply-update', () => {
   if (!armed || !armed.version) return { ok: false, error: 'Обновление не подготовлено' }
   const staging = path.join(APP_ROOT, '.update', 'staging')
   if (!existsSync(staging)) return { ok: false, error: 'Папка staging не найдена — подготовка обновления потеряна' }
+  const psScript = path.join(APP_ROOT, 'install', 'apply_update.ps1')
+  if (!existsSync(psScript)) {
+    updateDiag('apply_update.ps1 NOT FOUND: ' + psScript)
+    return { ok: false, error: 'Файл установщика apply_update.ps1 не найден' }
+  }
 
   const waitPids = [String(process.pid)]
   if (webServerChild && webServerChild.pid) waitPids.push(String(webServerChild.pid))
   // Скрытая cmd-оболочка от start_hidden.vbs/start.bat — родитель node-cli.
   if (process.ppid) waitPids.push(String(process.ppid))
 
+  updateDiag('apply requested: version=' + armed.version +
+    ' depsChanged=' + Boolean(armed.depsChanged) + ' waitPids=' + waitPids.join(','))
+
   try {
     const updater = spawn(POWERSHELL, [
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
       '-WindowStyle', 'Hidden',
-      '-File', path.join(APP_ROOT, 'install', 'apply_update.ps1'),
+      '-File', psScript,
       '-Root', APP_ROOT,
       '-Version', String(armed.version),
       '-DepsChanged', String(Boolean(armed.depsChanged)),
       '-WaitPids', waitPids.join(','),
     ], {
       cwd: APP_ROOT,
-      detached: true,
+      // (правка 797) detached УБРАН. Замер на живой машине: powershell.exe 5.1,
+      // порождённый с detached:true, завершается КОДОМ 0 за ~50 мс, даже не
+      // начав выполнять скрипт (ни строки в логе), при любом stdio. Без
+      // detached скрипт стартует и отрабатывает (~170 мс на пробе).
+      // На Windows это безопасно: выход родителя НЕ убивает дочерний процесс
+      // (в отличие от Unix), а before-quit трогает только список children,
+      // куда апдейтер не входит. Окна не мелькает — windowsHide:true.
       stdio: 'ignore',
       windowsHide: true,
     })
+    // (правка 796) Ошибки spawn приходят АСИНХРОННО: без слушателя 'error'
+    // приложение молча выходило, а апдейтер так и не стартовал.
+    updater.on('error', (e) => updateDiag('updater spawn error: ' + (e && e.message ? e.message : String(e))))
+    updater.on('exit', (code, signal) => updateDiag('updater exited: code=' + code + ' signal=' + signal))
     updater.unref()
     // (правка 795) Апдейтер живёт в нашем дереве процессов — запрещаем
     // before-quit убивать предка-cmd.exe вместе со всем деревом.
     applyingUpdate = true
+    updateDiag('updater spawned: pid=' + updater.pid + ' exe=' + POWERSHELL)
   } catch (err) {
+    updateDiag('spawn threw: ' + String(err && err.message ? err.message : err))
     return { ok: false, error: String(err && err.message ? err.message : err) }
   }
 
@@ -737,6 +773,8 @@ function isLocalAppUrl(url) {
 // ЭТОГО запуска, оставалась висеть навсегда (невидимый осиротевший процесс).
 app.on('before-quit', () => {
   quitting = true
+  // (правка 796) Видимый след выхода: по нему видно, дошёл ли апдейтер.
+  updateDiag('before-quit: applyingUpdate=' + applyingUpdate + ' ppid=' + process.ppid)
   for (const c of children) killTree(c.pid)
   children.clear()
   // (правка 748) Установщик, запущенный НАМИ (spawnChild), уже убит выше.
@@ -760,6 +798,7 @@ app.on('before-quit', () => {
   // с нами. Cmd-предок после нашей гибели сам завершает start.bat.
   if (applyingUpdate) {
     console.log('[desktop] применяем обновление — родительский cmd не убиваем')
+    updateDiag('ancestor cmd NOT killed (update in progress)')
   } else {
     killAncestorCmd()
   }

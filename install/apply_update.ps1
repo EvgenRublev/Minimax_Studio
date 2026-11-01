@@ -1,7 +1,11 @@
 # (fix 790) In-app updater: swaps app files AFTER the app has fully stopped.
 #
-# Spawned DETACHED by electron/main.js (h3:apply-update) right before quit,
-# so it survives Electron's before-quit killTree. Sequence:
+# Spawned by electron/main.js (h3:apply-update) right before quit. It is NOT
+# detached on purpose (fix 797): powershell 5.1 spawned with detached:true
+# exits with code 0 in ~50 ms without running the script at all. On Windows a
+# plain child survives its parent's exit anyway, and before-quit's killTree
+# only touches the children list, which does not include this updater.
+# Sequence:
 #   1. wait for app PIDs to exit (up to 90 s), then force-kill leftovers;
 #   2. verify .update\staging (package.json version, .next\BUILD_ID);
 #   3. back up every file we are about to replace into .update\backup;
