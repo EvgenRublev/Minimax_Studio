@@ -69,8 +69,10 @@ function remapFolderPath(value: string, oldPath: string, newPath: string): strin
 }
 
 export function GalleryView() {
-  const { files, folders, loading, load, deleteFile } = useVideoGallery()
+  const { files, folders, loading, load, deleteFile, toggleLike } = useVideoGallery()
   const [filter, setFilter] = useState<FolderFilter>('__all__')
+  // (правка 793) Фильтр «только избранные» — по флагу liked в сайдкарах.
+  const [onlyLiked, setOnlyLiked] = useState(false)
   const [creating, setCreating] = useState(false)
   /** (правка 495) Родитель создаваемой папки ('' = корень output). */
   const [createParent, setCreateParent] = useState('')
@@ -102,10 +104,29 @@ export function GalleryView() {
     [files],
   )
 
-  const visibleFiles = useMemo(
+  // (правка 793) Список текущей папки, затем фильтр «только избранные».
+  // likedCount — сколько избранных в текущей папке (для чипа в тулбаре).
+  const folderFiles = useMemo(
     () => (filter === '__all__' ? files : files.filter((f) => inFolder(f.subfolder || '', filter))),
     [files, filter],
   )
+  const likedCount = useMemo(
+    () => folderFiles.reduce((n, f) => n + (f.liked ? 1 : 0), 0),
+    [folderFiles],
+  )
+  const visibleFiles = useMemo(
+    () => (onlyLiked ? folderFiles.filter((f) => f.liked) : folderFiles),
+    [folderFiles, onlyLiked],
+  )
+  // (правка 793) Избранное в текущей папке кончилось (сняли последнюю
+  // звёздочку / удалили файл / перешли в пустую папку) — фильтр гасим сам,
+  // иначе грид покажет пустоту без тулбара и фильтр не выключить.
+  useEffect(() => {
+    if (onlyLiked && likedCount === 0) setOnlyLiked(false)
+  }, [onlyLiked, likedCount])
+  // Стабильная ссылка на переключатель — иначе memo(VideoGalleryGrid)
+  // перерисовывался бы на каждый рендер вью.
+  const toggleOnlyLiked = useCallback(() => setOnlyLiked((v) => !v), [])
 
   const startCreate = useCallback((parent: string) => {
     setCreateParent(parent)
@@ -369,6 +390,10 @@ export function GalleryView() {
             loading={loading}
             onRefresh={load}
             onDeleteFile={deleteFile}
+            onToggleLike={toggleLike}
+            onlyLiked={onlyLiked}
+            onToggleOnlyLiked={toggleOnlyLiked}
+            likedCount={likedCount}
             emptyHint="Пока нет видео. Сгенерируйте первое на вкладке «Генерация»."
           />
         </motion.div>

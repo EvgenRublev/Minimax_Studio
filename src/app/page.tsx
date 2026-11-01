@@ -155,7 +155,9 @@ export default function Home() {
         const j = await res.json()
         if (j.armed) {
           toast.info(`Обновление до v${j.armed.version} готово — перезапустите студию для установки`, {
-            duration: 15000,
+            // (правка 794) duration: Infinity — тост не исчезает сам, только
+            // крестиком: стартовое уведомление об обновлении нельзя пропустить.
+            duration: Infinity,
             action: window.h3desktop?.applyUpdate
               ? {
                   label: 'Перезапустить',
@@ -165,7 +167,8 @@ export default function Home() {
           })
         } else if (j.update) {
           toast.warning(`Доступно обновление студии: v${j.update.version}`, {
-            duration: 12000,
+            // (правка 794) Не исчезает сам — см. выше.
+            duration: Infinity,
             action: {
               label: 'Скачать',
               onClick: () => {

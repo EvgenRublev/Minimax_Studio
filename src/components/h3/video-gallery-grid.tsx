@@ -28,6 +28,7 @@ import {
   ScanFaceIcon,
   ArrowLeftRightIcon,
   XIcon,
+  StarIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MetaDialog } from './meta-dialog'
@@ -71,6 +72,8 @@ export interface VideoGalleryFile {
   generationTime?: number | null
   /** (правка 313) 'draft' → красный бейдж «Draft» на превью. */
   pipeline?: 'draft' | 'full' | null
+  /** (правка 793) «Избранное» — звёздочка на превью, флаг liked в .meta.json. */
+  liked?: boolean
 }
 
 interface VideoGalleryGridProps {
@@ -79,6 +82,13 @@ interface VideoGalleryGridProps {
   onRefresh?: () => void
   onDeleteFile?: (filename: string, subfolder: string) => void | Promise<void>
   emptyHint?: string
+  /** (правка 793) Переключение «избранного» на карточке (без него звёздочка не показывается). */
+  onToggleLike?: (file: VideoGalleryFile) => void | Promise<void>
+  /** (правка 793) Чип «Только избранные» в тулбаре (фильтр живёт у родителя — он и режет files). */
+  onlyLiked?: boolean
+  onToggleOnlyLiked?: () => void
+  /** Сколько избранных видео в текущем фильтре — для подписи чипа. */
+  likedCount?: number
 }
 
 /**
@@ -163,6 +173,10 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   onRefresh,
   onDeleteFile,
   emptyHint = 'Пока нет видео',
+  onToggleLike,
+  onlyLiked = false,
+  onToggleOnlyLiked,
+  likedCount,
 }: VideoGalleryGridProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [metaIndex, setMetaIndex] = useState<number | null>(null)
@@ -385,6 +399,23 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               <XIcon className="w-3.5 h-3.5" />
             </button>
           )}
+          {/* (правка 793) Фильтр «Только избранные» — включает себя только
+              когда родственный view передаёт onToggleOnlyLiked (галерея). */}
+          {onToggleOnlyLiked && (
+            <button
+              onClick={onToggleOnlyLiked}
+              className={cn(
+                'h-7 gap-1.5 px-2.5 rounded-lg text-xs border transition-colors inline-flex items-center',
+                onlyLiked
+                  ? 'bg-amber-400/15 text-amber-300 border-amber-400/50 font-semibold'
+                  : 'text-muted-foreground border-transparent hover:bg-[var(--surface-3)]',
+              )}
+              title="Показывать только видео, отмеченные звёздочкой"
+            >
+              <StarIcon className={cn('w-3.5 h-3.5', onlyLiked && 'fill-amber-400 text-amber-400')} />
+              Только избранные{typeof likedCount === 'number' ? ` (${likedCount})` : ''}
+            </button>
+          )}
           {onRefresh && (
             <button
               onClick={() => onRefresh()}
@@ -487,12 +518,28 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   раньше уход курсора с карточки делал opacity-0 и самому меню. */}
               <div
                 data-video-actions-menu
-                className={`absolute top-1.5 right-1.5 transition-opacity z-10 ${
-                  actionsOpenIndex === index
+                className={`absolute top-1.5 right-1.5 flex items-center gap-1 transition-opacity z-10 ${
+                  actionsOpenIndex === index || file.liked
                     ? 'opacity-100'
                     : 'opacity-0 group-hover:opacity-100'
                 }`}
               >
+                {/* (правка 793) Звёздочка «избранное» — рядом с кнопкой «⋮».
+                    Отмеченное видео показывает её постоянно (обёртка выше
+                    снята с hover), неотмеченное — только на ховере. */}
+                {onToggleLike && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void onToggleLike(file)
+                    }}
+                    className="p-1.5 rounded-lg bg-black/60 backdrop-blur-sm hover:bg-black/80 text-white/70 hover:text-amber-300 transition-colors"
+                    title={file.liked ? 'Убрать из избранного' : 'В избранное'}
+                  >
+                    <StarIcon className={cn('w-4 h-4', file.liked ? 'fill-amber-400 text-amber-400' : '')} />
+                  </button>
+                )}
                 <button
                   ref={(el) => { if (el) actionBtnRefs.current[index] = el }}
                   type="button"

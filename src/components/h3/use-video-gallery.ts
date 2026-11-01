@@ -84,7 +84,7 @@ export function useVideoGallery(opts?: {
           !/Minimax_Studio_refinepart_/i.test(f.name || f.filename || ''),
       )
       const next: VideoGalleryFile[] = videoFiles.map(
-        (f: { url: string; filename?: string; name?: string; subfolder?: string; mtime?: number; generationTime?: number | null; pipeline?: string | null }) => ({
+        (f: { url: string; filename?: string; name?: string; subfolder?: string; mtime?: number; generationTime?: number | null; pipeline?: string | null; liked?: boolean }) => ({
           url: f.url,
           filename: f.filename || f.name || '',
           subfolder: f.subfolder || '',
@@ -92,6 +92,8 @@ export function useVideoGallery(opts?: {
           generationTime: typeof f.generationTime === 'number' ? f.generationTime : null,
           // (правка 310) pipeline из .meta.json — красный бейдж «Draft».
           pipeline: f.pipeline === 'draft' || f.pipeline === 'full' ? f.pipeline : null,
+          // (правка 793) liked из .meta.json — звёздочка «избранное».
+          liked: f.liked === true,
         }),
       )
       // Only update state if the file list actually changed (avoids re-renders)
@@ -102,7 +104,10 @@ export function useVideoGallery(opts?: {
             // (правка 348) generationTime участвует в сравнении: сайдкар
             // пишется ПОСЛЕ появления файла, и без этого бейдж времени
             // генерации не появлялся до смены списка по другой причине.
-            p.generationTime === next[i].generationTime)
+            p.generationTime === next[i].generationTime &&
+            // (правка 793) liked участвует: иначе звёздочка не перерисовывалась
+            // после внешнего изменения (например, другим окном).
+            p.liked === next[i].liked)
         ) {
           return prev
         }
@@ -265,6 +270,31 @@ export function useVideoGallery(opts?: {
     return () => clearInterval(id)
   }, [active, phase, load])
 
+  // (правка 793) Переключение «избранного»: оптимистично меняем флаг в списке,
+  // затем POST /api/comfy/like; при ошибке откатываем. Откат ищет файл по
+  // ключу и возвращает ровно то значение liked, которое было до клика.
+  const toggleLike = useCallback(async (file: VideoGalleryFile) => {
+    const key = `${file.subfolder}/${file.filename}`
+    const prevLiked = file.liked === true
+    const nextLiked = !prevLiked
+    setFiles((prev) => prev.map((f) =>
+      `${f.subfolder}/${f.filename}` === key ? { ...f, liked: nextLiked } : f,
+    ))
+    try {
+      const res = await fetch('/api/comfy/like', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.filename, subfolder: file.subfolder, liked: nextLiked }),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+    } catch {
+      setFiles((prev) => prev.map((f) =>
+        `${f.subfolder}/${f.filename}` === key ? { ...f, liked: prevLiked } : f,
+      ))
+      toast.error('Не удалось сохранить отметку «избранное»')
+    }
+  }, [])
+
   const deleteFile = useCallback(async (filename: string, subfolder: string) => {
     try {
       const res = await fetch('/api/comfy/delete', {
@@ -287,5 +317,5 @@ export function useVideoGallery(opts?: {
     }
   }, [])
 
-  return { files, folders, loading, load, deleteFile }
+  return { files, folders, loading, load, deleteFile, toggleLike }
 }

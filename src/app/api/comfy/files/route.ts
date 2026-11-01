@@ -30,8 +30,8 @@ async function listDir(
   subfolder: string,
   typeFilter: string,
   includeHot: boolean,
-): Promise<Array<{ url: string; filename: string; subfolder: string; mtime: number; size: number; type: string; hasMeta: boolean; generationTime: number | null; pipeline: string | null }>> {
-  const files: Array<{ url: string; filename: string; subfolder: string; mtime: number; size: number; type: string; hasMeta: boolean; generationTime: number | null; pipeline: string | null }> = []
+): Promise<Array<{ url: string; filename: string; subfolder: string; mtime: number; size: number; type: string; hasMeta: boolean; generationTime: number | null; pipeline: string | null; liked: boolean }>> {
+  const files: Array<{ url: string; filename: string; subfolder: string; mtime: number; size: number; type: string; hasMeta: boolean; generationTime: number | null; pipeline: string | null; liked: boolean }> = []
   const entries = await fs.readdir(dirAbs, { withFileTypes: true })
 
   // (правка 354) stat + чтение сайдкаров — ПАРАЛЛЕЛЬНО по файлам:
@@ -56,6 +56,8 @@ async function listDir(
     let hasMeta = false
     let generationTime: number | null = null
     let pipeline: string | null = null
+    // (правка 793) «Избранное» — флаг liked в сайдкаре (.meta.json → liked).
+    let liked = false
     try {
       const filePath = path.join(dirAbs, entry.name)
       const metaPath = filePath + '.meta.json'
@@ -72,7 +74,7 @@ async function listDir(
       // (откуда и было расхождение «много/мало»).
       if (metaRaw !== null) {
         try {
-          const meta = JSON.parse(metaRaw) as { generation_time?: unknown; pipeline?: unknown; params?: { generation_time?: unknown } }
+          const meta = JSON.parse(metaRaw) as { generation_time?: unknown; pipeline?: unknown; liked?: unknown; params?: { generation_time?: unknown } }
           const top = typeof meta.generation_time === 'number' ? meta.generation_time : null
           const nested = typeof meta.params?.generation_time === 'number' ? meta.params.generation_time : null
           const gt = top ?? nested
@@ -80,16 +82,18 @@ async function listDir(
           // (правка 261) pipeline ('draft'|'full') — красный бейдж «Draft» на
           // превью галереи для однопроходных генераций.
           if (meta.pipeline === 'draft' || meta.pipeline === 'full') pipeline = meta.pipeline
+          // (правка 793) «Избранное»: звёздочка на превью и фильтр в галерее.
+          if (meta.liked === true) liked = true
         } catch { /* sidecar malformed / mid-write — оставим null */ }
       }
     } catch { /* ignore */ }
 
-    return { entry, mtime, size, hasMeta, generationTime, pipeline, isVideo }
+    return { entry, mtime, size, hasMeta, generationTime, pipeline, liked, isVideo }
   }))
 
   for (const item of probed) {
     if (!item) continue
-    const { entry, mtime, size, hasMeta, generationTime, pipeline, isVideo } = item
+    const { entry, mtime, size, hasMeta, generationTime, pipeline, liked, isVideo } = item
     // Still being written — skip until it goes "cold". include_hot=1 (used by
     // the post-completion extend discovery, where the task is already done and
     // all files are final) bypasses this filter.
@@ -105,6 +109,7 @@ async function listDir(
       hasMeta,
       generationTime,
       pipeline,
+      liked,
     })
   }
   return files
