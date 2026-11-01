@@ -1,9 +1,9 @@
-{
+﻿{
   "name": "minimax-h3-studio",
-  "version": "7.1.2",
+  "version": "7.1.3",
   "private": true,
   "productName": "Minimax H3 Studio",
-  "description": "Локальная студия генерации кинематографичных видео со звуком на базе модели MiniMax H3 (ComfyUI + Electron).",
+  "description": "Р›РѕРєР°Р»СЊРЅР°СЏ СЃС‚СѓРґРёСЏ РіРµРЅРµСЂР°С†РёРё РєРёРЅРµРјР°С‚РѕРіСЂР°С„РёС‡РЅС‹С… РІРёРґРµРѕ СЃРѕ Р·РІСѓРєРѕРј РЅР° Р±Р°Р·Рµ РјРѕРґРµР»Рё MiniMax H3 (ComfyUI + Electron).",
   "author": "MiniMax H3 Studio",
   "license": "GPL-3.0-or-later",
   "engines": {
