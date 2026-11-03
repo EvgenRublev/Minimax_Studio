@@ -9,7 +9,8 @@ cd /d "%~dp0.."
 
 set "COMFY_ROOT=ComfyUI-Easy-Install"
 
-REM Read VRAM config from config.ini (optional, defaults: reserve=3, dynamic=1)
+REM Read VRAM config from config.ini (optional, defaults: reserve=1, dynamic=1)
+REM (правка 803) Дефолты снижены: reserve 3→1, headroom 2→1.
 REM First matching line wins — immune to stray duplicate keys from old configs.
 set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
@@ -24,9 +25,9 @@ if exist config\config.ini (
     REM (правка 490) vram_headroom — доп. запас свободной VRAM для DynamicVRAM
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"vram_headroom" config\config.ini 2^>nul') do if not defined VRAM_HEADROOM set "VRAM_HEADROOM=%%a"
 )
-if not defined RESERVE_VRAM set "RESERVE_VRAM=3"
+if not defined RESERVE_VRAM set "RESERVE_VRAM=1"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
-if not defined VRAM_HEADROOM set "VRAM_HEADROOM=2"
+if not defined VRAM_HEADROOM set "VRAM_HEADROOM=1"
 REM (правка) async_offload по умолчанию = 0 (выключен). comfy-aimdo 0.4.13
 REM на Windows+NVIDIA падает при загрузке больших моделей (~20 ГБ):
 REM   hostbuf_file_reader_read failed / HostBuffer.read_file_slice failed,
@@ -42,10 +43,10 @@ set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
 REM (правка 357) Валидация: значение из config.ini подставляется в команды
 REM запуска — мусор (пробелы, текст, единицы "GB") ломал бы всю строку.
 REM Нечисловое значение → безопасный дефолт.
-echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=3"
+echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
-echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=2"
+echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
 set "EXTRA_FLAGS="
 if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
 REM (правка 490) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит

@@ -12,7 +12,7 @@ E:\Minimax_Studio_V7_Portable.zip    — zip64-архив (~5.4 ГБ)
 
 Модели H3, VAE, LoRA, LLM и остальные веса **не входят** в сборку. Их
 скачивает сам пользователь через «Настройки → Модели» после первого запуска.
-Настройки — заводские, `vram_headroom=2`.
+Настройки — заводские, `vram_headroom=1`.
 
 ---
 
@@ -282,7 +282,7 @@ $p = Start-Process -FilePath (Join-Path $dst 'runtime\node.exe') `
 try {
   Start-Sleep -Seconds 4
   $cfg = Invoke-RestMethod 'http://127.0.0.1:3002/api/config'
-  if ($cfg.vram_headroom -ne 2) { throw "vram_headroom=$($cfg.vram_headroom), ожидалось 2" }
+  if ($cfg.vram_headroom -ne 1) { throw "vram_headroom=$($cfg.vram_headroom), ожидалось 1" }
 
   $loras = Invoke-RestMethod 'http://127.0.0.1:3002/api/loras'
   if ($null -eq $loras.loras) { throw '/api/loras не вернул loras' }
@@ -355,7 +355,7 @@ Get-ChildItem (Join-Path $comfy 'output') -Recurse -File -ErrorAction SilentlyCo
 Get-Content (Join-Path $dst 'config\config.ini') | Select-String 'vram_headroom|comfy_dir|extra_paths'
 ```
 
-Должно быть `vram_headroom=2`, `comfy_dir` пустой/отсутствует,
+Должно быть `vram_headroom=1`, `comfy_dir` пустой/отсутствует,
 `extra_paths=[]`.
 
 ---
@@ -429,9 +429,9 @@ zip    ~5.4 ГБ
 - [ ] `python -c "import torch, cv2, torchvision; from torchvision import models"` проходит.
 - [ ] `ComfyUI main.py --quick-test-for-ci` проходит.
 - [ ] После quick-test очищены `ComfyUI/user`, `input`, `output`, `temp`, `data`.
-- [ ] Web-сервер на свободном порту отдаёт `/` 200, `/api/config` с `vram_headroom=2`.
+- [ ] Web-сервер на свободном порту отдаёт `/` 200, `/api/config` с `vram_headroom=1`.
 - [ ] `/api/comfy/inpaint` отдаёт 404.
 - [ ] В `ComfyUI/models` нет весов H3.
-- [ ] `config/config.ini` заводской, `vram_headroom=2`.
+- [ ] `config/config.ini` заводской, `vram_headroom=1`.
 - [ ] Zip создан через `tar.exe`, а не `Compress-Archive`.
 - [ ] Portable-папка и zip **не** добавлены в git.

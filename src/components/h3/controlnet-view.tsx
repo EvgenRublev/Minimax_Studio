@@ -380,6 +380,7 @@ export function ControlNetView() {
           chunkFeedForward: v.chunkFeedForward,
           chunkFFChunks: v.chunkFFChunks,
           chunkFFThreshold: v.chunkFFThreshold,
+          latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
         }
       })(),
     }

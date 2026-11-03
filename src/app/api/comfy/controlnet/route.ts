@@ -98,6 +98,7 @@ export async function POST(req: NextRequest) {
       chunkFeedForward?: boolean
       chunkFFChunks?: number
       chunkFFThreshold?: number
+      latentUpscaler3D?: boolean // (правка 806)
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
@@ -160,6 +161,7 @@ export async function POST(req: NextRequest) {
       }),
       low_vram_attention: body.lowVramAttention !== false,
       chunk_feed_forward: body.chunkFeedForward !== false,
+      latent_upscaler_3d: body.latentUpscaler3D !== false, // (правка 806)
       ...(body.chunkFeedForward !== false && {
         chunk_ff_chunks: body.chunkFFChunks ?? 2,
         chunk_ff_threshold: body.chunkFFThreshold ?? 4096,
@@ -173,7 +175,18 @@ export async function POST(req: NextRequest) {
       const name = path.basename(String(raw ?? ''))
       if (!name) continue
       if (!existsSync(path.join(cfg.inputDir, name))) {
-        return NextResponse.json({ error: `Референс не найден в input: ${name}` }, { status: 404 })
+        // (правка 807) Понятная причина вместо голого «не найден»: файл мог
+        // остаться в метаданных от другой установки/быть удалён вручную.
+        return NextResponse.json(
+          {
+            error:
+              `Референс «${name}» не найден в папке input/ ComfyUI. ` +
+              'Так бывает, если настройки восстановлены после переустановки ' +
+              'или файл удалён из input/ вручную. Уберите референс из списка ' +
+              'и загрузите его заново.',
+          },
+          { status: 404 },
+        )
       }
       refImages.push(name)
     }
@@ -298,6 +311,7 @@ export async function POST(req: NextRequest) {
           chunkFeedForward: body.chunkFeedForward,
           chunkFFChunks: body.chunkFFChunks,
           chunkFFThreshold: body.chunkFFThreshold,
+          latentUpscaler3D: body.latentUpscaler3D, // (правка 806)
         })
         // Стадии прогресса — как у стандартного ref-воркфлоу
         const stdParams: MiniMaxH3Params = {

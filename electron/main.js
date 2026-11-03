@@ -19,7 +19,7 @@
  * Запуск: node_modules\.bin\electron electron\main.js (скрипт `npm run desktop`,
  * либо автоматически из start.bat — там же фолбэк на старый браузерный режим).
  */
-const { app, BrowserWindow, Menu, MenuItem, dialog, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, MenuItem, dialog, shell, ipcMain, session } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } = require('node:fs')
 const fsPromises = require('node:fs').promises
@@ -96,6 +96,10 @@ let consoleTimer = null
  * зависший процесс Electron без окна.
  */
 let quitting = false
+
+// (правка 804) Однократный «заход на сброс хранилища» при выходе: первый
+// before-quit отменяется ради flushStorageData(), второй — обычный путь.
+let storageFlushDone = false
 
 /**
  * (правка 795) Флаг «применяем обновление». Ставится в ipc h3:apply-update
@@ -326,7 +330,9 @@ function killPortListeners(port) {
 
 /* ── config.ini → флаги ComfyUI (порт правки 551 из start.bat) ── */
 function parseIniVram() {
-  const v = { reserveGb: '3', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '0' }
+  // (правка 814) Заводские значения 1/1 — те же, что в app-config.ts и
+  // config.ini. Здесь они используются только если файла конфига нет вовсе.
+  const v = { reserveGb: '1', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '1' }
   if (!existsSync(CONFIG_INI)) return v
   let text = ''
   try {
@@ -342,10 +348,14 @@ function parseIniVram() {
   }
   // первый матч выигрывает (дубли ключей от старых конфигов), /b-семантика bat
   const num = (raw, dflt, re) => (raw !== undefined && re.test(raw) ? raw : dflt)
-  v.reserveGb = num(grab('reserve_gb'), '3', /^[0-9][0-9.]*$/)
+  // (правка 814) Заводские значения — 1/1, как в app-config.ts и config.ini.
+  // Раньше здесь стояли старые дефолты 3 и 2: ключа нет → Electron запускал
+  // ComfyUI с завышенными резервами, и поведение расходилось с интерфейсом
+  // (в настройках показывалось 1, а генерация резервировала больше).
+  v.reserveGb = num(grab('reserve_gb'), '1', /^[0-9][0-9.]*$/)
   v.dynamicVram = num(grab('dynamic_vram'), '1', /^[01]$/)
   v.asyncOffload = num(grab('async_offload'), '0', /^[01]$/)
-  v.vramHeadroom = num(grab('vram_headroom'), '2', /^[0-9][0-9.]*$/)
+  v.vramHeadroom = num(grab('vram_headroom'), '1', /^[0-9][0-9.]*$/)
   return v
 }
 
@@ -802,10 +812,34 @@ function isLocalAppUrl(url) {
 // Раньше app.quit() в ветке «вторая копия» вызывался до регистрации
 // обработчика, и скрытая консоль cmd.exe, созданная start_hidden.vbs для
 // ЭТОГО запуска, оставалась висеть навсегда (невидимый осиротевший процесс).
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   quitting = true
   // (правка 796) Видимый след выхода: по нему видно, дошёл ли апдейтер.
   updateDiag('before-quit: applyingUpdate=' + applyingUpdate + ' ppid=' + process.ppid)
+  // (правка 804) Chromium пишет localStorage на диск асинхронно, а ниже мы
+  // сами убиваем своё дерево процессов (killAncestorCmd → taskkill /T /F).
+  // Последние изменения настроек (например, выключенный Sol-Attn) не успевали
+  // записаться и после перезапуска возвращались к заводским. Схема: первый
+  // before-quit отменяется, main-процесс принудительно сбрасывает хранилище
+  // сессии на диск (flushStorageData) и даёт renderer'у долю секунды на
+  // sendBeacon из pagehide, затем повторяет app.quit() — второй заход уже
+  // убивает всё как раньше. Во время установки обновления не вмешиваемся
+  // (ветка applyingUpdate и так ничего не убивает, апдейтер сам всё чистит).
+  if (!storageFlushDone && !applyingUpdate) {
+    storageFlushDone = true
+    event.preventDefault()
+    updateDiag('before-quit: flush storage, quit again shortly')
+    let flush = Promise.resolve()
+    try {
+      flush = session.defaultSession.flushStorageData().catch(() => { /* ignore */ })
+    } catch { /* ignore */ }
+    const floor = new Promise((r) => setTimeout(r, 250)) // beacon'ам из pagehide
+    const ceiling = new Promise((r) => setTimeout(r, 800)) // но не вечность
+    Promise.race([Promise.all([flush, floor]), ceiling]).finally(() => {
+      try { app.quit() } catch { /* ignore */ }
+    })
+    return
+  }
   for (const c of children) killTree(c.pid)
   children.clear()
   // (правка 748) Установщик, запущенный НАМИ (spawnChild), уже убит выше.

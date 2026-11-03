@@ -21,7 +21,7 @@ import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe' // (правка 410)
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, computePass1Canvas, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { replaceVideoAudio, resolveOriginalAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
 
 /* ──────────────────── shared helpers ──────────────────── */
@@ -345,12 +345,31 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     // Заклёмпленное значение — как в реальном workflow (clampLowResMP).
     // (правка 424) extend: дополнительный кап по МП исходника — канва pass 1
     // не должна превышать final ни по одной оси (апскейлер только upscale).
-    low_res_mp: genMode0 === 'extend' && body.targetDimensions
-      ? Math.min(
-          clampLowResMP(body.lowResMP ?? 0.2, finalResolution),
-          (body.targetDimensions.width * body.targetDimensions.height) / (1024 * 1024),
-        )
-      : clampLowResMP(body.lowResMP ?? 0.2, finalResolution),
+    // (правка 810) Для остальных режимов пишем ФАКТИЧЕСКУЮ канву pass 1
+    // (computePass1Canvas): в пресетном режиме она подбирается не по слайдеру,
+    // а по пропорции, а при обходе 3D-апскейлера ещё и ограничена 1.5×.
+    low_res_mp: (() => {
+      const clamped = clampLowResMP(body.lowResMP ?? 0.2, finalResolution)
+      if (genMode0 === 'extend') {
+        return body.targetDimensions
+          ? Math.min(clamped, (body.targetDimensions.width * body.targetDimensions.height) / (1024 * 1024))
+          : clamped
+      }
+      const finalDims = body.targetDimensions
+        ? computeFinalDimensions(body.targetDimensions.width, body.targetDimensions.height)
+        : finalDimsFromMegapixels(body.aspectRatio || '16:9', finalResolution)
+      const aspectKey = body.targetDimensions
+        ? `${body.targetDimensions.width}:${body.targetDimensions.height}`
+        : (body.aspectRatio || '16:9')
+      const p1 = computePass1Canvas(
+        aspectKey,
+        finalDims,
+        clamped,
+        body.targetDimensions,
+        genMode0 === 'flf' || draft0,
+      )
+      return Math.round(((p1.w * p1.h) / (1024 * 1024)) * 1000) / 1000
+    })(),
     video_length: videoLengthFrames,
     duration_seconds: videoLengthFrames / fps,
     fps,
@@ -395,6 +414,7 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     }),
     low_vram_attention: body.lowVramAttention !== false,
     chunk_feed_forward: body.chunkFeedForward !== false,
+    latent_upscaler_3d: body.latentUpscaler3D !== false, // (правка 806)
     ...(body.chunkFeedForward !== false
       ? {
           chunk_ff_chunks: body.chunkFFChunks ?? 2,

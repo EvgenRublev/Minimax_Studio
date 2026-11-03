@@ -193,11 +193,13 @@ export function getAppConfig(): AppConfig {
     // (правка 716) parseNum0, а не `|| 3`: сохранённый reserve_gb = 0
     // (валидное значение) молча превращался в 3. Правка 556 убрала этот
     // паттерн в остальных полях — здесь он остался.
-    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '3', 3),
+    // (правка 803) Дефолт reserve_gb снижен 3 → 1: 3 ГБ + 1 ГБ headroom
+    // отнимали у 12–16 ГБ карт слишком много и провоцировали оффлоад.
+    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '1', 1),
     // (правка 490) 0 = выкл (флаг не передаётся), диапазон как в UI: 0–8 ГБ.
-    // По умолчанию 2 ГБ: aimdo держит этот запас свободным даже при чужих
-    // приложениях, не давая DynamicVRAM занять всю карту под веса.
-    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '2') || 0)),
+    // (правка 803) По умолчанию 1 ГБ вместо 2: при DynamicVRAM этот запас
+    // складывается с reserve_gb, поэтому суммарно держим ~2 ГБ.
+    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '1') || 0)),
     // Canonical home is [vram]; [comfy]/bare kept as read fallbacks for
     // configs written by older versions.
     dynamicVram: (ini['vram.dynamic_vram'] ?? ini['comfy.dynamic_vram'] ?? ini['dynamic_vram'] ?? '1') !== '0',
@@ -357,11 +359,11 @@ export function setConfigValue(section: string, key: string, value: string): voi
  * первой установке.
  */
 const DEFAULT_CONFIG_INI = `[vram]
-reserve_gb=3
+reserve_gb=1
 dynamic_vram=1
 ; 0 = синхронная загрузка моделей (стабильно), 1 = async-офлоад
 async_offload=0
-vram_headroom=2
+vram_headroom=1
 
 [comfy]
 turbo_lora=

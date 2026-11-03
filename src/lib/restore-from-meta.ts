@@ -81,6 +81,7 @@ interface MetaJson {
   veda_verbose?: boolean // (правка 405)
   low_vram_attention?: boolean
   chunk_feed_forward?: boolean
+  latent_upscaler_3d?: boolean // (правка 806)
   chunk_ff_chunks?: number
   chunk_ff_threshold?: number
   references?: MetaReference[]
@@ -260,6 +261,9 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     }
     if (typeof params.chunk_feed_forward === 'boolean') {
       patch.chunkFeedForward = params.chunk_feed_forward
+    }
+    if (typeof params.latent_upscaler_3d === 'boolean') {
+      patch.latentUpscaler3D = params.latent_upscaler_3d // (правка 806)
     }
     if (typeof params.chunk_ff_chunks === 'number') {
       patch.chunkFFChunks = params.chunk_ff_chunks

@@ -356,6 +356,7 @@ REM игнорировалось — ComfyUI всегда стартовал с 
 REM Паттерн и валидация — как в scripts\start_comfy.bat (правки 357/490):
 REM findstr /b /c: матчит только строки, НАЧИНАЮЩИЕСЯ с ключа (не комментарии),
 REM первый матч выигрывает, мусорные значения → безопасный дефолт.
+REM (правка 803) Дефолты снижены: reserve 3→1, headroom 2→1.
 set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
 set "ASYNC_OFFLOAD="
@@ -367,18 +368,18 @@ if exist config\config.ini (
     REM (правка 521) vram_headroom — доп. запас свободной VRAM для DynamicVRAM
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"vram_headroom" config\config.ini 2^>nul') do if not defined VRAM_HEADROOM set "VRAM_HEADROOM=%%a"
 )
-if not defined RESERVE_VRAM set "RESERVE_VRAM=3"
+if not defined RESERVE_VRAM set "RESERVE_VRAM=1"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
 if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=0"
-if not defined VRAM_HEADROOM set "VRAM_HEADROOM=2"
+if not defined VRAM_HEADROOM set "VRAM_HEADROOM=1"
 set "RESERVE_VRAM=%RESERVE_VRAM:"=%"
 set "DYNAMIC_VRAM=%DYNAMIC_VRAM:"=%"
 set "ASYNC_OFFLOAD=%ASYNC_OFFLOAD:"=%"
 set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
-echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=3"
+echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
-echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=2"
+echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
 set "EXTRA_FLAGS="
 if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
 REM (правка 521) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит

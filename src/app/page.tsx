@@ -15,6 +15,8 @@ import { GalleryView } from '@/components/h3/gallery-view'
 import { LearnView } from '@/components/h3/learn/learn-view'
 import { QueueIndicator } from '@/components/queue-indicator'
 import { SettingsDialog } from '@/components/h3/settings-dialog'
+import { PrefsSync } from '@/components/h3/prefs-sync' // (правка 804)
+import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
 // (правка 112) Всплывающее окно с краткой инструкцией при первом запуске
 import { WelcomeDialog } from '@/components/h3/welcome-dialog'
 import { ModelsWarningBanner } from '@/components/h3/models-warning-banner'
@@ -65,6 +67,7 @@ export default function Home() {
     if (dontShowAgain) {
       try {
         localStorage.setItem('h3_welcome_seen_v1', '1')
+        pushPrefs() // (правка 804) дублируем prefs на сервер
       } catch { /* ignore */ }
     }
     setWelcomeOpen(false)
@@ -225,6 +228,7 @@ export default function Home() {
       </main>
 
       {/* Settings dialog (connection, GPU memory) — opened from the sidebar */}
+      <PrefsSync />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* (правка 112) Приветствие при первом запуске — поверх всего */}

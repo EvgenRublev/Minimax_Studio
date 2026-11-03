@@ -584,6 +584,7 @@ export function ExtendView() {
       chunkFeedForward: v.chunkFeedForward,
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
+      latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
       outputSubfolder: v.extendSourceSubfolder ?? (v.outputFolder || ''), // (правка 363) галерея-источник → папка оригинала
       })
     } catch {

@@ -235,6 +235,10 @@ export interface MiniMaxH3Params {
   chunkFFChunks?: number
   /** ChunkFF: sequence length threshold above which chunking kicks in (default 4096). */
   chunkFFThreshold?: number
+  /** (правка 806) MinimaxH3LatentUpscaler3D между pass 1 и pass 2. Default true;
+   *  false — простое растягивание латента (core LatentUpscale) вместо обученного
+   *  3D-апскейлера: быстрее и без загрузки модели в VRAM, но качество хуже. */
+  latentUpscaler3D?: boolean
 
   /* ── Video references (max 3) ── */
   /** Video filenames in ComfyUI input/. Each produces IMAGE frames for ref_video_N. */
@@ -500,6 +504,27 @@ export function finalDimsFromMegapixels(
 }
 
 /**
+ * (правка 808) Размеры для core-ноды LatentUpscale в H3-цепочке (обход
+ * 3D-апскейлера). H3-латент сжат в 16× (VAE 8 × patch 2): штатная нода
+ * MinimaxH3LatentUpscaler3D считает latent = pixels / 16 (align 32).
+ * Core LatentUpscale — SD-нода: она делит width/height на 8, т.е.
+ * latent = arg / 8. Если передать ей пиксели напрямую, латент выходит
+ * ВДВОЕ больше нужного: pass 2 считает 4× пикселей (в ~4 раза дольше), а
+ * финальный кроп до outW×outH срезает половину кадра («зум» + артефакты).
+ * Поэтому выравниваем цель как 3D-нода (кратно 32) и переводим латент в
+ * «аргумент SD» умножением на 8: arg = (pixels / 16) * 8.
+ */
+export function h3LatentUpscaleArgs(genW: number, genH: number): { width: number; height: number } {
+  const align = 32
+  const toArg = (pixels: number) => {
+    // genW/genH уже кратны 32 → pixels / 16 чётно (patch 2) — деления без потерь.
+    const aligned = Math.max(align, Math.round(pixels / align) * align)
+    return Math.max(8, Math.round(aligned / 16) * 8)
+  }
+  return { width: toArg(genW), height: toArg(genH) }
+}
+
+/**
  * Replicate ComfyUI's frame-count calculation (workflow node 46:19) exactly:
  *   max(5, round(seconds*fps)) snapped UP to the 17n+5 grid.
  * Single source of truth for metadata, shared by the client (use-video-gen)
@@ -567,6 +592,71 @@ export function clampLowResMP(lowResMP: number, finalRes: number): number {
   return Math.min(lowResMP, Math.min(2, Math.max(finalRes, 1)))
 }
 
+/** (правка 812) Ограничение коэффициента латентного апскейла (правка 810)
+ *  временно отключено для теста: проверяем bislerp (правка 811) без поднятия
+ *  канвы pass 1. Константа оставлена, чтобы быстро вернуть предел. */
+export const BYPASS_MAX_UPSCALE = 1.5
+
+/**
+ * (правка 810) Канва pass 1 (низкое разрешение) — ЕДИНЫЙ источник истины
+ * для workflow и метаданных (pending-meta, use-video-gen).
+ *
+ * (правка 525 REVISED) В пресетном режиме подбираем lowResMP так, чтобы
+ * пропорция pass 1 совпадала с final (апскейл равномерный), при этом pass 1
+ * не больше final ни по одной оси. В singleCanvas (flf/draft) pass 1 = final
+ * (апскейлер early-return). В free-MP — selectResolution(aspect, lowResMP).
+ */
+export function computePass1Canvas(
+  aspect: string,
+  final: FinalDimensions,
+  lowResMP: number,
+  targetDimensions: { width: number; height: number } | undefined,
+  singleCanvas: boolean,
+): { w: number; h: number } {
+  let lowRes: { w: number; h: number }
+  if (singleCanvas) {
+    // flf/draft: lowRes = ceil32(targetDimensions) или selectResolution(finalRes)
+    // (совпадает с final.gen — апскейлер делает early-return).
+    lowRes = targetDimensions
+      ? {
+          w: Math.max(32, Math.ceil(targetDimensions.width / 32) * 32),
+          h: Math.max(32, Math.ceil(targetDimensions.height / 32) * 32),
+        }
+      : { w: final.genW, h: final.genH }
+  } else if (targetDimensions) {
+    // 'full' с пресетом: ищем lowResMP с минимальным |x_factor - y_factor|,
+    // lowRes ≤ final по обеим осям и апскейл не «пустой» (< 1.25×).
+    const finalMP = (final.genW * final.genH) / (1024 * 1024)
+    const userMP = lowResMP
+    const searchHi = Math.min(Math.max(userMP, 0.5), finalMP)
+    const searchLo = 0.05
+    let bestDistortion = Infinity
+    let bestResult = selectResolution(aspect, userMP)
+    const numSteps = 50
+    for (let i = 0; i <= numSteps; i++) {
+      const mp = searchLo + (searchHi - searchLo) * (i / numSteps)
+      const r = selectResolution(aspect, mp)
+      if (r.w > final.genW || r.h > final.genH) continue
+      const xFactor = final.genW / r.w
+      const yFactor = final.genH / r.h
+      const distortion = Math.abs(xFactor - yFactor)
+      const isTrivial = xFactor < 1.25 && yFactor < 1.25
+      if (isTrivial) continue
+      if (distortion < bestDistortion) {
+        bestDistortion = distortion
+        bestResult = r
+      }
+    }
+    // (правка 439 аналог) Ничего не нашли — pass 1 = final (early-return).
+    lowRes = bestDistortion === Infinity ? { w: final.genW, h: final.genH } : bestResult
+  } else {
+    // 'full' без targetDimensions (free-MP)
+    lowRes = selectResolution(aspect, lowResMP)
+  }
+
+  return lowRes
+}
+
 /**
  * (правка 255) Сэмплер-узлы по стадиям В ПОРЯДКЕ выполнения — для честного
  * 0→100% прогресса в трекере. Формируется из ТЕХ ЖЕ параметров, что и
@@ -601,6 +691,33 @@ const SIGMA_VARIANTS: Record<string, string> = {
   '7step': '0.9500, 0.9280, 0.9100, 0.8780, 0.8000, 0.6316, 0.3158, 0.0000',
 }
 
+// (правка 815) Отдельная лестница Pass 2 для обхода 3D-апскейлера.
+// CONST.noise_scaling = sigma*noise + (1-sigma)*latent (comfy/model_sampling.py):
+// чем ВЫШЕ стартовый sigma, тем меньше входе вес bislerp-латента и тем
+// сильнее pass 2 перерисовывает кадр заново. Эксперимент v1 (старт 0.50) и
+// v2 (старт 0.70): модель держится за off-distribution латент — проступает
+// сетка латентных патчей. Вывод (проверка на 1080p): нужно наоборот БОЛЬШЕ
+// шума, чем в штатной лестнице (0.9035) — v3: старты 0.95–0.98.
+// ВАЖНО: sigma >= 1.0 не ставим — при 1.0 вес латента pass 1 обнуляется
+// полностью и pass 2 становится чистым re-generation без затравки.
+const BYPASS_SIGMA_VARIANTS: Record<string, string> = {
+  '3step': '0.95, 0.70, 0.35, 0.0000',
+  '4step': '0.95, 0.85, 0.66, 0.33, 0.0000',
+  '5step': '0.96, 0.90, 0.80, 0.60, 0.30, 0.0000',
+  '6step': '0.97, 0.94, 0.87, 0.75, 0.52, 0.26, 0.0000',
+  '7step': '0.98, 0.95, 0.91, 0.84, 0.70, 0.48, 0.24, 0.0000',
+}
+
+// (правка 815) Выбор лестницы по настройке 3D-апскейлера — общая для
+// основного билдера ('46:33') и двухпроходного extend (ext_sig2_*).
+function pickSigmaVariant(p: { sigmaVariant?: string; latentUpscaler3D?: boolean }): string {
+  const key = p.sigmaVariant || '3step'
+  if (p.latentUpscaler3D === false) {
+    return BYPASS_SIGMA_VARIANTS[key] || BYPASS_SIGMA_VARIANTS['3step']
+  }
+  return SIGMA_VARIANTS[key] || SIGMA_VARIANTS['3step']
+}
+
 export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unknown> {
   const seed = p.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : p.seed
   // (правка 386) входы VHS-вывода из настроек формата
@@ -615,8 +732,9 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // (правка 258) Ограничение: pass 1 (low-res) максимум min(2.0, finalResolution).
   // Это черновик — не должен быть больше финального разрешения.
   // Кламп вынесен в clampLowResMP — метаданные используют ТО ЖЕ значение.
-  // Sigma variants for pass 2 (правка 423: таблица в module scope — SIGMA_VARIANTS)
-  const sigmaVariant = SIGMA_VARIANTS[p.sigmaVariant || '3step'] || SIGMA_VARIANTS['3step']
+  // Sigma variants for pass 2 (правка 423: таблица в module scope — SIGMA_VARIANTS;
+  // (правка 815) при обходе 3D-апскейлера — отдельная лестница BYPASS_SIGMA_VARIANTS)
+  const sigmaVariant = pickSigmaVariant(p)
   // (правка 69) Pass 2 sampler — из доп. настроек, валидация по белому списку
   const pass2Sampler = (VALID_KSAMPLERS as readonly string[]).includes(p.pass2Sampler || '')
     ? (p.pass2Sampler as string)
@@ -857,55 +975,15 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // selectResolution(aspect, finalRes) — апскейлер early-return.
   // В 'full' без targetDimensions (free-MP) — как раньше: selectResolution
   // (aspect, lowResMP); aspect и final имеют ОДНУ ПРОПОРЦИЮ → апскейл ~1×.
-  const finalMP = (final.genW * final.genH) / (1024 * 1024)
-  let lowRes: { w: number; h: number }
-  if (singleCanvas) {
-    // flf/draft: lowRes = ceil32(targetDimensions) или selectResolution(finalRes)
-    lowRes = p.targetDimensions
-      ? {
-          w: Math.max(32, Math.ceil(p.targetDimensions.width / 32) * 32),
-          h: Math.max(32, Math.ceil(p.targetDimensions.height / 32) * 32),
-        }
-      : selectResolution(aspect, finalRes)
-  } else if (p.targetDimensions) {
-    // 'full' с пресетом: подбираем lowResMP, чтобы пропорция lowRes ≈ пропорция final
-    // (minimize |x_factor - y_factor|), при этом lowRes ≤ final по обеим осям.
-    const userMP = clampLowResMP(p.lowResMP ?? 0.2, finalRes)
-    // Диапазон поиска: от 0.05 до max(userMP, 0.5), но не выше finalMP
-    const searchHi = Math.min(Math.max(userMP, 0.5), finalMP)
-    const searchLo = 0.05
-    let bestDistortion = Infinity
-    let bestResult = selectResolution(aspect, userMP)
-    // Итеративный поиск: пробуем разные значения MP и выбираем то, что даёт
-    // минимальное |x_factor - y_factor| при условии lowRes ≤ final
-    const numSteps = 50
-    for (let i = 0; i <= numSteps; i++) {
-      const mp = searchLo + (searchHi - searchLo) * (i / numSteps)
-      const r = selectResolution(aspect, mp)
-      // Проверяем, что lowRes ≤ final по обеим осям
-      if (r.w > final.genW || r.h > final.genH) continue
-      const xFactor = final.genW / r.w
-      const yFactor = final.genH / r.h
-      const distortion = Math.abs(xFactor - yFactor)
-      // Проверяем, что апскейл не слишком мал (< 1.25× по обеим осям → бессмысленно)
-      const isTrivial = xFactor < 1.25 && yFactor < 1.25
-      if (isTrivial) continue // пропускаем, чтобы pass 1 был реально меньше final
-      if (distortion < bestDistortion) {
-        bestDistortion = distortion
-        bestResult = r
-      }
-    }
-    // (правка 439 аналог) Если не нашли подходящий lowRes (все либо > final,
-    // либо апскейл < 1.25×) — pass 1 = final, апскейлер early-return.
-    if (bestDistortion === Infinity) {
-      lowRes = { w: final.genW, h: final.genH }
-    } else {
-      lowRes = bestResult
-    }
-  } else {
-    // 'full' без targetDimensions (free-MP): как раньше
-    lowRes = selectResolution(aspect, lowResMP)
-  }
+  // (правка 810) Канва pass 1 — общий расчёт (workflow/метаданные), включая
+  // ограничение масштаба при обходе 3D-апскейлера.
+  const lowRes = computePass1Canvas(
+    aspect,
+    final,
+    lowResMP,
+    p.targetDimensions,
+    singleCanvas,
+  )
   const needsCrop = final.genW !== final.outW || final.genH !== final.outH
   // (правка 146) Главный H3-узел зависит от режима: референсы →
   // MiniMaxH3ReferenceToVideo (как раньше), t2v/flf → MiniMaxH3ImageToVideo
@@ -1257,7 +1335,25 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       // (правка 124) Режим «target dimensions»: узел выдаёт ровно genW×genH,
       // независимо от пропорции pass 1 (megapixels-mode держал пропорцию
       // входа и округлял оси — из-за этого 16:9 не получалось точным).
-      '46:26': {
+      // (правка 806) Если 3D-апскейлер выключен в настройках — обычное
+      // растягивание латента (core LatentUpscale): обученная модель не
+      // грузится и не выполняется — быстрее и легче по VRAM.
+      // (правка 808) width/height — НЕ пиксели: LatentUpscale делит их на 8,
+      // а H3-латент 16×. h3LatentUpscaleArgs переводит цель в нужные единицы.
+      // (правка 811) bislerp вместо bilinear: bilinear на латенте давал
+      // «перхоть»/одиночные артефакты в pass 2; bislerp — латент-ориентированная
+      // интерполяция ComfyUI (сферическая, по каналам), заметно чище на 2×.
+      '46:26': p.latentUpscaler3D === false ? {
+        inputs: {
+          samples: ['46:35', 0],
+          upscale_method: 'bislerp',
+          width: h3LatentUpscaleArgs(final.genW, final.genH).width,
+          height: h3LatentUpscaleArgs(final.genW, final.genH).height,
+          crop: 'disabled',
+        },
+        class_type: 'LatentUpscale',
+        _meta: { title: `Растяжка латента → ${final.genW}×${final.genH}` },
+      } : {
         inputs: {
           model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
           mode: 'target dimensions',
@@ -1300,7 +1396,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
           sigmas: sigmaVariant,
         },
         class_type: 'ManualSigmas',
-        _meta: { title: `Pass 2 Sigmas (${(p.sigmaVariant || '3step')})` },
+        _meta: { title: `Pass 2 Sigmas (${(p.sigmaVariant || '3step')}${p.latentUpscaler3D === false ? ', bypass' : ''})` },
       },
       // Live Preview (attached to pass 2)
       '13': {
@@ -1550,7 +1646,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   })()
   const passW = lowRes.w
   const passH = lowRes.h
-  const sigmaVariant = SIGMA_VARIANTS[p.sigmaVariant || '3step'] || SIGMA_VARIANTS['3step']
+  const sigmaVariant = pickSigmaVariant(p) // (правка 815: bypass-лестница при выключенном 3D)
   const pass2Sampler = p.pass2Sampler || 'euler'
 
   // Model chain: UNET → [LowVRAM] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift → [Sparse] → Attention
@@ -2440,7 +2536,21 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         // Аудио пространства не имеет — passthrough с той же аудио-маской
         // (ext_amask_i от разрешения не зависит).
         if (twoPass) {
-          nodes[`ext_ups_${i}`] = {
+          // (правка 806) 3D-апскейлер выключен — растягивание латента (LatentUpscale).
+          // (правка 808) width/height — латентно-пиксельные единицы SD-ноды (÷8),
+          // не пиксели кадра; см. h3LatentUpscaleArgs.
+          // (правка 811) bislerp — как в основной цепочке (без «перхоти»).
+          nodes[`ext_ups_${i}`] = p.latentUpscaler3D === false ? {
+            inputs: {
+              samples: [`ext_ssep_${i}`, 0],
+              upscale_method: 'bislerp',
+              width: h3LatentUpscaleArgs(final.genW, final.genH).width,
+              height: h3LatentUpscaleArgs(final.genW, final.genH).height,
+              crop: 'disabled',
+            },
+            class_type: 'LatentUpscale',
+            _meta: { title: `Растяжка клипа ${i + 1} → ${final.genW}×${final.genH}` },
+          } : {
             inputs: {
               model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
               mode: 'target dimensions',
@@ -2502,7 +2612,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           nodes[`ext_sig2_${i}`] = {
             inputs: { sigmas: sigmaVariant },
             class_type: 'ManualSigmas',
-            _meta: { title: `Pass 2 Sigmas клип ${i + 1} (${p.sigmaVariant || '3step'})` },
+            _meta: { title: `Pass 2 Sigmas клип ${i + 1} (${p.sigmaVariant || '3step'}${p.latentUpscaler3D === false ? ', bypass' : ''})` },
           }
           nodes[`ext_g2_${i}`] = {
             inputs: { model: ['extpv2', 0], conditioning: [`ext_cond_${i}`, 0] },

@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { createMirrorStorage } from '@/lib/settings-storage' // (правка 804)
 
 export interface PromptHistoryEntry {
   id: string
@@ -81,6 +82,8 @@ export const usePromptHistory = create<PromptHistoryState>()(
     }),
     {
       name: 'h3-prompt-history',
+      // (правка 804) Двойная запись: localStorage + серверное зеркало.
+      storage: createMirrorStorage(),
       version: 1,
       partialize: (state) => ({ entries: state.entries }),
       merge: (persisted, current) => {

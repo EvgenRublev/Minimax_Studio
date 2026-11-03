@@ -107,6 +107,8 @@ export interface ControlNetGenParams {
   chunkFFChunks?: number
   /** ChunkFF: sequence length threshold. */
   chunkFFThreshold?: number
+  /** (правка 806) 3D-апскейлер латентов между проходами (default true). */
+  latentUpscaler3D?: boolean
   /** Sigma variant (pass 2). */
   sigmaVariant?: string
   /** Pass 1 sampler. */
@@ -482,6 +484,7 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     chunkFeedForward: p.chunkFeedForward,
     chunkFFChunks: p.chunkFFChunks,
     chunkFFThreshold: p.chunkFFThreshold,
+    latentUpscaler3D: p.latentUpscaler3D, // (правка 806)
     sigmaVariant: p.sigmaVariant,
     pass1Sampler: p.pass1Sampler,
     pass1Scheduler: p.pass1Scheduler,

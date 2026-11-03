@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
 import {
   XIcon,
   ChevronLeftIcon,
@@ -137,7 +138,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value)
     setVolume(vol)
-    try { window.localStorage.setItem(VOLUME_KEY, String(vol)) } catch { /* private mode */ }
+    try { window.localStorage.setItem(VOLUME_KEY, String(vol)); pushPrefs() /* (правка 804) */ } catch { /* private mode */ }
     const v = videoRef.current
     if (v) {
       v.volume = vol

@@ -186,6 +186,42 @@ export async function POST(req: NextRequest) {
     // path.join(input/, ...) — то же, что basename у outputSubfolder (91).
     if (body.extendSourceVideo) body.extendSourceVideo = path.basename(await transferStaged(body.extendSourceVideo))
 
+    // (правка 807) Все референсы должны реально лежать в input/ ComfyUI.
+    // «Повторить»/«Восстановить» подставляют имена из метаданных, но файлы
+    // могли быть загружены в ДРУГОЙ установке, удалены из input/ или
+    // почищены вручную. Раньше ComfyUI отвечал невнятным «Invalid image
+    // file» / падал на LoadVideoPath уже в очереди — пользователь не понимал,
+    // что делать. Проверяем заранее и объясняем причину.
+    {
+      const missing: Array<{ kind: string; name: string }> = []
+      const checkFile = (kind: string, raw: unknown) => {
+        if (typeof raw !== 'string' || !raw) return
+        const name = path.basename(raw)
+        if (!fs.existsSync(path.join(cfg.inputDir, name))) missing.push({ kind, name })
+      }
+      for (const n of body.refImages ?? []) checkFile('картинка-референс', n)
+      for (const v of body.refVideos ?? []) checkFile('видео-референс', v?.path)
+      for (const n of body.refAudios ?? []) checkFile('аудио-референс', n)
+      checkFile('первый кадр', body.firstFrame)
+      checkFile('последний кадр', body.lastFrame)
+      checkFile('исходное видео для продления', body.extendSourceVideo)
+      if (missing.length > 0) {
+        const list = missing.map((m) => `${m.kind} «${m.name}»`).join('; ')
+        return NextResponse.json(
+          {
+            error:
+              `Не найдены файлы в папке input/ ComfyUI: ${list}. ` +
+              'Так бывает, если видео/настройки восстановлены после переустановки ' +
+              'или файлы удалены из input/ ComfyUI вручную. ' +
+              'Уберите эти референсы из списка и загрузите их заново — ' +
+              'либо верните файлы в папку input/ ComfyUI.',
+            missingRefs: missing,
+          },
+          { status: 400 },
+        )
+      }
+    }
+
     // (правка 212) Extend: итоговое разрешение клипов = РАЗМЕР ИСХОДНИКА.
     // Раньше оставался дефолт (16:9 + finalResolution) — клипы генерились
     // в чужом разрешении, и на шве «оригинал → продолжение» был виден

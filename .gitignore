@@ -89,6 +89,8 @@ dlssg-worker.exe
 /data/assistant-chats.json
 /data/inflight-generate.json
 /data/loras.json
+# (правка 804) серверное зеркало клиентских настроек — пользовательские данные
+/data/settings/
 
 # внутренние документы разработки — в GitHub не публикуются
 /docs/

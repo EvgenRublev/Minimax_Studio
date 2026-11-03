@@ -11,7 +11,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
 import { playNotificationSound } from '@/lib/sound'
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions } from '@/lib/comfy/minimax-h3-template'
+import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, clampLowResMP, computePass1Canvas } from '@/lib/comfy/minimax-h3-template'
 
 /** (правка 158) flf: вычисляем номинал из пресета + размеров кадра —
  *  ТОЖЕ формула, что и на сервере (body.targetDimensions в route.ts).
@@ -1163,6 +1163,7 @@ export function useVideoGen() {
           chunkFeedForward: params.chunkFeedForward !== false,
           chunkFFChunks: params.chunkFFChunks ?? 2,
           chunkFFThreshold: params.chunkFFThreshold ?? 4096,
+          latentUpscaler3D: params.latentUpscaler3D !== false, // (правка 806)
           outputSubfolder: params.outputSubfolder || '', // (правка 91)
           // (правка 161) extend-режим: клипы + рефы (refImages → extendRefs)
           extendClips: genMode === 'extend' ? (params.extendClips || []) : undefined,
@@ -1333,7 +1334,20 @@ export function useVideoGen() {
           resolution: `${metaOutW}x${metaOutH}`,
           aspect_ratio: aspectRatio,
           final_resolution_mp: finalResolution,
-          low_res_mp: params.lowResMP ?? 0.2,
+          // (правка 810) Фактическая канва pass 1 (а не слайдер): в пресетном
+          // режиме она подбирается по пропорции, при обходе 3D-апскейлера
+          // ограничена 1.5×. Extend пишет слайдер, как и раньше.
+          low_res_mp: (() => {
+            if (genMode === 'extend') return params.lowResMP ?? 0.2
+            const p1 = computePass1Canvas(
+              aspectRatio,
+              finalDims,
+              clampLowResMP(params.lowResMP ?? 0.2, finalResolution),
+              targetDimensions,
+              genMode === 'flf' || draft,
+            )
+            return Math.round(((p1.w * p1.h) / (1024 * 1024)) * 1000) / 1000
+          })(),
           video_length: videoLengthFrames,
           duration_seconds: videoLengthFrames / fps,
           fps,
@@ -1372,6 +1386,7 @@ export function useVideoGen() {
           }),
           low_vram_attention: params.lowVramAttention !== false,
           chunk_feed_forward: params.chunkFeedForward !== false,
+          latent_upscaler_3d: params.latentUpscaler3D !== false, // (правка 806)
           ...(params.chunkFeedForward !== false
             ? {
                 chunk_ff_chunks: params.chunkFFChunks ?? 2,

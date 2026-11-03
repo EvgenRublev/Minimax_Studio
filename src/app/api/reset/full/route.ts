@@ -5,6 +5,7 @@ import { getAppConfig, resetConfigToDefaults } from '@/lib/app-config'
 import { resetLorasToDefaults } from '@/lib/loras-config'
 import { writeExtraModelPathsYaml } from '@/lib/extra-model-paths'
 import { clearInflight } from '@/lib/inflight-journal'
+import { clearAllMirrors } from '@/lib/settings-mirror' // (правка 804)
 import { stopLlm } from '@/lib/llm-runner'
 import { stopStt } from '@/lib/stt-runner'
 
@@ -206,6 +207,15 @@ export async function POST() {
     resetConfigToDefaults()
   } catch (e) {
     errors.push(`config.ini: ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  // (правка 804) Серверное зеркало клиентских настроек (data/settings/*.json).
+  // Если его не удалить, следующий старт восстановит настройки из зеркала и
+  // «заводской сброс» отменится сам собой.
+  try {
+    clearAllMirrors()
+  } catch (e) {
+    warnings.push(`settings-mirror: ${e instanceof Error ? e.message : String(e)}`)
   }
 
   return NextResponse.json({

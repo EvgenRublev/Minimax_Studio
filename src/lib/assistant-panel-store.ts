@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { createMirrorStorage } from '@/lib/settings-storage' // (правка 804)
 
 export const ASSISTANT_PANEL_MIN = 300
 export const ASSISTANT_PANEL_MAX = 640
@@ -47,6 +48,8 @@ export const useAssistantPanel = create<AssistantPanelState>()(
     }),
     {
       name: 'h3-assistant-panel',
+      // (правка 804) Двойная запись: localStorage + серверное зеркало.
+      storage: createMirrorStorage(),
       // (правка 444) Миграция v0→v1: у тех, кто уже открывал панель
       // (collapsed:false в localStorage), однократно сворачиваем в рейл —
       // новый дефолт. Ширину сохраняем.
