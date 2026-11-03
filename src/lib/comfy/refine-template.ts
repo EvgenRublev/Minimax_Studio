@@ -1616,20 +1616,25 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
 
       // Сегментный декод: полный латент режется на сегменты по SEG_DECODE_TOK
       // токенов (VRAM: пик декода ограничен сегментом, а не всем роликом),
-      // каждый декодируется своим VAEDecode, кадры склеиваются по порядку
-      // одним ImageBatchMulti (KJNodes — уже используется выше для масок).
+      // каждый декодируется своим VAEDecode.
       // (правка 412) ПЕРЕКРЫТИЕ 5 токенов (=17 кадров, границы кратны 5 —
       // паттерн FPT сохраняется): temporal VAE нелокален на краях, декод
-      // сегментов «встык» давал разрыв картинки на каждой границе (~85
-      // кадров) — «куски не склеиваются». Сегмент i>0 захватывает хвост
-      // предыдущего, дублирующиеся 17 кадров после декода отбрасываются.
+      // сегментов «встык» давал разрыв картинки на каждой границе.
+      // (правка 820) Жёсткий срез перекрытия заменён кроссфейдом. Каждый
+      // VAEDecode считает свой сегмент независимо и даёт небольшой сдвиг
+      // яркости/деталей, из-за чего на границе (кадры 85, 170, …) был виден
+      // 1–2-кадровый «моргающий» стык — именно он ощущался как шов между
+      // кусками. Теперь последние OVL_FRAMES кадров сегмента i линейно
+      // смешиваются с первыми OVL_FRAMES кадрами сегмента i+1: сдвиг
+      // размазывается на 17 кадров (0,7 с) и становится незаметным.
       const OVL_TOK = 5
       const OVL_FRAMES = framesForTok(OVL_TOK) // 17
       const segCount = Math.max(1, Math.ceil(tTokTotal / SEG_DECODE_TOK))
-      const segDec: string[] = []
+      const segFrames: number[] = []
       for (let i = 0; i < segCount; i++) {
         const index = i > 0 ? i * SEG_DECODE_TOK - OVL_TOK : 0
         const amount = Math.min(SEG_DECODE_TOK + (i > 0 ? OVL_TOK : 0), tTokTotal - index)
+        segFrames.push(framesForTok(amount))
         // (правка 395) index при ролике >~39 мин > MAX_RESOLUTION — дробим.
         const segRef = chainLatentCut(
           nodes, `cds_${i}`,
@@ -1642,28 +1647,69 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           class_type: 'VAEDecode',
           _meta: { title: `Decode сегмента ${i + 1}/${segCount}` },
         }
-        if (i > 0) {
-          nodes[`cdt_${i}`] = {
-            inputs: { image: [`cdd_${i}`, 0], batch_index: OVL_FRAMES, length: 4096 },
-            class_type: 'ImageFromBatch',
-            _meta: { title: `Сегмент ${i + 1}: без ${OVL_FRAMES} кадров перекрытия` },
-          }
-          segDec.push(`cdt_${i}`)
-        } else {
-          segDec.push(`cdd_${i}`)
-        }
       }
-      let framesAll: [string, number] = [segDec[0], 0]
-      if (segDec.length > 1) {
-        nodes[`cbatch`] = {
+      // (правка 820) Сборка: тело сегмента без перекрытий + кроссфейд на
+      // каждом стыке (tail сегмента i ↔ head сегмента i+1).
+      let framesAll: [string, number] = ['cdd_0', 0]
+      if (segCount > 1) {
+        const parts: string[] = []
+        for (let i = 0; i < segCount; i++) {
+          const len = segFrames[i]
+          const lead = i > 0 ? OVL_FRAMES : 0
+          const trail = i < segCount - 1 ? OVL_FRAMES : 0
+          nodes[`cbody_${i}`] = {
+            inputs: { image: [`cdd_${i}`, 0], batch_index: lead, length: len - lead - trail },
+            class_type: 'ImageFromBatch',
+            _meta: { title: `Сегмент ${i + 1}: тело без перекрытий` },
+          }
+          parts.push(`cbody_${i}`)
+          if (i < segCount - 1) {
+            nodes[`ctail_${i}`] = {
+              inputs: { image: [`cdd_${i}`, 0], batch_index: len - OVL_FRAMES, length: OVL_FRAMES },
+              class_type: 'ImageFromBatch',
+              _meta: { title: `Сегмент ${i + 1}: хвост перекрытия (${OVL_FRAMES} кадр.)` },
+            }
+            nodes[`chead_${i}`] = {
+              inputs: { image: [`cdd_${i + 1}`, 0], batch_index: 0, length: OVL_FRAMES },
+              class_type: 'ImageFromBatch',
+              _meta: { title: `Сегмент ${i + 2}: голова перекрытия (${OVL_FRAMES} кадр.)` },
+            }
+            nodes[`cmask_${i}`] = {
+              inputs: {
+                points_string: `0:(0.0),\n${OVL_FRAMES - 1}:(1.0)`,
+                invert: false,
+                frames: OVL_FRAMES,
+                width: 16,
+                height: 16,
+                interpolation: 'linear',
+              },
+              class_type: 'CreateFadeMaskAdvanced',
+              _meta: { title: `Кроссфейд ${i + 1}: маска 0→1 (${OVL_FRAMES} кадр.)` },
+            }
+            nodes[`cblend_${i}`] = {
+              inputs: {
+                destination: [`ctail_${i}`, 0],
+                source: [`chead_${i}`, 0],
+                x: 0,
+                y: 0,
+                resize_source: false,
+                mask: [`cmask_${i}`, 0],
+              },
+              class_type: 'ImageCompositeMasked',
+              _meta: { title: `Кроссфейд стыка сегментов ${i + 1}→${i + 2}` },
+            }
+            parts.push(`cblend_${i}`)
+          }
+        }
+        nodes['cbatch'] = {
           inputs: {
-            inputcount: segDec.length,
-            ...Object.fromEntries(segDec.map((id, i) => [`image_${i + 1}`, [id, 0]])),
+            inputcount: parts.length,
+            ...Object.fromEntries(parts.map((id, i) => [`image_${i + 1}`, [id, 0]])),
           },
           class_type: 'ImageBatchMulti',
-          _meta: { title: `Склейка кадров (${segDec.length} сегм.)` },
+          _meta: { title: `Склейка кадров (${segCount} сегм., кроссфейд)` },
         }
-        framesAll = [`cbatch`, 0]
+        framesAll = ['cbatch', 0]
       }
       // Кроп до номинала — ОДИН раз на полном батче (раньше ccrop_k покусочно)
       if (needsCrop) {
