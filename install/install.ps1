@@ -820,30 +820,17 @@ if ($nvidia) {
 if (-not $SkipApp) {
     Step 2 9 'Node.js'
 
-    $nodeExe = 'node'
+    # (правка 822) Установщик ВСЕГДА использует собственный портативный Node.js
+    # в runtime\ и больше не ищет Node в системе. Прежняя логика верила любому
+    # найденному по PATH `node`: у пользователей с Node через nvm/volta/scoop
+    # node в PATH есть, а npm.cmd рядом нет - установка падала с «The term
+    # 'npm.cmd' is not recognized» (PowerShell считает вызов несуществующей
+    # команды фатальной, ветка «npm не найден» ниже не доходила).
     $runtimeDir = Join-Path $Root 'runtime'
-    $nodeOk = $false
 
-    $sysNode = Get-Command node -ErrorAction SilentlyContinue
-    if ($sysNode) {
-        $verText = (& node --version 2>$null)
-        if ($verText -match 'v(\d+)\.') {
-            $major = [int]$Matches[1]
-            if ($major -ge 18) {
-                $nodeOk = $true
-                $nodeExe = 'node'
-                Ok ('Node.js в системе: ' + $verText)
-            } else {
-                Warn ('в системе Node.js ' + $verText + ' - слишком старый, ставлю портативный')
-            }
-        }
-    } elseif (Test-Path (Join-Path $runtimeDir 'node.exe')) {
-        $nodeOk = $true
-        $nodeExe = Join-Path $runtimeDir 'node.exe'
+    if (Test-Path (Join-Path $runtimeDir 'node.exe')) {
         Ok 'найден портативный runtime\node.exe'
-    }
-
-    if (-not $nodeOk) {
+    } else {
         $nodeVersion = '22.20.0'
         $zip = Join-Path $Cache ('node-v' + $nodeVersion + '-win-x64.zip')
         Get-Download ('https://nodejs.org/dist/v' + $nodeVersion + '/node-v' + $nodeVersion + '-win-x64.zip') $zip
@@ -851,24 +838,31 @@ if (-not $SkipApp) {
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         Expand-ZipSafe $zip $tmp
         $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
+        if (-not $inner) { throw 'в архиве node-v' + $nodeVersion + '-win-x64.zip нет папки с Node.js - архив повреждён, удалите .install-cache и запустите снова.' }
         if (Test-Path $runtimeDir) { Remove-Item $runtimeDir -Recurse -Force }
         New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
         Get-ChildItem $inner.FullName -Force | Move-Item -Destination $runtimeDir -Force
         Remove-Item $tmp -Recurse -Force
-        $nodeExe = 'node'
         Ok ('Node.js ' + $nodeVersion + ' установлен в runtime\')
     }
 
+    $nodeExe = Join-Path $runtimeDir 'node.exe'
+    # (правка 822) PATH поправляем ДО проверок и всегда указываем полные пути:
+    # node/npm должны находиться именно в runtime\, а не в системе.
     $env:PATH = $runtimeDir + ';' + $env:PATH
-    $checkVer = (& node --version 2>$null)
-    if (-not $checkVer) { throw 'Node.js не запускается после установки.' }
+    $checkVer = (& $nodeExe --version 2>$null)
+    if (-not $checkVer) { throw 'Node.js из runtime\ не запускается.' }
 
-    $npmVersion = (& npm.cmd --version 2>$null)
-    if (-not $npmVersion) {
-        Warn 'npm не найден рядом с Node.js'
-        throw 'npm недоступен. Установите Node.js 18+ с https://nodejs.org и запустите установщик снова.'
+    $npmCmd = Join-Path $runtimeDir 'npm.cmd'
+    if (-not (Test-Path $npmCmd)) {
+        throw 'npm не найден в runtime\ - папка runtime повреждена. Удалите runtime\ и .install-cache и запустите установщик снова.'
     }
-    Ok ('npm ' + $npmVersion)
+    $npmVersion = ''
+    try { $npmVersion = (& $npmCmd --version 2>$null) } catch { }
+    if (-not $npmVersion) {
+        throw 'npm из runtime\ не запускается. Удалите runtime\ и .install-cache и запустите установщик снова.'
+    }
+    Ok ('Node.js ' + $checkVer + ' (портативный), npm ' + $npmVersion)
 } else {
     Info 'пропущено (-SkipApp)'
 }

@@ -190,7 +190,7 @@ Minimax_Studio_V7/
 | ОС        | Windows 10/11 x64                              |
 | GPU       | NVIDIA, 12+ ГБ VRAM (рекомендуется), мин. 8 ГБ |
 | Драйвер   | CUDA 12.x                                      |
-| Node.js   | 18+ LTS (или bundled `runtime\node.exe`)       |
+| Node.js   | не нужен — установщик кладёт свой в `runtime\` |
 | ComfyUI   | Portable, папка `ComfyUI-Easy-Install`         |
 
 ## Запуск
