@@ -1380,53 +1380,87 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         class_type: 'LTXVSeparateAVLatent',
         _meta: { title: 'Separate AV Latent' },
       },
-      // Upscale video latent to target resolution
-      // (правка 124) Режим «target dimensions»: узел выдаёт ровно genW×genH,
-      // независимо от пропорции pass 1 (megapixels-mode держал пропорцию
-      // входа и округлял оси — из-за этого 16:9 не получалось точным).
-      // (правка 806) Если 3D-апскейлер выключен в настройках — обычное
-      // растягивание латента (core LatentUpscale): обученная модель не
-      // грузится и не выполняется — быстрее и легче по VRAM.
-      // (правка 808) width/height — НЕ пиксели: LatentUpscale делит их на 8,
-      // а H3-латент 16×. h3LatentUpscaleArgs переводит цель в нужные единицы.
-      // (правка 811) bislerp вместо bilinear: bilinear на латенте давал
-      // «перхоть»/одиночные артефакты в pass 2; bislerp — латент-ориентированная
-      // интерполяция ComfyUI (сферическая, по каналам), заметно чище на 2×.
-      '46:26': p.latentUpscaler3D === false ? {
-        inputs: {
-          samples: ['46:35', 0],
-          upscale_method: 'bislerp',
-          width: h3LatentUpscaleArgs(final.genW, final.genH).width,
-          height: h3LatentUpscaleArgs(final.genW, final.genH).height,
-          crop: 'disabled',
+      // (правка 829) В цикле апскейл делаем в ПИКСЕЛЯХ (декод → lanczos →
+      // VAE-энкод), как в рефайне (там это правка 750 V7.1). Причина:
+      // латентный 3D-апскейлер на зацикленном латенте Pass 1 срывается в
+      // «чешуйку» — решётку в одну латент-клетку в ярких областях, — и шов
+      // после этого не держится. Пиксельный путь его вообще не касается:
+      // Pass 2 получает обычный VAE-энкод кадров.
+      ...(loopOn ? {
+        '46:26:dec': {
+          inputs: { samples: ['46:35', 0], vae: ['46:3', 0] },
+          class_type: 'VAEDecode',
+          _meta: { title: 'Decode Pass 1 (для пиксельного апскейла)' },
         },
-        class_type: 'LatentUpscale',
-        _meta: { title: `Растяжка латента → ${final.genW}×${final.genH}` },
+        '46:26:res': {
+          inputs: {
+            image: ['46:26:dec', 0],
+            width: final.genW,
+            height: final.genH,
+            upscale_method: 'lanczos',
+            keep_proportion: 'stretch',
+            pad_color: '0, 0, 0',
+            crop_position: 'center',
+            divisible_by: 32,
+            device: 'cpu',
+          },
+          class_type: 'ImageResizeKJv2',
+          _meta: { title: `Pass 1 → ${final.genW}×${final.genH} (пиксельный апскейл)` },
+        },
+        '46:26:enc': {
+          inputs: { pixels: ['46:26:res', 0], vae: ['46:3', 0] },
+          class_type: 'VAEEncode',
+          _meta: { title: 'VAE-энкод затравки Pass 2' },
+        },
       } : {
-        inputs: {
-          model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
-          mode: 'target dimensions',
-          'mode.width': final.genW,
-          'mode.height': final.genH,
-          align: 32,
-          // enable_chunking — вход старых версий ноды; новые версии (pinned
-          // 40316cf) переименовали его в enable_temporal_chunking и добавили
-          // обязательный force_unload. ComfyUI игнорирует лишние входы, поэтому
-          // отправляем оба имени — воркфлоу работает с любой версией ноды.
-          enable_chunking: true, // (правка 68) было false — по запросу юзера
-          enable_temporal_chunking: true,
-          force_unload: true,
-          device: 'cuda',
-          precision: 'fp16',
-          latent: ['46:35', 0],
+        // Upscale video latent to target resolution
+        // (правка 124) Режим «target dimensions»: узел выдаёт ровно genW×genH,
+        // независимо от пропорции pass 1 (megapixels-mode держал пропорцию
+        // входа и округлял оси — из-за этого 16:9 не получалось точным).
+        // (правка 806) Если 3D-апскейлер выключен в настройках — обычное
+        // растягивание латента (core LatentUpscale): обученная модель не
+        // грузится и не выполняется — быстрее и легче по VRAM.
+        // (правка 808) width/height — НЕ пиксели: LatentUpscale делит их на 8,
+        // а H3-латент 16×. h3LatentUpscaleArgs переводит цель в нужные единицы.
+        // (правка 811) bislerp вместо bilinear: bilinear на латенте давал
+        // «перхоть»/одиночные артефакты в pass 2; bislerp — латент-ориентированная
+        // интерполяция ComfyUI (сферическая, по каналам), заметно чище на 2×.
+        '46:26': p.latentUpscaler3D === false ? {
+          inputs: {
+            samples: ['46:35', 0],
+            upscale_method: 'bislerp',
+            width: h3LatentUpscaleArgs(final.genW, final.genH).width,
+            height: h3LatentUpscaleArgs(final.genW, final.genH).height,
+            crop: 'disabled',
+          },
+          class_type: 'LatentUpscale',
+          _meta: { title: `Растяжка латента → ${final.genW}×${final.genH}` },
+        } : {
+          inputs: {
+            model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
+            mode: 'target dimensions',
+            'mode.width': final.genW,
+            'mode.height': final.genH,
+            align: 32,
+            // enable_chunking — вход старых версий ноды; новые версии (pinned
+            // 40316cf) переименовали его в enable_temporal_chunking и добавили
+            // обязательный force_unload. ComfyUI игнорирует лишние входы, поэтому
+            // отправляем оба имени — воркфлоу работает с любой версией ноды.
+            enable_chunking: true, // (правка 68) было false — по запросу юзера
+            enable_temporal_chunking: true,
+            force_unload: true,
+            device: 'cuda',
+            precision: 'fp16',
+            latent: ['46:35', 0],
+          },
+          class_type: 'MinimaxH3LatentUpscaler3D',
+          _meta: { title: `Latent Upscaler (3D) → ${final.genW}×${final.genH}` },
         },
-        class_type: 'MinimaxH3LatentUpscaler3D',
-        _meta: { title: `Latent Upscaler (3D) → ${final.genW}×${final.genH}` },
-      },
+      }),
       // Re-combine upscaled video + audio latent
       '46:10': {
         inputs: {
-          video_latent: ['46:26', 0],
+          video_latent: loopOn ? ['46:26:enc', 0] : ['46:26', 0],
           audio_latent: ['46:35', 1],
         },
         class_type: 'LTXVConcatAVLatent',
