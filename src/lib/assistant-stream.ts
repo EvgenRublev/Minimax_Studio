@@ -31,6 +31,9 @@ import {
   type AssistantRefEntry,
   type AssistantRefInput,
 } from './assistant-refs'
+// (правка 824) Разбор SSE-потока вынесен в чистый модуль (уровень B плана
+// отладки) — cycle читается и тестируется без сторов/React.
+import { consumeSse, type SseState } from './assistant-sse'
 
 export interface LlmStatusResp {
   running: boolean
@@ -740,16 +743,16 @@ export function runAssistantCompletion(
   useAssistantStream.setState({ chatId, text: '', runId })
 
   void (async () => {
-    let final = ''
+    // (правка 824) Текст дельт и признак «упёрся в лимит» накапливает чистый
+    // consumeSse (src/lib/assistant-sse.ts); снимок читаем и при успехе, и
+    // при throw — обрывок нужен в finally для коммита в чат.
+    const sse: SseState = { text: '', truncatedByLimit: false }
     // false = сервер ответил ошибкой на сам POST (409/503/...): показываем
     // ЭТУ ошибку; true = стрим начался и оборвался посередине
     let streamStarted = false
     // (клиентский idle-watchdog) объявлены ДО try: catch читает их даже если
     // throw случился до открытия стрима.
     let idleTimedOut = false
-    // (правка 717) Ответ упёрся в лимит max_tokens (finish_reason='length'):
-    // ответ неполный, но и не «ошибка» — помечаем в тексте.
-    let truncatedByLimit = false
     // (правка 717) Ответ прерван пользователем («Стоп»).
     let abortedByUser = false
     // (правка 717) Текст ошибки запроса — попадёт в чат синтетической
@@ -888,10 +891,7 @@ export function runAssistantCompletion(
         }
         throw new Error(msg)
       }
-      const reader = res.body.getReader()
       streamStarted = true
-      const decoder = new TextDecoder()
-      let buf = ''
       // (клиентский idle-watchdog) Half-open соединение (сон/гибернация ПК,
       // сдохший прокси) не разрешает reader.read() никогда — стрим висел
       // вечно, чат блокировался до перезагрузки страницы. Зеркалим серверный
@@ -908,57 +908,19 @@ export function runAssistantCompletion(
         }, 5 * 60_000)
       }
       try {
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          armIdle()
-          buf += decoder.decode(value, { stream: true })
-        const events = buf.split('\n\n')
-        buf = events.pop() ?? ''
-        for (const ev of events) {
-          const line = ev.split('\n').find((l) => l.startsWith('data: '))
-          if (!line) continue
-          // JSON.parse — в ОТДЕЛЬНОМ try: раньше фильтр «не JSON в сообщении»
-          // глотал и payload.error, если текст ошибки сервера упоминал JSON
-          // (например, исключения llama-cpp) — стрим «завершался» как успешный
-          // с обрезанным ответом.
-          // (правка 717) Сервер различает «дошли до конца» и «оборвалось»:
-          // финальный кадр несёт finish_reason и флаг aborted (см.
-          // tools/llm_server.py). Раньше клиент эти поля ИГНОРИРОВАЛ, и
-          // оборванный ответ коммитился в чат как ПОЛНЫЙ — пользователь видел
-          // готовый промпт, которого на самом деле нет.
-          let payload: {
-            delta?: string
-            error?: string
-            done?: boolean
-            aborted?: boolean
-            finish_reason?: string | null
-          } | null = null
-          try {
-            payload = JSON.parse(line.slice(6))
-          } catch {
-            continue // битый/незавершённый чанк — ждём следующий
-          }
-          if (!payload) continue
-          if (payload.error) throw new Error(payload.error)
-          if (payload.aborted) {
-            throw new Error('Ответ прерван (остановлен пользователем или сбой сервера).')
-          }
-          if (payload.done && payload.finish_reason === 'length') {
-            // Ответ упёрся в max_tokens — это не «ошибка», но и не полный
-            // промпт. Помечаем, чтобы пользователь знал.
-            truncatedByLimit = true
-          }
-          if (payload.delta) {
-            final += payload.delta
-            const s = useAssistantStream.getState()
-            // (правка 717) Сверяем ЭКЗЕМПЛЯР стрима, а не чат: после «Стоп»
-            // в том же чате мог начаться новый стрим, и старый дописывал бы
-            // свой текст в его хвост.
-            if (s.runId === runId) useAssistantStream.setState({ text: final })
-          }
-        }
-        }
+        // (правка 824) Чтение чанков, склейка через границы, разбор кадров
+        // (delta / error / aborted / finish_reason) — в чистом consumeSse,
+        // покрытом харнессом уровня B (scratchpad/assistant-sse-check.mjs).
+        await consumeSse(res.body, sse, {
+          onActivity: armIdle,
+          // (правка 717) Сверяем ЭКЗЕМПЛЯР стрима, а не чат: после «Стоп»
+          // в том же чате мог начаться новый стрим, и старый дописывал бы
+          // свой текст в его хвост.
+          isCurrent: () => useAssistantStream.getState().runId === runId,
+          onText: (fullText, live) => {
+            if (live) useAssistantStream.setState({ text: fullText })
+          },
+        })
       } finally {
         if (idleTimer) clearTimeout(idleTimer)
       }
@@ -1013,17 +975,17 @@ export function runAssistantCompletion(
       // обрыв (abort, обрыв сокета, finish_reason='length') молча
       // сохранял полупромпт в чат, и пользователь видел «готовый» ответ,
       // которого нет. Теперь в текст добавляется явная пометка.
-      if (final.trim()) {
+      if (sse.text.trim()) {
         const marker = abortedByUser
           ? '\n\n_[Ответ прерван — показан обрывок.]_'
-          : truncatedByLimit
+          : sse.truncatedByLimit
             ? '\n\n_[Ответ обрезан лимитом длины ответа — показан обрывок.]_'
             : errorMessage
               ? '\n\n_[Соединение прервано — показан обрывок.]_'
               : ''
         useAssistantChats.getState().appendMessage(chatId, {
           role: 'assistant',
-          content: final + marker,
+          content: sse.text + marker,
         })
       } else if (errorMessage) {
         // (правка 717) Ответа не было вовсе — оставляем в чате явную
