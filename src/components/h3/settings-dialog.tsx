@@ -373,7 +373,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       // (правка 54) текст соответствует фактическому поведению: сбрасываются
       // ВСЕ параметры, включая выбор моделей (LLM-квант, базовая модель),
       // видение видео и звук.
-      desc: 'Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, звук) вернутся к значениям по умолчанию. Действие необратимо.',
+      // (правка 826) в список сброшенного добавлен «формат сохранения» —
+      // раньше он молча оставался пользовательским.
+      desc: 'Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию. Действие необратимо.',
       button: 'Сбросить',
     },
     clean: {
@@ -488,6 +490,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             stt_model: '',
             stt_language: 'ru',
             stt_threads: 0,
+            // (правка 826) формат сохранения (вкладка «Видео») — тоже сбрасывается:
+            // подтверждение обещает «все параметры», а раньше video_* молча
+            // оставались пользовательскими (сбрасывались только заводским сбросом).
+            video_codec: 'h264',
+            video_crf: 12,
+            video_nvenc_bitrate: 16,
           }),
         })
         useGenStore.setState({ video: { ...DEFAULT_VIDEO_STATE } })
@@ -501,9 +509,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         setLlmDevice('auto')
         setLlmCtxSize(25600)
         setLlmMaxOut(4096)
-        setLlmVideoVision(false)
+        // (правка 825) POST выше ставит llm_video_vision: true (заводской
+        // дефолт), а чекбокс показывал false — после сброса сразу нажать
+        // «Сохранить» на вкладке LLM молча выключало настройку.
+        setLlmVideoVision(true)
         setLlmKvCache('q4_0')
         setSoundOn(true)
+        setVideoCodec('h264')      // (правка 826) состояние диалога = POST reset
+        setVideoCrf(12)            // (правка 826)
+        setVideoNvencBitrate(16)   // (правка 826)
         setLlmCustomModel('')   // (правка 311)
         setLlmCustomMmproj('')  // (правка 311)
         setResetTick((t) => t + 1) // (правка 54) селекторы моделей перечитают конфиг
@@ -807,7 +821,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
               <input
                 type="range"
-                min={8192}
+                // (правка 827) min 8192→4096: сервер и чтение принимают от
+                // 4096 (правка 314) — UI не давал установить нижнюю половину диапазона.
+                min={4096}
                 max={102400}
                 step={1024}
                 value={llmCtxSize}
@@ -815,7 +831,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 className="w-full h-2 cursor-pointer accent-cyan-400"
               />
               <div className="flex justify-between text-[10px] text-muted-foreground/50">
-                <span>8K</span><span>100K</span>
+                <span>4K</span><span>100K</span>
               </div>
             </div>
 
@@ -1559,7 +1575,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   Сброс настроек
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
-                  Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, звук) вернутся к значениям по умолчанию.
+                  {/* (правка 826) «формат сохранения» теперь тоже сбрасывается */}
+                  Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию.
                 </p>
               </div>
 
