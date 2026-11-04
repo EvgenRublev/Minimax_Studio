@@ -509,6 +509,18 @@ export const useGenStore = create<GenStoreState>()(
           if (typeof result.video.latentUpscaler3D !== 'boolean') {
             result.video.latentUpscaler3D = DEFAULT_VIDEO_STATE.latentUpscaler3D
           }
+          // (правка 829) Регидрация старых снимков без полей цикла.
+          if (typeof result.video.loop !== 'boolean') {
+            result.video.loop = DEFAULT_VIDEO_STATE.loop
+          }
+          if (typeof result.video.loopPadClips !== 'number' || isNaN(result.video.loopPadClips)) {
+            result.video.loopPadClips = DEFAULT_VIDEO_STATE.loopPadClips
+          } else {
+            result.video.loopPadClips = Math.max(1, Math.min(8, Math.round(result.video.loopPadClips)))
+          }
+          if (result.video.loopViews !== 1 && result.video.loopViews !== 2) {
+            result.video.loopViews = DEFAULT_VIDEO_STATE.loopViews
+          }
           if (!Array.isArray(result.video.refs)) {
             result.video.refs = []
           }

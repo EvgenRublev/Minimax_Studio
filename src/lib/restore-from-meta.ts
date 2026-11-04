@@ -280,10 +280,9 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     }
     // (правка 829) «Зациклено»: повтор того же ролика должен снова быть
     // циклом с теми же pad/views — иначе mp4 выйдет на 5 кадров длиннее
-    // и без обёрнутого контекста.
-    if (typeof params.loop === 'boolean') {
-      patch.loop = params.loop
-    }
+    // и без обёрнутого контекста. Обычный ролик в сайдкаре `loop` не хранит
+    // вовсе — явно сбрасываем в false, чтобы включённая галочка не «залипала».
+    patch.loop = params.loop === true
     if (typeof params.loop_pad_clips === 'number') {
       patch.loopPadClips = Math.max(1, Math.min(8, Math.round(params.loop_pad_clips)))
     }

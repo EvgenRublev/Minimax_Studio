@@ -1203,38 +1203,65 @@ export function GenerateView() {
           {(() => {
             const loopDisabled = video.mode === 'extend'
             const loopOn = video.loop === true && !loopDisabled
+            const stepsNow = video.pipeline === 'draft'
+              ? (video.draftSteps ?? 4)
+              : (video.firstSamplerSteps ?? 6)
             return (
-              <label
-                className={cn(
-                  'flex items-start gap-2 rounded-lg border p-2.5 transition-all',
-                  loopDisabled
-                    ? 'border-border bg-[var(--surface-2)] opacity-50 cursor-not-allowed'
-                    : loopOn
-                      ? 'border-violet-500/40 bg-violet-500/10 cursor-pointer'
-                      : 'border-border bg-[var(--surface-2)] hover:border-violet-500/30 cursor-pointer',
-                )}
-                title={loopDisabled
-                  ? 'Зацикливание недоступно в режиме продления: там видео собирается из клипов, и стык задаётся исходником.'
-                  : 'Сэмплер получает латент с обёрнутыми клипами по краям, поэтому конец плавно переходит в начало. Ролик можно ставить на повтор без шва в картинке и звуке.'}
-              >
-                <input
-                  type="checkbox"
-                  checked={loopOn}
-                  disabled={loopDisabled}
-                  onChange={(e) => patchVideo({ loop: e.target.checked })}
-                  className="mt-0.5 accent-violet-400"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className={cn('text-xs font-medium', loopOn ? 'text-violet-300' : 'text-foreground/80')}>
-                      Зациклено
+              <div className="space-y-1.5">
+                <label
+                  className={cn(
+                    'flex items-start gap-2 rounded-lg border p-2.5 transition-all',
+                    loopDisabled
+                      ? 'border-border bg-[var(--surface-2)] opacity-50 cursor-not-allowed'
+                      : loopOn
+                        ? 'border-violet-500/40 bg-violet-500/10 cursor-pointer'
+                        : 'border-border bg-[var(--surface-2)] hover:border-violet-500/30 cursor-pointer',
+                  )}
+                  title={loopDisabled
+                    ? 'Зацикливание недоступно в режиме продления: там видео собирается из клипов, и стык задаётся исходником.'
+                    : 'Сэмплер получает латент с обёрнутыми клипами по краям, поэтому конец плавно переходит в начало. Ролик можно ставить на повтор без шва в картинке и звуке.'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={loopOn}
+                    disabled={loopDisabled}
+                    onChange={(e) => patchVideo({ loop: e.target.checked })}
+                    className="mt-0.5 accent-violet-400"
+                  />
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="flex items-center justify-between gap-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className={cn('text-xs font-medium', loopOn ? 'text-violet-300' : 'text-foreground/80')}>
+                          Зациклено
+                        </span>
+                        <span className="text-[10px] text-muted-foreground/70">
+                          бесшовный повтор
+                        </span>
+                      </span>
+                      {loopOn && (
+                        <span className="text-[10px] font-mono text-violet-300/80">
+                          {loopInfo.frames} кадр · {loopInfo.seconds.toFixed(1)} с
+                        </span>
+                      )}
                     </span>
-                    <span className="text-[10px] text-muted-foreground/70">
-                      бесшовный повтор
-                    </span>
+                    {loopOn && (
+                      <span className="block text-[10px] leading-relaxed text-muted-foreground/80">
+                        Для чистого стыка: статичная камера и циклическое движение (дыхание, покачивание, ветер) — без dоlly/pan и разовых действий.
+                      </span>
+                    )}
                   </span>
-                </span>
-              </label>
+                </label>
+                {loopOn && stepsNow < 8 && (
+                  <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">
+                    Сейчас {stepsNow} шаг(а) — модель может не успеть свести концы. Для чистого стыка поставьте 8+ шагов или включите «Полное».
+                  </p>
+                )}
+                {loopOn && loopInfo.overTrained && (
+                  <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">
+                    С обёрнутым контекстом длина превышает обученный диапазон H3 (~362 кадра) — стык может выйти заметным.
+                  </p>
+                )}
+              </div>
             )
           })()}
 
