@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, extractInsertablePrompt } from '@/lib/assistant-fence'
+import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -853,9 +853,12 @@ export function AssistantView({
    */
   const hasStructuredPrompt = useCallback((content: string): boolean => {
     if (!content.trim()) return false
-    // A ``` code fence (the assistant wraps prompts in one)…
-    if (/```/.test(content)) return true
-    // …or an official H3 structural field marker.
+    // (правка 823) Кнопка «В промпт» — ТОЛЬКО для настоящего H3-промпта
+    // (subject_definitions / integrated_multimodal_description). Раньше любой
+    // ``` (пример кода, цитата) считался промптом и вставлялся в редактор.
+    // (правка 823) Оборванный ответ (лимит/«Стоп») без ЗАКРЫТОГО fence —
+    // не предлагаем вставлять: текст мог обрезаться посередине промпта.
+    if (isTruncatedAnswer(content) && !hasCompleteFence(content)) return false
     return hasH3Field(content)
   }, [])
 
@@ -1162,6 +1165,9 @@ export function AssistantView({
                     )}
                     {m.role === 'assistant' && !streaming && isExtendChat && (() => {
                       const msgFences = parseAllFences(m.content)
+                        // (правка 823) Незакрытый fence = обрывок (лимит/«Стоп»):
+                        // его промпт НЕ предлагаем вставлять в клип.
+                        .filter((f) => !f.streaming)
                       if (!msgFences.length) return null
                       // (правка 428) Fence с валидным маркером `clip: N`
                       // собираем в пары; если их 2+ — ОДНА кнопка «Вставить

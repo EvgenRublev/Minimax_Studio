@@ -26,6 +26,11 @@ import { useAssistantChats, type AssistantChatMessage, type AssistantChatMode } 
 import { useGenStore } from './gen-store'
 import { useControlNetTarget } from './controlnet-target-store' // (правка 502)
 import { H3_SPEC_A, H3_SPEC_B, H3_SPEC_EXTEND } from './h3-prompt-spec'
+import {
+  buildReferenceSet,
+  type AssistantRefEntry,
+  type AssistantRefInput,
+} from './assistant-refs'
 
 export interface LlmStatusResp {
   running: boolean
@@ -87,7 +92,6 @@ async function buildSystemMessage(
   if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn)
   const v = useGenStore.getState().video
   const mode = v.mode // (правка 150) 'ref' | 't2v' | 'flf' | 'extend'
-  const refs = v.refs
   // (правка 138) дефолт 124 → 60: минимум 2.5 с (60 кадров при 24 fps)
   const frames = v.videoLength || 60
   const seconds = Math.max(2.5, Math.round(frames / 24))
@@ -107,15 +111,15 @@ async function buildSystemMessage(
   const isExtendMode = mode === 'extend'
   const H3_SPEC = isExtendMode ? H3_SPEC_A : mode === 'ref' ? H3_SPEC_B : H3_SPEC_A
 
-  // (правка 150) В t2v/flf из рефов уходят ТОЛЬКО аудио (картинки/видео не используются нодой).
-  // Ассистенту показываем только аудио-рефы, чтобы LLM не вписывала <Picture N>/<Video N>.
-  // (правка 168) рефы видны ВСЕГДА, без исключения для новых чатов (правка 166):
-  // поведение единое и предсказуемое — модель всегда видит текущий рабочий стол.
-  const effectiveRefs = mode === 'ref' ? refs : refs.filter((r) => r.kind === 'audio')
-
-  const images = effectiveRefs.filter((r) => r.kind === 'image')
-  const videos = effectiveRefs.filter((r) => r.kind === 'video')
-  const audios = effectiveRefs.filter((r) => r.kind === 'audio')
+  // (правка 823) Системный промпт перечисляет РОВНО те референсы, что уйдут
+  // на провод: единый сборщик с REF_LIMITS (раньше здесь были ВСЕ v.refs без
+  // лимита — при >9 картинок модель писала <Picture 10..12>, которых нет).
+  // Кадры flf идут с триггерами «Первый кадр»/«Последний кадр» — это НЕ
+  // <Picture N>, поэтому в списки меток они не попадают (описаны отдельно).
+  const entries = getReferences('generate')
+  const images = entries.filter((e) => e.kind === 'image' && e.trigger.startsWith('Picture'))
+  const videos = entries.filter((e) => e.kind === 'video')
+  const audios = entries.filter((e) => e.kind === 'audio')
 
   // ── Explicit "attached references" block, numbered exactly like MiniMax ──
   // (images → <Picture N>, videos → <Video N>, audios → <Audio N>, each 1-based
@@ -141,7 +145,7 @@ async function buildSystemMessage(
   // (правка 168) кадры — живые из текущей формы генерации.
   const hasFlfFrames = mode === 'flf' && (!!v.startFrame?.path || !!v.endFrame?.path)
 
-  if (effectiveRefs.length === 0 && !hasFlfFrames) {
+  if (entries.length === 0 && !hasFlfFrames) {
     attachedBlock =
       modeHint + '\n' +
       'Прикреплённых референсов НЕТ → это FORMAT A (text-to-video).\n' +
@@ -161,7 +165,7 @@ async function buildSystemMessage(
     if (images.length) {
       lines.push('ИЗОБРАЖЕНИЯ — ты получаешь визуальное описание (digest) каждого изображения, сделанное по самому файлу (если файл приложен напрямую — видишь его):')
       images.forEach((r, i) => {
-        lines.push(`  <Picture ${i + 1}> = ${r.name}${r.imageIntent ? ` (используется как: ${r.imageIntent})` : ''}`)
+        lines.push(`  <Picture ${i + 1}> = ${r.name}${r.intent && r.intent !== 'identity' ? ` (используется как: ${r.intent})` : ''}`)
       })
     }
     if (videos.length) {
@@ -325,7 +329,6 @@ ${guide3dBlock}
 async function buildExtendSystemMessage(signal?: AbortSignal): Promise<string> {
   const v = useGenStore.getState().video
   const clips = v.extendClips
-  const refs = v.extendImageRefs
 
   const lines: string[] = []
   lines.push('⚠️ РЕЖИМ ЧАТА: «Продление» (extend). Помогаешь писать промпты КЛИПОВ продления видео. Общего промпта здесь нет — каждый клип продолжает предыдущий (клип 1 продолжает исходное видео).')
@@ -350,11 +353,14 @@ async function buildExtendSystemMessage(signal?: AbortSignal): Promise<string> {
   }
 
   // ── Референсы продления (extendImageRefs — своя нумерация <Picture N>) ──
+  // (правка 823) Через единый сборщик: потолок картинок 9 — РОВНО то, что
+  // уйдёт на провод (раньше система перечисляла все, сервер молча резал).
+  const refEntries = getReferences('extend')
   lines.push('')
-  if (refs.length) {
+  if (refEntries.length) {
     lines.push('РЕФЕРЕНСЫ ПРОДЛЕНИЯ (картинки; ты получаешь их визуальное описание/видишь приложенный файл):')
-    refs.forEach((r, i) => {
-      lines.push(`  <Picture ${i + 1}> = ${r.name}${r.imageIntent ? ` (используется как: ${r.imageIntent})` : ''}`)
+    refEntries.forEach((r, i) => {
+      lines.push(`  <Picture ${i + 1}> = ${r.name}${r.intent ? ` (используется как: ${r.intent})` : ''}`)
     })
   } else {
     lines.push('РЕФЕРЕНСОВ ПРОДЛЕНИЯ НЕТ → метки <Picture N> ЗАПРЕЩЕНЫ, не выдумывай их.')
@@ -476,9 +482,12 @@ function buildControlNetSystemMessage(videoVisionOn: boolean): string {
   } else {
     lines.push('Контрольное видео пока НЕ выбрано — без него генерация не запустится; подскажи выбрать на вкладке «ControlNet».')
   }
-  if (st.refImages.length) {
+  // (правка 823) Через единый сборщик: потолок картинок 9 и нумерация ровно
+  // по прикреплённым (раньше система перечисляла все refImages подряд).
+  const cnImages = getReferences('controlnet').filter((e) => e.kind === 'image')
+  if (cnImages.length) {
     lines.push('Изображения-референсы (ты получаешь их визуальное описание/видишь приложенный файл):')
-    st.refImages.forEach((r, i) => {
+    cnImages.forEach((r, i) => {
       lines.push(`  <Picture ${i + 1}> = ${r.name}`)
     })
   } else {
@@ -594,121 +603,58 @@ function numberSelectionHint(msgs: AssistantChatMessage[], n: number): string | 
  * (controlnet-target-store; пути — имена файлов в ComfyUI input/).
  */
 /**
- * (правка 717) Лимиты референсов — как у самой модели H3 и как в UI
- * (generate-view.tsx: FALLBACK_REF_LIMITS = image 9 / video 3 / audio 3,
- * всего 15).
- *
- * Раньше список референсов НИЧЕМ не ограничивался, а сервер на /api/llm/chat
- * обрезал его до 9 позиций ПО ПОРЯДКУ. Из-за этого системный промпт
- * перечислял <Picture 10>, <Video 2>…, которые на провод не уходили: модель
- * писала в промпт метки несуществующих референсов и описывала картинки,
- * которых НЕ ВИДЕЛА. Теперь лимит применяется ЗДЕСЬ, по видам, и промпт
- * нумерует ровно то, что уйдёт на провод.
+ * (правка 823) Снимок сторов → вход единого сборщика референсов
+ * (src/lib/assistant-refs.ts). ПЕРЕД правкой 823 списки собирались в трёх
+ * местах независимо, и system-промпт перечислял <Picture 10..12>, которых на
+ * проводе не было («несуществующие референсы»).
  */
-const REF_LIMITS = { image: 9, video: 3, audio: 3, total: 15 } as const
-
-function getReferences(chatMode: AssistantChatMode = 'generate'): Array<{
-  path: string
-  trigger: string
-  intent?: string
-  kind: 'image' | 'video' | 'audio'
-  includeAudio?: boolean
-}> {
+function collectRefInput(): AssistantRefInput {
   const v = useGenStore.getState().video
-  // (правка 502) controlnet-чат: референсы — картинки вкладки «ControlNet»:
-  // нумерация <Picture N> в системном промпте controlnet-чата идёт по ним.
-  //
-  // (direct) В режиме «Прямой» контрольное видео подаётся в H3 как
-  // ref_video_0 и является источником анимации. Добавляем его в refs, чтобы
-  // сервер построил digest по кадрам и закэшировал его по содержимому файла.
-  // Для depth/canny/pose оставляем прежнее поведение: ассистент видит только
-  // картинки, а движение задаёт карта.
-  if (chatMode === 'controlnet') {
-    const cn = useControlNetTarget.getState()
-    const out: Array<{
-      path: string
-      trigger: string
-      intent?: string
-      kind: 'image' | 'video' | 'audio'
-      includeAudio?: boolean
-    }> = []
-    if (cn.params.controlType === 'direct' && cn.source) {
-      const sourcePath = cn.source.inputSource
-        || (cn.source.subfolder ? `${cn.source.subfolder}/${cn.source.filename}` : cn.source.filename)
-      out.push({
-        path: sourcePath,
-        trigger: 'Video 1',
-        // inputSource — файл с диска, уже лежит в input/staging; иначе это
-        // галерейный output-файл, и resolver должен искать его в output.
-        intent: cn.source.inputSource ? 'control_source_input' : 'control_source',
-        kind: 'video',
-        includeAudio: false,
-      })
-    }
-    for (const [i, r] of cn.refImages.entries()) {
-      out.push({
-        path: r.path,
-        trigger: `Picture ${i + 1}`,
-        kind: 'image',
-      })
-    }
-    return out
-  }
-  // (правка 427) extend-чат: референсы — картинки вкладки «Продление»
-  // (extendImageRefs), а НЕ v.refs вкладки «Генерация»: нумерация <Picture N>
-  // в системном промпте extend-чата идёт по ним, и прикреплять надо именно их.
-  if (chatMode === 'extend') {
-    return v.extendImageRefs.map((r, i) => ({
+  const cn = useControlNetTarget.getState()
+  return {
+    mode: v.mode,
+    refs: v.refs.map((r) => ({
       path: r.path,
-      trigger: `Picture ${i + 1}`,
-      intent: r.imageIntent || 'identity',
+      name: r.name,
+      kind: r.kind,
+      imageIntent: r.imageIntent,
+      includeAudio: r.includeAudio,
+    })),
+    startFrame: v.startFrame ? { path: v.startFrame.path, name: v.startFrame.name } : null,
+    endFrame: v.endFrame ? { path: v.endFrame.path, name: v.endFrame.name } : null,
+    extendImageRefs: v.extendImageRefs.map((r) => ({
+      path: r.path,
+      name: r.name,
       kind: 'image' as const,
-    }))
+      imageIntent: r.imageIntent,
+    })),
+    controlnet: {
+      controlType: cn.params.controlType,
+      source: cn.source
+        ? {
+            filename: cn.source.filename,
+            inputSource: cn.source.inputSource,
+            subfolder: cn.source.subfolder,
+          }
+        : null,
+      refImages: cn.refImages.map((r) => ({
+        path: r.path,
+        name: r.name,
+        kind: 'image' as const,
+      })),
+    },
   }
-  // (правка 150) В t2v/flf из рефов уходят ТОЛЬКО аудио (картинки/видео не используются нодой).
-  // (правка 151) В flf: кадры (startFrame/endFrame) прикрепляются как image-рефы,
-  // чтобы LLM их ВИДЕЛА и описала словами (запрет <Picture N> — см. system-промпт).
-  const refs = v.mode === 'ref' ? v.refs : v.refs.filter((r) => r.kind === 'audio')
-  const out: Array<{
-    path: string
-    trigger: string
-    intent?: string
-    kind: 'image' | 'video' | 'audio'
-    includeAudio?: boolean
-  }> = []
-  const counters: Record<'image' | 'video' | 'audio', number> = { image: 0, video: 0, audio: 0 }
+}
 
-  // (правка 151) В flf-режиме кадры идут ПЕРВЫМИ (они главные), затем аудио.
-  // LLM должна их увидеть и описать словами; <Picture N> запрещён в system-промпте.
-  if (v.mode === 'flf') {
-    // (правка 717) Кадры занимают слоты <Picture 1..2> — учитываем их в
-    // лимите картинок, иначе общее число картинок могло превысить 9.
-    if (v.startFrame?.path && counters.image < REF_LIMITS.image) {
-      out.push({ path: v.startFrame.path, trigger: 'Первый кадр', intent: 'first_frame', kind: 'image' })
-      counters.image++
-    }
-    if (v.endFrame?.path && counters.image < REF_LIMITS.image) {
-      out.push({ path: v.endFrame.path, trigger: 'Последний кадр', intent: 'last_frame', kind: 'image' })
-      counters.image++
-    }
-  }
-
-  for (const r of refs) {
-    // (правка 717) Лимит по видам + общий потолок. Приоритет: картинки
-    // (их модель видит и они несут внешность), потом видео, потом аудио.
-    if (out.length >= REF_LIMITS.total) break
-    if (r.kind === 'image') {
-      if (counters.image >= REF_LIMITS.image) continue
-      out.push({ path: r.path, trigger: `Picture ${++counters.image}`, intent: r.imageIntent || 'identity', kind: 'image' })
-    } else if (r.kind === 'video') {
-      if (counters.video >= REF_LIMITS.video) continue
-      out.push({ path: r.path, trigger: `Video ${++counters.video}`, kind: 'video', includeAudio: r.includeAudio })
-    } else if (r.kind === 'audio') {
-      if (counters.audio >= REF_LIMITS.audio) continue
-      out.push({ path: r.path, trigger: `Audio ${++counters.audio}`, kind: 'audio' })
-    }
-  }
-  return out
+/**
+ * (правка 823) Референсы для чата. ЕДИНЫЙ источник для system-промпта и
+ * payload /api/llm/chat: потолки REF_LIMITS (image 9 / video 3 / audio 3,
+ * всего 15) применяются здесь ОДИН раз, нумерация компактная.
+ * (правка 427) extend-чат — картинки вкладки «Продление»; (правка 502)
+ * controlnet-чат — картинки «ControlNet» (+ контрольное видео в direct).
+ */
+function getReferences(chatMode: AssistantChatMode = 'generate'): AssistantRefEntry[] {
+  return buildReferenceSet(collectRefInput(), chatMode)
 }
 
 /* ── Live stream state (subscribed by mounted views) ────────────────── */

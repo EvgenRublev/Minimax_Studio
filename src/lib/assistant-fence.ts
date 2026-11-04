@@ -35,6 +35,26 @@ export function hasH3Field(content: string): boolean {
 }
 
 /**
+ * (правка 823) Ответ помечен как оборванный (правка 717 добавляет в конец
+ * текста одну из этих пометок). Обрывок незакрытого fence вставлять в
+ * промпт/клип НЕЛЬЗЯ — это «готовый» промпт, которого нет.
+ */
+const TRUNCATION_MARKERS = [
+  '_[Ответ прерван',
+  '_[Ответ обрезан лимитом',
+  '_[Соединение прервано',
+] as const
+
+export function isTruncatedAnswer(content: string): boolean {
+  return TRUNCATION_MARKERS.some((m) => content.includes(m))
+}
+
+/** Есть ли в тексте ХОТЯ БЫ ОДИН закрытый fence. */
+export function hasCompleteFence(content: string): boolean {
+  return /```[a-zA-Z]*\s*\n?[\s\S]*?\n?\s*```/.test(content)
+}
+
+/**
  * Разобрать ответ ассистента на preamble / fence-промпт / trailing.
  * Возвращает null, если fence нет вообще.
  *
@@ -119,36 +139,42 @@ function stripDecorativeQuotes(t: string): string {
 /**
  * Извлечь вставляемый H3-промпт из ответа ассистента (правка 34):
  * 1) содержимое fence-блока — ровно между ```text и ```, т.е. обрезка
- *    ПО ЗАКРЫВАЮЩЕМУ FENCE, а не до конца строки;
+ *    ПО ЗАКРЫВАЮЩЕМУ FENCE, а не до конца строки; (правка 823) только если
+ *    внутри есть настоящие H3-поля (иначе это код-цитата из Q&A);
  * 2) fence нет — от первого маркера H3-поля, также с обрезкой по
  *    закрывающему fence, если он встречается;
- * 3) фолбэк — последний содержательный абзац.
+ * 3) (правка 823) иначе — пустая строка: текст без H3-структуры (Q&A,
+ *    пояснение, обрывок) в поле промпта не вставляется.
  * Возвращает '' если ничего пригодного нет.
  */
 export function extractInsertablePrompt(content: string): string {
   if (!content) return ''
 
-  // 1)_fence-блок — предпочтительный источник.
+  // (правка 823) Fence — предпочтительный источник, НО только если внутри
+  // настоящие H3-поля. Раньше любой ``` (пример кода в Q&A, цитата) вставлялся
+  // в поле промпта как «промпт» — один из каналов «странных результатов».
   const fence = content.match(/```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```/)
-  if (fence && fence[1].trim()) {
+  if (fence && fence[1].trim() && hasH3Field(fence[1])) {
     return stripDecorativeQuotes(fence[1].trim())
   }
 
   // 2) Нет (полного) fence: от первого H3-поля, с обрезкой по закрывающему
   //    fence, если он всё же встречается дальше.
-  const marker = content.search(H3_FIELD_RE)
-  if (marker >= 0) {
-    let text = content.slice(marker)
-    const close = text.search(/\n\s*```/)
-    if (close >= 0) text = text.slice(0, close)
-    return stripDecorativeQuotes(text.trim())
+  //    (правка 823) Для ОБОРВАННОГО ответа этот путь запрещён: без закрытого
+  //    fence текст мог быть обрезан посередине — вставили бы полупромпт.
+  if (!isTruncatedAnswer(content)) {
+    const marker = content.search(H3_FIELD_RE)
+    if (marker >= 0) {
+      let text = content.slice(marker)
+      const close = text.search(/\n\s*```/)
+      if (close >= 0) text = text.slice(0, close)
+      return stripDecorativeQuotes(text.trim())
+    }
   }
 
-  // 3) Фолбэк: последний содержательный абзац (как было до правки 34).
-  const para = content
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p && !p.startsWith('—') && p.length > 40)
-    .pop()
-  return stripDecorativeQuotes(para ?? content.trim())
+  // 3) (правка 823) Фолбэк «последний абзац > 40 символов» УДАЛЁН.
+  //    Он вставлял в поле промпта русское пояснение из Q&A («Этот абзац
+  //    объясняет причину…») или обрывок ответа — это не H3-промпт.
+  //    Нет fence с H3-полями и нет маркера поля → вставлять нечего.
+  return ''
 }

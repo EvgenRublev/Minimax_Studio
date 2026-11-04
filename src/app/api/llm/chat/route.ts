@@ -13,6 +13,9 @@ import {
   videoBudgetSec,
   messageTokens,
 } from '@/lib/llm-context-trim'
+// (правка 823) Потолки референсов — ОДНА константа для клиента и сервера
+// (источник: src/lib/assistant-refs.ts, сборщик системного промпта).
+import { REF_LIMITS } from '@/lib/assistant-refs'
 import { existsSync, mkdirSync, unlinkSync, rmdirSync, readdirSync, statSync } from 'fs'
 import path, { join } from 'path'
 import sharp from 'sharp'
@@ -136,7 +139,9 @@ export async function POST(req: NextRequest) {
       // позиций. Модель писала в промпт <Picture 12> и описывала картинки,
       // которых НЕ видела. Теперь обе стороны режут одинаково, по видам, —
       // промпт и фактическое крепление всегда совпадают.
-      const REF_LIMITS = { image: 9, video: 3, audio: 3, total: 15 } as const
+      // (правка 823) Потолки — общая константа REF_LIMITS из
+      // src/lib/assistant-refs.ts (клиентский сборщик режет ровно так же —
+      // system-промпт и провод совпадают 1:1).
       const cappedReferences = (() => {
         if (!Array.isArray(references)) return undefined
         const counters = { image: 0, video: 0, audio: 0 }
