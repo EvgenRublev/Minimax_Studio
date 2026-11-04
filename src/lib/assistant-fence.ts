@@ -136,6 +136,17 @@ function stripDecorativeQuotes(t: string): string {
   return t.replace(/^["«]+/, '').replace(/["»]+$/g, '').trim()
 }
 
+/** (правка 828) Референсные метки FORMAT B: <Picture N>/<Video N>/<Subject N>
+ *  (и закрывающие). В FORMAT A они запрещены спекой (h3-prompt-spec.ts);
+ *  при генерации в режимах t2v/flf/extend generate-view вычищает их из
+ *  промпта (правка 150) — молча. <Audio N> НЕ считаем: он легален и в A. */
+const REF_TAG_RE = /<\/?(?:Picture|Video|Subject)\s*\d+\s*>/i
+
+/** Есть ли в вставляемом промпте метки референсов (≈ FORMAT B). */
+export function hasRefTags(prompt: string): boolean {
+  return !!prompt && REF_TAG_RE.test(prompt)
+}
+
 /**
  * Извлечь вставляемый H3-промпт из ответа ассистента (правка 34):
  * 1) содержимое fence-блока — ровно между ```text и ```, т.е. обрезка

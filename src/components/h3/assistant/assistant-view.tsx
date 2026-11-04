@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt } from '@/lib/assistant-fence'
+import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -776,7 +776,15 @@ export function AssistantView({
   const insertIntoPrompt = useCallback((content: string) => {
     const clean = extractInsertablePrompt(content)
     if (!clean) return
-    useGenStore.getState().setVideoPrompt(clean)
+    const st = useGenStore.getState()
+    st.setVideoPrompt(clean)
+    // (правка 828) S21: guard «формат ≠ режим». Промпт с метками
+    // <Picture N>/<Video N>/<Subject N> (FORMAT B) в режимах «Текст»/«Кадры»
+    // при генерации молча теряет метки (generate-view, правка 150) —
+    // предупреждаем, но НЕ блокируем вставку.
+    if (hasRefTags(clean) && st.video.mode !== 'ref') {
+      toast.warning('В промпте метки референсов (<Picture N>…), а форма в режиме «Текст»/«Кадры» — при генерации они будут удалены. Переключите режим на «Референсы» или уберите метки.')
+    }
     // (правка 161) Кнопка видна только когда !streaming — стрим завершён.
     // Но серверный assistantBusy может ещё быть true (drain-насос не
     // завершился). GenerateView при монтировании poll'ит /api/llm/status
@@ -815,6 +823,11 @@ export function AssistantView({
     }
     clips[idx] = { ...clips[idx], prompt: clean }
     st.patchVideo({ extendClips: clips })
+    // (правка 828) S21: продление — FORMAT A без меток референсов; при генерации
+    // они вычищаются (правка 150) — предупреждаем, не блокируя.
+    if (hasRefTags(clean)) {
+      toast.warning('В промпте клипа метки референсов (<Picture N>…) — в режиме продления они будут удалены при генерации.')
+    }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
     toast.success(`Промпт вставлен в клип ${clipNumber}`)
@@ -828,18 +841,25 @@ export function AssistantView({
     const st = useGenStore.getState()
     const clips = [...st.video.extendClips]
     let applied = 0
+    let withRefTags = 0 // (правка 828) S21
     for (const { content, clip } of pairs) {
       const clean = stripClipMarker(content).trim()
       const idx = clip - 1
       if (!clean || idx < 0 || idx >= clips.length) continue
       clips[idx] = { ...clips[idx], prompt: clean }
       applied++
+      if (hasRefTags(clean)) withRefTags++ // (правка 828)
     }
     if (applied === 0) {
       toast.error('Нечего вставлять — клипы не найдены')
       return
     }
     st.patchVideo({ extendClips: clips })
+    // (правка 828) S21: предупреждаем про метки референсов (при генерации
+    // в продлении они вычищаются, правка 150), вставку не блокируем.
+    if (withRefTags > 0) {
+      toast.warning(`В ${withRefTags} вставленных промптах есть метки референсов (<Picture N>…) — в режиме продления они будут удалены при генерации.`)
+    }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
     toast.success(`Промпты вставлены в клипы: ${applied} шт.`)
