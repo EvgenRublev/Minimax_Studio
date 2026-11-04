@@ -21,6 +21,7 @@ Auto-exits after --idle-sec without requests (frees RAM/VRAM); 0 disables it.
 import argparse
 import hashlib
 import inspect
+import itertools
 import json
 import socket
 import threading
@@ -360,6 +361,21 @@ def _build_llm(n_gpu_layers):
         n_ctx=args.ctx,
         n_threads=args.threads,
         verbose=False,
+        # (правка 830) Гибридные модели (Qwen3.5: is_hybrid=True) ломались на
+        # втором-третьем запросе длинного чата:
+        #   "decode: failed to find a memory slot for batch of size 2048"
+        #   -> "Llama.eval(decode): Failed completely even with batch size 1".
+        # Причина — HybridCheckpointCache: при расхождении префикса
+        # llama_multimodal.py восстанавливает ТОЛЬКО рекуррентное состояние
+        # (restore_checkpoint) и выставляет n_tokens = pos чекпойнта, но НЕ
+        # освобождает ячейки attention-KV за этой позицией (memory_seq_rm не
+        # вызывается). Следующий eval пишет в занятые ячейки — слотов нет.
+        # ctx_checkpoints=0 отключает чекпойнты: при расхождении префикса
+        # llama_multimodal делает memory_clear(True) + n_tokens=0 (полный
+        # пересчёт промпта) — корректно, ценой одного префилла на смену
+        # ветки диалога. Обычное продолжение диалога по-прежнему
+        # переиспользует префикс без пересчёта.
+        ctx_checkpoints=0,
     )
     # (правка 109) KV cache quantization: type_k = type_v = выбранный тип
     if kv_type is not None:
@@ -506,6 +522,21 @@ def _apply_system_n_keep(messages):
                 # оценка только завышается, запас остаётся безопасным.
                 n_tokens = len(llm.tokenize(content.encode('utf-8'), add_bos=True, special=True))
                 n_keep = n_tokens + 64  # 64 — запас на обёртку шаблона и BOS
+                # (правка 830) Не даём n_keep «съесть» весь контекст. Если
+                # системный промпт + запас на ответ больше n_ctx, при
+                # переполнении шифту нечего выбрасывать (всё закреплено) —
+                # и llama.cpp падает вместо сдвига. Держим не больше
+                # половины окна и всегда оставляем место под ответ.
+                _ctx_size = int(getattr(args, 'ctx', 0) or 0)
+                if _ctx_size > 0:
+                    _cap = max(256, min(_ctx_size // 2, _ctx_size - 4096))
+                    if n_keep > _cap:
+                        print(
+                            f'[llm] (правка 830) n_keep {n_keep} → {_cap} '
+                            f'(ctx={_ctx_size}: оставляем место под ответ)',
+                            flush=True,
+                        )
+                        n_keep = _cap
                 _n_keep_cache[key] = n_keep
                 if len(_n_keep_cache) > 8:
                     _n_keep_cache.clear()
@@ -522,6 +553,53 @@ def _apply_system_n_keep(messages):
     except Exception as e:  # noqa: BLE001
         # Не критично: без n_keep поведение как раньше (default 256).
         print(f'[llm] (правка 62) n_keep не установлен: {e}', flush=True)
+
+
+# ── (правка 830) восстановление после «нет слота в KV-кэше» ──────────────
+# Гибридные модели (Qwen3.5) в llama-cpp-python 0.3.46 могут оставить в
+# физическом KV-кэше «мусорные» занятые ячейки за позицией отката (см.
+# ctx_checkpoints=0 в _build_llm). Тогда ЛЮБОЙ следующий prefill падает:
+#   decode: failed to find a memory slot for batch of size 2048 … 1
+#   Llama.eval(decode): Failed completely even with batch size 1
+# Сервер при этом оставался мёртвым до перезапуска: каждый следующий /chat
+# упирался в тот же мусор. Теперь ошибку распознаём, чистим кэш физически
+# (memory_clear + сброс рекуррентных чекпойнтов + n_tokens=0) и повторяем
+# запрос ОДИН раз — с нуля, заново оценивая промпт.
+_KV_SLOT_ERROR_MARKERS = (
+    'failed to find a memory slot',
+    'failed completely even with batch size',
+)
+
+
+def _is_kv_slot_error(exc):
+    """True, если исключение — «нет свободного слота в KV-кэше»."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _KV_SLOT_ERROR_MARKERS)
+
+
+def _hard_reset_kv(reason):
+    """Полный сброс физического KV-кэша (attention-ячейки + hybrid-чекпойнты).
+    llm.reset() для этого не годится: он меняет только n_tokens, а занятые
+    ячейки/рекуррентное состояние остаются."""
+    ctx_obj = getattr(llm, '_ctx', None)
+    try:
+        mgr = getattr(llm, '_hybrid_cache_mgr', None)
+        if mgr is not None:
+            try:
+                mgr.clear()
+            except Exception:  # noqa: BLE001
+                pass
+        if ctx_obj is not None:
+            clear = getattr(ctx_obj, 'memory_clear', None)
+            if callable(clear):
+                clear(True)
+    except Exception as e:  # noqa: BLE001
+        print(f'[llm] (правка 830) память KV не очищена ({reason}): {e}', flush=True)
+    try:
+        llm.n_tokens = 0
+    except Exception:  # noqa: BLE001
+        pass
+    print(f'[llm] (правка 830) KV-кэш сброшен: {reason}', flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -781,16 +859,24 @@ class Handler(BaseHTTPRequestHandler):
                 result = {}
 
                 def _gen():
-                    try:
-                        result['res'] = llm.create_chat_completion(
-                            messages=messages,
-                            max_tokens=max_tokens,
-                            stop=stop,
-                            stream=False,
-                            **sampling,
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        result['err'] = e
+                    # (правка 830) Один повтор после физического сброса KV:
+                    # «нет слота» — состояние кэша, а не ошибка промпта.
+                    for _attempt in (1, 2):
+                        try:
+                            result['res'] = llm.create_chat_completion(
+                                messages=messages,
+                                max_tokens=max_tokens,
+                                stop=stop,
+                                stream=False,
+                                **sampling,
+                            )
+                            return
+                        except Exception as e:  # noqa: BLE001
+                            if _attempt == 1 and _is_kv_slot_error(e):
+                                _hard_reset_kv('non-stream prefill')
+                                continue
+                            result['err'] = e
+                            return
 
                 t = threading.Thread(target=_gen, daemon=True)
                 t.start()
@@ -882,14 +968,39 @@ class Handler(BaseHTTPRequestHandler):
             finish_reason = None
             aborted = False
             try:
-                stream = llm.create_chat_completion(
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    stop=stop,
-                    stream=True,
-                    **sampling,
-                )
-                for chunk in stream:
+                def _open_stream():
+                    return llm.create_chat_completion(
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        stop=stop,
+                        stream=True,
+                        **sampling,
+                    )
+
+                # (правка 830) Prefill выполняется на первом next(), ДО первого
+                # чанка. «Нет слота в KV-кэше» здесь ещё можно исправить: сброс
+                # кэша + один повтор — клиент не получил ни одного дельта-байта.
+                _NO_CHUNK = object()
+                stream = None
+                first_chunk = _NO_CHUNK
+                try:
+                    stream = _open_stream()
+                    first_chunk = next(stream)
+                except StopIteration:
+                    first_chunk = _NO_CHUNK
+                except Exception as e:  # noqa: BLE001
+                    if not _is_kv_slot_error(e):
+                        raise
+                    _hard_reset_kv('stream prefill')
+                    stream = _open_stream()
+                    try:
+                        first_chunk = next(stream)
+                    except StopIteration:
+                        first_chunk = _NO_CHUNK
+                chunks = stream
+                if first_chunk is not _NO_CHUNK:
+                    chunks = itertools.chain((first_chunk,), stream)
+                for chunk in chunks:
                     if abort_flag.is_set() or shutdown_requested.is_set():
                         aborted = True
                         break
