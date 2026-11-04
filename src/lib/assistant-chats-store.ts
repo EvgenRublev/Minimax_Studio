@@ -238,7 +238,9 @@ export const useAssistantChats = create<AssistantChatsState>()(
         // (extend-режима тогда не существовало).
         chats = chats.map((c) => ({
           ...c,
-          mode: typeof c.mode === 'string' ? c.mode : 'generate',
+          // (правка 831) Whitelist из трёх режимов (как в assistant-chats-sync):
+          // иначе чужое строковое значение прятало чат во всех фильтрах.
+          mode: (c.mode === 'extend' || c.mode === 'controlnet' ? c.mode : 'generate') as AssistantChatMode,
           messages: c.messages.map((m) => ({ ...m, content: capContent(m.content) })),
         }))
         const activeChatId =

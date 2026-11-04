@@ -235,6 +235,7 @@ export async function POST(req: NextRequest) {
             return rank(a.kind) - rank(b.kind)
           })
           for (const ref of digestOrder) {
+            if (req.signal?.aborted) break
             if (Date.now() - digestStartedAt > digestBudgetMs) {
               console.warn('[llm] ref digest budget exhausted — remaining references use raw media')
               break
@@ -260,7 +261,9 @@ export async function POST(req: NextRequest) {
               modelId: digestModelKey,
               videoVision: cfg.llmVideoVision,
               signal: req.signal,
+              requestId,
             })
+            if (result.error === 'aborted' || req.signal?.aborted) break
             if (result.ok && result.digest) {
               digestByTrigger.set(ref.trigger, result.digest)
               digestUsed = true
@@ -763,6 +766,13 @@ export async function POST(req: NextRequest) {
         } catch (e) {
           console.warn('[llm] audio-probe failed, continuing:', e)
         }
+      }
+
+      // (правка 831) Клиент уже отменил запрос («Стоп» во время загрузки
+      // модели или прохода дайджестов) — не запускаем сам стрим в LLM.
+      if (req.signal?.aborted) {
+        cleanup()
+        return { kind: 'upstream-error' as const, error: 'Запрос отменён' }
       }
 
       // Таймаут только на установку соединения (см. комментарий у fetch).

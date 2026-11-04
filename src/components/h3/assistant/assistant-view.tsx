@@ -272,7 +272,7 @@ export function AssistantView({
    * from the actual prompt to copy.
    */
   const renderChatContent = useCallback(
-    (rawText: string): React.ReactNode => {
+    (rawText: string, liveStream = false): React.ReactNode => {
       if (!rawText) return null
 
       // Fence parsing — единый источник истины: src/lib/assistant-fence.ts
@@ -290,7 +290,10 @@ export function AssistantView({
         return (
           <div className="space-y-3">
             {fences.map((fence, fi) => {
-              const fenceStreaming = fence.streaming
+              // (правка 831) Пульсирующий индикатор и «генерируется…» — только
+              // для реально идущего стрима: в уже сохранённом сообщении
+              // незакрытый fence означает обрыв ответа, а не генерацию.
+              const fenceStreaming = fence.streaming && liveStream
               // (правка 427) extend: маркер `clip: N` первой строкой fence —
               // показываем номер в подписи карточки и вырезаем строку из тела
               // (в карточку клипа она не попадёт — stripClipMarker при вставке).
@@ -1299,10 +1302,10 @@ export function AssistantView({
                   </div>
                 </motion.div>
               ))}
-              {streamingHere && (
+                  { streamingHere && (
                 <div className="flex justify-start">
                   <div className="select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words bg-[var(--surface-2)]/60 border border-border/60 text-foreground/95 rounded-bl-sm">
-                    {streamText ? renderChatContent(streamText) : 'Готовлю ответ…'}
+                    {streamText ? renderChatContent(streamText, true) : 'Готовлю ответ…'}
                   </div>
                 </div>
               )}

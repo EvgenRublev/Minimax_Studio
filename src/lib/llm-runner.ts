@@ -314,7 +314,19 @@ async function healthUp(timeoutMs: number): Promise<boolean> {
       const r = await fetch(`http://127.0.0.1:${LLM_PORT}/health`, {
         signal: AbortSignal.timeout(2000),
       })
-      if (r.ok) return true
+      if (r.ok) {
+        // (правка 831) Синхронизируем gpuMode с фактическим числом слоёв на
+        // GPU: при --gpu-layers -1 llm_server.py может откатиться на 0 слоёв
+        // (CPU), но при спавне gpuMode ставился в 'gpu' заранее — бейдж
+        // показывал «GPU», хотя модель реально работала на CPU.
+        try {
+          const j = (await r.json()) as { gpu_layers?: unknown }
+          if (typeof j.gpu_layers === 'number') {
+            gpuMode = j.gpu_layers === 0 ? 'cpu' : 'gpu'
+          }
+        } catch { /* llama-server (bonsai) не отдаёт gpu_layers в /health */ }
+        return true
+      }
     } catch {
       /* not up yet — model loading */
     }
@@ -464,9 +476,11 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
       // llm_server.py отдаёт модель прямо в /health; llama-server (bonsai) —
       // через /v1/models.
       let foreignModel: string | null = null
+      let foreignGpuLayers: number | null = null
       try {
-        const j = (await r.json()) as { model?: unknown }
+        const j = (await r.json()) as { model?: unknown; gpu_layers?: unknown }
         if (typeof j.model === 'string' && j.model) foreignModel = j.model
+        if (typeof j.gpu_layers === 'number') foreignGpuLayers = j.gpu_layers
       } catch { /* тело не JSON — вероятно, llama-server */ }
       if (!foreignModel) {
         try {
@@ -490,6 +504,9 @@ export async function ensureLlm(): Promise<{ ok: boolean; error?: string }> {
             error: `Порт ${LLM_PORT} занят LLM-сервером с другой моделью (${base(foreignModel)} вместо ${base(desired)}) — процесс остался от прошлого запуска. Завершите python.exe / llama-server.exe в Диспетчере задач и отправьте сообщение снова.`,
           }
         }
+      }
+      if (foreignGpuLayers !== null) {
+        gpuMode = foreignGpuLayers === 0 ? 'cpu' : 'gpu'
       }
       spawnSig = null // сервер не заспавнен нами — сигнатурную проверку пропускаем
       console.log(`[llm] (правка 343) порт ${LLM_PORT} уже слушает живой сервер — переиспользую его`)

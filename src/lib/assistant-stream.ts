@@ -391,12 +391,14 @@ async function buildExtendSystemMessage(signal?: AbortSignal): Promise<string> {
       const metaPath = v.extendSourceSubfolder
         ? `${v.extendSourceSubfolder}/${v.extendSourceName}`
         : v.extendSourceName
+      // (правка 831) Ограничиваем ожидание /api/comfy/meta 8 с И одновременно
+      // слушаем signal отмены стрима: `signal ?? timeout` отключал таймаут,
+      // когда передан ac.signal (его собственный таймаут — 10 минут).
+      const metaSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+        : AbortSignal.timeout(8000)
       const mr = await fetch(`/api/comfy/meta?path=${encodeURIComponent(metaPath)}`, {
-        // (правка 717) Таймаут и сигнал отмены. Раньше этот запрос шёл без
-        // signal: зависший /api/comfy/meta навсегда подвешивал await, а
-        // значит — и весь цикл стрима: UI оставался в состоянии «стримит»,
-        // send() отказывал, и без «Стоп» чат было не разбудить.
-        signal: signal ?? AbortSignal.timeout(8000),
+        signal: metaSignal,
       })
       if (mr.ok) {
         const meta = (await mr.json()) as {
@@ -838,7 +840,9 @@ export function runAssistantCompletion(
       // Лёгкий локальный GET; при ошибке остаёмся по умолчанию (выкл).
       let videoVisionOn = true
       try {
-        const cfgRes = await fetch('/api/config', { signal: ac.signal })
+        const cfgRes = await fetch('/api/config', {
+          signal: AbortSignal.any([ac.signal, AbortSignal.timeout(5000)]),
+        })
         if (cfgRes.ok) {
           const cfg = await cfgRes.json()
           videoVisionOn = cfg.llm_video_vision !== false

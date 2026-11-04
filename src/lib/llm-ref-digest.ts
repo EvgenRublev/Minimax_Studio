@@ -49,6 +49,9 @@ export interface RefDigestRequest {
   modelId: string
   videoVision: boolean
   signal?: AbortSignal
+  /** (правка 831) request_id основного чата — чтобы кнопка «Стоп»
+   *  (POST /abort?request_id=…) останавливала и проход дайджестов тоже. */
+  requestId?: string | null
 }
 
 export interface RefDigestResult {
@@ -356,6 +359,7 @@ async function callDigestLlm(opts: {
   modelId: string
   messages: Array<{ role: string; content: string | unknown[] }>
   signal?: AbortSignal
+  requestId?: string | null
 }): Promise<string> {
   const controller = new AbortController()
   const onAbort = () => controller.abort()
@@ -396,6 +400,7 @@ async function callDigestLlm(opts: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...(opts.requestId ? { request_id: opts.requestId } : {}),
         messages: opts.messages,
         max_tokens: DIGEST_MAX_TOKENS,
         stream: false,
@@ -415,8 +420,12 @@ async function callDigestLlm(opts: {
       ok?: boolean
       text?: string
       error?: string
+      finish_reason?: string
     } | null
     if (!data?.ok) throw new Error(data?.error || 'LLM returned no text')
+    // (правка 831) Прерванный дайджест («Стоп» во время анализа рефов) —
+    // не кэшируем пустой ответ и сразу прекращаем цепочку.
+    if (data.finish_reason === 'aborted') throw new Error('aborted')
     return typeof data.text === 'string' ? data.text : ''
   } finally {
     clearTimeout(timer)
@@ -509,6 +518,7 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
       modelId: input.modelId,
       messages,
       signal: input.signal,
+      requestId: input.requestId,
     })
     const digest = normalizeDigest(raw)
     if (!digest) {

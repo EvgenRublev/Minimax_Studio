@@ -36,17 +36,30 @@ export function hasH3Field(content: string): boolean {
 
 /**
  * (правка 823) Ответ помечен как оборванный (правка 717 добавляет в конец
- * текста одну из этих пометок). Обрывок незакрытого fence вставлять в
+ * текста одну из этих пометок, либо сам ответ — синтетическая реплика
+ * `_[Ошибка: …]_`). Обрывок незакрытого fence или текст ошибки вставлять в
  * промпт/клип НЕЛЬЗЯ — это «готовый» промпт, которого нет.
  */
 const TRUNCATION_MARKERS = [
   '_[Ответ прерван',
   '_[Ответ обрезан лимитом',
   '_[Соединение прервано',
+  '_[Ошибка:',
 ] as const
 
 export function isTruncatedAnswer(content: string): boolean {
   return TRUNCATION_MARKERS.some((m) => content.includes(m))
+}
+
+/** (правка 831) Забрать текст до синтетической пометки обрыва/ошибки
+ *  (правка 717 добавляет её в самый конец сообщения после `\n\n`). Без этого
+ *  незакрытый fence `\`\`\`text\n…` проглатывал строку `_[Ответ прерван…]_`
+ *  внутрь тела промпта, и пометка рендерилась и копировалась как часть
+ *  самого промпта. */
+function stripTrailingStatusMarker(raw: string): { body: string; marker: string } {
+  const m = raw.match(/\n\n(_\[(?:Ответ прерван|Ответ обрезан лимитом|Соединение прервано|Ошибка:)[^\n]*\]_)\s*$/)
+  if (!m || typeof m.index !== 'number') return { body: raw, marker: '' }
+  return { body: raw.slice(0, m.index), marker: m[1] }
 }
 
 /** Есть ли в тексте ХОТЯ БЫ ОДИН закрытый fence. */
@@ -65,17 +78,19 @@ export function hasCompleteFence(content: string): boolean {
  */
 export function parseFence(raw: string): FenceParse | null {
   if (!raw) return null
-  let m = raw.match(/```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```/)
+  const { body, marker } = stripTrailingStatusMarker(raw)
+  let m = body.match(/```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```/)
   let streaming = false
   if (!m) {
-    const open = raw.match(/```[a-zA-Z]*[ \t]*\n?([\s\S]*)$/)
+    const open = body.match(/```[a-zA-Z]*[ \t]*\n?([\s\S]*)$/)
     if (!open) return null
     m = open
     streaming = true
   }
-  const idx = raw.indexOf(m[0])
-  const preamble = raw.slice(0, idx).trim()
-  const trailing = streaming ? '' : raw.slice(idx + m[0].length).trim()
+  const idx = body.indexOf(m[0])
+  const preamble = body.slice(0, idx).trim()
+  const rest = streaming ? '' : body.slice(idx + m[0].length).trim()
+  const trailing = [rest, marker].filter(Boolean).join('\n\n')
   return { preamble, prompt: m[1].trim(), trailing, streaming }
 }
 
@@ -89,15 +104,16 @@ export function parseFence(raw: string): FenceParse | null {
  */
 export function parseAllFences(raw: string): FenceParse[] {
   if (!raw) return []
+  const { body, marker } = stripTrailingStatusMarker(raw)
   const out: FenceParse[] = []
   const re = /```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```/g
   let last = 0
   let m: RegExpExecArray | null
-  while ((m = re.exec(raw)) !== null) {
-    out.push({ preamble: raw.slice(last, m.index).trim(), prompt: m[1].trim(), trailing: '', streaming: false })
+  while ((m = re.exec(body)) !== null) {
+    out.push({ preamble: body.slice(last, m.index).trim(), prompt: m[1].trim(), trailing: '', streaming: false })
     last = m.index + m[0].length
   }
-  const rest = raw.slice(last)
+  const rest = body.slice(last)
   // Незакрытый fence в конце — стриминг: важно проверять ДАЖЕ когда
   // завершённых fence не было вовсе (единственный fence ещё стримится).
   const open = rest.match(/```[a-zA-Z]*[ \t]*\n?([\s\S]*)$/)
@@ -105,11 +121,12 @@ export function parseAllFences(raw: string): FenceParse[] {
     out.push({
       preamble: rest.slice(0, open.index).trim(),
       prompt: open[1].trim(),
-      trailing: '',
+      trailing: marker,
       streaming: true,
     })
-  } else if (out.length && rest.trim()) {
-    out[out.length - 1].trailing = rest.trim()
+  } else if (out.length) {
+    const tail = [rest.trim(), marker].filter(Boolean).join('\n\n')
+    if (tail) out[out.length - 1].trailing = tail
   }
   return out
 }
