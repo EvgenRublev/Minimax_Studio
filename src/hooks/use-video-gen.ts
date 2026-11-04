@@ -1164,6 +1164,11 @@ export function useVideoGen() {
           chunkFFChunks: params.chunkFFChunks ?? 2,
           chunkFFThreshold: params.chunkFFThreshold ?? 4096,
           latentUpscaler3D: params.latentUpscaler3D !== false, // (правка 806)
+          // (правка 829) «Зациклено»: только не в extend. Шаблон патчит модель
+          // (MiniMaxStudioLoop) и декодирует через MiniMaxStudioLoopDecode.
+          loop: genMode !== 'extend' && params.loop === true ? true : undefined,
+          loopPadClips: genMode !== 'extend' && params.loop === true ? params.loopPadClips : undefined,
+          loopViews: genMode !== 'extend' && params.loop === true ? params.loopViews : undefined,
           outputSubfolder: params.outputSubfolder || '', // (правка 91)
           // (правка 161) extend-режим: клипы + рефы (refImages → extendRefs)
           extendClips: genMode === 'extend' ? (params.extendClips || []) : undefined,
@@ -1330,6 +1335,16 @@ export function useVideoGen() {
           model_type: 'minimax_h3_ref2va',
           workflow: draft ? 'draft-single-pass' : 'two-pass-latent-upscaler',
           pipeline: draft ? 'draft' : 'full',
+          // (правка 829) «Зациклено»: в mp4 ровно один цикл — на 5 кадров
+          // меньше запроса. В сайдкар пишем фактическую длину файла (как для
+          // refine/extend): «Повторить» подаст это число, а узел 46:19 снова
+          // снапнет его до 17k+5 — запрос выйдет тот же.
+          ...(genMode !== 'extend' && params.loop === true && {
+            loop: true,
+            loop_frames: Math.max(17, videoLengthFrames - 5),
+            loop_pad_clips: params.loopPadClips ?? 1,
+            loop_views: params.loopViews ?? 2,
+          }),
           seed: actualSeed,
           resolution: `${metaOutW}x${metaOutH}`,
           aspect_ratio: aspectRatio,
@@ -1348,8 +1363,12 @@ export function useVideoGen() {
             )
             return Math.round(((p1.w * p1.h) / (1024 * 1024)) * 1000) / 1000
           })(),
-          video_length: videoLengthFrames,
-          duration_seconds: videoLengthFrames / fps,
+          video_length: genMode !== 'extend' && params.loop === true
+            ? Math.max(17, videoLengthFrames - 5)
+            : videoLengthFrames,
+          duration_seconds: (genMode !== 'extend' && params.loop === true
+            ? Math.max(17, videoLengthFrames - 5)
+            : videoLengthFrames) / fps,
           fps,
           // Extend: фактические шаги КЛИПА (override > шаги исходника/first) —
           // мету результата читает следующее продление как «авто».

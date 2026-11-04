@@ -156,6 +156,16 @@ export interface VideoGenerateParams {
   /** ChunkFF: sequence length threshold above which chunking kicks in (default 4096). */
   chunkFFThreshold?: number
 
+  /* ── (правка 829) «Зациклено» ── */
+  /** Бесшовный цикл (конец переходит в начало). Модель патчится
+   *  MiniMaxStudioLoop, декод идёт через MiniMaxStudioLoopDecode и отдаёт
+   *  ровно videoLength−5 кадров. В режиме 'extend' не поддерживается. */
+  loop?: boolean
+  /** Клипов по 17 кадров обёрнутого контекста с каждой стороны (default 1). */
+  loopPadClips?: number
+  /** 2 (default) — второй вид со сдвигом на полцикла для звука; 1 — один вид. */
+  loopViews?: number
+
   /* ── misc ── */
   textEncoder?: string
   negativePrompt?: string

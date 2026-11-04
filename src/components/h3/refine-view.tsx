@@ -127,9 +127,13 @@ export function RefineView() {
   // (правка 377) Наличие латента у источника: true → lossless-путь
   // (refine стартует с первозданного латента, без h264+VAE-потерь).
   const [latentOk, setLatentOk] = useState(false)
+  // (правка 829) Источник зациклен (флаг loop в его сайдкаре): рефайн
+  // автоматически идёт циклической цепочкой — показываем это бейджем.
+  const [srcLoop, setSrcLoop] = useState(false)
   useEffect(() => {
     setMetaRefs(null)
     setLatentOk(false)
+    setSrcLoop(false)
     if (!source || source.inputSource || !source.filename) return
     const sub = source.subfolder ?? ''
     const p = sub ? `${sub}/${source.filename}` : source.filename
@@ -144,11 +148,13 @@ export function RefineView() {
           generation_mode?: string
           first_frame?: string | null
           latent_available?: boolean // (правка 377)
+          loop?: boolean // (правка 829)
         }
       })
       .then((meta) => {
         if (cancelled) return
         setLatentOk(meta?.latent_available === true)
+        setSrcLoop(meta?.loop === true)
         const list = Array.isArray(meta?.references) ? meta!.references!
           : Array.isArray(meta?.minimax_h3_references) ? meta!.minimax_h3_references!
           : []
@@ -554,13 +560,32 @@ export function RefineView() {
             </p>
           )}
 
+          {/* (правка 829) Источник — цикл: рефайн соберёт его заново по
+              цикличной цепочке (Loop после сэмплера + Loop Decode), поэтому
+              в mp4 снова попадёт ровно один цикл. */}
+          {source && !source.inputSource && srcLoop && (
+            <p
+              className="text-[10px] -mt-1 flex items-center gap-1.5 text-violet-300/90"
+              title={mode === 'whole'
+                ? 'Исходник помечен как зацикленный: рефайн добавит 5 кадров хвоста, сэмплер получит обёрнутый контекст, а декод отдаст ровно один цикл — стык «конец → начало» сохранится.'
+                : 'В режиме «Частями» цикл не поддерживается: окна режутся независимо, стык не собрать. Рефайн пойдёт обычным проходом.'}
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
+              {mode === 'whole'
+                ? 'Зациклено ✓ — рефайн сохранит цикл'
+                : 'Зациклено — в «Частями» цикл не сохраняется'}
+            </p>
+          )}
+
           {/* (правка 377) Бейдж «латент ✓»: источник несёт сохранённый
               AV-латент генерации → рефайн пойдёт по lossless-пути (без
               h264-декода и повторного VAEEncode) — в ОБОИХ режимах:
               «Целый» и «Частями» (правка 382: окна режутся токенами
               латента). Показываем только при наличии латента: его
-              отсутствие — обычный mp4-путь (старые файлы, чужие видео). */}
-          {source && !source.inputSource && latentOk && (
+              отсутствие — обычный mp4-путь (старые файлы, чужие видео).
+              (правка 829) У зацикленных роликов латента нет — бейдж не
+              показываем, чтобы не обещать lossless-путь. */}
+          {source && !source.inputSource && latentOk && !srcLoop && (
             <p
               className="text-[10px] -mt-1 flex items-center gap-1.5 text-emerald-400/90"
               title={

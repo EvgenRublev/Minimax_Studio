@@ -8,7 +8,7 @@
       * Node.js 22 (портативный, если в системе нет 18+)
       * node_modules + production-сборку .next
       * ComfyUI 0.33.0 + Python 3.12.10 + torch 2.11.0+cu130 + 288 пакетов
-      * 22 кастомные ноды по зафиксированным коммитам + 4 локальные ноды
+      * 22 кастомные ноды по зафиксированным коммитам + 5 локальных нод
       * STT-рантайм transcribe.cpp v0.1.3 (голосовой ввод; CPU-only)
       * папки моделей, extra_model_paths.yaml, .no-auto-update
 
@@ -1180,7 +1180,7 @@ if (-not $SkipComfy) {
     }
 
     # --- 6. кастомные ноды ---
-    Step 6 9 'Кастомные ноды (22 из GitHub + 4 локальные)'
+    Step 6 9 'Кастомные ноды (22 из GitHub + 5 локальных)'
 
     $nodesDir = Join-Path $comfyApp 'custom_nodes'
     if (-not (Test-Path $nodesDir)) { New-Item -ItemType Directory -Force -Path $nodesDir | Out-Null }

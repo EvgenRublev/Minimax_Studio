@@ -274,6 +274,21 @@ export interface MiniMaxH3Params {
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini; сервер
    *  передаёт при сборке джоба, undefined = дефолт h264/CRF 12). */
   videoFormat?: VideoFormatSettings
+  /** (правка 829) «Зациклено»: бесшовный цикл — конец переходит в начало.
+   *  Модель патчится MiniMaxStudioLoop (круговой латент-паддинг: сэмплер
+   *  видит латент с обёрнутыми клипами по краям), а декод идёт через
+   *  MiniMaxStudioLoopDecode — на выходе ровно length−5 кадров (17k) и
+   *  звук той же длины. Недоступно в режиме 'extend'. */
+  loop?: boolean
+  /** (правка 829) «Зациклено»: клипов по 17 кадров обёрнутого контекста с
+   *  каждой стороны цикла (default 1, 1–8). Больше — чище стык, дольше
+   *  сэмплинг. При pad 1 длина > 328 кадров выходит за обученный диапазон
+   *  H3 (362 кадра уже после паддинга). */
+  loopPadClips?: number
+  /** (правка 829) «Зациклено»: 2 (default) — второй вид со сдвигом на
+   *  полцикла для звука (убирает «кашу»/перегруз на стыке, ~1.8× времени
+   *  сэмплинга); 1 — один вид. */
+  loopViews?: number
 }
 
 /** Node IDs for reference images (up to 9). */
@@ -1094,6 +1109,26 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     modelSrc = ['46:40', 0]
   }
 
+  // ─── (правка 829) «Зациклено» — бесшовный цикл ───
+  // Круговой латент-паддинг: сэмплер видит латент, у которого по краям
+  // добавлены клипы, обёрнутые с другого конца цикла. Поэтому стык
+  // конец→начало денойзится как обычная граница клипов, а края уходят в
+  // контекст, который потом выбрасывается.
+  // Декод — отдельным узлом (MiniMaxStudioLoopDecode): VAE получает тот же
+  // латент с обёрнутым контекстом с двух сторон и отдаёт ровно один цикл
+  // (length−5 кадров = 17k) и звук той же длины.
+  const loopOn = p.loop === true
+  const loopPadClips = Math.max(1, Math.min(8, Math.round(p.loopPadClips ?? 1)))
+  const loopViews = p.loopViews === 1 ? 1 : 2
+  // (правка 829) хвост цепочки модели: sparse-нода, если включена, иначе backend
+  const modelChainTail: [string, number] = (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0]
+  // «Зациклено»: патч цикла — ПОСЛЕДНИМ в цепочке, чтобы сэмплер, гайдер и
+  // превью получили модель с уже навешенной обёрткой.
+  const modelTail: [string, number] = loopOn ? ['46:60', 0] : modelChainTail
+  // (правка 829) Источники кадров/звука для кропа и VHS: обычный декод или Loop Decode.
+  const decodeImageSrc: [string, number] = loopOn ? ['46:60:dec', 0] : ['46:25', 0]
+  const decodeAudioSrc: [string, number] = loopOn ? ['46:60:dec', 1] : ['46:14', 0]
+
   const workflow: Record<string, unknown> = {
     // ═══════════════════════════════════════════════
     //  INPUTS
@@ -1221,11 +1256,25 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       class_type: 'ModelAttentionBackend',
       _meta: { title: 'Attention Backend' },
     },
+    // (правка 829) «Зациклено»: патч модели последним в цепочке.
+    // pad_clips — клипов обёрнутого контекста с каждой стороны, views=2 —
+    // второй вид со сдвигом на полцикла для звука (см. minimax_studio_loop).
+    ...(loopOn ? {
+      '46:60': {
+        inputs: {
+          model: modelChainTail,
+          pad_clips: loopPadClips,
+          views: loopViews,
+        },
+        class_type: 'MiniMaxStudioLoop',
+        _meta: { title: `Loop: бесшовный цикл (pad ${loopPadClips}, views ${loopViews})` },
+      },
+    } : {}),
     // Live Preview (attached to pass 1 only)
     '12': {
       inputs: {
-        // (правка 422) хвост цепочки: sparse-нода, если включена, иначе backend
-        model: (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0],
+        // (правка 829) хвост цепочки: патч цикла, иначе sparse-нода/backend
+        model: modelTail,
         vae: ['46:3', 0],
         tiny_vae: 'taeh3.safetensors',
         max_resolution: 1024,
@@ -1401,8 +1450,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       // Live Preview (attached to pass 2)
       '13': {
         inputs: {
-          // (правка 422) хвост цепочки: sparse-нода, если включена, иначе backend
-          model: (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0],
+          // (правка 829) хвост цепочки: патч цикла, иначе sparse-нода/backend
+          model: modelTail,
           vae: ['46:3', 0],
           tiny_vae: 'taeh3.safetensors',
           max_resolution: 1024,
@@ -1441,15 +1490,33 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     //  DECODE (separate video + audio)
     // ═══════════════════════════════════════════════
 
-    '46:25': {
-      inputs: {
-        // 'draft': единственный проход ('46:21'); 'full': Pass 2 ('46:16')
-        samples: draft ? ['46:21', 0] : ['46:16', 0],
-        vae: ['46:3', 0],
+    // (правка 829) «Зациклено»: один узел вместо VAEDecode + VAEDecodeAudio.
+    // VAE получает латент с обёрнутым контекстом с двух сторон, поэтому
+    // декодер не начинается и не заканчивается внутри цикла (иначе шов
+    // проявляется в первых/последних кадрах), и отдаёт ровно один цикл:
+    // 17k кадров и звук той же длины.
+    ...(loopOn ? {
+      '46:60:dec': {
+        inputs: {
+          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          vae: ['46:3', 0],
+          audio_vae: ['46:4', 0],
+          pad_clips: loopPadClips,
+        },
+        class_type: 'MiniMaxStudioLoopDecode',
+        _meta: { title: `Loop Decode (pad ${loopPadClips})` },
       },
-      class_type: 'VAEDecode',
-      _meta: { title: 'Decode Video' },
-    },
+    } : {
+      '46:25': {
+        inputs: {
+          // 'draft': единственный проход ('46:21'); 'full': Pass 2 ('46:16')
+          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          vae: ['46:3', 0],
+        },
+        class_type: 'VAEDecode',
+        _meta: { title: 'Decode Video' },
+      },
+    }),
 
     // (правка 124) Кроп gen-разрешения (кратное 32, чуть больше номинала)
     // до ТОЧНОГО номинала (например 16:9 1080p: 1920×1088 → 1920×1080).
@@ -1458,7 +1525,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     ...(needsCrop && !draft && {
       '46:48': {
         inputs: {
-          image: ['46:25', 0],
+          image: decodeImageSrc,
           width: final.outW,
           height: final.outH,
           x: final.cropX,
@@ -1468,14 +1535,16 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         _meta: { title: `Точный кроп → ${final.outW}×${final.outH}` },
       },
     }),
-    '46:14': {
-      inputs: {
-        samples: draft ? ['46:21', 0] : ['46:16', 0],
-        vae: ['46:4', 0],
+    ...(!loopOn ? {
+      '46:14': {
+        inputs: {
+          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          vae: ['46:4', 0],
+        },
+        class_type: 'VAEDecodeAudio',
+        _meta: { title: 'Decode Audio' },
       },
-      class_type: 'VAEDecodeAudio',
-      _meta: { title: 'Decode Audio' },
-    },
+    } : {}),
 
     // ═══════════════════════════════════════════════
     //  OUTPUT
@@ -1494,8 +1563,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         pingpong: false,
         save_output: true,
         // (правка 121) через кроп-ноду, если соотношению нужен точный кроп
-        images: needsCrop && !draft ? ['46:48', 0] : ['46:25', 0],
-        audio: ['46:14', 0],
+        images: needsCrop && !draft ? ['46:48', 0] : decodeImageSrc,
+        audio: decodeAudioSrc,
       },
       class_type: 'VHS_VideoCombine',
       _meta: { title: 'Video Combine' },
@@ -1512,6 +1581,11 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     // как latent_file (pending-meta.ts). Рефайн при наличии латента стартует
     // с него напрямую, минуя h264-декод + повторный VAEEncode (lossless-путь).
     // Файл: output/<подпапка>/latents/Minimax_Studio_XXXXX_.latent (~1–10 МБ).
+    // (правка 829) «Зациклено» латент НЕ сохраняем: в нём 17k+5 кадров (цикл +
+    // 5 кадров хвоста модели), а в mp4 — ровно 17k. Рефайн с такого латента
+    // сделал бы ролик на 5 кадров длиннее mp4, поэтому для цикла пусть идёт
+    // обычный путь через mp4 (кадры совпадают).
+    ...(!loopOn ? {
     '46:49': {
       inputs: {
         samples: draft ? ['46:21', 0] : ['46:16', 0],
@@ -1523,6 +1597,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       class_type: 'MiniMaxStudioSaveAVLatent',
       _meta: { title: 'Save AV Latent (для lossless-рефайна)' },
     },
+    } : {}),
 
     // ─── Reference image nodes (правка 55: up to 9) ───
     ...refImageNodes,

@@ -302,6 +302,11 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
       delete p.tool
       delete p.duration_seconds
       delete p.fps
+      // (правка 829) «Зациклено» — показано ячейкой «Цикл» выше
+      delete p.loop
+      delete p.loop_frames
+      delete p.loop_pad_clips
+      delete p.loop_views
       delete p.file_size
       delete p.source_file
       delete p.upscale_feature
@@ -482,6 +487,16 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                 <ParamCell label={pass2Ran ? 'Шаги (pass1 + pass2)' : 'Шаги'}>
                   {stepsLabel ?? '—'}
                 </ParamCell>
+                {/* (правка 829) «Зациклено»: в mp4 ровно один цикл (pad —
+                    клипов контекста с каждой стороны, views — видов сэмплинга). */}
+                {params?.loop === true && (
+                  <ParamCell label="Цикл">
+                    <span className="text-violet-300">
+                      бесшовный · pad {typeof params.loop_pad_clips === 'number' ? params.loop_pad_clips : 1}
+                      {typeof params.loop_views === 'number' ? ` · views ${params.loop_views}` : ''}
+                    </span>
+                  </ParamCell>
+                )}
                 {/* (правка 69, 440) Сэмплер pass 2 — только если pass 2 был */}
                 {params?.pass2_sampler != null && pass2Ran && (
                   <ParamCell label="Сэмплер (pass 2)">

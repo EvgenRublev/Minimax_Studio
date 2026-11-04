@@ -84,6 +84,13 @@ interface MetaJson {
   latent_upscaler_3d?: boolean // (правка 806)
   chunk_ff_chunks?: number
   chunk_ff_threshold?: number
+  /** (правка 829) «Зациклено»: режим, клипы контекста и число видов. */
+  loop?: boolean
+  /** (правка 829) Длина самого цикла в кадрах (17k) — в mp4, а video_length
+   *  хранит длину запроса (17k+5), по ней «Повторить» воспроизводит генерацию. */
+  loop_frames?: number
+  loop_pad_clips?: number
+  loop_views?: number
   references?: MetaReference[]
   minimax_h3_references?: MetaReference[]
   job_id?: string
@@ -270,6 +277,18 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     }
     if (typeof params.chunk_ff_threshold === 'number') {
       patch.chunkFFThreshold = params.chunk_ff_threshold
+    }
+    // (правка 829) «Зациклено»: повтор того же ролика должен снова быть
+    // циклом с теми же pad/views — иначе mp4 выйдет на 5 кадров длиннее
+    // и без обёрнутого контекста.
+    if (typeof params.loop === 'boolean') {
+      patch.loop = params.loop
+    }
+    if (typeof params.loop_pad_clips === 'number') {
+      patch.loopPadClips = Math.max(1, Math.min(8, Math.round(params.loop_pad_clips)))
+    }
+    if (typeof params.loop_views === 'number') {
+      patch.loopViews = params.loop_views === 1 ? 1 : 2
     }
 
     // Resolution (правка 124): известный номинал → режим пресета

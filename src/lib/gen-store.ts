@@ -180,6 +180,15 @@ export interface VideoGenState {
   /** (правка 91) Активная папка галереи: '' = общая, иначе имя подпапки output.
    *  Вкладка «Генерация» фильтрует галерею по ней и складывает новые видео в неё. */
   outputFolder: string
+  /** (правка 829) «Зациклено»: бесшовный цикл — конец переходит в начало.
+   *  В режиме продления не поддерживается. */
+  loop: boolean
+  /** (правка 829) «Зациклено»: клипов по 17 кадров обёрнутого контекста с
+   *  каждой стороны цикла (default 1, 1–8). */
+  loopPadClips: number
+  /** (правка 829) «Зациклено»: 2 (default) — второй вид со сдвигом на
+   *  полцикла для звука (~1.8× времени сэмплинга); 1 — один вид. */
+  loopViews: number
 }
 
 export const DEFAULT_VIDEO_STATE: VideoGenState = {
@@ -238,6 +247,10 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   chunkFFThreshold: 4096,
   latentUpscaler3D: true, // (правка 806)
   outputFolder: '',
+  // (правка 829) «Зациклено» — по умолчанию выкл.
+  loop: false,
+  loopPadClips: 1,
+  loopViews: 2,
 }
 
 /* ──────────────────────────── Store ──────────────────────────── */

@@ -162,6 +162,10 @@ export interface RefineParams {
    *  дописывается в самый конец conditioning-промпта, после подписей
    *  референсов. В мету не попадает (роут хранит чистый промпт). */
   promptSuffix?: string
+  /** (правка 829) Зацикленный источник: пересобрать бесшовный цикл в латенте. */
+  loop?: boolean
+  loopPadClips?: number
+  loopViews?: number
 }
 
 /**
@@ -230,6 +234,16 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   const needsCrop = final.genW !== final.outW || final.genH !== final.outH
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
 
+  // (правка 829) Зацикленный источник: рефайн идёт циклической цепочкой —
+  // патч MiniMaxStudioLoop последним в цепочке модели (сэмплер/гайдер/превью
+  // получают обёрнутый контекст), а декод отдаёт ровно один цикл через
+  // MiniMaxStudioLoopDecode. В латент 17k+5 (ролик цикла + 5 кадров хвоста).
+  // При `chunkJob` цикл не собирается (частичный латент, стык не восстановим) —
+  // как и r_savelat.
+  const loopOn = p.loop === true && !p.chunkJob
+  const loopPad = Math.max(1, Math.min(8, Math.round(p.loopPadClips ?? 1)))
+  const loopViews = p.loopViews === 1 ? 1 : 2
+
   // Кодируем исходник в СВОЁМ разрешении (дёшево), до /32-сетки — латент
   // без апскейлера должен напрямую ложиться в сетку DiT (patch 2×2).
   const ceil32 = (n: number) => Math.max(32, Math.ceil(n / 32) * 32)
@@ -260,7 +274,19 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   const samplerSeedLatent: [string, number] = latentMode
     ? (needsUpscale ? ['r_cat', 0] : ['r_lat', 0])
     : ['r_cat', 0]
-  const guideAudioSrc: [string, number] = latentMode ? ['r_aorig', 0] : ['r_asafe', 0]
+  // (правка 829) в цикле гайд ведёт дорожка с хвостом (17k+5), чтобы
+  // аудио-поток модели покрывал весь латент; на выход муксим ОРИГИНАЛЬНУЮ
+  // дорожку (без хвоста) — она ровно по длине mp4 (17k кадров).
+  const guideAudioSrc: [string, number] = latentMode
+    ? ['r_aorig', 0]
+    : loopOn ? ['r_apad', 0] : ['r_asafe', 0]
+
+  const outputAudioSrc: [string, number] = latentMode ? ['r_aorig', 0] : ['r_asafe', 0]
+  // (правка 829) картинка декода: при цикле — Loop Decode (ровно 17k кадров).
+  const decodedImage: [string, number] = loopOn ? (['46:60:decr', 0] as [string, number]) : (['46:25', 0] as [string, number])
+  // (правка 829) хвост цепочки моделей для прогона — после Loop ('46:60r');
+  // когда цикл не собирается, это Attention Backend (эквивалент прежнего wiring).
+  const modelTail: [string, number] = loopOn ? ['46:60r', 0] : ['46:37', 0]
 
   // ─── Model optimization chain: UNET → [LowVRAM] → [ChunkFF] ───
   const lowVram = p.lowVramAttention !== false
@@ -361,6 +387,19 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       class_type: 'ModelAttentionBackend',
       _meta: { title: 'Attention Backend' },
     },
+    // (правка 829) «Зациклено»: патч кругового латент-паддинга — последним
+    // в цепочке, чтобы сэмплер, гайдер и превью получили обёрнутую модель.
+    ...(loopOn ? {
+      '46:60r': {
+        inputs: {
+          model: ['46:37', 0],
+          pad_clips: loopPad,
+          views: loopViews,
+        },
+        class_type: 'MiniMaxStudioLoop',
+        _meta: { title: `Loop: бесшовный цикл (pad ${loopPad}, views ${loopViews})` },
+      },
+    } : {}),
 
     // ═══════════════════════════════════════════════
     //  SOURCE → ЗАТРАВКА ЛАТЕНТА (роль Pass 1)
@@ -473,21 +512,46 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       // latent_t — иначе конкат видео+аудио латентов рассогласуется.
       'r_cap': {
         inputs: {
-          expression: 'max(5, a - ((a - 5) % 17))',
+          // (правка 829) Цикл: ролик = ровно 17k кадров (один цикл), сетка
+          // 17k+5 получается добавлением 5 кадров хвоста ниже ('r_pad').
+          expression: loopOn ? 'max(17, a - (a % 17))' : 'max(5, a - ((a - 5) % 17))',
           'values.a': ['r_cnt', 3],
         },
         class_type: 'ComfyMathExpression',
-        _meta: { title: 'Кадры до сетки 17k+5' },
+        _meta: { title: loopOn ? 'Кадры цикла (17k)' : 'Кадры до сетки 17k+5' },
       },
       'r_img': {
         inputs: { image: ['r_src', 0], batch_index: 0, length: ['r_cap', 1] },
         class_type: 'ImageFromBatch',
         _meta: { title: 'Кадры по сетке' },
       },
+      // (правка 829) Хвост модели для цикла: последние 5 кадров латента у
+      // зацикленного ролика — это первые 5 кадров цикла (обёртка), поэтому
+      // дописываем их к клипу. Получается 17k+5 кадров = 5k+2 латента —
+      // та же геометрия, что у генерации с циклом.
+      ...(loopOn ? {
+        'r_head': {
+          inputs: { image: ['r_src', 0], batch_index: 0, length: 5 },
+          class_type: 'ImageFromBatch',
+          _meta: { title: 'Первые 5 кадров (хвост цикла)' },
+        },
+        'r_pad': {
+          inputs: { image1: ['r_img', 0], image2: ['r_head', 0] },
+          class_type: 'ImageBatch',
+          _meta: { title: 'Цикл + хвост 5 кадров (17k+5)' },
+        },
+        // Длина латента/превью/conditioning в цикле — 17k+5 (а не 17k).
+        'r_len': {
+          inputs: { expression: 'a + 5', 'values.a': ['r_cap', 1] },
+          class_type: 'ComfyMathExpression',
+          _meta: { title: 'Кадры цикла + хвост' },
+        },
+      } : {}),
       // Ресайз до /32-сетки кодирования (паттерн 'extv_tres' вкладки Extend).
       'r_res': {
         inputs: {
-          image: ['r_img', 0],
+          // (правка 829) цикл — кадры с хвостом (17k+5).
+          image: loopOn ? ['r_pad', 0] : ['r_img', 0],
           width: encW,
           height: encH,
           upscale_method: 'lanczos',
@@ -515,8 +579,23 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         class_type: 'MiniMaxH3AudioOrSilent',
         _meta: { title: 'Аудио исходника (или тишина)' },
       },
+      // (правка 829) Цикл: у видео-латента 17k+5 кадров, значит и звук
+      // должен покрывать 17k+5 — дописываем к дорожке её первые 5 кадров
+      // (0.208 с). Иначе A/V-потоки модели разъезжаются на 5 кадров к концу.
+      ...(loopOn ? {
+        'r_ahead': {
+          inputs: { audio: ['r_asafe', 0], start_index: 0, duration: 0.2083 },
+          class_type: 'TrimAudioDuration',
+          _meta: { title: 'Первые 5 кадров звука (хвост цикла)' },
+        },
+        'r_apad': {
+          inputs: { audio1: ['r_asafe', 0], audio2: ['r_ahead', 0], direction: 'after' },
+          class_type: 'AudioConcat',
+          _meta: { title: 'Звук цикла + хвост' },
+        },
+      } : {}),
       'r_aenc': {
-        inputs: { audio: ['r_asafe', 0], vae: ['46:4', 0] },
+        inputs: { audio: loopOn ? ['r_apad', 0] : ['r_asafe', 0], vae: ['46:4', 0] },
         class_type: 'VAEEncodeAudio',
         _meta: { title: 'Аудио → латент (правка 313)' },
       },
@@ -589,8 +668,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         height: final.genH,
         // (правка 376) latent-ветка: длина от сервера (кадры mp4 уже на
         // сетке 17k+5 — совпадает с T загруженного латента); mp4-ветка —
-        // из графа ('r_cap').
-        length: latentMode ? framesGrid : ['r_cap', 1],
+        // из графа ('r_cap'). (правка 829) в цикле — 17k+5 ('r_len').
+        length: loopOn ? ['r_len', 1] : latentMode ? framesGrid : ['r_cap', 1],
         ref_image_size: p.refImageSize ?? 'max', // (правка 323)
         clip: ['46:15', 0],
         vae: ['46:3', 0],
@@ -620,7 +699,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           positive: [condNodeId, 0],
           latent: samplerSeedLatent,
           frame_idx: 0,
-          audio: guideAudioSrc,
+          // (правка 829) цикл — подровненная по длине латента дорожка.
+          audio: loopOn ? ['r_apad', 0] : guideAudioSrc,
           audio_vae: ['46:4', 0],
         },
         class_type: 'MiniMaxH3AddGuide',
@@ -643,7 +723,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     },
     '46:33': light
       ? {
-          inputs: { scheduler: 'simple', steps: 2, denoise: 0.2, model: ['46:37', 0] },
+          inputs: { scheduler: 'simple', steps: 2, denoise: 0.2, model: modelTail },
           class_type: 'BasicScheduler',
           _meta: { title: 'Лёгкий проход: 2 шага, denoise 0.2' },
         }
@@ -654,16 +734,16 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         },
     '12': {
       inputs: {
-        model: ['46:37', 0],
+        model: modelTail,
         vae: ['46:3', 0],
         tiny_vae: 'taeh3.safetensors',
         max_resolution: 1024,
         jpeg_quality: 80,
         suppress_default_preview: true,
         // Как на вкладке «Генерация» ('46:19'): превью покрывает всё видео
-        // (кадры по сетке 17k+5; (правка 376) в latent-ветке — от сервера),
-        // playback 6 fps.
-        preview_frames: latentMode ? framesGrid : ['r_cap', 1],
+        // (кадры по сетке 17k+5; (правка 376) в latent-ветке — от сервера;
+        // (правка 829) в цикле — 17k+5 ('r_len')), playback 6 fps.
+        preview_frames: loopOn ? ['r_len', 1] : latentMode ? framesGrid : ['r_cap', 1],
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',
@@ -700,7 +780,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // подхватит .latent из outputs и запишет latent_file в сайдкар.
     // В legacy chunkJob (покусочные refinepart) латент — лишь окно,
     // не сохраняем.
-    ...(!p.chunkJob && {
+    // (правка 829) При цикле латент прогона — лишь половина гребня,
+    // lossless-повтор по нему невозможен, не сохраняем.
+    ...(!p.chunkJob && !loopOn && {
       'r_savelat': {
         inputs: {
           samples: ['46:21', 0],
@@ -715,16 +797,32 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // ═══════════════════════════════════════════════
     //  DECODE (только видео) + ТОЧНЫЙ КРОП
     // ═══════════════════════════════════════════════
-    '46:35': {
-      inputs: { av_latent: ['46:21', 0] },
-      class_type: 'LTXVSeparateAVLatent',
-      _meta: { title: 'Separate AV Latent' },
-    },
-    '46:25': {
-      inputs: { samples: ['46:35', 0], vae: ['46:3', 0] },
-      class_type: 'VAEDecode',
-      _meta: { title: 'Decode Video' },
-    },
+    // (правка 829) Цикл: один узел вместо Separate + VAEDecode. VAE получает
+    // латент с обёрнутым контекстом с двух сторон и отдаёт ровно 17k кадров
+    // (хвостовые 5 кадров в mp4 не попадают).
+    ...(loopOn ? {
+      '46:60:decr': {
+        inputs: {
+          samples: ['46:21', 0],
+          vae: ['46:3', 0],
+          audio_vae: ['46:4', 0],
+          pad_clips: loopPad,
+        },
+        class_type: 'MiniMaxStudioLoopDecode',
+        _meta: { title: `Loop Decode (pad ${loopPad})` },
+      },
+    } : {
+      '46:35': {
+        inputs: { av_latent: ['46:21', 0] },
+        class_type: 'LTXVSeparateAVLatent',
+        _meta: { title: 'Separate AV Latent' },
+      },
+      '46:25': {
+        inputs: { samples: ['46:35', 0], vae: ['46:3', 0] },
+        class_type: 'VAEDecode',
+        _meta: { title: 'Decode Video' },
+      },
+    }),
     // (правка 313) Декод аудио-латента сэмплера — как '46:14' во 2-м
     // проходе генерации (minimax-h3-template.ts).
     // (правка 737) На выход ВСЕГДА муксится оригинальная дорожка, поэтому
@@ -732,7 +830,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     ...(needsCrop && {
       '46:48': {
         inputs: {
-          image: ['46:25', 0],
+          // (правка 829) при цикле — картинка с LoopDecode.
+          image: decodedImage,
           width: final.outW,
           height: final.outH,
           x: final.cropX,
@@ -760,8 +859,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         save_metadata: false,
         pingpong: false,
         save_output: true,
-        images: needsCrop ? ['46:48', 0] : ['46:25', 0],
-        ...(p.chunkJob ? {} : { audio: guideAudioSrc }),
+        // (правка 829) при цикле — картинка с LoopDecode, аудио — r_apad.
+        images: needsCrop ? ['46:48', 0] : decodedImage,
+        ...(p.chunkJob ? {} : { audio: outputAudioSrc }),
       },
       class_type: 'VHS_VideoCombine',
       _meta: { title: p.chunkJob ? 'Video Combine (кусок)' : 'Video Combine (refine)' },

@@ -120,6 +120,49 @@ function sanitizeFragment(fragment: string): string {
     .trim()
 }
 
+export interface MetaLoopInfo {
+  /** (правка 829) Исходник сгенерирован в режиме «Зациклено». */
+  loop: boolean
+  /** Клипов обёрнутого контекста (правка 829), 1–8. */
+  padClips: number
+  /** 1 | 2 — второй вид для звука (правка 829). */
+  views: number
+}
+
+/**
+ * (правка 829) Прочитать из сайдкара исходника флаг «Зациклено» — рефайн
+ * должен автоматически идти по цикличной цепочке (обёрнутый контекст в
+ * сэмплере + Loop Decode), иначе стык «конец → начало» разваливается.
+ * Нет меты/поля → обычный проход.
+ */
+export function readMetaLoop(subfolder: string, filename: string): MetaLoopInfo {
+  const off: MetaLoopInfo = { loop: false, padClips: 1, views: 2 }
+  const OUTPUT_DIR = getAppConfig().outputDir
+  if (!OUTPUT_DIR || !filename) return off
+
+  const safeSub = subfolder ? sanitizeFolderPath(subfolder) : ''
+  const safeName = path.basename(filename)
+  const metaFile = path.resolve(path.join(OUTPUT_DIR, ...safeSub.split('/').filter(Boolean), safeName + '.meta.json'))
+  if (!isInsideOutput(metaFile, OUTPUT_DIR)) return off
+
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8')) as {
+      loop?: unknown
+      loop_pad_clips?: unknown
+      loop_views?: unknown
+    }
+    if (meta.loop !== true) return off
+    const pad = typeof meta.loop_pad_clips === 'number' ? Math.round(meta.loop_pad_clips) : 1
+    return {
+      loop: true,
+      padClips: Math.min(8, Math.max(1, pad)),
+      views: meta.loop_views === 1 ? 1 : 2,
+    }
+  } catch {
+    return off
+  }
+}
+
 /**
  * (правка 309) Прочитать картинки-референсы из .meta.json исходника.
  * (правка 311) Возвращает объекты { path, role } (role — imageIntent из

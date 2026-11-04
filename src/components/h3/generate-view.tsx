@@ -37,6 +37,9 @@ import {
 import { toast } from 'sonner'
 import { SettingSlider } from './setting-slider'
 import { useVideoGen, computeOutputDimensions } from '@/hooks/use-video-gen'
+// (правка 829) «Зациклено»: фактическое число кадров — та же формула, что у
+// узла 46:19 и в метаданных (сетка 17n+5).
+import { framesForDuration } from '@/lib/comfy/minimax-h3-template'
 
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
@@ -257,6 +260,25 @@ export function GenerateView() {
     for (const r of video.refs) counts[r.kind]++
     return counts
   }, [video.refs])
+
+  /* (правка 829) «Зациклено»: длина цикла в кадрах/секундах.
+     Запрос идёт на 17k+5 кадров (столько же, сколько в обычном режиме),
+     но в mp4 попадает ровно один цикл — 17k кадров (длина запроса − 5):
+     последние 5 кадров H3 — это хвостовой латент, он нужен только модели,
+     чтобы довести движение до конца цикла, и в цикле дублирует начало. */
+  const loopInfo = useMemo(() => {
+    const durationSec = Math.max(2.5, (video.videoLength ?? framesMin) / fps)
+    const snapped = framesForDuration(durationSec, fps)
+    const frames = Math.max(17, snapped - 5)
+    return {
+      snapped,
+      frames,
+      seconds: frames / fps,
+      // (правка 829) pad_clips=1 добавляет 17 кадров контекста сверху цикла:
+      // за обученным диапазоном H3 (~362 кадра) качество не гарантировано.
+      overTrained: frames + 17 * (video.loopPadClips ?? 1) > 362,
+    }
+  }, [video.videoLength, video.loopPadClips, fps, framesMin])
 
   /* ──────────── Reference uploads ──────────── */
 
@@ -856,6 +878,10 @@ export function GenerateView() {
       chunkFeedForward: v.chunkFeedForward,
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
+      // (правка 829) «Зациклено»: не в продлении — там шаблон собирает клипы.
+      loop: v.mode !== 'extend' && v.loop === true,
+      loopPadClips: v.loopPadClips,
+      loopViews: v.loopViews,
       latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
       outputSubfolder: v.outputFolder || '', // (правка 91) папка проекта
       })
@@ -1079,7 +1105,19 @@ export function GenerateView() {
       ) : (
         <Badge variant="secondary" className="text-[10px]">{video.resolution}</Badge>
       )}
-      <Badge variant="secondary" className="text-[10px]">{(video.videoLength / fps).toFixed(1)} с · {fps} fps</Badge>
+      {/* (правка 829) «Зациклено»: в файле ровно один цикл — на 5 кадров
+          меньше запроса, поэтому бейдж показывает фактическую длительность
+          ролика, а не длину запроса (она видна под галочкой). */}
+      <Badge variant="secondary" className="text-[10px]">
+        {(video.loop === true && video.mode !== 'extend'
+          ? loopInfo.seconds
+          : video.videoLength / fps).toFixed(1)} с · {fps} fps
+      </Badge>
+      {video.loop === true && video.mode !== 'extend' && (
+        <Badge className="text-[10px] bg-violet-500/15 text-violet-300 border-violet-500/30 hover:bg-violet-500/15">
+          Зациклено
+        </Badge>
+      )}
       {/* (правка 742) Количество проходов зависит от пайплайна: драфт —
           ОДИН проход (шаблон не добавляет узлы Pass 2), полное — два.
           Раньше бейдж был статичным «2-Pass» и в драфте врал. */}
@@ -1157,6 +1195,48 @@ export function GenerateView() {
               ))}
             </div>
           </div>
+
+          {/* (правка 829) «Зациклено»: бесшовный цикл — конец переходит в начало.
+              Круговой латент-паддинг: сэмплер видит латент с обёрнутыми клипами
+              по краям (стык денойзится как обычная граница клипов), декод отдаёт
+              ровно один цикл. В продлении недоступно — там своя схема стыковки. */}
+          {(() => {
+            const loopDisabled = video.mode === 'extend'
+            const loopOn = video.loop === true && !loopDisabled
+            return (
+              <label
+                className={cn(
+                  'flex items-start gap-2 rounded-lg border p-2.5 transition-all',
+                  loopDisabled
+                    ? 'border-border bg-[var(--surface-2)] opacity-50 cursor-not-allowed'
+                    : loopOn
+                      ? 'border-violet-500/40 bg-violet-500/10 cursor-pointer'
+                      : 'border-border bg-[var(--surface-2)] hover:border-violet-500/30 cursor-pointer',
+                )}
+                title={loopDisabled
+                  ? 'Зацикливание недоступно в режиме продления: там видео собирается из клипов, и стык задаётся исходником.'
+                  : 'Сэмплер получает латент с обёрнутыми клипами по краям, поэтому конец плавно переходит в начало. Ролик можно ставить на повтор без шва в картинке и звуке.'}
+              >
+                <input
+                  type="checkbox"
+                  checked={loopOn}
+                  disabled={loopDisabled}
+                  onChange={(e) => patchVideo({ loop: e.target.checked })}
+                  className="mt-0.5 accent-violet-400"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className={cn('text-xs font-medium', loopOn ? 'text-violet-300' : 'text-foreground/80')}>
+                      Зациклено
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/70">
+                      бесшовный повтор
+                    </span>
+                  </span>
+                </span>
+              </label>
+            )
+          })()}
 
           <Separator className="bg-border opacity-50" />
 

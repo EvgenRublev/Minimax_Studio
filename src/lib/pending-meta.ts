@@ -268,6 +268,13 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
   const { w, h } = computeOutputDimensions(body.aspectRatio || '16:9', finalResolution, body.targetDimensions)
   const genMode0: 'ref' | 't2v' | 'flf' | 'extend' = body.mode === 't2v' || body.mode === 'flf' || body.mode === 'extend' ? body.mode : 'ref'
   const draft0 = genMode0 !== 'extend' && body.pipeline === 'draft'
+  // (правка 829) «Зациклено»: в mp4 попадает ровно один цикл — на 5 кадров
+  // меньше запроса (5 хвостовых кадров нужны только модели). В сайдкар пишем
+  // ФАКТИЧЕСКУЮ длину файла: «Повторить» подаст это же число, а узел 46:19
+  // снова снапнет его до 17k+5 — запрос выйдет тот же (17k ≡ 0 mod 17).
+  const loopFrames = genMode0 !== 'extend' && body.loop === true
+    ? Math.max(17, videoLengthFrames - 5)
+    : videoLengthFrames
   // Драфт: фактический выход = ОСНОВНОЕ разрешение (как flf):
   // пресет → ceil32(targetDimensions), свободное → finalRes MP
   const draftCanvas = draft0 && genMode0 !== 'flf'
@@ -370,8 +377,8 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
       )
       return Math.round(((p1.w * p1.h) / (1024 * 1024)) * 1000) / 1000
     })(),
-    video_length: videoLengthFrames,
-    duration_seconds: videoLengthFrames / fps,
+    video_length: loopFrames,
+    duration_seconds: loopFrames / fps,
     fps,
     // Extend: фактические шаги КЛИПА (override > фолбэк firstSamplerSteps) —
     // по этой мете следующее продление берёт значение «авто».
@@ -395,6 +402,16 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     // турбо в шаблоне не используется — сила хранится в loras.json.
     minimax_h3_reference_detail: body.refImageSize || 'match', // (правка 58)
     sparse_attention: body.sparseAttention === true, // (правки 168→387) Sol-Attn default OFF
+    // (правка 829) «Зациклено»: video_length выше — это ровно то, что в mp4
+    // (один цикл, на 5 кадров меньше запроса). loop_frames дублируем для
+    // наглядности в метаданных, pad/views — чтобы «Повторить» собрал тот же
+    // граф.
+    ...(body.mode !== 'extend' && body.loop === true && {
+      loop: true,
+      loop_frames: loopFrames,
+      loop_pad_clips: body.loopPadClips ?? 1,
+      loop_views: body.loopViews === 1 ? 1 : 2,
+    }),
     // (правка 466) настройки Sol-Attn — «Повторить» восстанавливает
     ...(body.sparseAttention === true && {
       sparse_tau: body.sparseTau ?? 1.3,

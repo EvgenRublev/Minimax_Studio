@@ -9,7 +9,7 @@ import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import { refineDimensions, buildChunkedRefineWorkflow, planChunkWindows, refineChunkStages } from '@/lib/comfy/refine-template'
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
-import { readPromptChain, readPromptChainParts, readMetaImageRefs, resolveSourceLatent } from '@/lib/refine-meta'
+import { readPromptChain, readPromptChainParts, readMetaImageRefs, readMetaLoop, resolveSourceLatent } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config' // (правка 483)
@@ -536,8 +536,33 @@ export async function POST(req: NextRequest) {
     // (ceil32 от mp4 мог отличаться от канвы свободного-MП генератора).
     // Цель меньше канвы → внутренний апскейлер получил бы уменьшение
     // (запрещено) → fallback на mp4-путь (он ресайзит пиксели до encode).
+    // (правка 829) «Зациклено»: флаг из сайдкара исходника. Тогда рефайн
+    // идёт циклической цепочкой (Loop после сэмплера + Loop Decode),
+    // иначе — обычный проход. «Частями» цикл не поддерживает: окна режутся
+    // независимо, стык конец→начало так не собрать.
+    const srcLoop = readMetaLoop(sub, safeName)
+    if (srcLoop.loop && body.mode === 'chunks') {
+      console.warn(`[refine] ${safeName}: исходник зациклен, но режим «Частями» цикл не поддерживает — идём обычным проходом`)
+    }
+    const loopParams = srcLoop.loop && body.mode !== 'chunks'
+      ? { loop: true as const, loopPadClips: srcLoop.padClips, loopViews: srcLoop.views }
+      : {}
+    const loopMeta = srcLoop.loop && body.mode !== 'chunks'
+      ? {
+          loop: true,
+          // (правка 829) В mp4 ровно один цикл — столько же кадров, сколько
+          // у исходника (он уже 17k). Поля нужны следующему рефайну.
+          loop_frames: probe.frames,
+          loop_pad_clips: srcLoop.padClips,
+          loop_views: srcLoop.views,
+        }
+      : {}
+
     const latentEligible =
       !body.chunkJob && !body.skipFrames && !body.frameCap && probe.frames > 0
+      // (правка 829) у зацикленных роликов латента нет (в нём 17k+5 кадров,
+      // в mp4 — 17k; сохранение отключено и в генерации, и в рефайне)
+      && !srcLoop.loop
     let sourceLatent: string | undefined
     let srcW = probe.width
     let srcH = probe.height
@@ -677,6 +702,8 @@ export async function POST(req: NextRequest) {
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)
         ...(sourceLatent && { sourceLatent, sourceFrames: probe.frames }),
+        // (правка 829) цикл — по мете исходника (обёртка + Loop Decode)
+        ...loopParams,
         sourceWidth: srcW,
         sourceHeight: srcH,
         targetShortSide: targetEff,
@@ -723,6 +750,8 @@ export async function POST(req: NextRequest) {
         sigma_start: body.sigmaStart,
         seed: body.seed ?? -1,
         first_frame_ref: true,
+        // (правка 829) исходник зациклен — результат тоже цикл
+        ...loopMeta,
         // (правка 309) число картинок-рефов из меты
         ...(metaRefImages.length > 0 && { meta_ref_count: metaRefImages.length }),
         // (правка 318) и сами референсы — якоря повторного рефайна
