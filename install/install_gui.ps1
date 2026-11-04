@@ -68,8 +68,19 @@ try { [void][Gui.Win32Ui]::SetCurrentProcessExplicitAppUserModelID('MiniMax.H3St
 
 # (правка 766) Окно иногда «моргает»: панели с самокраской (рамка, прогресс,
 # полоса прокрутки) при перерисовке сначала стирают фон, потом рисуют —
-# на глазах вспышка. Лечим двойной буферизацией контролов + комpositing
-# всего окна (WS_EX_COMPOSITED: Windows перерисовывает окно в offscreen-буфер).
+# на глазах вспышка.
+#
+# (правка 832) ФЛАГ AllPaintingInWmPaint ОСТАВЛЕН — он отключает обработку
+# WM_ERASEBKGND, и именно этим убирается «вспышка» (erase-стирание перед
+# отрисовкой). Но вместе с ним WinForms перестаёт заливать фон сам, поэтому
+# фон теперь заливается ЯВНО в обработчиках Paint (Fill-Rect) — иначе на
+# части машин незалитая область оставалась ПРОЗРАЧНОЙ (пользователь видел
+# сквозь окно установщика рабочий стол, а текст/рамки рисовались).
+#
+# (правка 832) WS_EX_COMPOSITED УБРАН: флаг deprecated и на некоторых
+# конфигурациях DWM даёт именно «прозрачное окно» (а правки 768/772 уже
+# воевали с его побочными эффектами). От «моргания» теперь спасает
+# AllPaintingInWmPaint + явная заливка фона.
 $script:SetStyleMethod = [System.Windows.Forms.Control].GetMethod(
     'SetStyle',
     [System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
@@ -78,6 +89,18 @@ function Enable-DoubleBuffering($ctrl) {
         $st = [System.Windows.Forms.ControlStyles]::OptimizedDoubleBuffer -bor `
               [System.Windows.Forms.ControlStyles]::AllPaintingInWmPaint
         [void]$script:SetStyleMethod.Invoke($ctrl, [object[]]@($st, $true))
+    } catch { }
+}
+
+# (правка 832) Явная заливка фона прямоугольника. Все панели с самокраской
+# рисуют фон сами: WM_ERASEBKGND отключён (AllPaintingInWmPaint), поэтому
+# без этой заливки фон панели просто отсутствует.
+function Fill-Rect($g, [System.Drawing.Color]$Color, [int]$X, [int]$Y, [int]$W, [int]$H) {
+    try {
+        if ($W -le 0 -or $H -le 0) { return }
+        $b = New-Object System.Drawing.SolidBrush($Color)
+        $g.FillRectangle($b, $X, $Y, $W, $H)
+        $b.Dispose()
     } catch { }
 }
 
@@ -219,6 +242,12 @@ $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 Enable-DoubleBuffering $form
+# (правка 832) Фон самой формы — тоже явно: окно установщика не должно быть
+# прозрачным (у пользователя сквозь него был виден рабочий стол).
+$form.Add_Paint({
+    param($s, $e)
+    Fill-Rect $e.Graphics $C_BG 0 0 $s.Width $s.Height
+})
 if (Test-Path $IconIco) {
     try { $form.Icon = New-Object System.Drawing.Icon($IconIco) } catch { }
 }
@@ -243,7 +272,13 @@ function Draw-WindowBorder {
 $body = New-Object System.Windows.Forms.Panel
 $body.Dock = 'Fill'
 $body.BackColor = $C_BG
-$body.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
+$body.Add_Paint({
+    param($s, $e)
+    # (правка 832) Явно заливаем фон: окно установщика не должно быть
+    # прозрачным (сквозь него был виден рабочий стол).
+    Fill-Rect $e.Graphics $C_BG 0 0 $s.Width $s.Height
+    Draw-WindowBorder $e.Graphics
+})
 Enable-DoubleBuffering $body
 $form.Controls.Add($body)
 
@@ -254,7 +289,12 @@ $header.Height = 36
 $header.BackColor = $C_HEAD
 # шапка закрывает верхнюю часть окна - верхнюю линию и верхние углы рамки
 # дорисовываем в ней (та же кривая в тех же координатах)
-$header.Add_Paint({ param($s, $e) Draw-WindowBorder $e.Graphics })
+$header.Add_Paint({
+    param($s, $e)
+    # (правка 832) шапка — та же история: заливаем фон явно.
+    Fill-Rect $e.Graphics $C_HEAD 0 0 $s.Width $s.Height
+    Draw-WindowBorder $e.Graphics
+})
 Enable-DoubleBuffering $header
 $body.Controls.Add($header)
 
@@ -378,6 +418,8 @@ $bar.Add_Paint({
     param($s, $e)
     try {
         $g = $e.Graphics
+        # (правка 832) фон полосы прогресса — явно (иначе видна «дыра»).
+        Fill-Rect $g $C_BG 0 0 $s.Width $s.Height
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $w = $s.Width - 1; $h = $s.Height - 1; $r = 5
         $path = New-Object System.Drawing.Drawing2D.GraphicsPath
@@ -443,6 +485,8 @@ $logWrap.BackColor = $C_LOG_BG
 $logWrap.Add_Paint({
     param($s, $e)
     try {
+        # (правка 832) фон лог-панели — явно (иначе панель прозрачна).
+        Fill-Rect $e.Graphics $C_LOG_BG 0 0 $s.Width $s.Height
         $pen = New-Object System.Drawing.Pen($C_LOG_BORDER, 1)
         $e.Graphics.DrawRectangle($pen, 0, 0, ($s.Width - 1), ($s.Height - 1))
         $pen.Dispose()
@@ -530,6 +574,8 @@ $logBar.Add_Paint({
     param($s, $e)
     try {
         $g = $e.Graphics
+        # (правка 832) фон полосы прокрутки — явно (иначе видна «дыра»).
+        Fill-Rect $g $C_LOG_BG 0 0 $s.Width $s.Height
         $g.SmoothingMode = 'AntiAlias'
         $pad = 4
         $trkY = $pad
@@ -884,31 +930,20 @@ function Apply-RoundedWindow {
     }
 }
 
-# (правка 766) WS_EX_COMPOSITED: всё окно целиком перерисовывается в скрытый
-# буфер и выводится одним кадром — пропадают вспышки при перерисовках рамок,
-# лога и перетаскивании окна (гладный лечит «морганье» безрамочных окон).
-# (правка 768) У этого флага есть побочный эффект: при сворачивании буфер
-# сбрасывается, и после развертывания окно «раскрывается» полупустым (лог
-# дорисован частично, рамки пропали). Лечим так: при сворачивании флаг снимаем
-# (окно всё равно не рисуется), при возврате — ставим обратно и принудительно
-# перерисовываем всё окно целиком.
+# (правка 832) WS_EX_COMPOSITED УБРАН ПОЛНОСТЬЮ.
+# Флаг deprecated; на части конфигураций DWM окно с ним рисуется как
+# «полупрозрачное» (сквозь него видно рабочий стол, а текст/рамки рисуются).
+# Правки 768/772 уже воевали с его побочными эффектами («полупустое окно»
+# после разворота). От «моргания» теперь спасает AllPaintingInWmPaint
+# (отключает erase-стирание) + двойная буферизация + явная заливка фона.
 function Set-Composited([bool]$On, [switch]$FrameChange) {
+    # (правка 832) Заглушка: сам флаг больше не выставляется, но вызовы
+    # оставлены (см. Restore-FromMinimized), чтобы не ломать поток управления.
     try {
-        if (-not $form.IsHandleCreated) { return }
-        $ex = [Gui.Win32Ui]::GetWindowLong($form.Handle, -20)   # GWL_EXSTYLE
-        $newEx = $ex
-        if ($On) { $newEx = ($ex -bor 0x02000000) } else { $newEx = ($ex -band (-bnot 0x02000000)) }
-        if ($newEx -eq $ex) { return }
-        [void][Gui.Win32Ui]::SetWindowLong($form.Handle, -20, $newEx)
         if ($FrameChange) {
-            # (правка 772) Смена ex-стиля у ВИДИМОГО окна без SWP_FRAMECHANGED
-            # оставляет в композитном буфере старый (свёрнутый) кадр: после
-            # разворота окно «полупустое», пока не придёт следующая перерисовка.
-            # После завершения установки перерисовок больше нет — баг оставался
-            # видимым. Просим Windows пересобрать кадр немедленно.
-            [void][Gui.Win32Ui]::SetWindowPos(
-                $form.Handle, [IntPtr]::Zero, 0, 0, 0, 0,
-                (0x0001 -bor 0x0002 -bor 0x0004 -bor 0x0010 -bor 0x0020))
+            [void][Gui.Win32Ui]::RedrawWindow(
+                $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero,
+                (0x0001 -bor 0x0004 -bor 0x0080 -bor 0x0100 -bor 0x0400))
         }
     } catch { }
 }
