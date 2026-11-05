@@ -10,6 +10,9 @@ LICENSE text eol=lf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 *.vbs text eol=crlf
+# (правка 833) исходник NSIS: CRLF как в собранном и проверенном файле.
+# BOM (EF BB BF) — часть содержимого, git его не трогает.
+*.nsi text eol=crlf
 
 *.ts text eol=lf
 *.tsx text eol=lf
