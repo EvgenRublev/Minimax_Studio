@@ -51,14 +51,23 @@ export async function POST(request: Request) {
         { status: 413 },
       )
     }
+    const t0 = Date.now()
     const r = await fetch(`http://127.0.0.1:${STT_PORT}/transcribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: Buffer.from(body),
       // CPU-распознавание: 30 секунд записи на whisper small ≈ до минуты.
-      signal: AbortSignal.timeout(180_000),
+      // (правка 873) 180 с -> 300 с: на загруженной машине (генерация +
+      // LLM в RAM, «RAM pressure cache») whisper small на CPU не укладывался
+      // в 3 минуты — юзер получал «Распознавание заняло слишком долго» без
+      // каких-либо строк в логе. maxDuration роута и так 300.
+      signal: AbortSignal.timeout(300_000),
     })
     const data = await r.json().catch(() => ({ ok: false, error: 'Некорректный ответ STT-сервера' }))
+    // (правка 873) Круг «браузер -> сервер -> whisper» виден в консоли
+    // десктопа: раньше успех проксировался молча, и по логу невозможно было
+    // понять, дошёл ли запрос до STT-сервера.
+    console.log(`[stt] transcribe: ${body.byteLength} Б -> HTTP ${r.status} за ${Date.now() - t0} мс`)
     return NextResponse.json(data, { status: r.status })
   } catch (err) {
     const msg =

@@ -203,8 +203,14 @@ export function useVoiceDictation(): VoiceDictationApi {
     teardown()
 
     if (chunks.length === 0) {
+      // (правка 873) Раньше это был молчаливый no-op: запись не дошла
+      // (микрофон дёрнули короче буфера, или поток не давал данных) — и
+      // кнопка «ничего не отвечала». Теперь — понятная ошибка, кнопка
+      // никогда не молчит.
       setState('idle')
-      return { text: null, error: null }
+      const err = 'Запись не поступила — микрофон не передаёт данные (попробуйте подольше поговорить)'
+      setError(err)
+      return { text: null, error: err }
     }
     let total = 0
     for (const c of chunks) total += c.length
