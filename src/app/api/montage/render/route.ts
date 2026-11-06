@@ -450,8 +450,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Некорректное тело запроса' }, { status: 400 })
     }
     const inputs = Array.isArray(body.inputs) ? body.inputs : []
-    if (inputs.length < 2) {
-      return NextResponse.json({ error: 'Добавьте на таймлайн минимум 2 шота' }, { status: 400 })
+    // (правка 864) сборка из одного шота — тоже сборка (перекодировка,
+    // эффекты, скорость, канва секвенции); ругаемся только на пустой таймлайн
+    if (!inputs.length) {
+      return NextResponse.json({ error: 'Добавьте на таймлайн хотя бы один шот' }, { status: 400 })
     }
     if (inputs.length > 60) {
       return NextResponse.json({ error: 'Слишком много шотов (максимум 60)' }, { status: 400 })

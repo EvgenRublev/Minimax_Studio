@@ -1826,7 +1826,9 @@ export function MontageView() {
   }, [])
 
   const runRender = useCallback(async () => {
-    if (shots.length < 2 || rendering) return
+    // (правка 864) собирать можно и один шот: пустой таймлайн — единственное
+    // условие отказа (раньше требовалось минимум два)
+    if (!shots.length || rendering) return
     // (правка 720 v11) правки в полях свойств не имеют своей точки снимка —
     // сохраняем перед ними историю на ходу (кнопка «Собрать» нажимается редко)
     // (правка 844) снимок кладём руками и при НЕудачной сборке снимаем его:
@@ -2381,7 +2383,7 @@ export function MontageView() {
             )}
             <button
               className="rounded-md bg-[#7C3AED] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={shots.length < 2 || rendering}
+              disabled={!shots.length || rendering}
               onClick={runRender}
             >
               {rendering ? `Сборка…${renderPct != null ? ` ${renderPct}%` : ''}` : `Собрать (${shots.length})`}
