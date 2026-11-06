@@ -1688,10 +1688,34 @@ export function MontageView() {
    * заголовком (titleBarStyle hidden) нативный requestFullscreen в Electron
    * срабатывает через раз, поэтому полный экран делаем CSS-оверлеем на весь
    * вьюпорт (тот же прием, что в video-lightbox).
+   * (правка 868) Сам по себе оверлей таскбар не прячет ( maximized-окно не
+   * пускают поверх таскбара, в Win11 — особенно): в Electron дополнительно
+   * включаем настоящий фулскрин окна через preload-мост, в браузере —
+   * стандартный Fullscreen API. Внешний выход из фулскрина гасит оверлей.
    */
   const toggleFullscreen = useCallback(() => {
     setIsFs((v) => !v)
   }, [])
+
+  useEffect(() => {
+    const d = window.h3desktop
+    const setFs = d?.fullscreen
+    if (setFs) {
+      setFs(isFs)
+      const off = d?.onFullscreenChange?.((on) => { if (!on) setIsFs(false) })
+      return () => { if (isFs) setFs(false); off?.() }
+    }
+    // Браузерный фолбэк: нативный фулскрин документа; если запрещён — остаётся
+    // только CSS-оверлей (как раньше).
+    if (isFs) {
+      document.documentElement.requestFullscreen?.().catch(() => { /* CSS-оверлей и так работает */ })
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {})
+    }
+    const onFsChange = () => { if (!document.fullscreenElement) setIsFs(false) }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [isFs])
 
   // (правка 859) обновление эффектов выбранного клипа и копирование между клипами
   const updateSelectedFx = useCallback((patch: Partial<ShotFx> | ((prev: ShotFx) => ShotFx)) => {

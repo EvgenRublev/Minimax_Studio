@@ -521,6 +521,15 @@ ipcMain.on('h3:window-maximize-toggle', () => {
 })
 ipcMain.on('h3:window-close', () => win?.close())
 
+/* (правка 868) «Просмотр на весь экран (F)» во вкладке «Монтаж»: CSS-оверлей
+ * покрывает только вьюпорт окна, а таскбар (в Win11 в частности) maximized-окно
+ * не пускает поверх себя. В Electron просим настоящий window.setFullScreen —
+ * таскбар скрывается; рендерер синхронизируется через
+ * 'h3:window-fullscreen-changed' (внешний выход из фулскрина тоже гасит оверлей). */
+ipcMain.on('h3:window-fullscreen', (_e, on) => {
+  if (win) win.setFullScreen(Boolean(on))
+})
+
 /* (правка 567) Панель «Консоль»: полный буфер + сохранение в файл
  * через нативный диалог выбора места. */
 ipcMain.handle('h3:console-get', () => consoleBuf)
@@ -790,6 +799,9 @@ function createWindow() {
   })
 
   win.on('closed', () => { win = null })
+  // (правка 868) статус полноэкранного режима → рендерер (вход/выход, в т.ч. внешний).
+  win.on('enter-full-screen', () => { if (win) win.webContents.send('h3:window-fullscreen-changed', true) })
+  win.on('leave-full-screen', () => { if (win) win.webContents.send('h3:window-fullscreen-changed', false) })
   // (правка 716) .catch обязателен: loadURL отклоняется при ERR_CONNECTION_REFUSED
   // (сервер не поднялся) или ERR_ABORTED. Без обработчика — unhandled
   // rejection → падение main-процесса → осиротевшие ComfyUI/python-процессы

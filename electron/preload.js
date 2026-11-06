@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('h3desktop', {
   // (правка 790) «Перезапустить и установить»: main-процесс запускает
   // install\apply_update.ps1 отдельным процессом и закрывает приложение.
   applyUpdate: () => ipcRenderer.invoke('h3:apply-update'),
+  // (правка 868) полноэкранный режим окна (просмотр «Монтажа» на весь экран, F):
+  // CSS-оверлей не прячет таскбар, просим нативный setFullScreen у окна.
+  fullscreen: (on) => ipcRenderer.send('h3:window-fullscreen', Boolean(on)),
+  /** Подписка на смену фулскрина (внешний вход/выход); возвращает отписку. */
+  onFullscreenChange: (cb) => {
+    const handler = (_e, on) => cb(!!on)
+    ipcRenderer.on('h3:window-fullscreen-changed', handler)
+    return () => ipcRenderer.removeListener('h3:window-fullscreen-changed', handler)
+  },
   // (правка 567) Панель «Консоль»: буфер вывода всех процессов приложения.
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */

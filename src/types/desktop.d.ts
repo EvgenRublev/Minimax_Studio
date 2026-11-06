@@ -12,6 +12,10 @@ export interface H3DesktopBridge {
   close: () => void
   /** (правка 790) «Перезапустить и установить»: запуск apply_update.ps1 и выход. */
   applyUpdate?: () => Promise<{ ok: boolean; error?: string }>
+  /** (правка 868) полноэкранный режим окна (просмотр «Монтажа», F). */
+  fullscreen?: (on: boolean) => void
+  /** (правка 868) подписка на смену фулскрина (внешний вход/выход); отписка в return. */
+  onFullscreenChange?: (cb: (on: boolean) => void) => () => void
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */
     get: () => Promise<string>
