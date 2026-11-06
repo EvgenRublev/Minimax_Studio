@@ -715,6 +715,18 @@ $body.Controls.Add($runBtn)
 # ------------------------------------------------------------------- flow ---
 
 function Stop-Install {
+    # (правка 790) Помечать установку ошибкой есть смысл только пока она
+    # реально идёт. Раньше закрытие окна ПОСЛЕ успешной установки затирало
+    # статус «done» ошибкой «Установка прервана пользователем», и заставка
+    # показывала её при каждом следующем запуске.
+    $st = Get-Status
+    $live = $false
+    if ($st) {
+        $live = ($st.state -eq 'running' -and (Test-PidAlive ([int]$st.pid)))
+    } elseif ($script:child -and -not $script:child.HasExited) {
+        $live = $true
+    }
+    if (-not $live) { return }
     if ($script:child -and -not $script:child.HasExited) {
         try { & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $script:child.Id 2>$null | Out-Null } catch { }
         try { $script:child.Kill() } catch { }

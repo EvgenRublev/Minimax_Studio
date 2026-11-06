@@ -803,16 +803,51 @@ try {
     }
 } catch { }
 
+# (правка 791) nvidia-smi лежит в System32 и может не находиться по PATH:
+# у лаунчера бывает усечённый PATH, а 32-битный процесс видит SysWOW64, где
+# nvidia-smi нет вовсе. Поэтому сначала Get-Command, затем известные пути,
+# и только в крайнем случае — предупреждение.
+$nvidiaExe = $null
 $nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-if ($nvidia) {
+if ($nvidia) { $nvidiaExe = $nvidia.Source }
+if (-not $nvidiaExe) {
+    $candidates = @(
+        (Join-Path $env:SystemRoot 'System32\nvidia-smi.exe'),
+        (Join-Path $env:SystemRoot 'Sysnative\nvidia-smi.exe'),
+        (Join-Path $env:ProgramFiles 'NVIDIA Corporation\NVSMI\nvidia-smi.exe')
+    )
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} 'NVIDIA Corporation\NVSMI\nvidia-smi.exe')
+    }
+    foreach ($p in $candidates) {
+        if (Test-Path $p) { $nvidiaExe = $p; break }
+    }
+}
+if ($nvidiaExe) {
     try {
-        $gpu = (& nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>$null | Select-Object -First 1)
-        Ok ('GPU: ' + $gpu)
+        $gpu = (& $nvidiaExe --query-gpu=name,memory.total --format=csv,noheader 2>$null | Select-Object -First 1)
+        if ($gpu) {
+            Ok ('GPU: ' + $gpu)
+        } else {
+            Warn 'nvidia-smi найден, но видеокарта не ответила'
+        }
     } catch {
         Warn 'nvidia-smi найден, но видеокарта не ответила'
     }
 } else {
-    Warn 'nvidia-smi не найден: не установлен драйвер NVIDIA. Студия сможет запуститься, но генерация без GPU невозможна.'
+    # Последний шанс: драйвер может быть установлен, а nvidia-smi отсутствовать
+    # (OEM/ноутбучные сборки). Спрашиваем у WMI, а не пугаем пользователя.
+    $gpuName = $null
+    try {
+        $vc = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1
+        if ($vc) { $gpuName = $vc.Name }
+    } catch { }
+    if ($gpuName) {
+        Ok ('GPU: ' + $gpuName + ' (nvidia-smi недоступен)')
+    } else {
+        Warn 'nvidia-smi не найден: не установлен драйвер NVIDIA. Студия сможет запуститься, но генерация без GPU невозможна.'
+    }
 }
 
 # ------------------------------------------------------------- 2. Node.js ---
