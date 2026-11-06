@@ -22,6 +22,12 @@
 // user side is ever deleted. Files in the bundle are tiny (<150 KB), so the
 // per-file compare is cheap.
 //
+// (правка 875) The bundle itself was incomplete: "custom nodes\ComfyUI-Frame-
+// Interpolation" shipped only vfi_utils.py + vfi_models/film, so the merge
+// created a package WITHOUT __init__.py - ComfyUI could not import it and the
+// FPS tab died with HTTP 400 missing_node_type ('RIFE VFI'). The full package
+// sources (65 .py, no ckpts/images) are now in the bundle.
+//
 // Usage: node scripts\sync_custom_nodes.js [comfyRoot]
 //        (omitted -> resolved from config\config.ini [comfy] comfy_dir,
 //         then %COMFY_ROOT%, then 'ComfyUI-Easy-Install' - same rules as
