@@ -1745,7 +1745,24 @@ export function MontageView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return
+      const tag = el?.tagName ?? ''
+      const inputType = tag === 'INPUT' ? ((el as HTMLInputElement).type || 'text').toLowerCase() : ''
+      // (правка 865) «текстовые» поля забирают все клавиши: там пробел — это
+      // пробел, а не воспроизведение. Ползунки/чекбоксы/кнопки к ним не относятся.
+      const isTextEntry =
+        tag === 'TEXTAREA' ||
+        (tag === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'].includes(inputType)) ||
+        !!el?.isContentEditable
+      if (isTextEntry) return
+      // (правка 865) пробел = play/pause ВСЕГДА, даже если фокус остался на
+      // кнопке или ползунке после клика: раньше срабатывало родное действие
+      // (кнопка нажималась заново, селект открывался), а воспроизведение нет.
+      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+        togglePlay()
+        return
+      }
       if (e.key === 'Escape') {
         if (isFs) {
           e.preventDefault()
@@ -1753,6 +1770,7 @@ export function MontageView() {
         }
         return
       }
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const k = e.key.toLowerCase()
         if (k === 'z' || k === 'я') {
@@ -1766,10 +1784,7 @@ export function MontageView() {
         return
       }
       if (!seqRef.current.length) return
-      if (e.code === 'Space') {
-        e.preventDefault()
-        togglePlay()
-      } else if (e.altKey && e.key === 'ArrowLeft') {
+      if (e.altKey && e.key === 'ArrowLeft') {
         e.preventDefault()
         moveShot(selectedKey, -1)
       } else if (e.altKey && e.key === 'ArrowRight') {
@@ -2256,6 +2271,20 @@ export function MontageView() {
     }
   }, [result])
 
+  // (правка 865) клик мышью не оставляет фокус на кнопке/ползунке: иначе после
+  // любого клика элемент подсвечен рамкой фокуса, а пробел уходит «в него».
+  // Текстовые поля не трогаем — в них фокус нужен для ввода.
+  const dropMouseFocus = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const el = e.target as HTMLElement | null
+    const ctl = el?.closest('button, input') as HTMLElement | null
+    if (!ctl) return
+    if (ctl instanceof HTMLInputElement) {
+      const t = (ctl.type || 'text').toLowerCase()
+      if (!['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'].includes(t)) return
+    }
+    requestAnimationFrame(() => ctl.blur())
+  }, [])
+
   // деления линейки
   const rulerStep = totalSec > 0 ? pickStep(totalSec, pps) : 1
   const rulerTicks: number[] = []
@@ -2269,7 +2298,7 @@ export function MontageView() {
   const canRedo = histTick >= 0 && redoRef.current.length > 0
 
   return (
-    <div className="flex h-full w-full min-w-0">
+    <div className="flex h-full w-full min-w-0" onPointerUp={dropMouseFocus}>
       {/* центр: шапка + превью + транспорт + таймлайн */}
       <section className="flex min-w-0 flex-1 flex-col">
         {/* шапка: заголовок + настройки секвенции + сборка (правка 861: настройки таймлайна перенесены вниз к таймлайну) */}
