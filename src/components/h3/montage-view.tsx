@@ -40,6 +40,9 @@ import {
   FrameIcon,
   LinkIcon,
   MagnetIcon,
+  // (правка 874) кнопки «+ слой» и «+ аудио»
+  LayersIcon,
+  MusicIcon,
   MaximizeIcon,
   MinimizeIcon,
   PauseIcon,
@@ -94,6 +97,45 @@ type MontageShot = {
   /** (правка 860) пустой промежуток (пауза, сек >= 0) перед этим клипом на таймлайне */
   gap?: number
 }
+
+// (правка 874) клип видео-слоя (дорожки V2+): лежит поверх базовой дорожки в окне [at, at+эфф.длит.).
+// trimStart/trimEnd — числа (сек), speed — множитель; fit — как кадрируется в кадре;
+// звук слоя НЕ смешивается (как верхние видеодорожки DaVinci)
+type LayerClip = {
+  key: string
+  filename: string
+  subfolder?: string
+  name: string
+  url: string // /api/comfy/file?... — для превью
+  at: number
+  track: number // >=1; меньше — ниже; верхний перекрывает нижние
+  trimStart: number
+  trimEnd: number
+  speed: number
+  fit: 'stretch' | 'cover' | 'contain' | 'blur'
+  duration: number
+  hidden?: boolean
+}
+
+// (правка 874) аудиоклип звуковой дорожки (A1+): файл импортирован на сервер (.montage-audio)
+type AudioClip = {
+  key: string
+  file: string // имя файла на сервере — для рендера
+  name: string
+  url: string // /api/montage/audio?f=... — для превью
+  at: number
+  track: number // >=1
+  trimStart: number
+  trimEnd: number
+  vol: number // % (100 = без изменения)
+  fadeIn: number
+  fadeOut: number
+  duration: number
+  muted?: boolean
+}
+
+/** (правка 874) снимок таймлайна для истории (отмена/повтор) */
+type HistSnap = { shots: MontageShot[]; layers: LayerClip[]; audios: AudioClip[] }
 
 /** (правка 859, 861) 5 узловых точек 2D-кривой [x, y] (0..1):
  *  0: Чёрные (0,0), 1: Тени (0.25,0.25), 2: Средние (0.5,0.5), 3: Света (0.75,0.75), 4: Белые (1,1).
@@ -191,8 +233,15 @@ type SeqRow = { shot: MontageShot; r: { start: number; end: number }; offset: nu
 
 let shotCounter = 0
 const newShotKey = () => `shot-${Date.now()}-${++shotCounter}`
+// (правка 874) ключи клипов слоёв и аудио (тот же счётчик — ключи не пересекаются)
+const newLayerKey = () => `lay-${Date.now()}-${++shotCounter}`
+const newAudioKey = () => `aud-${Date.now()}-${++shotCounter}`
 
 const MAX_SHOTS = 60
+/** (правка 874) мягкие защитные лимиты для слоёв и аудио (как DaVinci, но с крышкой) */
+const MAX_LAYER_CLIPS = 40
+const MAX_AUDIO_CLIPS = 60
+const MAX_TRACKS = 12
 
 /** за сколько секунд до конца клипа прогревать резервный буфер превью */
 const PREWARM = 1.5
@@ -210,6 +259,9 @@ const LS_KEY = 'h3_montage_v1'
 
 type MontageSaved = {
   shots?: MontageShot[]
+  // (правка 874) видео-слои и звуковые дорожки
+  layers?: LayerClip[]
+  audios?: AudioClip[]
   selectedKey?: string | null
   folderFilter?: string
   pps?: number
@@ -657,6 +709,23 @@ export function MontageView() {
   const [seqOpen, setSeqOpen] = useState(false)
   /** (правка 859) вкладка правой панели: галерея | свойства | эффекты */
   const [rightTab, setRightTab] = useState<'gallery' | 'props' | 'fx'>('gallery')
+  /** (правка 874) видео-слои (дорожки V2+): поверх базы, трек выше — перекрывает */
+  const [layers, setLayers] = useState<LayerClip[]>([])
+  const layersRef = useRef<LayerClip[]>([])
+  /** (правка 874) нижняя граница числа рядов слоёв в UI («+ слой» добавляет ряд) */
+  const [layerTracks, setLayerTracks] = useState(0)
+  const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null)
+  /** (правка 874) аудиоклипы звуковых дорожек (A1+) */
+  const [audios, setAudios] = useState<AudioClip[]>([])
+  const audiosRef = useRef<AudioClip[]>([])
+  const [audioTracks, setAudioTracks] = useState(0)
+  const [selectedAudioKey, setSelectedAudioKey] = useState<string | null>(null)
+  /** (правка 874) DOM-элементы слоистых <video>/<audio> в превью: key -> элемент
+   *  (для fit=blur — контейнер с двумя <video>) */
+  const layerElsRef = useRef<Map<string, HTMLVideoElement | HTMLDivElement>>(new Map())
+  const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  /** (правка 874) скрытый <input type=file> импорта звука */
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null)
   /** (правка 859) редактируемый канал кривых цвета */
   const [curveCh, setCurveCh] = useState<'master' | 'r' | 'g' | 'b'>('master')
   /** (правка 859) буфер скопированных эффектов для переноса на другие клипы */
@@ -679,7 +748,13 @@ export function MontageView() {
   }, [])
 
   /** источник текущего drag (dataTransfer данные на dragover недоступны) */
-  const dragRef = useRef<{ kind: 'gallery'; file: VideoGalleryFile } | { kind: 'move'; key: string } | null>(null)
+  const dragRef = useRef<
+    | { kind: 'gallery'; file: VideoGalleryFile }
+    | { kind: 'move'; key: string }
+    | { kind: 'move-layer'; key: string }
+    | { kind: 'move-audio'; key: string }
+    | null
+  >(null)
   /** true, пока тянем за край блока (гасит HTML5-drag блока) */
   const suppressDrag = useRef(false)
   const trackRef = useRef<HTMLDivElement>(null)
@@ -724,9 +799,10 @@ export function MontageView() {
   /** (правка 720 v11) зеркала переключателей транспорта для rAF-обработчика */
   const snapRef = useRef(true)
   const loopClipRef = useRef(false)
-  /** (правка 720 v11) история таймлайна для Ctrl+Z / Ctrl+Shift+Z */
-  const undoRef = useRef<MontageShot[][]>([])
-  const redoRef = useRef<MontageShot[][]>([])
+  /** (правка 720 v11) история таймлайна для Ctrl+Z / Ctrl+Shift+Z
+   *  (правка 874) снапшот теперь {shots, layers, audios} */
+  const undoRef = useRef<HistSnap[]>([])
+  const redoRef = useRef<HistSnap[]>([])
   /** точка времени, которую держим под курсором при зуме колесом */
   const zoomAnchorRef = useRef<{ t: number; x: number } | null>(null)
   /** зеркало shots для обработчиков без зависимостей */
@@ -748,6 +824,15 @@ export function MontageView() {
   }, [files, folderFilter, search])
 
   const selected = shots.find((s) => s.key === selectedKey) || null
+  // (правка 874) выделенные слой/аудио + точечные правки из панели свойств
+  const selectedLayer = layers.find((l) => l.key === selectedLayerKey) || null
+  const selectedAudio = audios.find((a) => a.key === selectedAudioKey) || null
+  const patchLayer = useCallback((key: string, patch: Partial<LayerClip>) => {
+    setLayers((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)))
+  }, [])
+  const patchAudio = useCallback((key: string, patch: Partial<AudioClip>) => {
+    setAudios((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)))
+  }, [])
 
   const seq = useMemo<SeqRow[]>(() => {
     let acc = 0
@@ -765,6 +850,31 @@ export function MontageView() {
   }, [shots])
   const totalSec = seq.length ? seq[seq.length - 1].offset + seq[seq.length - 1].len : 0
 
+  // (правка 874) эффективная длина на таймлайне для слоёв/аудио, сек на выходе
+  const layerLen = useCallback((l: LayerClip) => Math.max(0.05, (l.duration - l.trimStart - l.trimEnd) / (l.speed || 1)), [])
+  const audioLen = useCallback((a: AudioClip) => Math.max(0.05, a.duration - a.trimStart - a.trimEnd), [])
+  /** полная длина шкалы таймлайна: база + хвосты слоёв/аудио (рендер всё равно режется по базе) */
+  const tlEnd = useMemo(() => {
+    let e = totalSec
+    for (const l of layers) e = Math.max(e, l.at + layerLen(l))
+    for (const a of audios) e = Math.max(e, a.at + audioLen(a))
+    return e
+  }, [totalSec, layers, audios, layerLen, audioLen])
+  /** индексы рядов слоёв сверху вниз (верхний ряд — самый верхний трек); V1 — база, её тут нет */
+  const layerRows = useMemo(() => {
+    const maxT = Math.min(MAX_TRACKS, Math.max(layerTracks, layers.reduce((m, l) => Math.max(m, l.track), 0)))
+    const rows: number[] = []
+    for (let t = maxT; t >= 1; t--) rows.push(t)
+    return rows
+  }, [layerTracks, layers])
+  /** индексы аудиорядов сверху вниз: A1, A2, ... */
+  const audioRows = useMemo(() => {
+    const maxT = Math.min(MAX_TRACKS, Math.max(audioTracks, audios.reduce((m, a) => Math.max(m, a.track), 0)))
+    const rows: number[] = []
+    for (let t = 1; t <= maxT; t++) rows.push(t)
+    return rows
+  }, [audioTracks, audios])
+
   // зеркала для rAF/клавиатурных обработчиков, чтобы не зависеть от замыканий
   const seqRef = useRef<SeqRow[]>([])
   useEffect(() => { seqRef.current = seq }, [seq])
@@ -772,6 +882,47 @@ export function MontageView() {
   useEffect(() => { seqTRef.current = playT }, [playT])
   useEffect(() => { trackHRef.current = trackH }, [trackH])
   useEffect(() => { shotsRef.current = shots }, [shots])
+  // (правка 874) зеркала слоёв/аудио для обработчиков без зависимостей
+  useEffect(() => { layersRef.current = layers }, [layers])
+  useEffect(() => { audiosRef.current = audios }, [audios])
+  // (правка 874) синхронизация слоистых <video>/<audio> с курсором превью:
+  // играем только окна клипов, рассинхрон > 0.35 с подтягиваем seek'ом
+  const layerVideosOf = (host: HTMLVideoElement | HTMLDivElement): HTMLVideoElement[] =>
+    host.tagName === 'VIDEO' ? [host as HTMLVideoElement] : Array.from(host.querySelectorAll('video'))
+  useEffect(() => {
+    const live = new Set<string>()
+    if (playing && !result) {
+      for (const l of layers) {
+        if (l.hidden) continue
+        const sp = l.speed || 1
+        if (playT < l.at || playT >= l.at + layerLen(l)) continue
+        const host = layerElsRef.current.get(l.key)
+        if (!host) continue
+        live.add(l.key)
+        const want = Math.min(l.trimStart + (playT - l.at) * sp, Math.max(0, (l.duration || 0) - 0.01))
+        for (const v of layerVideosOf(host)) {
+          if (Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = Math.max(0, want) } catch { /* ignore */ } }
+          if (v.paused) void v.play().catch(() => {})
+        }
+      }
+      for (const a of audios) {
+        if (a.muted) continue
+        if (playT < a.at || playT >= a.at + audioLen(a)) continue
+        const el = audioElsRef.current.get(a.key)
+        if (!el) continue
+        live.add(a.key)
+        const want = Math.min(a.trimStart + (playT - a.at), Math.max(0, (a.duration || 0) - 0.01))
+        if (Math.abs(el.currentTime - want) > 0.35) { try { el.currentTime = Math.max(0, want) } catch { /* ignore */ } }
+        el.volume = muted ? 0 : Math.max(0, Math.min(1, ((a.vol ?? 100) / 100) * masterVol))
+        if (el.paused) void el.play().catch(() => {})
+      }
+    }
+    for (const [k, host] of layerElsRef.current) {
+      if (live.has(k)) continue
+      for (const v of layerVideosOf(host)) if (!v.paused) v.pause()
+    }
+    for (const [k, el] of audioElsRef.current) if (!live.has(k) && !el.paused) el.pause()
+  }, [playT, playing, result, layers, audios, muted, masterVol, layerLen, audioLen])
   useEffect(() => { snapRef.current = snap }, [snap])
   useEffect(() => { loopClipRef.current = loopClip }, [loopClip])
 
@@ -785,6 +936,51 @@ export function MontageView() {
     } catch { /* битые данные — стартуем пусто */ }
     if (Array.isArray(s.shots)) {
       setShots(s.shots.filter((x) => x && typeof x.key === 'string' && typeof x.url === 'string').slice(0, MAX_SHOTS))
+    }
+    // (правка 874) слои и аудио: валидация полей, мягкие лимиты рядов/клипов
+    if (Array.isArray(s.layers)) {
+      const ls = s.layers
+        .filter((x) => x && typeof x.key === 'string' && typeof x.filename === 'string' && typeof x.url === 'string')
+        .slice(0, MAX_LAYER_CLIPS)
+        .map((x) => ({
+          key: x.key as string,
+          filename: x.filename as string,
+          subfolder: typeof x.subfolder === 'string' ? x.subfolder : '',
+          name: typeof x.name === 'string' ? x.name : (x.filename as string),
+          url: x.url as string,
+          at: Number.isFinite(x.at as number) ? Math.max(0, x.at as number) : 0,
+          track: Number.isFinite(x.track as number) ? Math.max(1, Math.round(x.track as number)) : 1,
+          trimStart: Number.isFinite(x.trimStart as number) ? Math.max(0, x.trimStart as number) : 0,
+          trimEnd: Number.isFinite(x.trimEnd as number) ? Math.max(0, x.trimEnd as number) : 0,
+          speed: Number.isFinite(x.speed as number) ? Math.max(0.25, Math.min(4, x.speed as number)) : 1,
+          fit: (['stretch', 'cover', 'contain', 'blur'] as const).includes(x.fit as 'blur') ? (x.fit as LayerClip['fit']) : 'stretch',
+          duration: Number.isFinite(x.duration as number) ? Math.max(0, x.duration as number) : 0,
+          hidden: x.hidden === true,
+        }))
+      setLayers(ls)
+      setLayerTracks(ls.reduce((m, l) => Math.max(m, l.track), 0))
+    }
+    if (Array.isArray(s.audios)) {
+      const as = s.audios
+        .filter((x) => x && typeof x.key === 'string' && typeof x.file === 'string' && typeof x.url === 'string')
+        .slice(0, MAX_AUDIO_CLIPS)
+        .map((x) => ({
+          key: x.key as string,
+          file: x.file as string,
+          name: typeof x.name === 'string' ? x.name : (x.file as string),
+          url: x.url as string,
+          at: Number.isFinite(x.at as number) ? Math.max(0, x.at as number) : 0,
+          track: Number.isFinite(x.track as number) ? Math.max(1, Math.round(x.track as number)) : 1,
+          trimStart: Number.isFinite(x.trimStart as number) ? Math.max(0, x.trimStart as number) : 0,
+          trimEnd: Number.isFinite(x.trimEnd as number) ? Math.max(0, x.trimEnd as number) : 0,
+          vol: Number.isFinite(x.vol as number) ? Math.max(0, Math.min(200, x.vol as number)) : 100,
+          fadeIn: Number.isFinite(x.fadeIn as number) ? Math.max(0, x.fadeIn as number) : 0,
+          fadeOut: Number.isFinite(x.fadeOut as number) ? Math.max(0, x.fadeOut as number) : 0,
+          duration: Number.isFinite(x.duration as number) ? Math.max(0, x.duration as number) : 0,
+          muted: x.muted === true,
+        }))
+      setAudios(as)
+      setAudioTracks(as.reduce((m, a) => Math.max(m, a.track), 0))
     }
     if (typeof s.selectedKey === 'string') setSelectedKey(s.selectedKey)
     if (typeof s.folderFilter === 'string') setFolderFilter(s.folderFilter)
@@ -816,7 +1012,7 @@ export function MontageView() {
   useEffect(() => {
     if (!hydrated.current) return
     const payload: MontageSaved = {
-      shots, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seq: seqSet,
+      shots, layers, audios, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seq: seqSet,
     }
     const save = () => {
       try {
@@ -828,7 +1024,7 @@ export function MontageView() {
       clearTimeout(timer)
       save()
     }
-  }, [shots, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seqSet])
+  }, [shots, layers, audios, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seqSet])
 
   // (правка 858) если в сохранённом таймлайне остались шоты с duration === 0
   // (вкладку закрыли до завершения измерения), домеряем их при монтировании
@@ -844,7 +1040,17 @@ export function MontageView() {
         }
       })
     }
-  }, [shots])
+    // (правка 874) так же домеряем длительность видео-слоёв
+    for (const l of layers) {
+      if (l.duration > 0 || durProbedRef.current.has(l.key)) continue
+      durProbedRef.current.add(l.key)
+      getVideoDuration(l.url).then((d) => {
+        if (d > 0 && mountedRef.current) {
+          setLayers((cur) => cur.map((x) => (x.key === l.key && !x.duration ? { ...x, duration: d } : x)))
+        }
+      })
+    }
+  }, [shots, layers])
 
   // (правка 843) в сохранённом таймлайне могут остаться ссылки на УДАЛЁННЫЕ файлы
   // галереи (url больше не отдаётся, превью и рендер битые). Когда галерея
@@ -854,15 +1060,23 @@ export function MontageView() {
     const aliveKey = (s: { subfolder?: string; filename: string }) => `${s.subfolder || ''}|${s.filename}`
     const alive = new Set(files.map((f) => aliveKey(f)))
     const gone = shotsRef.current.filter((s) => !alive.has(aliveKey(s))).length
-    if (!gone) return
+    // (правка 874) мёртвые видео-слои снимаем так же (аудио живёт в .montage-audio — не трогаем)
+    const goneL = layersRef.current.filter((l) => !alive.has(aliveKey(l))).length
+    if (!gone && !goneL) return
     setShots((prev) => {
       const next = prev.filter((s) => alive.has(aliveKey(s)))
       return next.length === prev.length ? prev : next
     })
+    setLayers((prev) => {
+      const next = prev.filter((l) => alive.has(aliveKey(l)))
+      return next.length === prev.length ? prev : next
+    })
     const cur = selectedKey ? shotsRef.current.find((x) => x.key === selectedKey) : null
     if (cur && !alive.has(aliveKey(cur))) setSelectedKey(null)
-    showToast(`С таймлайна убрано удалённых файлов: ${gone}`, 'error')
-  }, [files, loading, selectedKey])
+    const curL = selectedLayerKey ? layersRef.current.find((x) => x.key === selectedLayerKey) : null
+    if (curL && !alive.has(aliveKey(curL))) setSelectedLayerKey(null)
+    showToast(`С таймлайна убрано удалённых файлов: ${gone + goneL}`, 'error')
+  }, [files, loading, selectedKey, selectedLayerKey])
 
   // зум таймлайна колесом мыши (вверх = крупнее), точка под курсором остаётся на месте
   useEffect(() => {
@@ -1305,7 +1519,11 @@ export function MontageView() {
    * Храним сами шоты: подрезки, громкости, фейды, порядок.
    */
   const pushHistory = useCallback(() => {
-    undoRef.current.push(shotsRef.current.map((s) => ({ ...s })))
+    undoRef.current.push({
+      shots: shotsRef.current.map((s) => ({ ...s })),
+      layers: layersRef.current.map((l) => ({ ...l })),
+      audios: audiosRef.current.map((a) => ({ ...a })),
+    })
     if (undoRef.current.length > 50) undoRef.current.shift()
     redoRef.current = []
     setHistTick((v) => v + 1)
@@ -1314,23 +1532,39 @@ export function MontageView() {
   const undo = useCallback(() => {
     const prev = undoRef.current.pop()
     if (!prev) return
-    redoRef.current.push(shotsRef.current.map((s) => ({ ...s })))
+    redoRef.current.push({
+      shots: shotsRef.current.map((s) => ({ ...s })),
+      layers: layersRef.current.map((l) => ({ ...l })),
+      audios: audiosRef.current.map((a) => ({ ...a })),
+    })
     setHistTick((v) => v + 1)
     stopSeq(false)
     setResult(null)
-    setShots(prev)
-    setSelectedKey((cur) => (cur && prev.some((s) => s.key === cur) ? cur : null))
+    setShots(prev.shots)
+    setLayers(prev.layers)
+    setAudios(prev.audios)
+    setSelectedKey((cur) => (cur && prev.shots.some((s) => s.key === cur) ? cur : null))
+    setSelectedLayerKey((cur) => (cur && prev.layers.some((l) => l.key === cur) ? cur : null))
+    setSelectedAudioKey((cur) => (cur && prev.audios.some((a) => a.key === cur) ? cur : null))
   }, [stopSeq])
 
   const redo = useCallback(() => {
     const next = redoRef.current.pop()
     if (!next) return
-    undoRef.current.push(shotsRef.current.map((s) => ({ ...s })))
+    undoRef.current.push({
+      shots: shotsRef.current.map((s) => ({ ...s })),
+      layers: layersRef.current.map((l) => ({ ...l })),
+      audios: audiosRef.current.map((a) => ({ ...a })),
+    })
     setHistTick((v) => v + 1)
     stopSeq(false)
     setResult(null)
-    setShots(next)
-    setSelectedKey((cur) => (cur && next.some((s) => s.key === cur) ? cur : null))
+    setShots(next.shots)
+    setLayers(next.layers)
+    setAudios(next.audios)
+    setSelectedKey((cur) => (cur && next.shots.some((s) => s.key === cur) ? cur : null))
+    setSelectedLayerKey((cur) => (cur && next.layers.some((l) => l.key === cur) ? cur : null))
+    setSelectedAudioKey((cur) => (cur && next.audios.some((a) => a.key === cur) ? cur : null))
   }, [stopSeq])
 
   /** тянем границу между превью и таймлайном — меняем высоту дорожки */
@@ -1684,6 +1918,109 @@ export function MontageView() {
     setShots(next)
   }, [stopSeq, pushHistory])
 
+  /** (правка 874) положить файл галереи клипом на слой track (по умолчанию — верхний ряд, по плейхеду) */
+  const addLayerClip = useCallback(
+    (f: VideoGalleryFile, at?: number, track?: number) => {
+      if (layersRef.current.length >= MAX_LAYER_CLIPS) {
+        showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
+        return
+      }
+      const trk = Math.min(MAX_TRACKS, Math.max(1, track ?? Math.max(1, layerTracks)))
+      pushHistory()
+      const lay: LayerClip = {
+        key: newLayerKey(), filename: f.filename, subfolder: f.subfolder || '',
+        name: f.filename.replace(/\.[^.]+$/, ''), url: f.url,
+        at: Math.max(0, at ?? seqTRef.current), track: trk,
+        trimStart: 0, trimEnd: 0, speed: 1, fit: 'cover', duration: 0,
+      }
+      setLayers((prev) => [...prev, lay])
+      setLayerTracks((cur) => Math.max(cur, trk))
+      setSelectedLayerKey(lay.key)
+      setSelectedKey(null)
+      setSelectedAudioKey(null)
+      setResult(null)
+      getVideoDuration(f.url).then((d) => {
+        if (d > 0 && mountedRef.current) setLayers((cur) => cur.map((x) => (x.key === lay.key ? { ...x, duration: d } : x)))
+      })
+    },
+    [layerTracks, pushHistory],
+  )
+
+  const removeLayerClip = useCallback((key: string) => {
+    pushHistory()
+    setLayers((prev) => prev.filter((l) => l.key !== key))
+    setSelectedLayerKey((cur) => (cur === key ? null : cur))
+  }, [pushHistory])
+
+  const duplicateLayerClip = useCallback((key: string) => {
+    const src = layersRef.current.find((l) => l.key === key)
+    if (!src) return
+    if (layersRef.current.length >= MAX_LAYER_CLIPS) {
+      showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
+      return
+    }
+    pushHistory()
+    const copy: LayerClip = { ...src, key: newLayerKey(), at: src.at + layerLen(src) }
+    setLayers((prev) => [...prev, copy])
+    setSelectedLayerKey(copy.key)
+  }, [pushHistory, layerLen])
+
+  /** (правка 874) импорт звука с диска (POST /api/montage/audio) + клип на ряд track по плейхеду */
+  const importAndAddAudio = useCallback(
+    async (fileObj: File, at?: number, track?: number) => {
+      if (audiosRef.current.length >= MAX_AUDIO_CLIPS) {
+        showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
+        return
+      }
+      const fd = new FormData()
+      fd.append('file', fileObj)
+      try {
+        const res = await fetch('/api/montage/audio', { method: 'POST', body: fd })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || typeof data?.file !== 'string') {
+          showToast(String(data?.error || 'Не удалось импортировать аудио'), 'error')
+          return
+        }
+        pushHistory()
+        const trk = Math.min(MAX_TRACKS, Math.max(1, track ?? Math.max(1, audioTracks)))
+        const clip: AudioClip = {
+          key: newAudioKey(), file: data.file, name: typeof data.name === 'string' ? data.name : fileObj.name,
+          url: typeof data.url === 'string' ? data.url : `/api/montage/audio?f=${encodeURIComponent(data.file)}`,
+          at: Math.max(0, at ?? seqTRef.current), track: trk,
+          trimStart: 0, trimEnd: 0, vol: 100, fadeIn: 0, fadeOut: 0,
+          duration: Number.isFinite(data.duration) ? data.duration : 0,
+        }
+        setAudios((prev) => [...prev, clip])
+        setAudioTracks((cur) => Math.max(cur, trk))
+        setSelectedAudioKey(clip.key)
+        setSelectedKey(null)
+        setSelectedLayerKey(null)
+      } catch (e) {
+        showToast(`Импорт аудио не удался: ${e instanceof Error ? e.message : String(e)}`, 'error')
+      }
+    },
+    [audioTracks, pushHistory],
+  )
+
+  const removeAudioClip = useCallback((key: string) => {
+    pushHistory()
+    setAudios((prev) => prev.filter((a) => a.key !== key))
+    setSelectedAudioKey((cur) => (cur === key ? null : cur))
+  }, [pushHistory])
+
+  const duplicateAudioClip = useCallback((key: string) => {
+    const src = audiosRef.current.find((a) => a.key === key)
+    if (!src) return
+    if (audiosRef.current.length >= MAX_AUDIO_CLIPS) {
+      showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
+      return
+    }
+    pushHistory()
+    const copy: AudioClip = { ...src, key: newAudioKey(), at: src.at + audioLen(src) }
+    setAudios((prev) => [...prev, copy])
+    setSelectedAudioKey(copy.key)
+  }, [pushHistory, audioLen])
+
   /**
    * Превью на весь экран (F). (правка 720 v11) В кадре окна с невидимым
    * заголовком (titleBarStyle hidden) нативный requestFullscreen в Electron
@@ -1804,7 +2141,14 @@ export function MontageView() {
         e.preventDefault()
         scrubBy(1 / (seqSet.fps || 24))
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedKey) {
+        // (правка 874) удаляем выделенное: слой, аудио или базовый клип
+        if (selectedLayerKey) {
+          e.preventDefault()
+          removeLayerClip(selectedLayerKey)
+        } else if (selectedAudioKey) {
+          e.preventDefault()
+          removeAudioClip(selectedAudioKey)
+        } else if (selectedKey) {
           e.preventDefault()
           removeShot(selectedKey)
         }
@@ -1812,7 +2156,14 @@ export function MontageView() {
         e.preventDefault()
         splitAtPlayhead()
       } else if (['d', 'D', 'в', 'В'].includes(e.key)) {
-        if (selectedKey) {
+        // (правка 874) дубликат выделенного клипа любого типа
+        if (selectedLayerKey) {
+          e.preventDefault()
+          duplicateLayerClip(selectedLayerKey)
+        } else if (selectedAudioKey) {
+          e.preventDefault()
+          duplicateAudioClip(selectedAudioKey)
+        } else if (selectedKey) {
           e.preventDefault()
           duplicateShot(selectedKey)
         }
@@ -1823,7 +2174,11 @@ export function MontageView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, scrubBy, selectedKey, removeShot, splitAtPlayhead, duplicateShot, toggleFullscreen, moveShot, undo, redo, isFs, seqSet.fps])
+  }, [
+    togglePlay, scrubBy, selectedKey, selectedLayerKey, selectedAudioKey,
+    removeShot, removeLayerClip, removeAudioClip, splitAtPlayhead, duplicateShot,
+    duplicateLayerClip, duplicateAudioClip, toggleFullscreen, moveShot, undo, redo, isFs, seqSet.fps,
+  ])
 
   const setTrim = useCallback((key: string, side: 'start' | 'end', value: number, dur: number) => {
     setShots((prev) =>
@@ -1848,7 +2203,11 @@ export function MontageView() {
     // сохраняем перед ними историю на ходу (кнопка «Собрать» нажимается редко)
     // (правка 844) снимок кладём руками и при НЕудачной сборке снимаем его:
     // иначе после любой ошибки Ctrl+Z «срабатывает вхолостую»
-    const histSnap = shotsRef.current.map((s) => ({ ...s }))
+    const histSnap: HistSnap = {
+      shots: shotsRef.current.map((s) => ({ ...s })),
+      layers: layersRef.current.map((l) => ({ ...l })),
+      audios: audiosRef.current.map((a) => ({ ...a })),
+    }
     undoRef.current.push(histSnap)
     if (undoRef.current.length > 50) undoRef.current.shift()
     redoRef.current = []
@@ -1880,6 +2239,34 @@ export function MontageView() {
             gap: s.gap && s.gap >= 0.02 ? +s.gap.toFixed(3) : undefined,
           })),
           masterVol,
+          // (правка 874) видео-слои: трек от 0 (первый над базой), подрезка конца —
+          // АБСОЛЮТНАЯ секунда конца исходника (бэкенд делает trim=start:end)
+          layers: layers
+            .filter((l) => !l.hidden)
+            .map((l) => ({
+              name: l.filename,
+              subfolder: l.subfolder || undefined,
+              at: +l.at.toFixed(3),
+              track: Math.max(0, l.track - 1),
+              trimStart: l.trimStart > 0.001 ? +l.trimStart.toFixed(3) : undefined,
+              trimEnd:
+                l.duration > 0 && l.trimEnd > 0.001 ? +Math.max(0.05, l.duration - l.trimEnd).toFixed(3) : undefined,
+              speed: l.speed !== 1 ? l.speed : undefined,
+              fit: l.fit,
+            })),
+          // (правка 874) аудиоклипы звуковых дорожек (muted не едут в микс)
+          audios: audios
+            .filter((a) => !a.muted)
+            .map((a) => ({
+              file: a.file,
+              at: +a.at.toFixed(3),
+              trimStart: a.trimStart > 0.001 ? +a.trimStart.toFixed(3) : undefined,
+              trimEnd:
+                a.duration > 0 && a.trimEnd > 0.001 ? +Math.max(0.05, a.duration - a.trimEnd).toFixed(3) : undefined,
+              vol: (a.vol ?? 100) / 100,
+              fadeIn: a.fadeIn > 0.04 ? +a.fadeIn.toFixed(2) : undefined,
+              fadeOut: a.fadeOut > 0.04 ? +a.fadeOut.toFixed(2) : undefined,
+            })),
           // (правка 850) настройки секвенции (правка 846 бэкенда)
           seq: seqSet,
         }),
@@ -1942,11 +2329,28 @@ export function MontageView() {
     const idx = computeDropIdx(e.clientX)
     setDropIdx(null)
     dragRef.current = null
+    const el = e.target as HTMLElement | null
+    const trackEl = trackRef.current
+    const atX = trackEl ? Math.max(0, (e.clientX - trackEl.getBoundingClientRect().left) / ppsRef.current) : seqTRef.current
+    // (правка 874) сброс на ряд видео-слоя: файл галереи -> клип слоя на этом треке
+    const lRow = el?.closest('[data-layer-row]') as HTMLElement | null
+    if (lRow) {
+      if (d?.kind === 'gallery') addLayerClip(d.file, atX, Number(lRow.dataset.layerRow) || 1)
+      return
+    }
+    // (правка 874) сброс на аудиоряд: файл прямо из проводника (или dragRef не галерея — игнор)
+    const aRow = el?.closest('[data-audio-row]') as HTMLElement | null
+    if (aRow) {
+      const f0 = Array.from(e.dataTransfer?.files || []).find((x) => x.size > 0)
+      if (f0) void importAndAddAudio(f0, atX, Number(aRow.dataset.audioRow) || 1)
+      return
+    }
     if (!d) return
     if (d.kind === 'gallery') {
       addShot(d.file, idx)
       return
     }
+    if (d.kind !== 'move') return // (правка 874) слои/аудио двигаются pointer-drag'ом внутри своих рядов
     pushHistory()
     setShots((prev) => {
       const from = prev.findIndex((s) => s.key === d.key)
@@ -1957,7 +2361,7 @@ export function MontageView() {
       next.splice(Math.max(0, Math.min(to, next.length)), 0, moved)
       return next
     })
-  }, [addShot, computeDropIdx, pushHistory])
+  }, [addShot, addLayerClip, importAndAddAudio, computeDropIdx, pushHistory])
 
   /** тяга за край блока — подрезка в секундах (+ подсказка новой длительности и живой кадр в превью) */
   const startTrimDrag = useCallback(
@@ -2166,6 +2570,158 @@ export function MontageView() {
       window.addEventListener('pointerup', onUp)
     },
     [stopSeq, pushHistory, seekTo],
+  )
+
+  /**
+   * (правка 874) свободный pointer-drag клипа слоя/аудио: горизонталь — позиция
+   * at (магнит к 0, плейхеду, стыкам базы и краям соседних свободных клипов),
+   * вертикаль — смена ряда того же типа.
+   */
+  const startFreeClipDrag = useCallback(
+    (e: React.PointerEvent, kind: 'layer' | 'audio', clip: LayerClip | AudioClip) => {
+      if (e.button !== 0) return
+      const targetEl = e.target as HTMLElement | null
+      if (targetEl && (targetEl.closest('button') || targetEl.closest('[data-trim-handle]'))) return
+      e.preventDefault()
+      e.stopPropagation()
+      const startX = e.clientX
+      const at0 = clip.at
+      const len = kind === 'layer' ? layerLen(clip as LayerClip) : audioLen(clip as AudioClip)
+      const rows: Array<{ kind: 'layer' | 'audio'; track: number; top: number; bottom: number }> = []
+      for (const el of Array.from(scrollerRef.current?.querySelectorAll<HTMLElement>('[data-layer-row],[data-audio-row]') || [])) {
+        const r = el.getBoundingClientRect()
+        if (el.dataset.layerRow != null) rows.push({ kind: 'layer', track: Number(el.dataset.layerRow) || 1, top: r.top, bottom: r.bottom })
+        else if (el.dataset.audioRow != null) rows.push({ kind: 'audio', track: Number(el.dataset.audioRow) || 1, top: r.top, bottom: r.bottom })
+      }
+      const setClip = (at: number, track: number) => {
+        if (kind === 'layer') setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
+        else setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
+      }
+      let moved = false
+      let dragRaf = 0
+      let latestX = startX
+      let latestY = e.clientY
+      let curAt = at0
+      let curTrack = clip.track
+      const applyMove = (clientX: number, clientY: number) => {
+        const curPps = Math.max(8, ppsRef.current)
+        let want = Math.max(0, at0 + (clientX - startX) / curPps)
+        if (snapRef.current) {
+          const tol = Math.min(0.18, 8 / curPps)
+          const snapPts: number[] = [0, seqTRef.current, Math.max(0, seqTRef.current - len)]
+          for (const r of seqRef.current) snapPts.push(r.offset, r.offset + r.len)
+          for (const o of kind === 'layer' ? layersRef.current : audiosRef.current) {
+            if (o.key === clip.key) continue
+            snapPts.push(o.at, o.at + (kind === 'layer' ? layerLen(o as LayerClip) : audioLen(o as AudioClip)))
+          }
+          for (const sp of snapPts) if (Math.abs(want - sp) <= tol) { want = sp; break }
+        }
+        let track = curTrack
+        for (const r of rows) {
+          if (r.kind !== kind) continue
+          if (clientY >= r.top - 4 && clientY <= r.bottom + 4) { track = r.track; break }
+        }
+        curAt = +want.toFixed(3)
+        curTrack = Math.min(MAX_TRACKS, Math.max(1, track))
+        setClip(curAt, curTrack)
+        setTrimBadge({ x: clientX, y: clientY, text: `${curAt.toFixed(2)} с · ${kind === 'layer' ? 'V' : 'A'}${curTrack}` })
+      }
+      const onMove = (ev: PointerEvent) => {
+        latestX = ev.clientX
+        latestY = ev.clientY
+        if (!moved) {
+          if (Math.abs(ev.clientX - startX) < 3) return
+          moved = true
+          suppressDrag.current = true
+          stopSeq(false)
+          setResult(null)
+          if (kind === 'layer') setSelectedLayerKey(clip.key)
+          else setSelectedAudioKey(clip.key)
+          pushHistory()
+        }
+        if (!dragRaf) {
+          dragRaf = requestAnimationFrame(() => {
+            dragRaf = 0
+            applyMove(latestX, latestY)
+          })
+        }
+      }
+      const onUp = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0 }
+        setTrimBadge(null)
+        if (moved) {
+          applyMove(ev.clientX, ev.clientY)
+          setTimeout(() => { suppressDrag.current = false }, 0)
+        } else {
+          if (kind === 'layer') setSelectedLayerKey(clip.key)
+          else setSelectedAudioKey(clip.key)
+          setResult(null)
+          const track = trackRef.current
+          if (track) seekTo(Math.max(0, (ev.clientX - track.getBoundingClientRect().left) / ppsRef.current))
+        }
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [stopSeq, pushHistory, seekTo, layerLen, audioLen],
+  )
+
+  /** (правка 874) подрезка клипа слоя/аудио за край: trimStart/trimEnd — числа (сек исходника) */
+  const startFreeTrimDrag = useCallback(
+    (e: React.PointerEvent, kind: 'layer' | 'audio', clip: LayerClip | AudioClip, side: 'start' | 'end') => {
+      e.preventDefault()
+      e.stopPropagation()
+      suppressDrag.current = true
+      if (kind === 'layer') setSelectedLayerKey(clip.key)
+      else setSelectedAudioKey(clip.key)
+      const startX = e.clientX
+      const ts0 = clip.trimStart
+      const te0 = clip.trimEnd
+      const dur = clip.duration || 0
+      const sp = kind === 'layer' ? (clip as LayerClip).speed || 1 : 1
+      const maxTs = dur > 0 ? Math.max(0, dur - te0 - 0.05) : 0
+      const maxTe = dur > 0 ? Math.max(0, dur - ts0 - 0.05) : 0
+      let pushed = false
+      let ts = ts0
+      let te = te0
+      let raf = 0
+      const commit = () => {
+        if (kind === 'layer') {
+          setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x)))
+        } else {
+          setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x)))
+        }
+      }
+      const onMove = (ev: PointerEvent) => {
+        if (!pushed) { pushed = true; pushHistory() }
+        const srcDt = ((ev.clientX - startX) / ppsRef.current) * sp
+        if (side === 'start') ts = Math.max(0, Math.min(ts0 + srcDt, maxTs))
+        else te = Math.max(0, Math.min(te0 - srcDt, maxTe))
+        if (!raf) {
+          const bx = ev.clientX
+          const by = ev.clientY
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            commit()
+            const outLen = dur > 0 ? (dur - ts - te) / sp : 0
+            setTrimBadge({ x: bx, y: by, text: dur > 0 ? `${outLen.toFixed(2)} с` : '…' })
+          })
+        }
+      }
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        if (raf) { cancelAnimationFrame(raf); raf = 0 }
+        if (pushed) commit()
+        setTrimBadge(null)
+        setTimeout(() => { suppressDrag.current = false }, 0)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [pushHistory],
   )
 
   /** (правка 720 v11) вписать всю сборку в видимую ширину таймлайна */
@@ -2466,6 +3022,56 @@ export function MontageView() {
               })}
             </defs>
           </svg>
+          {/* (правка 874) видео-слои поверх базового кадра, синхронно playT.
+              Рендерятся только активные в текущий момент; звук слоя не участвует (muted). */}
+          {!result &&
+            layers.map((l) => {
+              const len = layerLen(l)
+              if (l.hidden || playT < l.at || playT >= l.at + len) return null
+              const objFit = l.fit === 'contain' ? 'contain' : l.fit === 'cover' ? 'cover' : l.fit === 'blur' ? 'contain' : 'fill'
+              return (
+                <video
+                  key={l.key}
+                  ref={(el) => {
+                    if (el) layerElsRef.current.set(l.key, el)
+                    else layerElsRef.current.delete(l.key)
+                  }}
+                  src={l.url}
+                  muted
+                  playsInline
+                  preload="auto"
+                  className="absolute object-contain"
+                  style={{
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: `${Math.round(vScale * 100)}%`,
+                    maxWidth: '100%',
+                    maxHeight: `${Math.round(vScale * 100)}%`,
+                    objectFit: objFit,
+                    zIndex: 5 + l.track,
+                  }}
+                />
+              )
+            })}
+          {/* (правка 874) аудиоклипы звуковых дорожек в превью (скрытые <audio>), микшируются с базой */}
+          {!result &&
+            audios.map((a) => {
+              const len = audioLen(a)
+              if (a.muted || playT < a.at || playT >= a.at + len) return null
+              return (
+                <audio
+                  key={a.key}
+                  ref={(el) => {
+                    if (el) audioElsRef.current.set(a.key, el)
+                    else audioElsRef.current.delete(a.key)
+                  }}
+                  src={a.url}
+                  preload="auto"
+                  className="hidden"
+                />
+              )
+            })}
           {[0, 1].map((b) => {
             // (правка 858, 859) живые CSS+SVG эффекты (отражение, кривые, дисперсия, яркость/контраст/насыщенность)
             const bKey = buf === b ? (previewVolKeyRef.current ?? bufShotKeyRef.current[b] ?? selectedKey) : bufShotKeyRef.current[b]
@@ -2641,6 +3247,40 @@ export function MontageView() {
             >
               <MagnetIcon className="h-3.5 w-3.5" />
             </button>
+            {/* (правка 874) новый ряд видео-слоя и импорт звука на звуковую дорожку */}
+            <button
+              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
+              onClick={() => {
+                const rowsNow = Math.max(layerTracks, layers.reduce((m, l) => Math.max(m, l.track), 0))
+                if (rowsNow >= MAX_TRACKS) {
+                  showToast(`Не более ${MAX_TRACKS} слоёв`, 'error')
+                  return
+                }
+                setLayerTracks(rowsNow + 1)
+                showToast('Добавлен ряд слоя — перетащите файл из галереи на него')
+              }}
+              title="Добавить ряд видео-слоя (файл кладётся перетаскиванием из галереи на ряд)"
+            >
+              <LayersIcon className="h-3.5 w-3.5" />
+            </button>
+            <button
+              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
+              onClick={() => audioFileInputRef.current?.click()}
+              title="Импорт аудиофайла с диска на звуковую дорожку (по плейхеду)"
+            >
+              <MusicIcon className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={audioFileInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void importAndAddAudio(f)
+              }}
+            />
             {shots.length > 0 && (
               <button
                 className="rounded border border-border px-2 py-1 text-xs text-zinc-400 hover:border-red-500/50 hover:text-red-300"
@@ -2759,15 +3399,36 @@ export function MontageView() {
           ref={scrollerRef}
           className="shrink-0 overflow-x-auto overflow-y-hidden border-t border-border bg-[var(--surface-1)] px-2 py-2"
           onDragOver={(e) => {
-            if (!dragRef.current) return
+            const el = e.target as HTMLElement | null
+            const aRow = el?.closest('[data-audio-row]')
+            const lRow = el?.closest('[data-layer-row]')
+            const d = dragRef.current
+            // (правка 874) над аудиорядом принимаем и файлы из проводника (dragRef пуст)
+            if (aRow) {
+              if (d || Array.from(e.dataTransfer.types || []).includes('Files')) {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDropIdx(null)
+              }
+              return
+            }
+            if (lRow) {
+              if (d?.kind === 'gallery') {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDropIdx(null)
+              }
+              return
+            }
+            if (!d) return
             e.preventDefault()
-            e.dataTransfer.dropEffect = dragRef.current.kind === 'gallery' ? 'copy' : 'move'
+            e.dataTransfer.dropEffect = d.kind === 'gallery' ? 'copy' : 'move'
             setDropIdx(computeDropIdx(e.clientX))
           }}
           onDragLeave={() => setDropIdx(null)}
           onDrop={onTimelineDrop}
         >
-          <div className="relative" style={{ width: `${Math.max(400, (totalSec + 5) * pps)}px` }}>
+          <div className="relative" style={{ width: `${Math.max(400, (tlEnd + 5) * pps)}px` }}>
             {/* линейка времени */}
             <div
               className="relative h-6 cursor-pointer select-none"
@@ -2787,6 +3448,76 @@ export function MontageView() {
                 </span>
               ))}
             </div>
+            {/* (правка 874) ряды видео-слоёв V2+ над базой: верхний ряд перекрывает нижние */}
+            {layerRows.map((t) => {
+              const h = Math.max(30, Math.round(trackH * 0.7))
+              const clips = layers.filter((l) => l.track === t)
+              return (
+                <div
+                  key={`layer-${t}`}
+                  data-layer-row={t}
+                  className="relative mb-1 rounded border border-[#7C3AED]/25 bg-[#7C3AED]/5"
+                  style={{ height: h }}
+                  onPointerDown={(e) => {
+                    if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
+                  }}
+                  title="Ряд видео-слоя: перетащите сюда файл из галереи"
+                >
+                  <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-[#A78BFA]/60">
+                    V{t + 1}
+                  </span>
+                  {clips.map((l) => {
+                    const w = Math.max(14, layerLen(l) * pps)
+                    return (
+                      <div
+                        key={l.key}
+                        onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
+                        className={cn(
+                          'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
+                          selectedLayerKey === l.key
+                            ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40'
+                            : 'border-[#7C3AED]/40 hover:border-[#A78BFA]/70',
+                          l.hidden && 'opacity-40',
+                        )}
+                        style={{ left: `${l.at * pps}px`, width: `${w}px` }}
+                        title={`${l.name} · слой V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с · звук слоя в сборку не входит`}
+                      >
+                        <img
+                          src={`${l.url}${l.url.includes('?') ? '&' : '?'}width=160`}
+                          alt=""
+                          draggable={false}
+                          loading="lazy"
+                          className="h-full w-full object-cover opacity-70"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
+                          {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}
+                        </div>
+                        <div
+                          data-trim-handle="start"
+                          onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'start')}
+                          className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          title="Подрезать начало"
+                        />
+                        <div
+                          data-trim-handle="end"
+                          onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'end')}
+                          className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          title="Подрезать конец"
+                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeLayerClip(l.key) }}
+                          className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
+                          title="Убрать слой"
+                        >
+                          <XIcon className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
             {/* дорожка с клипами (правка 860: клипы позиционируются по offset и двигаются свободно с паузами gap) */}
             <div
               ref={trackRef}
@@ -2802,6 +3533,7 @@ export function MontageView() {
                 if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
               }}
             >
+              <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-zinc-600">V1</span>
               {seq.length === 0 && (
                 <div
                   className="flex w-full items-center justify-center rounded border border-dashed border-border text-xs text-zinc-500"
@@ -2908,6 +3640,71 @@ export function MontageView() {
                 />
               )}
             </div>
+            {/* (правка 874) аудиоряды A1+ под базой: клипы со звуком с диска */}
+            {audioRows.map((t) => {
+              const h = Math.max(22, Math.round(trackH * 0.45))
+              const clips = audios.filter((a) => a.track === t)
+              return (
+                <div
+                  key={`audio-${t}`}
+                  data-audio-row={t}
+                  className="relative mb-1 rounded border border-emerald-500/25 bg-emerald-500/5"
+                  style={{ height: h }}
+                  onPointerDown={(e) => {
+                    if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
+                  }}
+                  title="Звуковая дорожка: перетащите сюда аудиофайл из проводника"
+                >
+                  <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-emerald-400/60">
+                    A{t}
+                  </span>
+                  {clips.map((a) => {
+                    const w = Math.max(12, audioLen(a) * pps)
+                    return (
+                      <div
+                        key={a.key}
+                        onPointerDown={(e) => startFreeClipDrag(e, 'audio', a)}
+                        className={cn(
+                          'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-[2px] border bg-emerald-600/25 active:cursor-grabbing',
+                          selectedAudioKey === a.key
+                            ? 'z-10 border-emerald-300 ring-1 ring-emerald-300/40'
+                            : 'border-emerald-500/40 hover:border-emerald-400/70',
+                          a.muted && 'opacity-40',
+                        )}
+                        style={{ left: `${a.at * pps}px`, width: `${w}px` }}
+                        title={`${a.name} · дорожка A${t} · старт ${a.at.toFixed(2)} с · длина ${audioLen(a).toFixed(1)} с · ${Math.round(a.vol)}%`}
+                      >
+                        <div className="pointer-events-none absolute inset-0 flex items-center px-2 opacity-25">
+                          <MusicIcon className="h-3 w-3 shrink-0 text-emerald-200" />
+                        </div>
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
+                          {a.name} · {audioLen(a).toFixed(1)}с · {Math.round(a.vol)}%{a.muted ? ' · нем' : ''}
+                        </div>
+                        <div
+                          data-trim-handle="start"
+                          onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'start')}
+                          className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-emerald-500/0 group-hover:bg-emerald-500/60"
+                          title="Подрезать начало"
+                        />
+                        <div
+                          data-trim-handle="end"
+                          onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'end')}
+                          className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-emerald-500/0 group-hover:bg-emerald-500/60"
+                          title="Подрезать конец"
+                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeAudioClip(a.key) }}
+                          className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
+                          title="Убрать аудио"
+                        >
+                          <XIcon className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
             {/* плейхед: линия + ромб-головка (тяните — перемотка) */}
             {seq.length > 0 && (
               <div ref={playheadRef} className="pointer-events-none absolute inset-y-0 z-20" style={{ left: `${playT * pps}px` }}>
@@ -3023,10 +3820,241 @@ export function MontageView() {
           </>
         )}
 
-        {/* ВКЛАДКА 2: СВОЙСТВА КЛИПА */}
+        {/* ВКЛАДКА 2: СВОЙСТВА КЛИПА (правка 874: плюс свойства слоёв и аудио) */}
         {rightTab === 'props' && (
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
-            {!selected ? (
+            {selectedLayer ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-[#7C3AED]/40 bg-[var(--surface-2)] p-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <LayersIcon className="h-3.5 w-3.5 shrink-0 text-[#A78BFA]" />
+                    <span className="truncate font-medium text-zinc-100" title={selectedLayer.filename}>{selectedLayer.name}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
+                    <span>В кадре: <strong className="text-zinc-200">{layerLen(selectedLayer).toFixed(2)} с</strong></span>
+                    <span>Исходник: {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
+                  </div>
+                  <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
+                    Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук в сборку не входит.
+                    Тяните клип по ряду или между рядами, за края — подрезка.
+                  </div>
+                </div>
+                <div className="space-y-1.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="text-[11px] font-medium text-zinc-300">Позиция на шкале, с</div>
+                  <input
+                    key={`at-${selectedLayer.key}-${selectedLayer.at}`}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={selectedLayer.at.toFixed(2)}
+                    onFocus={pushHistory}
+                    onBlur={(e) => {
+                      const v = parseSec(e.target.value)
+                      if (v != null && Math.abs(v - selectedLayer.at) > 0.001) patchLayer(selectedLayer.key, { at: +v.toFixed(3) })
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                    className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-zinc-200 focus:border-[#A78BFA] focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="text-[11px] font-medium text-zinc-300">Вписывание в кадр</div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {([
+                      ['stretch', 'Растянуть'],
+                      ['cover', 'Заполнить'],
+                      ['contain', 'Вписать'],
+                      ['blur', 'Подложка'],
+                    ] as const).map(([f, lab]) => (
+                      <button
+                        key={f}
+                        onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fit: f }) }}
+                        className={cn(
+                          'rounded border px-1 py-1.5 text-[10px] transition-colors',
+                          selectedLayer.fit === f
+                            ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
+                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                        )}
+                      >
+                        {lab}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="text-[11px] font-medium text-zinc-300">Скорость воспроизведения</div>
+                  <div className="grid grid-cols-6 gap-1">
+                    {SPEED_STEPS.map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { speed: v }) }}
+                        className={cn(
+                          'rounded border py-1 text-[11px] font-mono transition-colors',
+                          Math.abs((selectedLayer.speed || 1) - v) < 0.01
+                            ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
+                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                        )}
+                      >
+                        {v}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { hidden: !selectedLayer.hidden }) }}
+                    className={cn(
+                      'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
+                      selectedLayer.hidden ? 'text-[#A78BFA]' : 'text-zinc-300',
+                    )}
+                    title="Скрывать слой в превью и сборке"
+                  >
+                    {selectedLayer.hidden ? 'Показать' : 'Скрыть'}
+                  </button>
+                  <button
+                    onClick={() => duplicateLayerClip(selectedLayer.key)}
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    title="Дублировать слой (D)"
+                  >
+                    <CopyIcon className="h-3.5 w-3.5" />
+                    Дубликат
+                  </button>
+                  <button
+                    onClick={() => removeLayerClip(selectedLayer.key)}
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-red-500/60 hover:text-red-300"
+                    title="Удалить слой (Del)"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" />
+                    Удалить
+                  </button>
+                </div>
+              </div>
+            ) : selectedAudio ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-emerald-500/40 bg-[var(--surface-2)] p-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <MusicIcon className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                    <span className="truncate font-medium text-zinc-100" title={selectedAudio.name}>{selectedAudio.name}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
+                    <span>В сборке: <strong className="text-zinc-200">{audioLen(selectedAudio).toFixed(2)} с</strong></span>
+                    <span>Файл: {selectedAudio.duration ? `${selectedAudio.duration.toFixed(2)} с` : '…'}</span>
+                  </div>
+                  <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
+                    Звук дорожки A{selectedAudio.track} микшируется с базой без нормализации.
+                  </div>
+                </div>
+                <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-zinc-300">Позиция на шкале, с</div>
+                    <input
+                      key={`aat-${selectedAudio.key}-${selectedAudio.at}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={selectedAudio.at.toFixed(2)}
+                      onFocus={pushHistory}
+                      onBlur={(e) => {
+                        const v = parseSec(e.target.value)
+                        if (v != null && Math.abs(v - selectedAudio.at) > 0.001) patchAudio(selectedAudio.key, { at: +v.toFixed(3) })
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-zinc-200 focus:border-[#A78BFA] focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-zinc-300">Громкость клипа</span>
+                      <button
+                        onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { vol: 100 }) }}
+                        className="font-mono text-[11px] text-[#A78BFA] hover:underline"
+                        title="Клик — сбросить в 100%"
+                      >
+                        {Math.round(selectedAudio.vol)}%
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={200}
+                      value={Math.round(selectedAudio.vol)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchAudio(selectedAudio.key, { vol: Number(e.target.value) })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">Плавный вход звука (↑)</span>
+                      <button
+                        onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeIn: 0 }) }}
+                        className="font-mono text-[#A78BFA] hover:underline"
+                        title="Клик — выключить плавный вход"
+                      >
+                        {(selectedAudio.fadeIn || 0).toFixed(1)} с
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(1, Math.min(10, +audioLen(selectedAudio).toFixed(1)))}
+                      step={0.1}
+                      value={Math.min(10, selectedAudio.fadeIn || 0)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchAudio(selectedAudio.key, { fadeIn: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">Затухание звука в конце (↓)</span>
+                      <button
+                        onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeOut: 0 }) }}
+                        className="font-mono text-[#A78BFA] hover:underline"
+                        title="Клик — выключить затухание"
+                      >
+                        {(selectedAudio.fadeOut || 0).toFixed(1)} с
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(1, Math.min(10, +audioLen(selectedAudio).toFixed(1)))}
+                      step={0.1}
+                      value={Math.min(10, selectedAudio.fadeOut || 0)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchAudio(selectedAudio.key, { fadeOut: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { muted: !selectedAudio.muted }) }}
+                    className={cn(
+                      'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
+                      selectedAudio.muted ? 'text-[#A78BFA]' : 'text-zinc-300',
+                    )}
+                    title="Выключить этот звук в превью и сборке"
+                  >
+                    {selectedAudio.muted ? 'Включить звук' : 'Заглушить'}
+                  </button>
+                  <button
+                    onClick={() => duplicateAudioClip(selectedAudio.key)}
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    title="Дублировать аудио (D)"
+                  >
+                    <CopyIcon className="h-3.5 w-3.5" />
+                    Дубликат
+                  </button>
+                  <button
+                    onClick={() => removeAudioClip(selectedAudio.key)}
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-red-500/60 hover:text-red-300"
+                    title="Удалить аудио (Del)"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" />
+                    Удалить
+                  </button>
+                </div>
+              </div>
+            ) : !selected ? (
               <div className="rounded-lg border border-dashed border-border p-4 text-center text-zinc-500">
                 <div>Кликните по клипу на таймлайне, чтобы настроить его свойства</div>
                 {shots.length > 0 && (

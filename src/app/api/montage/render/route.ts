@@ -31,6 +31,12 @@
  * ролика = Σ d − Σ D, offset k-го xfade = Σ d(<k) − Σ D(≤k).
  * (правка 848) эффекты шота: speed 0.25–4 (setpts + цепочка atempo из-за
  * диапазона 0.5–2) и fx { flipH, flipV, gray, bright, contrast, sat }.
+ *
+ * (правка 874) body.layers = клипы видео-слоёв (at, track, fit): картинка
+ * накладывается на базу цепочкой overlay с enable=between(t,at,end), звук
+ * слоя не участвует; body.audios = аудиоклипы из .montage-audio (at, vol,
+ * фейды), смешиваются с базовым звуком через amix=normalize=0 + adelay.
+ * Без слоёв/аудио граф идентичен прежнему.
  */
 import path from 'path'
 import { promises as fs, existsSync } from 'fs'
@@ -44,6 +50,9 @@ import { resolveFfmpeg } from '@/lib/thumb'
 export const runtime = 'nodejs'
 
 const execFileAsync = promisify(execFile)
+
+/** (правка 874) папка импортированных звуков монтажки (см. /api/montage/audio) */
+const AUDIO_DIR = path.resolve(process.env.MONTAGE_AUDIO_DIR || './.montage-audio')
 
 /** (правка 834) одна сборка за раз: второй запрос получает 409, а не гонку имён */
 let renderBusy = false
@@ -211,6 +220,45 @@ interface TransitionSpec {
   dur: number
 }
 
+/**
+ * (правка 874) клип видео-слоя поверх базовой дорожки (V2+). Картинка: звук
+ * слоя не смешивается (как верхние видеодорожки в DaVinci). Позиция —
+ * абсолютная на шкале сборки (at, сек); порядок слоёв = track по возрастанию
+ * (меньший номер ниже, больший перекрывает). Клипы за концом базовой
+ * дорожки обрезаются длиной базы.
+ */
+interface MontageLayerInput {
+  /** имя файла в папке output ComfyUI (как у шотов) */
+  name: string
+  subfolder?: string
+  /** позиция на шкале сборки, сек */
+  at?: number | string | null
+  /** номер дорожки-слоя (0 = первая над базой); выше = перекрывает */
+  track?: number | string | null
+  trimStart?: number | string | null
+  trimEnd?: number | string | null
+  /** скорость 0.25..4 */
+  speed?: number | string | null
+  /** вписывание в кадр слоя: stretch | cover | contain | blur */
+  fit?: string | null
+}
+
+/**
+ * (правка 874) аудиоклип звуковой дорожки (A1+): файл из .montage-audio/
+ * (импорт /api/montage/audio), абсолютная позиция at, подрезка, громкость,
+ * фейды. Смешивается с базовым звуком через amix=normalize=0.
+ */
+interface MontageAudioInput {
+  /** имя файла в .montage-audio (basename, без путей) */
+  file: string
+  at?: number | string | null
+  trimStart?: number | string | null
+  trimEnd?: number | string | null
+  vol?: number | string | null
+  fadeIn?: number | string | null
+  fadeOut?: number | string | null
+}
+
 /** (правка 846) настройки секвенции */
 interface MontageSeq {
   w?: number | null
@@ -344,6 +392,10 @@ interface RenderBody {
   seq?: MontageSeq | null
   /** (правка 720 v8) общая громкость таймлайна, 0..1; применяется к mixes-output */
   masterVol?: number | string | null
+  /** (правка 874) клипы видео-слоёв поверх базовой дорожки */
+  layers?: MontageLayerInput[] | null
+  /** (правка 874) аудиоклипы звуковых дорожек (.montage-audio) */
+  audios?: MontageAudioInput[] | null
   /** куда положить результат (подпапка output), по умолчанию — общая */
   outSubfolder?: string
 }
@@ -542,25 +594,140 @@ export async function POST(req: Request) {
       })
     }
 
+    // ---- (правка 874) разбор клипов видео-слоёв (V2+) ----
+    const rawLayers = Array.isArray(body.layers) ? body.layers : []
+    if (rawLayers.length > 40) {
+      return NextResponse.json({ error: 'Слишком много клипов слоёв (максимум 40)' }, { status: 400 })
+    }
+    const layerItems: Array<{
+      src: string
+      at: number
+      track: number
+      start: number | null
+      end: number | null
+      speed: number
+      fit: string
+    }> = []
+    for (const l of rawLayers) {
+      const name = String(l?.name || '')
+      if (!name || name.includes('..') || /[\\/:]/.test(name)) {
+        return NextResponse.json({ error: 'Некорректное имя файла слоя' }, { status: 400 })
+      }
+      const sub = sanitizeFolderPath(l.subfolder || '')
+      const src = path.resolve(outputDir, ...(sub ? sub.split('/') : []), name)
+      let final: string | null = null
+      if (src.startsWith(outputRoot + path.sep) && existsSync(src)) {
+        final = src
+      } else {
+        const hits = await findAllRecursive(outputDir, name, 3)
+        const wantDir = path.dirname(src)
+        final = hits.find((h) => path.dirname(h) === wantDir) ?? (hits.length === 1 ? hits[0] : null)
+      }
+      if (!final) {
+        return NextResponse.json({ error: `Файл слоя не найден: ${name}` }, { status: 404 })
+      }
+      const at = typeof l.at === 'number' ? l.at : parseFloat(String(l.at ?? ''))
+      const trk = typeof l.track === 'number' ? l.track : parseInt(String(l.track ?? '0'), 10)
+      layerItems.push({
+        src: final,
+        at: Number.isFinite(at) && at > 0 ? Math.min(36_000, at) : 0,
+        track: Number.isFinite(trk) && trk > 0 ? Math.min(16, trk) : 0,
+        start: parseSec(l.trimStart),
+        end: parseSec(l.trimEnd),
+        speed: parseSpeed(l.speed),
+        fit: ['stretch', 'cover', 'contain', 'blur'].includes(String(l.fit)) ? String(l.fit) : 'cover',
+      })
+    }
+
+    // ---- (правка 874) разбор аудиоклипов (A1+): только .montage-audio ----
+    const rawAudios = Array.isArray(body.audios) ? body.audios : []
+    if (rawAudios.length > 60) {
+      return NextResponse.json({ error: 'Слишком много аудиоклипов (максимум 60)' }, { status: 400 })
+    }
+    const audioItems: Array<{
+      src: string
+      at: number
+      start: number | null
+      end: number | null
+      vol: number
+      fi: number
+      fo: number
+    }> = []
+    for (const a of rawAudios) {
+      const f = String(a?.file || '')
+      if (!f || f.includes('..') || /[\\/:]/.test(f)) {
+        return NextResponse.json({ error: 'Некорректное имя аудиофайла' }, { status: 400 })
+      }
+      const cand = path.resolve(path.join(AUDIO_DIR, path.basename(f)))
+      if (!cand.startsWith(AUDIO_DIR + path.sep) || !existsSync(cand)) {
+        return NextResponse.json({ error: `Аудиофайл не найден: ${f}` }, { status: 404 })
+      }
+      const at = typeof a.at === 'number' ? a.at : parseFloat(String(a.at ?? ''))
+      const s0 = parseSec(a.trimStart)
+      const e0 = parseSec(a.trimEnd)
+      if (s0 != null && e0 != null && e0 <= s0) {
+        return NextResponse.json({ error: `Подрезка конца больше начала в аудио ${f}` }, { status: 400 })
+      }
+      audioItems.push({
+        src: cand,
+        at: Number.isFinite(at) && at > 0 ? Math.min(36_000, at) : 0,
+        start: s0,
+        end: e0,
+        vol: parseVol(a.vol),
+        fi: parseFade(a.fadeIn),
+        fo: parseFade(a.fadeOut),
+      })
+    }
+
     // ---- probe всех входов; канва = ПЕРВЫЙ клип (даже) + 24fps ----
     // (правка 839) probe идёт параллельно (до 4 процессов): раньше 60 входов
     // давали ~1.26 с только на чтение метаданных перед началом кодирования.
-    const probed: Array<ProbeInfo | null> = new Array(items.length).fill(null)
+    // (правка 874) probe покрывает также входы слоёв и аудиоклипов.
+    const probeCount = items.length + layerItems.length + audioItems.length
+    const probed: Array<ProbeInfo | null> = new Array(probeCount).fill(null)
     {
       let next = 0
       const worker = async () => {
-        while (next < items.length) {
+        while (next < probeCount) {
           const i = next++
-          probed[i] = await probeVideo(ffmpeg, items[i].src)
+          const p = await probeVideo(
+            ffmpeg,
+            i < items.length ? items[i].src : i < items.length + layerItems.length
+              ? layerItems[i - items.length].src
+              : audioItems[i - items.length - layerItems.length].src,
+          )
+          // аудиофайл без видеокадра: probeVideo требует разрешение — для него
+          // берём только длительность и признак звука из stderr-разбора
+          if (!p && i >= items.length + layerItems.length) {
+            let stderr = ''
+            try {
+              const r = await execFileAsync(ffmpeg, ['-hide_banner', '-i', audioItems[i - items.length - layerItems.length].src], { timeout: 15_000 })
+              stderr = r.stderr ?? ''
+            } catch (e) {
+              stderr = (e as { stderr?: string }).stderr ?? ''
+            }
+            const dm = /Duration:\s*(\d+):(\d{2}):(\d{2}\.\d{2})/.exec(stderr)
+            const dur = dm ? Number(dm[1]) * 3600 + Number(dm[2]) * 60 + Number(dm[3]) : 0
+            probed[i] = dur > 0 ? { duration: dur, width: 0, height: 0, hasAudio: true } : null
+          } else {
+            probed[i] = p
+          }
         }
       }
-      await Promise.all(Array.from({ length: Math.min(4, items.length) }, worker))
+      await Promise.all(Array.from({ length: Math.min(4, probeCount) }, worker))
     }
     const broken = probed.findIndex((p) => !p)
     if (broken >= 0) {
-      return NextResponse.json({ error: `Не удалось прочитать видео: ${path.basename(items[broken].src)}` }, { status: 500 })
+      const brokenName = broken < items.length
+        ? path.basename(items[broken].src)
+        : broken < items.length + layerItems.length
+          ? path.basename(layerItems[broken - items.length].src)
+          : path.basename(audioItems[broken - items.length - layerItems.length].src)
+      return NextResponse.json({ error: `Не удалось прочитать файл: ${brokenName}` }, { status: 500 })
     }
     const infos: ProbeInfo[] = probed as ProbeInfo[]
+    const layerInfos: ProbeInfo[] = infos.slice(items.length, items.length + layerItems.length)
+    const audioInfos: ProbeInfo[] = infos.slice(items.length + layerItems.length)
     // (правка 846) канва секвенции: w/h = 0 ⇒ размер первого клипа (как раньше),
     // fps = 0 ⇒ 24, fit = stretch (как раньше), quality = standard (crf 20)
     const seqIn: MontageSeq = body.seq && typeof body.seq === 'object' ? body.seq : {}
@@ -723,6 +890,63 @@ export async function POST(req: Request) {
         parts.push(`anullsrc=r=44100:cl=stereo,atrim=duration=${dur.toFixed(4)}[a${i}]`)
       }
     }
+    // ---- (правка 874) цепочки клипов видео-слоёв: картинка на канву секвенции,
+    // PTS со сдвигом на at (overlay рисует по таймстемпам, поэтому без сдвига
+    // кадр слоя попал бы в начало шкалы). Звук слоя не участвует. ----
+    interface LayerChain { j: number; tag: string; x: string; y: string; at: number; end: number }
+    const layerChains: LayerChain[] = []
+    for (let j = 0; j < layerItems.length; j++) {
+      const li = layerItems[j]
+      const info = layerInfos[j]
+      const s = li.start ?? 0
+      if (s >= info.duration - 0.05) {
+        return NextResponse.json(
+          { error: `Слой ${path.basename(li.src)}: начало подрезки ${s.toFixed(2)} с за пределами клипа (${info.duration.toFixed(2)} с)` },
+          { status: 400 },
+        )
+      }
+      let e: number | null = li.end != null ? Math.min(li.end, info.duration) : null
+      if (e != null && e - s < 0.05) e = s + 0.05
+      const dur = ((e ?? info.duration) - s) / li.speed
+      const at = li.at
+      const trimV = s > 0.001 || e != null ? `trim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},` : ''
+      const pts = li.speed !== 1 ? `setpts=(PTS-STARTPTS)/${li.speed}` : 'setpts=PTS-STARTPTS'
+      const inIdx = items.length + j
+      let ox = '0'
+      let oy = '0'
+      let fitStr: string
+      if (li.fit === 'contain' && (info.width !== evW || info.height !== evH)) {
+        // поле: кадр вписан целиком, оверлей рисуем по центру (фон базы виден вокруг)
+        const k = Math.min(evW / info.width, evH / info.height)
+        const fw = Math.max(2, Math.floor((info.width * k) / 2) * 2)
+        const fh = Math.max(2, Math.floor((info.height * k) / 2) * 2)
+        fitStr = `scale=${fw}:${fh}`
+        ox = '(W-w)/2'
+        oy = '(H-h)/2'
+      } else if (li.fit === 'blur' && (info.width !== evW || info.height !== evH)) {
+        // размытая подложка + кадр по центру, собираем в один кадр канвы
+        const k = Math.min(evW / info.width, evH / info.height)
+        const fw = Math.max(2, Math.floor((info.width * k) / 2) * 2)
+        const fh = Math.max(2, Math.floor((info.height * k) / 2) * 2)
+        parts.push(`[${inIdx}:v]${trimV}${pts},split=2[bgL${j}][fgL${j}]`)
+        parts.push(`[bgL${j}]scale=${evW}:${evH}:force_original_aspect_ratio=increase,crop=${evW}:${evH},gblur=sigma=20[bgLz${j}]`)
+        parts.push(`[fgL${j}]scale=${fw}:${fh}[fgLz${j}]`)
+        parts.push(`[bgLz${j}][fgLz${j}]overlay=(W-w)/2:(H-h)/2[bl${j}]`)
+        parts.push(`[bl${j}]fps=${FPS},format=yuv420p,setsar=1,setpts=PTS+${at.toFixed(4)}/TB[lv${j}]`)
+        layerChains.push({ j, tag: `lv${j}`, x: ox, y: oy, at, end: at + dur })
+        continue
+      } else if (li.fit === 'cover') {
+        fitStr = `scale=${evW}:${evH}:force_original_aspect_ratio=increase,crop=${evW}:${evH}`
+      } else {
+        // stretch на канву; contain при равном размере — обычное scale
+        fitStr = li.fit === 'contain'
+          ? `scale=${evW}:${evH}:force_original_aspect_ratio=decrease`
+          : `scale=${evW}:${evH}`
+      }
+      parts.push(`[${inIdx}:v]${trimV}${pts},${fitStr},fps=${FPS},format=yuv420p,setsar=1,setpts=PTS+${at.toFixed(4)}/TB[lv${j}]`)
+      layerChains.push({ j, tag: `lv${j}`, x: ox, y: oy, at, end: at + dur })
+    }
+
     // (правка 847) склейка: стыки с переходом — цепочки xfade (видео) +
     // acrossfade (звук), между цепочками-«ранами» — обычный concat. Разбивка на
     // раны нужна потому, что xfade работает только попарно и варит обе ветки
@@ -785,9 +1009,62 @@ export async function POST(req: Request) {
     const pairs = runV.map((v, r) => `[${v}][${runA[r]}]`).join('')
     parts.push(`${pairs}concat=n=${runV.length}:v=1:a=1[vout][aout]`)
     let aOutTag = 'aout'
-    if (masterVol !== 1) {
+    // ---- (правка 874) микс звуковых дорожек: базовый звук + аудиоклипы
+    // (atrim+фейды+громкость, сдвиг adelay по at), amix=normalize=0 чтобы
+    // громкость не делилась на количество входов; итог режем по длине базы. ----
+    if (audioItems.length) {
+      for (let k = 0; k < audioItems.length; k++) {
+        const ai = audioItems[k]
+        const info = audioInfos[k]
+        const s = ai.start ?? 0
+        if (s >= info.duration - 0.05) {
+          return NextResponse.json(
+            { error: `Аудио ${path.basename(ai.src)}: начало подрезки ${s.toFixed(2)} с за пределами файла (${info.duration.toFixed(2)} с)` },
+            { status: 400 },
+          )
+        }
+        let e: number | null = ai.end != null ? Math.min(ai.end, info.duration) : null
+        if (e != null && e - s < 0.05) e = s + 0.05
+        const dur = (e ?? info.duration) - s
+        const inIdx = items.length + layerItems.length + k
+        const at = s > 0.001 || e != null
+          ? `atrim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},asetpts=PTS-STARTPTS,`
+          : ''
+        const fi = Math.min(ai.fi, Math.max(0, dur - 0.01))
+        const fo = Math.min(ai.fo, Math.max(0, dur - 0.01))
+        const af = (fi > 0.01 ? `afade=t=in:st=0:d=${fi.toFixed(4)},` : '')
+          + (fo > 0.01 ? `afade=t=out:st=${Math.max(0, dur - fo).toFixed(4)}:d=${fo.toFixed(4)},` : '')
+        const av = ai.vol !== 1 ? `volume=${ai.vol.toFixed(4)},` : ''
+        const ms = Math.round(ai.at * 1000)
+        const dl = ms > 0 ? `,adelay=${ms}|${ms}` : ''
+        parts.push(`[${inIdx}:a]${at}${af}${av}aresample=44100,aformat=channel_layouts=stereo${dl}[ac${k}]`)
+      }
+      const mixIn = [`[aout]`, ...audioItems.map((_, k) => `[ac${k}]`)].join('')
+      parts.push(`${mixIn}amix=inputs=${audioItems.length + 1}:normalize=0:duration=longest:dropout_transition=0[mix]`)
+      const trimOut = totalOut > 0 ? `atrim=0:${totalOut.toFixed(4)},asetpts=PTS-STARTPTS,` : ''
+      const vol = masterVol !== 1 ? `volume=${masterVol.toFixed(4)}` : 'anull'
+      parts.push(`[mix]${trimOut}${vol}[aoutm]`)
+      aOutTag = 'aoutm'
+    } else if (masterVol !== 1) {
       parts.push(`[aout]volume=${masterVol.toFixed(4)}[aoutm]`)
       aOutTag = 'aoutm'
+    }
+
+    // ---- (правка 874) наложение видео-слоёв поверх базы: порядок цепочки =
+    // порядок дорожек (низ → верх), enable рисует клип только в его окне
+    // времени, eof_action=pass — после конца клипа идёт база. ----
+    let vMap = 'vout'
+    if (layerChains.length) {
+      let cur = 'vout'
+      layerChains.sort((a, b) => layerItems[a.j].track - layerItems[b.j].track)
+      for (const c of layerChains) {
+        const next = `ov${c.j}`
+        parts.push(
+          `[${cur}][${c.tag}]overlay=x=${c.x}:y=${c.y}:eof_action=pass:enable='between(t,${c.at.toFixed(4)},${c.end.toFixed(4)})'[${next}]`,
+        )
+        cur = next
+      }
+      vMap = cur
     }
 
     // ---- куда писать результат (счётчик в имени) ----
@@ -823,9 +1100,13 @@ export async function POST(req: Request) {
     // (правка 839) -progress pipe:1: прогресс кода времени читаем из stdout
     const args: string[] = ['-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-y']
     for (const it of items) args.push('-i', it.src)
+    // (правка 874) входы слоёв и аудиоклипов идут после базовых — их индексы
+    // (items.length + j) используются в filter_complex выше
+    for (const li of layerItems) args.push('-i', li.src)
+    for (const ai of audioItems) args.push('-i', ai.src)
     args.push(
       '-filter_complex', parts.join(';'),
-      '-map', '[vout]', '-map', `[${aOutTag}]`,
+      '-map', `[${vMap}]`, '-map', `[${aOutTag}]`,
       '-c:v', 'libx264', '-preset', QUAL.preset, '-crf', QUAL.crf,
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-ar', '44100', '-ac', '2',
