@@ -25,6 +25,8 @@ const { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } = r
 const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
+// (правка 866) само-восстановление студийных custom_nodes (см. scripts/sync_custom_nodes.js)
+const { syncStudioNodes } = require('../scripts/sync_custom_nodes')
 
 const APP_ROOT = path.resolve(__dirname, '..')
 const PORT = 3000
@@ -365,6 +367,18 @@ function startComfy() {
     return null
   }
   const v = parseIniVram()
+  // (правка 866) Синхронизация студийных custom_nodes до старта Python: install.ps1
+  // ставил их только при установке, внутрипрограммный апдейт ComfyUI не трогает —
+  // у обновившихся юзеров воркфлоу падал с HTTP 400 missing_node_type
+  // (MiniMaxStudioLoop, 7.1.11). Фикс едет внутри апдейт-зипа и срабатывает при
+  // первом запуске после обновления, переустановка не нужна.
+  try {
+    for (const name of syncStudioNodes(APP_ROOT, COMFY_ROOT)) {
+      appendConsole(`[desktop] студийная нода обновлена в ComfyUI: ${name}\n`)
+    }
+  } catch (err) {
+    console.log(`[desktop] синхронизация custom_nodes не удалась: ${err && err.message ? err.message : err}`)
+  }
   const args = [
     '-I', path.join(COMFY_ROOT, 'ComfyUI', 'main.py'),
     '--windows-standalone-build',

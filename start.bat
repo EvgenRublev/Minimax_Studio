@@ -337,6 +337,15 @@ if defined FRONTEND_ONLY (
 echo.
 echo  Starting ComfyUI backend...
 
+REM (правка 866) Само-восстановление студийных custom_nodes: install.ps1 копирует
+REM "custom nodes\*" в ComfyUI\custom_nodes только при установке, а апдейт из
+REM программы ComfyUI не трогает — у обновившихся юзеров новые ноды (7.1.11
+REM MiniMaxStudioLoop) отсутствовали и воркфлоу падал с HTTP 400 missing_node_type.
+REM Синхронизация перед каждым стартом ComfyUI; ошибка не фатальна.
+if defined NODE_CMD if exist "%~dp0scripts\sync_custom_nodes.js" (
+    "%NODE_CMD%" "%~dp0scripts\sync_custom_nodes.js" "%COMFY_ROOT%"
+)
+
 REM Kill any existing process on ComfyUI port
 REM ВАЖНО: два findstr /C: подряд. Одиночный findstr ":port .*LISTENING"
 REM в литеральном режиме делит шаблон по пробелам на ИЛИ-альтернативы и
