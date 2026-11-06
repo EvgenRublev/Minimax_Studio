@@ -110,7 +110,7 @@ interface VideoGalleryGridProps {
  * (правка 312) «FPS» — вывод вкладки «FPS» (вставка кадров):
  *   «Minimax_Studio_fps_<stamp>.ext» (filename_prefix в fps-template.ts).
  */
-export type VideoSourceBadge = 'dlss5' | 'upscale' | 'extended' | 'refined' | 'tileupscale' | 'fps' | 'edited' | 'controlnet' | 'facerefine' | 'draft'
+export type VideoSourceBadge = 'dlss5' | 'upscale' | 'extended' | 'refined' | 'tileupscale' | 'fps' | 'edited' | 'controlnet' | 'facerefine' | 'montage' | 'draft'
 
 export function videoSourceBadge(file: Pick<VideoGalleryFile, 'filename'>): VideoSourceBadge | null {
   // (правка 306) "Edited" — самый приоритетный: обрезанный файл всегда обрезанный,
@@ -120,6 +120,9 @@ export function videoSourceBadge(file: Pick<VideoGalleryFile, 'filename'>): Vide
   if (/_RTXVIDEO(?:_PREVIEW)?_\d{8}-\d{6}-[0-9a-f]{8}/.test(file.filename)) return 'upscale'
   if (/Minimax_Studio_extclip_\d+/i.test(file.filename) || /Minimax_Studio_combined/i.test(file.filename)) return 'extended'
   if (/Minimax_Studio_tileupscale/i.test(file.filename)) return 'tileupscale'
+  // (правка 867) «Montage» — вывод вкладки «Монтаж»:
+  // Minimax_Studio_montage_<i>.mp4 (src/app/api/montage/render/route.ts).
+  if (/Minimax_Studio_montage_\d/i.test(file.filename)) return 'montage'
   // (правка 497) «ControlNet» — вывод вкладки «ControlNet» (Fun ControlNet).
   if (/Minimax_Studio_controlnet/i.test(file.filename)) return 'controlnet'
   // (правка 722) «Face Refine» — вывод вкладки «Face Refine».
@@ -868,6 +871,21 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     >
                       <ScanFaceIcon className="w-2.5 h-2.5" />
                       Face Refine
+                    </span>
+                  )
+                }
+                // (правка 867) «Montage» — результат сборки на вкладке «Монтаж»:
+                // Minimax_Studio_montage_<i>.mp4. Небесный — свободный оттенок,
+                // не пересекается с cyan (Upscale/Extended) и violet (FPS).
+                if (badge === 'montage') {
+                  return (
+                    <span
+                      className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-sky-300 border border-sky-400/40"
+                      title="Смонтировано на вкладке «Монтаж»"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ClapperboardIcon className="w-2.5 h-2.5" />
+                      Montage
                     </span>
                   )
                 }
