@@ -22,6 +22,7 @@ import {
   Grid3x3Icon,
   MoreVerticalIcon,
   ScissorsIcon,
+  ClapperboardIcon, // (правка 855) «В Монтаж»
   GaugeIcon,
   ZapIcon,
   WaypointsIcon,
@@ -53,6 +54,7 @@ import { useTileUpscaleTarget } from '@/lib/tile-upscale-target-store'
 import { useControlNetTarget } from '@/lib/controlnet-target-store' // (правка 497)
 import { useFpsTarget } from '@/lib/fps-store'
 import { useExtendTarget } from '@/lib/extend-target-store'
+import { useMontageTarget } from '@/lib/montage-target-store' // (правка 855)
 import { useFaceRefineTarget } from '@/lib/face-refine-target-store'
 
 
@@ -313,6 +315,12 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   const sendToExtend = useCallback((file: VideoGalleryFile) => {
     useExtendTarget.getState().setTarget({ filename: file.filename, subfolder: file.subfolder })
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
+  }, [])
+
+  /* ── (правка 855) «В Монтаж»: добавить видео следующим клипом на таймлайн. ── */
+  const sendToMontage = useCallback((file: VideoGalleryFile) => {
+    useMontageTarget.getState().setTarget({ filename: file.filename, subfolder: file.subfolder })
+    window.dispatchEvent(new CustomEvent('h3:goto-montage'))
   }, [])
 
   /* ── Delete handler (оптимистичное обновление в useVideoGallery) ── */
@@ -701,6 +709,18 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     >
                       <FilmIcon className="w-4 h-4 shrink-0 text-cyan-400" />
                       Продлить
+                    </button>
+                    {/* (правка 855) «В Монтаж»: открыть монтаж и добавить следующим клипом */}
+                    <button
+                      onClick={() => {
+                        sendToMontage(file)
+                        setActionsOpenIndex(null)
+                      }}
+                      title="В Монтаж"
+                      className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
+                    >
+                      <ClapperboardIcon className="w-4 h-4 shrink-0 text-[#A78BFA]" />
+                      В Монтаж
                     </button>
                     <button
                       onClick={() => {

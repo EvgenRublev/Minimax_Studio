@@ -15,6 +15,7 @@ import {
   ChevronRightIcon,
   SparklesIcon,
   ScanFaceIcon,
+  ScissorsIcon, // (правка 720) вкладка «Монтаж»
   Wand2Icon,
   WaypointsIcon,
 } from 'lucide-react'
@@ -30,7 +31,7 @@ import {
 
 // (правка 442) Вкладки «Ассистент» больше нет: ассистент — правая панель
 // на вкладках «Генерация» и «Продление».
-export type TabType = 'generate' | 'extend' | 'refine' | 'upscale' | 'tile-upscale' | 'controlnet' | 'fps' | 'face-refine' | 'gallery' | 'learn'
+export type TabType = 'generate' | 'extend' | 'refine' | 'upscale' | 'tile-upscale' | 'controlnet' | 'fps' | 'face-refine' | 'gallery' | 'montage' | 'learn'
 
 interface SidebarProps {
   activeTab: TabType
@@ -49,6 +50,7 @@ const navItems = [
   { id: 'face-refine' as TabType, label: 'Face Refine', icon: ScanFaceIcon, color: '#FACC15' },
   { id: 'upscale' as TabType, label: 'DLSS', icon: SparklesIcon, color: '#F472B6' },
   { id: 'gallery' as TabType, label: 'Галерея', icon: FolderOpenIcon, color: '#8B5CF6' },
+  { id: 'montage' as TabType, label: 'Монтаж', icon: ScissorsIcon, color: '#A78BFA' }, // (правка 720)
   { id: 'learn' as TabType, label: 'Обучение', icon: GraduationCapIcon, color: '#10B981' },
 ]
 

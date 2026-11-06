@@ -67,6 +67,7 @@ import {
 } from '@/lib/comfy/refine-sigmas'
 import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useRefineTarget, type RefineSource } from '@/lib/refine-target-store'
+import { useMontageReturn } from '@/lib/montage-return-store' // (правка 857)
 import {
   enqueueRefine,
   cancelActiveRefines,
@@ -87,6 +88,16 @@ export function RefineView() {
   // возврата на вкладку была недоступна, источник приходилось кидать заново.
   const source = useRefineTarget((s) => s.source)
   const setSource = useRefineTarget((s) => s.setSource)
+
+  // (правка 857) источник пришёл из монтажки («В Refine» с клипа) — после
+  // готовности результат вернётся и заменит этот клип на таймлайне
+  const pendingMontage = useMontageReturn((s) => s.pending)
+  const backToMontage =
+    !!source &&
+    !source.inputSource &&
+    Object.values(pendingMontage).some(
+      (p) => p.filename === source.filename && (p.subfolder || '') === (source.subfolder || ''),
+    )
   const sourceRef = useRef<RefineSource | null>(null)
   sourceRef.current = source
 
@@ -574,6 +585,18 @@ export function RefineView() {
               {mode === 'whole'
                 ? 'Зациклено ✓ — рефайн сохранит цикл'
                 : 'Зациклено — в «Частями» цикл не сохраняется'}
+            </p>
+          )}
+
+          {/* (правка 857) источник взят с таймлайна «Монтаж» — результат
+              подменит тот клип (подрезки и настройки сохранятся) */}
+          {backToMontage && (
+            <p
+              className="text-[10px] -mt-1 flex items-center gap-1.5 text-[#A78BFA]"
+              title="Клип отправлен в Refine из монтажки: когда генерация закончится, вернись на вкладку «Монтаж» — чистовик заменит этот клип, его подрезка и настройки останутся на месте."
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />
+              Клип из монтажки — результат вернётся и заменит его
             </p>
           )}
 

@@ -12,6 +12,7 @@ import { ControlNetView } from '@/components/h3/controlnet-view' // (правк�
 import { FpsView } from '@/components/h3/fps-view'
 import { FaceRefineView } from '@/components/h3/face-refine-view'
 import { GalleryView } from '@/components/h3/gallery-view'
+import { MontageView } from '@/components/h3/montage-view' // (правка 720)
 import { LearnView } from '@/components/h3/learn/learn-view'
 import { QueueIndicator } from '@/components/queue-indicator'
 import { SettingsDialog } from '@/components/h3/settings-dialog'
@@ -46,6 +47,7 @@ const TAB_CONTENT = {
   fps: FpsView,
   'face-refine': FaceRefineView,
   gallery: GalleryView,
+  montage: MontageView, // (правка 720)
   learn: LearnView,
 }
 
@@ -93,6 +95,7 @@ export default function Home() {
     const gotoControlNet = () => setActiveTab('controlnet') // (правка 497)
     const gotoFps = () => setActiveTab('fps')
     const gotoFaceRefine = () => setActiveTab('face-refine')
+    const gotoMontage = () => setActiveTab('montage') // (правка 720)
     // (правка 442) «Открыть ассистента»: вкладки «Ассистент» больше нет —
     // переключаемся на вкладку нужного режима (generate/extend) и разворачиваем
     // правую панель. Стор модульный: панель примонтируется уже развёрнутой.
@@ -110,6 +113,7 @@ export default function Home() {
     window.addEventListener('h3:goto-controlnet', gotoControlNet) // (правка 497)
     window.addEventListener('h3:goto-fps', gotoFps)
     window.addEventListener('h3:goto-face-refine', gotoFaceRefine)
+    window.addEventListener('h3:goto-montage', gotoMontage) // (правка 720)
     window.addEventListener('h3:open-assistant-panel', openAssistantPanel)
     return () => {
       window.removeEventListener('h3:goto-generate', gotoGenerate)
@@ -120,6 +124,7 @@ export default function Home() {
       window.removeEventListener('h3:goto-controlnet', gotoControlNet) // (правка 497)
       window.removeEventListener('h3:goto-fps', gotoFps)
       window.removeEventListener('h3:goto-face-refine', gotoFaceRefine)
+      window.removeEventListener('h3:goto-montage', gotoMontage) // (правка 720)
       window.removeEventListener('h3:open-assistant-panel', openAssistantPanel)
     }
   }, [])

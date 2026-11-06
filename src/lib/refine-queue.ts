@@ -17,6 +17,7 @@
 import { useGenQueue, type QueueItem } from './gen-queue-store'
 import { acquireComfyTurn, isComfyTurnActive } from './comfy-turn'
 import { useGalleryRefresh } from './gallery-refresh-store'
+import { useMontageReturn } from './montage-return-store' // (правка 857)
 
 export interface RefineTask {
   mode: 'whole' | 'chunks'
@@ -307,6 +308,8 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
     if (s.status !== 'done') continue
 
     // ── done ──
+    // (правка 857) имя чистовика нужно и для возврата в монтажку
+    let finalFile: { filename: string; subfolder: string } | null = null
     if (task.mode === 'chunks') {
       // (правка 311) Новый воркфлоу (правка 314 в refine-template.ts) склеивает
       // окна В ЛАТЕНТЕ и отдаёт ОДИН файл Minimax_Studio_refine_* — ffmpeg-
@@ -331,6 +334,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
           (o) => o.type === 'output' && /Minimax_Studio_refine(?!part).*[.]mp4$/i.test(o.filename),
         )
         if (!single) throw new Error('ComfyUI не вернул файл рефайна')
+        finalFile = { filename: single.filename, subfolder: single.subfolder || '' }
         if (isCancelled(id)) return
       } else {
       if (isCancelled(id)) return
@@ -373,9 +377,26 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
           },
         }),
       })
-      const sd = (await st.json()) as { error?: string }
+      const sd = (await st.json()) as { error?: string; filename?: string; subfolder?: string }
       if (!st.ok || sd.error) throw new Error(sd.error || `HTTP ${st.status}`)
+      if (sd.filename) finalFile = { filename: sd.filename, subfolder: sd.subfolder || '' }
       }
+    }
+    // (правка 857) режим «Целый»: чистовик — единственный файл результата
+    if (!finalFile) {
+      const whole = (s.outputs || []).find(
+        (o) => o.type === 'output' && /Minimax_Studio_refine(?!part).*[.]mp4$/i.test(o.filename),
+      )
+      if (whole) finalFile = { filename: whole.filename, subfolder: whole.subfolder || '' }
+    }
+    // (правка 857) монтажка ждёт этот файл — кладём в «прибывшие», MontageView
+    // подменит им шот, с которого клип отправляли в Refine
+    if (finalFile) {
+      useMontageReturn.getState().noteArrival({
+        ...finalFile,
+        sourceFilename: task.source.filename,
+        sourceSubfolder: task.source.subfolder || '',
+      })
     }
     q().setStatus(id, 'done')
     q().setProgress(id, 100, 100)
@@ -436,6 +457,27 @@ export function sweepOrphanRefineItems(): void {
  *    ошибка с понятным текстом, а не молчаливое «Готово». */
 const orphanRecovery = new Set<string>()
 
+/**
+ * (правка 857) Возврат в монтажку после перезагрузки страницы: у задачи нет
+ * живой RefineTask, поэтому исходник берём из сайдкара результата
+ * (source_video пишет финализация pending-meta).
+ */
+async function noteArrivalFromMeta(file: { filename: string; subfolder: string }): Promise<void> {
+  try {
+    const p = `${file.subfolder ? file.subfolder + '/' : ''}${file.filename}`
+    const r = await fetch(`/api/comfy/meta?path=${encodeURIComponent(p)}`)
+    if (!r.ok) return
+    const m = (await r.json()) as { source_video?: { filename?: string; subfolder?: string } }
+    if (!m?.source_video?.filename) return
+    useMontageReturn.getState().noteArrival({
+      filename: file.filename,
+      subfolder: file.subfolder || '',
+      sourceFilename: m.source_video.filename,
+      sourceSubfolder: m.source_video.subfolder || '',
+    })
+  } catch { /* не критично: замена просто не произойдёт */ }
+}
+
 async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
   const promptId = item.promptId
   if (!promptId || orphanRecovery.has(promptId)) return
@@ -492,6 +534,11 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
         })
       if (!parts.length) {
         // Новый воркфлоу: один файл, сшивать нечего.
+        // (правка 857) монтажка: чистовик прибыл — исходник берём из меты
+        const single = (s.outputs || []).find(
+          (o) => o.type === 'output' && /Minimax_Studio_refine(?!part).*[.]mp4$/i.test(o.filename),
+        )
+        if (single) await noteArrivalFromMeta({ filename: single.filename, subfolder: single.subfolder || '' })
         q().setStatus(item.id, 'done')
         q().setProgress(item.id, 100, 100)
         useGalleryRefresh.getState().bump()
@@ -556,7 +603,7 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
           },
         }),
       })
-      const sd = (await st.json().catch(() => ({}))) as { error?: string }
+      const sd = (await st.json().catch(() => ({}))) as { error?: string; filename?: string; subfolder?: string }
       if (!st.ok || sd.error) {
         q().setStatus(
           item.id,
@@ -564,6 +611,15 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
           `Сшивка кусков после перезагрузки не удалась: ${sd.error || `HTTP ${st.status}`}. Куски refinepart_* остались в галерее.`,
         )
         return
+      }
+      // (правка 857) монтажка: сшитый чистовик прибыл
+      if (sd.filename) {
+        useMontageReturn.getState().noteArrival({
+          filename: sd.filename,
+          subfolder: sd.subfolder || '',
+          sourceFilename: source.filename,
+          sourceSubfolder: source.subfolder || '',
+        })
       }
       q().setStatus(item.id, 'done')
       q().setProgress(item.id, 100, 100)
