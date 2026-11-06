@@ -9,6 +9,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
+// (правка 869) «Просмотр на весь экран (F)» — тот же механизм, что в «Монтаже»
+// (правка 868): CSS-оверлей + настоящий фулскрин окна (Electron/браузер).
+import { useFsFullscreen } from '@/lib/use-fs-fullscreen'
 import {
   XIcon,
   ChevronLeftIcon,
@@ -19,6 +22,8 @@ import {
   PauseIcon,
   Volume2Icon,
   VolumeXIcon,
+  Maximize2Icon,
+  Minimize2Icon,
 } from 'lucide-react'
 
 interface VideoFile {
@@ -60,6 +65,9 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
   const [loadError, setLoadError] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // (правка 869) F — полный экран: разворачивает и окно (скрывает таскбар),
+  // см. use-fs-fullscreen.
+  const { isFs, setIsFs, toggleFs } = useFsFullscreen()
 
   const goTo = useCallback(
     (i: number) => {
@@ -74,7 +82,11 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       switch (e.key) {
-        case 'Escape': onClose(); break
+        case 'Escape':
+          // (правка 869) в полноэкранном режиме Esc сначала выходит из него,
+          // и только потом закрывает лайтбокс.
+          if (isFs) { setIsFs(false); break }
+          onClose(); break
         case 'ArrowLeft': goTo(index - 1); break
         case 'ArrowRight': goTo(index + 1); break
         case ' ':
@@ -85,11 +97,18 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
         case 'M':
           toggleMute()
           break
+        // (правка 869) F (и «а» в русской раскладке) — полный экран, как в «Монтаже».
+        case 'f':
+        case 'F':
+        case 'а':
+        case 'А':
+          toggleFs()
+          break
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [index, onClose, goTo])
+  }, [index, onClose, goTo, isFs, setIsFs, toggleFs])
 
   // Apply volume imperatively — covers slider changes and initial mount alike
   useEffect(() => {
@@ -378,6 +397,14 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
                   </button>
                 </>
               )}
+              {/* (правка 869) Просмотр на весь экран (F) — как в «Монтаже». */}
+              <button
+                onClick={toggleFs}
+                className="p-1.5 text-white/70 hover:text-white transition-colors"
+                title={isFs ? 'выйти из полноэкранного режима (F)' : 'просмотр на весь экран (F)'}
+              >
+                {isFs ? <Minimize2Icon className="w-4 h-4" /> : <Maximize2Icon className="w-4 h-4" />}
+              </button>
             </div>
           </div>
         </div>
@@ -412,6 +439,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
         <div className="absolute bottom-[80px] left-1/2 -translate-x-1/2 flex items-center gap-4 text-[10px] text-white/30 pointer-events-none">
           <span>Space — Play/Pause</span>
           <span>M — Mute</span>
+          <span>F — Полный экран</span>
           <span>←→ — Навигация</span>
           <span>Esc — Закрыть</span>
         </div>

@@ -64,6 +64,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useMontageTarget } from '@/lib/montage-target-store' // (правка 855)
 import { useMontageReturn } from '@/lib/montage-return-store' // (правка 857)
 import { useRefineTarget } from '@/lib/refine-target-store' // (правка 856)
+import { useFsFullscreen } from '@/lib/use-fs-fullscreen' // (правка 869)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
 
@@ -636,8 +637,8 @@ export function MontageView() {
   const [trackH, setTrackH] = useState(64)
   /** масштаб превью: доля панели 0.2..1 */
   const [vScale, setVScale] = useState(0.8)
-  /** превью развернуто на весь экран */
-  const [isFs, setIsFs] = useState(false)
+  /** превью развернуто на весь экран (правка 869) — общий хук, см. use-fs-fullscreen */
+  const { isFs, setIsFs, toggleFs: toggleFullscreen } = useFsFullscreen()
   /** выключить звук в превью */
   const [muted, setMuted] = useState(false)
   /** (правка 720 v8) общая громкость таймлайна, 0..1; вплавляется и в рендер */
@@ -1687,35 +1688,10 @@ export function MontageView() {
    * Превью на весь экран (F). (правка 720 v11) В кадре окна с невидимым
    * заголовком (titleBarStyle hidden) нативный requestFullscreen в Electron
    * срабатывает через раз, поэтому полный экран делаем CSS-оверлеем на весь
-   * вьюпорт (тот же прием, что в video-lightbox).
-   * (правка 868) Сам по себе оверлей таскбар не прячет ( maximized-окно не
-   * пускают поверх таскбара, в Win11 — особенно): в Electron дополнительно
-   * включаем настоящий фулскрин окна через preload-мост, в браузере —
-   * стандартный Fullscreen API. Внешний выход из фулскрина гасит оверлей.
+   * вьюпорт (тот же прием, что в video-lightbox). (правки 868, 869) сам оверлей
+   * таскбар не прячет — настоящий фулскрин окна включает общий хук
+   * useFsFullscreen (Electron-мост / браузерный Fullscreen API).
    */
-  const toggleFullscreen = useCallback(() => {
-    setIsFs((v) => !v)
-  }, [])
-
-  useEffect(() => {
-    const d = window.h3desktop
-    const setFs = d?.fullscreen
-    if (setFs) {
-      setFs(isFs)
-      const off = d?.onFullscreenChange?.((on) => { if (!on) setIsFs(false) })
-      return () => { if (isFs) setFs(false); off?.() }
-    }
-    // Браузерный фолбэк: нативный фулскрин документа; если запрещён — остаётся
-    // только CSS-оверлей (как раньше).
-    if (isFs) {
-      document.documentElement.requestFullscreen?.().catch(() => { /* CSS-оверлей и так работает */ })
-    } else if (document.fullscreenElement) {
-      document.exitFullscreen?.().catch(() => {})
-    }
-    const onFsChange = () => { if (!document.fullscreenElement) setIsFs(false) }
-    document.addEventListener('fullscreenchange', onFsChange)
-    return () => document.removeEventListener('fullscreenchange', onFsChange)
-  }, [isFs])
 
   // (правка 859) обновление эффектов выбранного клипа и копирование между клипами
   const updateSelectedFx = useCallback((patch: Partial<ShotFx> | ((prev: ShotFx) => ShotFx)) => {
