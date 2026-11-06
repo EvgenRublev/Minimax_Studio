@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
+import os from 'os' // (правка 871)
 import path from 'path'
 import { submitRefine, submitWorkflowJson } from '@/lib/comfy/minimax-h3-client'
 import { setActivePrompt } from '@/lib/comfy/progress-tracker'
@@ -68,6 +69,51 @@ function effectiveTarget(
   return body.target === 'same' || body.target === 'x2' || typeof body.target === 'number'
     ? body.target
     : 'same'
+}
+
+/**
+ * (правка 871) Pre-flight guard режима «Целый» для mp4-ветки Refine.
+ * В этой ветке VHS_LoadVideo грузит ВЕСЬ исходник в CPU-память float32
+ * (батч IMAGE), ImageFromBatch и ImageResizeKJv2 делают ещё по копии —
+ * пик пика ≈ кадры × max(кадр исходника, кадр кодирования) × 3 канала ×
+ * 4 байта, плюс накладные расходы декода. На больших исходниках (~4K,
+ * ~340 кадров) это 30+ ГБ и «alloc_cpu ... not enough memory» внутри
+ * ComfyUI — джоб падает уже после запуска. Оцениваем пик до отправки и
+ * отклоняем с понятной подсказкой («Частями»), если он не помещается в
+ * ~90% физической RAM. Оценка консервативна (коэффициент 2.2), точные
+ * размеры берутся из той же геометрии, что у buildRefineWorkflow
+ * (ceil32 / downscale-правило / сетка 17k+5).
+ * Возвращает текст ошибки или null (памяти достаточно).
+ */
+function wholeModeMemoryError(
+  probe: { width: number; height: number; frames: number },
+  dims: { genW: number; genH: number },
+  opts: { skipFrames?: number; frameCap?: number },
+): string | null {
+  if (probe.frames <= 0 || probe.width <= 0 || probe.height <= 0) return null
+  const skip = Math.max(0, Math.round(opts.skipFrames ?? 0))
+  let loaded = probe.frames - skip
+  const cap = Math.max(0, Math.round(opts.frameCap ?? 0))
+  if (cap > 0) loaded = Math.min(loaded, cap)
+  if (loaded <= 0) return null
+  // Сетка 17k+5 ('r_cap' в воркфлоу) — столько кадров доходит до ресайза.
+  const grid = Math.max(5, loaded - ((loaded - 5) % 17))
+  // Геометрия кодирования — как в buildRefineWorkflow (правка 871).
+  const ceil32 = (n: number) => Math.max(32, Math.ceil(n / 32) * 32)
+  const downscale = dims.genW < ceil32(probe.width) || dims.genH < ceil32(probe.height)
+  const encW = downscale ? dims.genW : ceil32(probe.width)
+  const encH = downscale ? dims.genH : ceil32(probe.height)
+  const perFrame = Math.max(probe.width * probe.height, encW * encH) * 3 * 4 // float32 RGB
+  const peak = grid * perFrame * 2.2
+  const budget = 0.9 * os.totalmem()
+  if (peak <= budget) return null
+  const gb = (n: number) => (n / 1024 ** 3).toFixed(0)
+  return (
+    `Режим «Целый» не подходит для этого видео: исходник ${probe.width}×${probe.height}, ` +
+    `${grid} кадров потребует около ${gb(peak)} ГБ оперативной памяти, а на ПК всего ` +
+    `${gb(os.totalmem())} ГБ — ComfyUI упадёт с ошибкой нехватки памяти. ` +
+    `Используйте режим «Частями» (он обрабатывает видео окнами по несколько секунд).`
+  )
 }
 
 export async function POST(req: NextRequest) {
@@ -367,6 +413,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Режим «Целый»
+      // (правка 871) Pre-flight по памяти: большой mp4 целиком в RAM не влезет.
+      const memErr = wholeModeMemoryError(probe, dims, {})
+      if (memErr) {
+        return NextResponse.json({ error: memErr }, { status: 400 })
+      }
       const run = await runGeneration(() =>
         submitRefine({
           sourceVideo: inName,
@@ -695,6 +746,21 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Сборка + отправка ───
+    // (правка 871) Pre-flight по памяти для mp4-ветки «Целый»: весь исходник
+    // грузится в CPU-батч (VHS_LoadVideo + копии), на 4K-исходниках — 30+ ГБ
+    // и падение ComfyUI («alloc_cpu ... not enough memory»). Lossless-ветка
+    // (латент) и куски целиком mp4 не грузят — их не трогаем.
+    if (!sourceLatent && !body.chunkJob) {
+      const memErr = wholeModeMemoryError(probe, dims, {
+        skipFrames: body.skipFrames,
+        frameCap: body.frameCap,
+      })
+      if (memErr) {
+        // Свежая копия в input/ уже сделана — откатываем, как при ошибках запуска.
+        if (copiedPath) await fs.unlink(copiedPath).catch(() => {})
+        return NextResponse.json({ error: memErr }, { status: 400 })
+      }
+    }
     const run = await runGeneration(() =>
       submitRefine({
         sourceVideo: destName,
