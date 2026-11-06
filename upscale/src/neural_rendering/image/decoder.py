@@ -7,14 +7,27 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-import pillow_heif
+
+# (правка 872) pillow_heif нужен только для HEIC/HEIF картинок-референсов.
+# В связке пользователя его не оказалось (битая копия portable-окружения), и
+# жёсткий импорт ронял весь модуль image -> ImportError 'ImageBatchResult'
+# (частичная инициализация) -> Neural Rendering был недоступен совсем.
+# Делаем импорт опциональным: без него NR работает, HEIF — честная ошибка.
+try:
+    import pillow_heif
+except ModuleNotFoundError:
+    pillow_heif = None
+
 import rawpy
 import resvg_py
 from PIL import Image, ImageCms, ImageOps
 
 from .models import RAW_EXTENSIONS
 
-pillow_heif.register_heif_opener()
+HEIF_EXTENSIONS = {".heic", ".heif", ".hif"}
+
+if pillow_heif is not None:
+    pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
 
 @dataclass(slots=True)
@@ -45,6 +58,12 @@ def _open_pillow_source(path: Path) -> tuple[Image.Image, str]:
     if suffix == ".svg":
         png = resvg_py.svg_to_bytes(svg_path=str(path), resources_dir=str(path.parent))
         return Image.open(io.BytesIO(png)), "resvg"
+    # (правка 872) HEIF без pillow_heif — понятная ошибка вместо UnidentifiedImageError.
+    if suffix in HEIF_EXTENSIONS and pillow_heif is None:
+        raise RuntimeError(
+            "HEIC/HEIF images need the 'pillow-heif' package, which is missing from the "
+            "bundled upscale runtime. Use JPG/PNG/WebP references, or reinstall the studio."
+        )
     return Image.open(path), "Pillow"
 
 
