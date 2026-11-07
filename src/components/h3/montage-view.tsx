@@ -1989,19 +1989,58 @@ export function MontageView() {
   }, [stopSeq, pushHistory])
 
   /** разрез шота под плейхедом на две части (S) */
+  /**
+   * (правка 880) разрез клипа слоя по времени сборки t: возвращает [лево, право]
+   * или null, если разрезать нельзя (края, неизвестная длительность).
+   */
+  const splitLayerAt = useCallback((l: LayerClip, t: number): [LayerClip, LayerClip] | null => {
+    if (!l.duration) return null
+    const len = layerLen(l)
+    if (t < l.at + 0.05 || t >= l.at + len - 0.05) return null
+    const local = l.trimStart + (t - l.at) * (l.speed || 1)
+    if (local >= l.duration - l.trimEnd - 0.05) return null
+    const left: LayerClip = { ...l, trimEnd: Math.max(0, +(l.duration - local).toFixed(3)) }
+    const right: LayerClip = { ...l, key: newLayerKey(), at: +t.toFixed(3), trimStart: +Math.max(0, local).toFixed(3) }
+    return [left, right]
+  }, [layerLen])
+
+  /** (правка 880) разрез аудиоклипа по времени сборки t */
+  const splitAudioAt = useCallback((a: AudioClip, t: number): [AudioClip, AudioClip] | null => {
+    if (!a.duration) return null
+    const len = audioLen(a)
+    if (t < a.at + 0.05 || t >= a.at + len - 0.05) return null
+    const local = Math.max(0, Math.min(a.duration - 0.05, a.trimStart + (t - a.at)))
+    const left: AudioClip = { ...a, trimEnd: Math.max(0, +(a.duration - local).toFixed(3)) }
+    const right: AudioClip = { ...a, key: newAudioKey(), at: +t.toFixed(3), trimStart: +local.toFixed(3) }
+    return [left, right]
+  }, [audioLen])
+
+  /** (правка 880) разрез клипа базы по времени сборки t (скорость шота учтена) */
+  const splitShotAt = useCallback((row: SeqRow, t: number): [MontageShot, MontageShot] | null => {
+    const local = row.r.start + (t - row.offset) * shotSpeed(row.shot)
+    if (local <= row.r.start + 0.05 || local >= row.r.end - 0.05) return null
+    const cut = local.toFixed(2)
+    const left: MontageShot = { ...row.shot, trimEnd: cut }
+    // (правка 860) правая половинка идёт встык за левой (gap: 0)
+    const right: MontageShot = { ...row.shot, key: newShotKey(), trimStart: cut, trimEnd: row.shot.trimEnd, gap: 0 }
+    return [left, right]
+  }, [])
+
   const splitAtPlayhead = useCallback(() => {
     const t = seqTRef.current
+    const sq = seqRef.current
     // (правка 876) разрез по плейхеду работает для любого выделенного клипа:
     // очерёдность та же, что у Del/D и панели свойств — слой → аудио → база
     const lay = selectedLayerKey ? layersRef.current.find((x) => x.key === selectedLayerKey) : null
+    const aud = selectedAudioKey ? audiosRef.current.find((x) => x.key === selectedAudioKey) : null
     if (lay) {
       stopSeq(false)
       if (!lay.duration) {
         showToast('Длительность исходника ещё не известна — попробуйте позже', 'error')
         return
       }
-      const len = layerLen(lay)
-      if (t < lay.at + 0.05 || t >= lay.at + len - 0.05) {
+      const pair = splitLayerAt(lay, t)
+      if (!pair) {
         showToast('Поставьте плейхед внутрь клипа слоя (не на его край)', 'error')
         return
       }
@@ -2009,28 +2048,20 @@ export function MontageView() {
         showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
         return
       }
-      const local = lay.trimStart + (t - lay.at) * (lay.speed || 1)
-      if (local >= lay.duration - lay.trimEnd - 0.05) {
-        showToast('Поставьте плейхед внутри исходника (не на его край)', 'error')
-        return
-      }
       pushHistory()
-      const left: LayerClip = { ...lay, trimEnd: Math.max(0, +(lay.duration - local).toFixed(3)) }
-      const right: LayerClip = { ...lay, key: newLayerKey(), at: +t.toFixed(3), trimStart: +Math.max(0, local).toFixed(3) }
-      setLayers((prev) => prev.flatMap((x) => (x.key === lay.key ? [left, right] : [x])))
-      setSelectedLayerKey(right.key)
+      setLayers((prev) => prev.flatMap((x) => (x.key === lay.key ? pair : [x])))
+      setSelectedLayerKey(pair[1].key)
       setResult(null)
       return
     }
-    const aud = selectedAudioKey ? audiosRef.current.find((x) => x.key === selectedAudioKey) : null
     if (aud) {
       stopSeq(false)
       if (!aud.duration) {
         showToast('Длительность файла ещё не известна — попробуйте позже', 'error')
         return
       }
-      const len = audioLen(aud)
-      if (t < aud.at + 0.05 || t >= aud.at + len - 0.05) {
+      const pair = splitAudioAt(aud, t)
+      if (!pair) {
         showToast('Поставьте плейхед внутрь аудиоклипа (не на его край)', 'error')
         return
       }
@@ -2038,49 +2069,65 @@ export function MontageView() {
         showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
         return
       }
-      const local = Math.max(0, Math.min(aud.duration - 0.05, aud.trimStart + (t - aud.at)))
       pushHistory()
-      const left: AudioClip = { ...aud, trimEnd: Math.max(0, +(aud.duration - local).toFixed(3)) }
-      const right: AudioClip = { ...aud, key: newAudioKey(), at: +t.toFixed(3), trimStart: +local.toFixed(3) }
-      setAudios((prev) => prev.flatMap((x) => (x.key === aud.key ? [left, right] : [x])))
-      setSelectedAudioKey(right.key)
+      setAudios((prev) => prev.flatMap((x) => (x.key === aud.key ? pair : [x])))
+      setSelectedAudioKey(pair[1].key)
       setResult(null)
       return
     }
-    const sq = seqRef.current
-    if (!sq.length) return
-    stopSeq(false)
-    const loc = findAtTime(t)
-    if (loc.inGap) {
-      showToast('Поставьте плейхед внутрь клипа (не в пустой промежуток)', 'error')
+    // (правка 880) клип не выделен — режем всё, что стоит под плейхедом, на всех
+    // дорожках (как лезвие в DaVinci): база, слои V2+ и все аудиодорожки
+    const baseEnd = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
+    const loc = sq.length && t < baseEnd - 0.001 ? findAtTime(t) : null
+    const row = loc && !loc.inGap ? sq[loc.idx] : null
+    const shotPair = row ? splitShotAt(row, t) : null
+    const layPairs = layersRef.current
+      .map((l) => ({ key: l.key, pair: splitLayerAt(l, t) }))
+      .filter((p): p is { key: string; pair: [LayerClip, LayerClip] } => !!p.pair)
+    const audPairs = audiosRef.current
+      .map((a) => ({ key: a.key, pair: splitAudioAt(a, t) }))
+      .filter((p): p is { key: string; pair: [AudioClip, AudioClip] } => !!p.pair)
+    if (!shotPair && !layPairs.length && !audPairs.length) {
+      if (row) showToast('Поставьте плейхед внутрь клипа (не на его край)', 'error')
+      else showToast('Поставьте плейхед на клип любой дорожки', 'error')
       return
     }
-    const row = sq[loc.idx]
-    if (!row) return
-    // (правка 858) учитываем скорость шота при переводе времени сборки в исходник
-    const local = row.r.start + (t - row.offset) * shotSpeed(row.shot)
-    if (local <= row.r.start + 0.05 || local >= row.r.end - 0.05) {
-      showToast('Поставьте плейхед внутрь клипа (не на его край)', 'error')
+    if (layPairs.length && layersRef.current.length + layPairs.length > MAX_LAYER_CLIPS) {
+      showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
       return
     }
-    if (shotsRef.current.length >= MAX_SHOTS) {
+    if (audPairs.length && audiosRef.current.length + audPairs.length > MAX_AUDIO_CLIPS) {
+      showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
+      return
+    }
+    if (shotPair && shotsRef.current.length >= MAX_SHOTS) {
       showToast('Максимум 60 шотов на таймлайне', 'error')
       return
     }
+    stopSeq(false)
     pushHistory()
-    const cut = local.toFixed(2)
-    const left: MontageShot = { ...row.shot, trimEnd: cut }
-    // (правка 860) правая половинка идёт встык за левой (gap: 0)
-    const right: MontageShot = { ...row.shot, key: newShotKey(), trimStart: cut, trimEnd: row.shot.trimEnd, gap: 0 }
-    setShots((prev) => {
-      const idx = prev.findIndex((s) => s.key === row.shot.key)
-      if (idx < 0) return prev
-      const next = [...prev]
-      next.splice(idx, 1, left, right)
-      return next
-    })
-    setSelectedKey(right.key)
-  }, [stopSeq, pushHistory, selectedLayerKey, selectedAudioKey, layerLen, audioLen])
+    if (shotPair && row) {
+      setShots((prev) => {
+        const idx = prev.findIndex((s) => s.key === row.shot.key)
+        if (idx < 0) return prev
+        const next = [...prev]
+        next.splice(idx, 1, shotPair[0], shotPair[1])
+        return next
+      })
+      setSelectedKey(shotPair[1].key)
+    }
+    if (layPairs.length) {
+      const lmap = new Map(layPairs.map((p) => [p.key, p.pair]))
+      setLayers((prev) => prev.flatMap((x) => (lmap.has(x.key) ? lmap.get(x.key) as [LayerClip, LayerClip] : [x])))
+      setSelectedLayerKey(layPairs[0].pair[1].key)
+    }
+    if (audPairs.length) {
+      const amap = new Map(audPairs.map((p) => [p.key, p.pair]))
+      setAudios((prev) => prev.flatMap((x) => (amap.has(x.key) ? amap.get(x.key) as [AudioClip, AudioClip] : [x])))
+      if (!shotPair && !layPairs.length) setSelectedAudioKey(audPairs[0].pair[1].key)
+    }
+    setResult(null)
+  }, [stopSeq, pushHistory, selectedLayerKey, selectedAudioKey, splitLayerAt, splitAudioAt, splitShotAt])
 
   /** копия шота сразу за оригиналом (D) */
   const duplicateShot = useCallback((key: string) => {
@@ -2364,13 +2411,27 @@ export function MontageView() {
           return
         }
         pushHistory()
-        const trk = Math.min(MAX_TRACKS, Math.max(1, track ?? Math.max(1, audioTracks)))
+        // (правка 880) без явной дорожки ставим клип на первую аудиодорожку, где
+        // он ни с чем не пересекается; если все заняты — заводим новую
+        const start = Math.max(0, at ?? seqTRef.current)
+        const dur = Number.isFinite(data.duration) ? data.duration : 0
+        let trk: number
+        if (track != null) {
+          trk = Math.min(MAX_TRACKS, Math.max(1, track))
+        } else {
+          const maxT = Math.min(MAX_TRACKS, Math.max(audioTracks, audiosRef.current.reduce((m, a) => Math.max(m, a.track), 0)))
+          const busy = (t: number) => audiosRef.current.some((a) =>
+            a.track === t && start < a.at + audioLen(a) - 0.01 && start + (dur || 1e9) > a.at + 0.01)
+          let free = 0
+          for (let t = 1; t <= maxT; t++) if (!busy(t)) { free = t; break }
+          trk = free || Math.min(MAX_TRACKS, maxT + 1)
+        }
         const clip: AudioClip = {
           key: newAudioKey(), file: data.file, name: typeof data.name === 'string' ? data.name : fileObj.name,
           url: typeof data.url === 'string' ? data.url : `/api/montage/audio?f=${encodeURIComponent(data.file)}`,
-          at: Math.max(0, at ?? seqTRef.current), track: trk,
+          at: start, track: trk,
           trimStart: 0, trimEnd: 0, vol: 100, fadeIn: 0, fadeOut: 0,
-          duration: Number.isFinite(data.duration) ? data.duration : 0,
+          duration: dur,
         }
         setAudios((prev) => [...prev, clip])
         setAudioTracks((cur) => Math.max(cur, trk))
@@ -2381,7 +2442,7 @@ export function MontageView() {
         showToast(`Импорт аудио не удался: ${e instanceof Error ? e.message : String(e)}`, 'error')
       }
     },
-    [audioTracks, pushHistory],
+    [audioTracks, audioLen, pushHistory],
   )
 
   const removeAudioClip = useCallback((key: string) => {
@@ -3067,6 +3128,23 @@ export function MontageView() {
         : Math.max(24, trackHRef.current)
       const isOverBase = (y: number) =>
         !!baseRect && y >= baseRect.top - 4 && y <= baseRect.bottom + 4
+      // (правка 880) под нижним аудиорядом — новая дорожка A(N+1)
+      const audioRowsGeo = rows.filter((r) => r.kind === 'audio')
+      const bottomAudioBottom = audioRowsGeo.length
+        ? Math.max(...audioRowsGeo.map((r) => r.bottom))
+        : baseRect?.bottom ?? null
+      const audioRowH = audioRowsGeo.length
+        ? Math.max(18, Math.max(...audioRowsGeo.map((r) => r.bottom - r.top)))
+        : Math.max(22, Math.round(trackHRef.current * 0.45))
+      const newAudioTrack = (y: number): number | null => {
+        if (bottomAudioBottom == null) return null
+        if (y > bottomAudioBottom && y <= bottomAudioBottom + audioRowH) {
+          const maxT = audioRowsGeo.length ? Math.max(...audioRowsGeo.map((r) => r.track)) : 0
+          if (maxT + 1 > MAX_TRACKS) return null
+          return maxT + 1
+        }
+        return null
+      }
       const newTopTrack = (y: number): number | null => {
         if (topLayerTop == null) return null
         if (y >= topLayerTop - layerRowH && y < topLayerTop) {
@@ -3111,6 +3189,14 @@ export function MontageView() {
           const nt = newTopTrack(clientY)
           if (nt != null) {
             setTrimBadge({ x: clientX, y: clientY, text: `→ V${nt + 1} · ${want.toFixed(2)} с` })
+            return
+          }
+        }
+        // (правка 880) под нижним аудиорядом — перенос на новую дорожку A(N+1)
+        if (kind === 'audio') {
+          const nt = newAudioTrack(clientY)
+          if (nt != null) {
+            setTrimBadge({ x: clientX, y: clientY, text: `→ A${nt} · ${want.toFixed(2)} с` })
             return
           }
         }
@@ -3163,6 +3249,17 @@ export function MontageView() {
             if (nt != null) {
               setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, track: nt } : x)))
               setLayerTracks((cur) => Math.max(cur, nt))
+              setTimeout(() => { suppressDrag.current = false }, 0)
+              return
+            }
+          }
+          // (правка 880) аудиоклип под нижним рядом → новая дорожка A(N+1)
+          if (kind === 'audio') {
+            const at = Math.max(0, at0 + (ev.clientX - startX) / Math.max(8, ppsRef.current))
+            const nt = newAudioTrack(ev.clientY)
+            if (nt != null) {
+              setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at: +at.toFixed(3), track: nt } : x)))
+              setAudioTracks((cur) => Math.max(cur, nt))
               setTimeout(() => { suppressDrag.current = false }, 0)
               return
             }
@@ -3759,8 +3856,8 @@ export function MontageView() {
             <button
               className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-40"
               onClick={splitAtPlayhead}
-              disabled={!shots.length || !seq.length}
-              title="Разрезать клип на плейхеде (S)"
+              disabled={tlEnd <= 0}
+              title="Разрезать клип на плейхеде (S): режет все дорожки под плейхедом"
             >
               <ScissorsIcon className="h-3.5 w-3.5" />
             </button>
@@ -3792,8 +3889,24 @@ export function MontageView() {
             </button>
             <button
               className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
+              onClick={() => {
+                // (правка 880) новая аудиодорожка: A2, A3… — верхняя существующая + 1
+                const rowsNow = Math.max(audioTracks, audios.reduce((m, a) => Math.max(m, a.track), 0))
+                if (rowsNow >= MAX_TRACKS) {
+                  showToast(`Не более ${MAX_TRACKS} аудиодорожек`, 'error')
+                  return
+                }
+                setAudioTracks(rowsNow + 1)
+                showToast(`Добавлена аудиодорожка A${rowsNow + 1} — перетащите аудиофайл на неё`)
+              }}
+              title="Добавить аудиодорожку (файл кладётся перетаскиванием из проводника на дорожку)"
+            >
+              <span className="font-mono text-[11px] font-semibold">A+</span>
+            </button>
+            <button
+              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
               onClick={() => audioFileInputRef.current?.click()}
-              title="Импорт аудиофайла с диска на звуковую дорожку (по плейхеду)"
+              title="Импорт аудиофайла с диска на аудиодорожку (встаёт по плейхеду)"
             >
               <MusicIcon className="h-3.5 w-3.5" />
             </button>
@@ -3808,11 +3921,24 @@ export function MontageView() {
                 if (f) void importAndAddAudio(f)
               }}
             />
-            {shots.length > 0 && (
+            {(shots.length > 0 || layers.length > 0 || audios.length > 0) && (
               <button
                 className="rounded border border-border px-2 py-1 text-xs text-zinc-400 hover:border-red-500/50 hover:text-red-300"
-                onClick={() => { pushHistory(); stopSeq(false); setShots([]); setSelectedKey(null); setResult(null) }}
-                title="Очистить весь таймлайн"
+                onClick={() => {
+                  // (правка 880) очищаем все дорожки одинаково: видеоряды и аудиоряды
+                  pushHistory()
+                  stopSeq(false)
+                  setShots([])
+                  setLayers([])
+                  setAudios([])
+                  setLayerTracks(0)
+                  setAudioTracks(0)
+                  setSelectedKey(null)
+                  setSelectedLayerKey(null)
+                  setSelectedAudioKey(null)
+                  setResult(null)
+                }}
+                title="Очистить все дорожки таймлайна"
               >
                 Очистить
               </button>
@@ -4208,7 +4334,7 @@ export function MontageView() {
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
-                  title="Звуковая дорожка: перетащите сюда аудиофайл из проводника"
+                  title={`Аудиодорожка A${t}: перетащите сюда аудиофайл из проводника`}
                 >
                   <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-emerald-400/60">
                     A{t}
