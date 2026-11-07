@@ -70,6 +70,7 @@ import { useMontageTarget } from '@/lib/montage-target-store' // (правка 8
 import { useMontageReturn } from '@/lib/montage-return-store' // (правка 857)
 import { useRefineTarget } from '@/lib/refine-target-store' // (правка 856)
 import { useFsFullscreen } from '@/lib/use-fs-fullscreen' // (правка 869)
+import { dispersionCoeffs, dispersionMaxShift } from '@/lib/montage-dispersion' // (правка 898)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
 
@@ -556,18 +557,37 @@ function needsSvgFx(fx?: ShotFx): boolean {
   return !!(efx && (hasCurves(efx.curves) || (efx.dispersion && efx.dispersion > 0) || (efx.temp && Math.abs(efx.temp) >= 1)))
 }
 
-/** (правка 884) кэш радиальных карт дисперсии по размеру маски центра (0..90%) */
-const radialDispMapCache = new Map<number, string>()
+/** (правка 884, 898) кэш радиальных карт дисперсии: ключ — сила + маска + аспект */
+const radialDispMapCache = new Map<string, string>()
 
-/** (правка 876, 884) SVG-фильтр цветокоррекции для мгновенного превью (кривые + температура +
- * радиальная дисперсия с настраиваемой маской центра); учитывает байпас */
-function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: string }) {
+/** (правка 876, 884, 898) SVG-фильтр цветокоррекции для мгновенного превью
+ *  (кривые + температура + радиальная дисперсия); учитывает байпас.
+ *  diagPx — полудиагональ кадра в CSS px: от неё зависит сила смещения, чтобы
+ *  превью не «гуляло» вместе с размером окна и совпадало с рендером. */
+function FxSvgFilter({
+  fx,
+  id,
+  dispMap,
+  diagPx = 0,
+  aspect = 16 / 9,
+}: {
+  fx?: ShotFx
+  id: string
+  dispMap: string
+  diagPx?: number
+  aspect?: number
+}) {
   const efx = effectiveFx(fx)
   const c = efx?.curves
   const temp = efx?.temp && Math.abs(efx.temp) >= 1 ? efx.temp / 380 : 0
   const disp = efx?.dispersion && efx.dispersion > 0 ? efx.dispersion : 0
   const maskPct = typeof efx?.dispersionMask === 'number' ? Math.max(0, Math.min(90, Math.round(efx.dispersionMask))) : 35
-  const mapUrl = disp > 0 ? (createRadialDispMapDataUrl(maskPct) || dispMap) : dispMap
+  const mapUrl = disp > 0 ? (createRadialDispMapDataUrl(disp, maskPct, aspect) || dispMap) : dispMap
+  /* (правка 898) feDisplacementMap смещает на scale*(канал-0.5), канал хранит
+     единичное направление*вес, поэтому максимум смещения = scale/2. В рендере
+     максимальное смещение (в углах) = dispersionMaxShift * полудиагональ кадра.
+     Отсюда scale. */
+  const dispScale = disp > 0 && diagPx > 0 ? 2 * dispersionMaxShift(disp, maskPct) * diagPx : 0
   const rTab = buildChannelTable(c?.master, c?.r, temp)
   const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
   const bTab = buildChannelTable(c?.master, c?.b, -temp)
@@ -591,11 +611,11 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
               теряла канал и рисовала цветную рамку по периметру. */}
           <feColorMatrix in="curved" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR0" />
           <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB0" />
-          <feDisplacementMap in="curved" in2="dispMap" scale={disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radR" />
+          <feDisplacementMap in="curved" in2="dispMap" scale={dispScale} xChannelSelector="R" yChannelSelector="G" result="radR" />
           <feColorMatrix in="radR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
           <feComposite in="chR" in2="chR0" operator="over" result="chRFull" />
           <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
-          <feDisplacementMap in="curved" in2="dispMap" scale={-disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radB" />
+          <feDisplacementMap in="curved" in2="dispMap" scale={-dispScale} xChannelSelector="R" yChannelSelector="G" result="radB" />
           <feColorMatrix in="radB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
           <feComposite in="chB" in2="chB0" operator="over" result="chBFull" />
           <feBlend in="chRFull" in2="chG" mode="screen" result="rg" />
@@ -612,45 +632,67 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
 }
 
 /**
- * (правка 861, 884) Генерирует карту радиальной линзовой дисперсии с настраиваемой
- * маской центра (maskPct = 0..90%, по умолчанию 35%):
- * - В радиусе <= r0 R=128, G=128, Alpha=0 -> центр НЕ задействуется вообще (100% чистый)!
- * - От r0 к краям и углам R и G кодируют радиальный вектор от центра наружу, а Alpha плавно
- *   растёт от 0 до 255 — дисперсия плавно проявляется к краям и углам кадра.
+ * (правка 861, 884, 898) Карта радиальной линзовой дисперсии для SVG-превью.
+ *
+ * Профиль смещения повторяет то, что делает рендер (ffmpeg lenscorrection с
+ * коэффициентами из src/lib/montage-dispersion.ts):
+ *   смещение(r) = (k1·r² + k2·r⁴) · расстояние_до_центра, r нормирован так,
+ *   что r=1 в углах кадра. Поэтому у центра смещение почти нулевое (~r³),
+ *   а у краёв и углов — максимальное; отдельная маска центра не нужна.
+ *   Ползунок «маска центра» (maskPct) влияет на силу через k1/k2 — ровно как
+ *   в рендере.
+ *
+ * Аспект кадра учитывается (правка 898): раньше карта была квадратной и
+ * растягивалась на кадр 16:9, из-за чего вертикальное смещение было в ~1.8 раза
+ * сильнее горизонтального и не совпадало с рендером.
  */
-function createRadialDispMapDataUrl(maskPct = 35): string {
-  const key = Math.max(0, Math.min(90, Math.round(maskPct)))
+function createRadialDispMapDataUrl(disp = 10, maskPct = 35, aspect = 16 / 9): string {
+  const d0 = Math.max(1, Math.min(20, Math.round(disp * 10) / 10))
+  const m0 = Math.max(0, Math.min(90, Math.round(maskPct)))
+  const a0 = Math.max(0.2, Math.min(4, Math.round(aspect * 100) / 100))
+  const key = `${d0}|${m0}|${a0}`
   const cached = radialDispMapCache.get(key)
   if (cached) return cached
   try {
-    const size = 192
+    const H = 180
+    const W = Math.max(2, Math.round(H * a0))
     const c = document.createElement('canvas')
-    c.width = size
-    c.height = size
+    c.width = W
+    c.height = H
     const ctx = c.getContext('2d')
     if (!ctx) return ''
-    const img = ctx.createImageData(size, size)
+    const img = ctx.createImageData(W, H)
     const d = img.data
-    const r0 = (key / 100) * 1.08
-    const span = Math.max(0.18, 1.25 - r0)
-    for (let y = 0; y < size; y++) {
-      const ny = (y / (size - 1)) * 2 - 1 // -1..1
-      for (let x = 0; x < size; x++) {
-        const nx = (x / (size - 1)) * 2 - 1 // -1..1
-        const r = Math.hypot(nx, ny) // 0 в центре, 1 у краёв, ~1.41 в углах
-        // в радиусе 0..r0 вес строго 0 (центр чистый), дальше плавный подъём к краям
-        const t = Math.max(0, Math.min(1, (r - r0) / span))
-        let weight = t * t * (3 - 2 * t)
-        // (правка 862) у самой кромки кадра смещение плавно гасим, иначе
-        // выборка за пределами кадра даёт цветную «рамку» по периметру
-        const dEdge = Math.min(1 - Math.abs(nx), 1 - Math.abs(ny))
-        const ef = Math.max(0, Math.min(1, dEdge / 0.045))
-        weight *= ef * ef * (3 - 2 * ef)
-        const vx = Math.max(-1, Math.min(1, nx * weight))
-        const vy = Math.max(-1, Math.min(1, ny * weight))
-        const idx = (y * size + x) * 4
-        d[idx] = Math.round(128 + vx * 127)
-        d[idx + 1] = Math.round(128 + vy * 127)
+    const { k1, k2, zoom } = dispersionCoeffs(d0, m0)
+    const maxShift = dispersionMaxShift(d0, m0)
+    const z2 = zoom * zoom
+    const diag = Math.hypot(a0, 1)
+    for (let y = 0; y < H; y++) {
+      const ny = (y / (H - 1)) * 2 - 1 // -1..1 по высоте
+      for (let x = 0; x < W; x++) {
+        const nx = (x / (W - 1)) * 2 - 1 // -1..1 по ширине
+        // физические координаты (пропорциональны пикселям кадра)
+        const ax = nx * a0
+        const ay = ny
+        const len = Math.hypot(ax, ay)
+        const r = len / diag // 0 в центре, 1 в углах
+        let weight = 0
+        let dirx = 0
+        let diry = 0
+        if (len > 1e-6) {
+          dirx = ax / len
+          diry = ay / len
+          /* профиль рендера: смещение = (k1·r'² + k2·r'⁴) · расстояние до центра,
+             нормировано на максимум в углу кадра. Множитель r уже даёт «чистый»
+             центр (смещение ~r³ у середины) — отдельная маска не нужна, иначе
+             превью расходилось бы с рендером. Маска центра в UI управляет
+             силой через k1/k2 (см. dispersionCoeffs). */
+          const rp2 = (r * r) / z2
+          weight = Math.max(0, Math.min(1, ((k1 * rp2 + k2 * rp2 * rp2) * r) / maxShift))
+        }
+        const idx = (y * W + x) * 4
+        d[idx] = Math.round(128 + dirx * weight * 127)
+        d[idx + 1] = Math.round(128 + diry * weight * 127)
         d[idx + 2] = 128
         d[idx + 3] = Math.round(weight * 255)
       }
@@ -824,6 +866,9 @@ export function MontageView() {
   const [trackH, setTrackH] = useState(64)
   /** масштаб превью: доля панели 0.2..1 */
   const [vScale, setVScale] = useState(0.8)
+  /** (правка 898) размер панели превью в CSS px — чтобы сила дисперсии в
+   *  превью совпадала с рендером (смещение в долях кадра, а не в пикселях) */
+  const [panelBox, setPanelBox] = useState({ w: 0, h: 0 })
   /** превью развернуто на весь экран (правка 869) — общий хук, см. use-fs-fullscreen */
   const { isFs, setIsFs, toggleFs: toggleFullscreen } = useFsFullscreen()
   /** выключить звук в превью */
@@ -1326,6 +1371,35 @@ export function MontageView() {
     if (curL && !alive.has(aliveKey(curL))) setSelectedLayerKey(null)
     showToast(`С таймлайна убрано удалённых файлов: ${gone + goneL}`, 'error')
   }, [files, loading, selectedKey, selectedLayerKey])
+
+  // (правка 898) следим за размером панели превью: от него зависит масштаб
+  // смещения дисперсии (доли кадра), чтобы превью совпадало с рендером.
+  useEffect(() => {
+    const el = previewBoxRef.current
+    if (!el) return
+    const update = (w: number, h: number) => {
+      setPanelBox((p) => (p.w === Math.round(w) && p.h === Math.round(h) ? p : { w: Math.round(w), h: Math.round(h) }))
+    }
+    const r0 = el.getBoundingClientRect()
+    update(r0.width, r0.height)
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      if (r) update(r.width, r.height)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  /** (правка 898) полудиагональ кадра превью в CSS px и его аспект — калибровка
+   *  силы дисперсии: смещение задаётся в долях кадра, как в ffmpeg-рендерe */
+  const fxDiagPx = useMemo(
+    () => (panelBox.w > 0 && panelBox.h > 0 ? (Math.hypot(panelBox.w, panelBox.h) * vScale) / 2 : 0),
+    [panelBox, vScale],
+  )
+  const fxAspect = useMemo(
+    () => (panelBox.w > 0 && panelBox.h > 0 ? panelBox.w / panelBox.h : 16 / 9),
+    [panelBox],
+  )
 
   // зум таймлайна колесом мыши (вверх = крупнее), точка под курсором остаётся на месте
   useEffect(() => {
@@ -4043,12 +4117,12 @@ export function MontageView() {
               {[0, 1].map((b) => {
                 const bKey = buf === b ? (previewVolKeyRef.current ?? bufShotKeyRef.current[b] ?? selectedKey) : bufShotKeyRef.current[b]
                 const bShot = !result && bKey ? shots.find((s) => s.key === bKey) : null
-                return <FxSvgFilter key={b} fx={bShot?.fx} id={`h3-fx-buf-${b}`} dispMap={radialDispMap} />
+                return <FxSvgFilter key={b} fx={bShot?.fx} id={`h3-fx-buf-${b}`} dispMap={radialDispMap} diagPx={fxDiagPx} aspect={fxAspect} />
               })}
               {/* (правка 876) SVG-фильтры эффектов клипов слоёв V2+ (только когда нужны) */}
               {layers.map((l) =>
                 needsSvgFx(l.fx) ? (
-                  <FxSvgFilter key={`l-${l.key}`} fx={l.fx} id={`h3-fx-layer-${l.key}`} dispMap={radialDispMap} />
+                  <FxSvgFilter key={`l-${l.key}`} fx={l.fx} id={`h3-fx-layer-${l.key}`} dispMap={radialDispMap} diagPx={fxDiagPx} aspect={fxAspect} />
                 ) : null,
               )}
             </defs>
@@ -6127,7 +6201,7 @@ export function MontageView() {
                             <div className="flex items-center justify-between text-[11px]">
                               <span
                                 className="text-zinc-400"
-                                title="Размер чистой зоны в центре кадра, не затронутой дисперсией (0% — от самого центра, 90% — только у самых углов)"
+                                title="Радиус чистой зоны в центре кадра: 0% — дисперсия максимальной силы по всему кадру, 90% — эффект сильно приглушён и остаётся у самых краёв. Считается одинаково в превью и в финальном рендере"
                               >
                                 Радиальная маска центра
                               </span>

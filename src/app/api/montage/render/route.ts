@@ -46,6 +46,7 @@ import { NextResponse } from 'next/server'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveFfmpeg } from '@/lib/thumb'
+import { dispersionCoeffs } from '@/lib/montage-dispersion' // (правка 898) общая формула дисперсии
 
 export const runtime = 'nodejs'
 
@@ -470,22 +471,24 @@ function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): stri
     // (правка 861, 862, 884) радиальная дисперсия с настраиваемой маской центра:
     // dispersionMask (0..90%, по умолчанию 35%) задаёт радиус чистого центра.
     const maskPct = typeof fx.dispersionMask === 'number' ? Math.max(0, Math.min(90, fx.dispersionMask)) : 35
-    const m = maskPct / 100
-    const k1 = +(fx.dispersion * 0.0024 * Math.max(0.05, 1 - m * 0.9)).toFixed(4)
-    const k2 = +(fx.dispersion * 0.0013 * Math.max(0.15, 1 - m * 0.4)).toFixed(4)
-    // (правка 862) запас кадра считаем от силы линзы: смещение кромки равно
-    // (k1+k2) от половины меньшей стороны, поэтому zoom = 1 + k1 + k2 + запас.
-    // Фиксированные 1.14 не хватало на максимальной дисперсии — оставалась рамка.
-    const zoom = Math.min(1.5, 1 + k1 + k2 + 0.01)
+    // (правка 898) коэффициенты — из общей с render-роутом и превью монтажки
+    // формулы (src/lib/montage-dispersion.ts), чтобы сила в превью и в файле
+    // совпадала.
+    const { k1, k2, zoom } = dispersionCoeffs(fx.dispersion, maskPct)
+    const k1s = +k1.toFixed(4)
+    const k2s = +k2.toFixed(4)
     const upW = Math.max(2, Math.round((srcW * zoom) / 2) * 2)
     const upH = Math.max(2, Math.round((srcH * zoom) / 2) * 2)
     const cropW = Math.max(2, srcW - (srcW % 2))
     const cropH = Math.max(2, srcH - (srcH % 2))
+    // (правка 862) запас кадра (zoom) считаем от силы линзы: кадр растягивается,
+    // каналы смещаются и кадр режется обратно — так у кромки не остаётся рамки
+    // из разложенных цветов.
     // (правка 863) extractplanes отдаёт каналы в порядке R,G,B, а не в порядке
     // букв «g+b+r»: раньше R/B подмешивались в чужие плоскости и рендер зеленел.
     // Раскладка mergeplanes: G (без сдвига), B (сдвиг +k), R (сдвиг -k).
     fxv.push(
-      `scale=${upW}:${upH},format=gbrp,extractplanes=g+b+r[pg${tag}][pb${tag}][pr${tag}];[pg${tag}]lenscorrection=k1=${-k1}:k2=${-k2}[sr${tag}];[pr${tag}]lenscorrection=k1=${k1}:k2=${k2}[sb${tag}];[pb${tag}][sb${tag}][sr${tag}]mergeplanes=0x001020:gbrp,crop=${cropW}:${cropH}`,
+      `scale=${upW}:${upH},format=gbrp,extractplanes=g+b+r[pg${tag}][pb${tag}][pr${tag}];[pg${tag}]lenscorrection=k1=${-k1s}:k2=${-k2s}[sr${tag}];[pr${tag}]lenscorrection=k1=${k1s}:k2=${k2s}[sb${tag}];[pb${tag}][sb${tag}][sr${tag}]mergeplanes=0x001020:gbrp,crop=${cropW}:${cropH}`,
     )
   }
   if (fx.hue && Math.abs(fx.hue) >= 1) {
