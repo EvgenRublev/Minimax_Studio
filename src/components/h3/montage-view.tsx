@@ -36,6 +36,8 @@ import {
   ClapperboardIcon,
   CopyIcon,
   DownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
   FilmIcon,
   FrameIcon,
   LinkIcon,
@@ -166,7 +168,10 @@ type ShotCurves = {
   b?: CurvePts
 }
 
-/** (правка 849, 859, 861) картинные эффекты шота (совпадают с полем fx в /api/montage/render) */
+/** (правка 884) ключи индивидуального байпаса каждого эффекта */
+type FxBypassKey = 'flip' | 'curves' | 'temp' | 'hue' | 'bright' | 'contrast' | 'sat' | 'dispersion' | 'grain'
+
+/** (правка 849, 859, 861, 884) картинные эффекты шота (совпадают с полем fx в /api/montage/render) */
 type ShotFx = {
   flipH?: boolean
   flipV?: boolean
@@ -184,8 +189,14 @@ type ShotFx = {
   curves?: ShotCurves
   /** (правка 859, 861) радиальная хроматическая дисперсия (центр чистый, к краям до 20) */
   dispersion?: number
+  /** (правка 884) радиальная маска чистого центра для дисперсии, 0..90% (по умолчанию 35%) */
+  dispersionMask?: number
   /** (правка 859) киношный анимированный шум (зерно 35mm), 0..100% */
   grain?: number
+  /** (правка 884) общий байпас всех эффектов клипа для сравнения До/После */
+  bypass?: boolean
+  /** (правка 884) индивидуальный байпас каждого эффекта отдельно */
+  bypassed?: Partial<Record<FxBypassKey, boolean>>
 }
 
 const DEFAULT_CURVE: CurvePts = [
@@ -466,7 +477,7 @@ function hasFx(fx?: ShotFx): boolean {
   )
 }
 
-/** (правка 859, 861) глубокое клонирование объекта эффектов для копирования между клипами */
+/** (правка 859, 861, 884) глубокое клонирование объекта эффектов для копирования между клипами */
 function cloneFx(fx?: ShotFx): ShotFx {
   if (!fx) return {}
   return {
@@ -478,7 +489,10 @@ function cloneFx(fx?: ShotFx): ShotFx {
     temp: fx.temp,
     hue: fx.hue,
     dispersion: fx.dispersion,
+    dispersionMask: fx.dispersionMask,
     grain: fx.grain,
+    bypass: fx.bypass,
+    bypassed: fx.bypassed ? { ...fx.bypassed } : undefined,
     curves: fx.curves
       ? {
           master: fx.curves.master ? normalizeCurvePts(fx.curves.master) : undefined,
@@ -490,38 +504,70 @@ function cloneFx(fx?: ShotFx): ShotFx {
   }
 }
 
-/** (правка 858, 859, 861) CSS-представление эффектов шота для мгновенного превью в плеере */
+/** (правка 884) возвращает эффекты с учётом общего и поэффектного байпаса */
+function effectiveFx(fx?: ShotFx): ShotFx | undefined {
+  if (!fx || fx.bypass) return undefined
+  const b = fx.bypassed || {}
+  return {
+    flipH: b.flip ? undefined : fx.flipH,
+    flipV: b.flip ? undefined : fx.flipV,
+    bright: b.bright ? undefined : fx.bright,
+    contrast: b.contrast ? undefined : fx.contrast,
+    sat: b.sat ? undefined : fx.sat,
+    temp: b.temp ? undefined : fx.temp,
+    hue: b.hue ? undefined : fx.hue,
+    curves: b.curves ? undefined : fx.curves,
+    dispersion: b.dispersion ? undefined : fx.dispersion,
+    dispersionMask: fx.dispersionMask,
+    grain: b.grain ? undefined : fx.grain,
+  }
+}
+
+/** (правка 884) есть ли хотя бы один активный (не в байпасе) эффект */
+function hasActiveFx(fx?: ShotFx): boolean {
+  return hasFx(effectiveFx(fx))
+}
+
+/** (правка 858, 859, 861, 884) CSS-представление эффектов шота для мгновенного превью в плеере */
 function shotFxCss(fx: ShotFx | undefined, svgFilterId?: string): { filter?: string; scaleX: number; scaleY: number } {
-  if (!fx) return { scaleX: 1, scaleY: 1 }
+  const efx = effectiveFx(fx)
+  if (!efx) return { scaleX: 1, scaleY: 1 }
   const filters: string[] = []
   if (
     svgFilterId &&
-    (hasCurves(fx.curves) || (fx.dispersion && fx.dispersion > 0) || (fx.temp && Math.abs(fx.temp) >= 1))
+    (hasCurves(efx.curves) || (efx.dispersion && efx.dispersion > 0) || (efx.temp && Math.abs(efx.temp) >= 1))
   ) {
     filters.push(`url(#${svgFilterId})`)
   }
-  if (fx.hue && Math.abs(fx.hue) >= 1) filters.push(`hue-rotate(${fx.hue.toFixed(0)}deg)`)
-  if (fx.bright) filters.push(`brightness(${Math.max(0.2, 1 + fx.bright).toFixed(2)})`)
-  if (fx.contrast) filters.push(`contrast(${Math.max(0.2, 1 + fx.contrast).toFixed(2)})`)
-  if (fx.sat !== undefined && fx.sat !== 1) filters.push(`saturate(${Math.max(0, fx.sat).toFixed(2)})`)
+  if (efx.hue && Math.abs(efx.hue) >= 1) filters.push(`hue-rotate(${efx.hue.toFixed(0)}deg)`)
+  if (efx.bright) filters.push(`brightness(${Math.max(0.2, 1 + efx.bright).toFixed(2)})`)
+  if (efx.contrast) filters.push(`contrast(${Math.max(0.2, 1 + efx.contrast).toFixed(2)})`)
+  if (efx.sat !== undefined && efx.sat !== 1) filters.push(`saturate(${Math.max(0, efx.sat).toFixed(2)})`)
   return {
     filter: filters.length ? filters.join(' ') : undefined,
-    scaleX: fx.flipH ? -1 : 1,
-    scaleY: fx.flipV ? -1 : 1,
+    scaleX: efx.flipH ? -1 : 1,
+    scaleY: efx.flipV ? -1 : 1,
   }
 }
 
-/** (правка 876) нужны ли эффектам SVG-фильтр (кривые/температура/дисперсия) */
+/** (правка 876, 884) нужны ли эффектам SVG-фильтр (кривые/температура/дисперсия) */
 function needsSvgFx(fx?: ShotFx): boolean {
-  return !!(fx && (hasCurves(fx.curves) || (fx.dispersion && fx.dispersion > 0) || (fx.temp && Math.abs(fx.temp) >= 1)))
+  const efx = effectiveFx(fx)
+  return !!(efx && (hasCurves(efx.curves) || (efx.dispersion && efx.dispersion > 0) || (efx.temp && Math.abs(efx.temp) >= 1)))
 }
 
-/** (правка 876) SVG-фильтр цветокоррекции для мгновенного превью (кривые + температура +
- * радиальная дисперсия); общий для буферов плеера и клипов слоёв V2+ */
+/** (правка 884) кэш радиальных карт дисперсии по размеру маски центра (0..90%) */
+const radialDispMapCache = new Map<number, string>()
+
+/** (правка 876, 884) SVG-фильтр цветокоррекции для мгновенного превью (кривые + температура +
+ * радиальная дисперсия с настраиваемой маской центра); учитывает байпас */
 function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: string }) {
-  const c = fx?.curves
-  const temp = fx?.temp && Math.abs(fx.temp) >= 1 ? fx.temp / 380 : 0
-  const disp = fx?.dispersion && fx.dispersion > 0 ? fx.dispersion : 0
+  const efx = effectiveFx(fx)
+  const c = efx?.curves
+  const temp = efx?.temp && Math.abs(efx.temp) >= 1 ? efx.temp / 380 : 0
+  const disp = efx?.dispersion && efx.dispersion > 0 ? efx.dispersion : 0
+  const maskPct = typeof efx?.dispersionMask === 'number' ? Math.max(0, Math.min(90, Math.round(efx.dispersionMask))) : 35
+  const mapUrl = disp > 0 ? (createRadialDispMapDataUrl(maskPct) || dispMap) : dispMap
   const rTab = buildChannelTable(c?.master, c?.r, temp)
   const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
   const bTab = buildChannelTable(c?.master, c?.b, -temp)
@@ -532,9 +578,9 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
         <feFuncG type="table" tableValues={gTab} />
         <feFuncB type="table" tableValues={bTab} />
       </feComponentTransfer>
-      {disp > 0 && dispMap && (
+      {disp > 0 && mapUrl && (
         <>
-          <feImage href={dispMap} x="0%" y="0%" width="100%" height="100%" preserveAspectRatio="none" result="dispMap" />
+          <feImage href={mapUrl} x="0%" y="0%" width="100%" height="100%" preserveAspectRatio="none" result="dispMap" />
           <feDisplacementMap in="curved" in2="dispMap" scale={disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radR" />
           <feColorMatrix in="radR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
           <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
@@ -554,14 +600,18 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
 }
 
 /**
- * (правка 861) Генерирует карту радиальной линзовой дисперсии 256×256 (как в DaVinci Resolve):
- * - В центре кадра (радиус <= 32%) R=128, G=128, Alpha=0 -> центр НЕ задействуется вообще (100% чистый)!
- * - От центра к краям и углам R и G кодируют радиальный вектор от центра наружу, а Alpha плавно
+ * (правка 861, 884) Генерирует карту радиальной линзовой дисперсии с настраиваемой
+ * маской центра (maskPct = 0..90%, по умолчанию 35%):
+ * - В радиусе <= r0 R=128, G=128, Alpha=0 -> центр НЕ задействуется вообще (100% чистый)!
+ * - От r0 к краям и углам R и G кодируют радиальный вектор от центра наружу, а Alpha плавно
  *   растёт от 0 до 255 — дисперсия плавно проявляется к краям и углам кадра.
  */
-function createRadialDispMapDataUrl(): string {
+function createRadialDispMapDataUrl(maskPct = 35): string {
+  const key = Math.max(0, Math.min(90, Math.round(maskPct)))
+  const cached = radialDispMapCache.get(key)
+  if (cached) return cached
   try {
-    const size = 256
+    const size = 192
     const c = document.createElement('canvas')
     c.width = size
     c.height = size
@@ -569,13 +619,15 @@ function createRadialDispMapDataUrl(): string {
     if (!ctx) return ''
     const img = ctx.createImageData(size, size)
     const d = img.data
+    const r0 = (key / 100) * 1.08
+    const span = Math.max(0.18, 1.25 - r0)
     for (let y = 0; y < size; y++) {
       const ny = (y / (size - 1)) * 2 - 1 // -1..1
       for (let x = 0; x < size; x++) {
         const nx = (x / (size - 1)) * 2 - 1 // -1..1
         const r = Math.hypot(nx, ny) // 0 в центре, 1 у краёв, ~1.41 в углах
-        // в радиусе 0..0.4 вес строго 0 (центр чистый), дальше плавный подъём к краям
-        const t = Math.max(0, Math.min(1, (r - 0.4) / 0.75))
+        // в радиусе 0..r0 вес строго 0 (центр чистый), дальше плавный подъём к краям
+        const t = Math.max(0, Math.min(1, (r - r0) / span))
         let weight = t * t * (3 - 2 * t)
         // (правка 862) у самой кромки кадра смещение плавно гасим, иначе
         // выборка за пределами кадра даёт цветную «рамку» по периметру
@@ -592,7 +644,9 @@ function createRadialDispMapDataUrl(): string {
       }
     }
     ctx.putImageData(img, 0, 0)
-    return c.toDataURL('image/png')
+    const url = c.toDataURL('image/png')
+    radialDispMapCache.set(key, url)
+    return url
   } catch {
     return ''
   }
@@ -2663,10 +2717,19 @@ export function MontageView() {
     showToast(label)
   }, [pushHistory])
 
-  // (правка 859) анимированный киношный шум в превью: 24 кадра/с сдвигает тайл зерна
+  // (правка 859, 884) анимированный киношный шум в превью: 24 кадра/с сдвигает тайл зерна,
+  // учитывает общий/индивидуальный байпас и слои V2+
   const activePreviewKey = !result ? (previewVolKeyRef.current ?? bufShotKeyRef.current[buf] ?? selectedKey) : null
   const activePreviewShot = activePreviewKey ? shots.find((s) => s.key === activePreviewKey) ?? selected : selected
-  const activeGrain = !result ? (activePreviewShot?.fx?.grain ?? 0) : 0
+  const activeTopLayer = useMemo(() => {
+    if (result) return null
+    const vis = layers.filter((l) => !l.hidden && playT >= l.at && playT < l.at + layerLen(l))
+    if (!vis.length) return selectedLayer
+    return vis.reduce((top, cur) => (cur.track >= top.track ? cur : top), vis[0])
+  }, [result, layers, playT, layerLen, selectedLayer])
+  const activeGrain = !result
+    ? (effectiveFx(activeTopLayer?.fx)?.grain ?? effectiveFx(activePreviewShot?.fx)?.grain ?? 0)
+    : 0
   useEffect(() => {
     if (!activeGrain || activeGrain <= 0) return
     const iv = setInterval(() => {
@@ -2784,19 +2847,56 @@ export function MontageView() {
     duplicateLayerClip, duplicateAudioClip, toggleFullscreen, moveShot, undo, redo, isFs, seqSet.fps,
   ])
 
+  /**
+   * (правка 884) подрезка шота на V1:
+   * - при сжатии от начала (side === 'start') начальная граница перемещается вправо
+   *   (пауза gap перед клипом увеличивается на величину подрезки), конечная граница
+   *   клипа остаётся на месте, и все следующие клипы остаются на своих местах;
+   * - при сжатии с конца (side === 'end') пауза перед следующим клипом компенсирует
+   *   изменение длины, чтобы остальные клипы после этого тоже оставались на местах.
+   */
   const setTrim = useCallback((key: string, side: 'start' | 'end', value: number, dur: number) => {
-    setShots((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s
-        const r = effRange(s)
-        if (side === 'start') {
-          const st = Math.max(0, Math.min(value, (dur || r.end) - 0.1))
-          return { ...s, trimStart: st <= 0 ? '' : st.toFixed(2) }
+    setShots((prev) => {
+      const idx = prev.findIndex((s) => s.key === key)
+      if (idx < 0) return prev
+      const s = prev[idx]
+      const r = effRange(s)
+      const sp = shotSpeed(s)
+      const next = [...prev]
+      if (side === 'start') {
+        const oldGap = Math.max(0, typeof s.gap === 'number' && Number.isFinite(s.gap) ? s.gap : 0)
+        const minSt = idx > 0 ? Math.max(0, r.start - oldGap * sp) : 0
+        const st = Math.max(minSt, Math.min(value, (dur || r.end) - 0.1))
+        const deltaTimeline = (st - r.start) / sp
+        const newGap = Math.max(0, +(oldGap + deltaTimeline).toFixed(3))
+        next[idx] = {
+          ...s,
+          trimStart: st <= 0.001 ? '' : st.toFixed(2),
+          gap: newGap < 0.01 ? undefined : newGap,
         }
-        const en = Math.min(value, dur || Number.POSITIVE_INFINITY)
-        return { ...s, trimEnd: dur && en >= dur - 0.01 ? '' : Math.max(r.start + 0.1, en).toFixed(2) }
-      }),
-    )
+        return next
+      }
+      const hasNext = idx + 1 < next.length
+      const nextShot = hasNext ? next[idx + 1] : null
+      const nextGap0 = nextShot ? Math.max(0, typeof nextShot.gap === 'number' && Number.isFinite(nextShot.gap) ? nextShot.gap : 0) : 0
+      const maxEn = hasNext
+        ? Math.min(dur || Number.POSITIVE_INFINITY, r.end + nextGap0 * sp)
+        : (dur || Number.POSITIVE_INFINITY)
+      const en = Math.min(Math.max(value, r.start + 0.1), maxEn)
+      const deltaLen = (en - r.end) / sp
+      next[idx] = {
+        ...s,
+        trimEnd: dur && en >= dur - 0.01 ? '' : en.toFixed(2),
+      }
+      if (hasNext && nextShot) {
+        const newNextGap = Math.max(0, +(nextGap0 - deltaLen).toFixed(3))
+        next[idx + 1] = {
+          ...nextShot,
+          gap: newNextGap < 0.01 ? undefined : newNextGap,
+        }
+      }
+      return next
+    })
   }, [])
 
   const runRender = useCallback(async () => {
@@ -3427,7 +3527,9 @@ export function MontageView() {
     [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot],
   )
 
-  /** (правка 874) подрезка клипа слоя/аудио за край: trimStart/trimEnd — числа (сек исходника) */
+  /** (правка 874, 884) подрезка клипа слоя/аудио за край:
+   *  при сжатии от начала (side === 'start') начальная граница at перемещается
+   *  вправо за курсором мыши, а конечная граница остаётся на месте */
   const startFreeTrimDrag = useCallback(
     (e: React.PointerEvent, kind: 'layer' | 'audio', clip: LayerClip | AudioClip, side: 'start' | 'end') => {
       e.preventDefault()
@@ -3436,28 +3538,52 @@ export function MontageView() {
       if (kind === 'layer') setSelectedLayerKey(clip.key)
       else setSelectedAudioKey(clip.key)
       const startX = e.clientX
+      const at0 = clip.at
       const ts0 = clip.trimStart
       const te0 = clip.trimEnd
       const dur = clip.duration || 0
       const sp = kind === 'layer' ? (clip as LayerClip).speed || 1 : 1
+      const peers =
+        kind === 'layer'
+          ? layersRef.current.filter((x) => x.key !== clip.key && x.track === clip.track)
+          : audiosRef.current.filter((x) => x.key !== clip.key && x.track === clip.track)
+      let leftLimitAt = 0
+      for (const p of peers) {
+        const pEnd = p.at + (kind === 'layer' ? layerLen(p as LayerClip) : audioLen(p as AudioClip))
+        if (pEnd <= at0 + 0.01) leftLimitAt = Math.max(leftLimitAt, pEnd)
+      }
+      const minTs = Math.max(0, ts0 - Math.max(0, at0 - leftLimitAt) * sp)
       const maxTs = dur > 0 ? Math.max(0, dur - te0 - 0.05) : 0
       const maxTe = dur > 0 ? Math.max(0, dur - ts0 - 0.05) : 0
       let pushed = false
       let ts = ts0
       let te = te0
+      let nextAt = at0
       let raf = 0
       const commit = () => {
         if (kind === 'layer') {
-          setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x)))
+          setLayers((prev) =>
+            prev.map((x) =>
+              x.key === clip.key ? { ...x, at: +nextAt.toFixed(3), trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x,
+            ),
+          )
         } else {
-          setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x)))
+          setAudios((prev) =>
+            prev.map((x) =>
+              x.key === clip.key ? { ...x, at: +nextAt.toFixed(3), trimStart: +ts.toFixed(3), trimEnd: +te.toFixed(3) } : x,
+            ),
+          )
         }
       }
       const onMove = (ev: PointerEvent) => {
         if (!pushed) { pushed = true; pushHistory() }
         const srcDt = ((ev.clientX - startX) / ppsRef.current) * sp
-        if (side === 'start') ts = Math.max(0, Math.min(ts0 + srcDt, maxTs))
-        else te = Math.max(0, Math.min(te0 - srcDt, maxTe))
+        if (side === 'start') {
+          ts = Math.max(minTs, Math.min(ts0 + srcDt, maxTs))
+          nextAt = Math.max(leftLimitAt, at0 + (ts - ts0) / sp)
+        } else {
+          te = Math.max(0, Math.min(te0 - srcDt, maxTe))
+        }
         if (!raf) {
           const bx = ev.clientX
           const by = ev.clientY
@@ -3480,7 +3606,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [pushHistory],
+    [pushHistory, layerLen, audioLen],
   )
 
   /** (правка 720 v11) вписать всю сборку в видимую ширину таймлайна */
@@ -3935,8 +4061,8 @@ export function MontageView() {
               />
             )
           })}
-          {/* (правка 859) анимированный киношный шум (зерно 35mm, 24 к/с) поверх кадра превью */}
-          {previewSrc && !inGap && activeGrain > 0 && grainTile && (
+          {/* (правка 859, 884) анимированный киношный шум (зерно 35mm, 24 к/с) поверх кадра превью */}
+          {(previewSrc || layers.length > 0) && !inGap && activeGrain > 0 && grainTile && (
             <div
               ref={grainOverlayRef}
               className="pointer-events-none absolute"
@@ -4008,8 +4134,8 @@ export function MontageView() {
 
         {/* (правка 861) транспорт + настройки таймлайна: прямо над самим таймлайном */}
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-[var(--surface-1)] px-3 py-1.5">
-          {/* слева: история, разрез, магнит, очистка таймлайна */}
-          <div className="flex items-center gap-1.5">
+          {/* слева: история, разрез, магнит, дорожки, очистка таймлайна */}
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)] disabled:opacity-40"
               onClick={undo}
@@ -5353,469 +5479,599 @@ export function MontageView() {
               </div>
             ) : (
               <>
-                {/* шапка выбранного клипа + сброс */}
-                <div className="flex items-center justify-between rounded-lg border border-border bg-[var(--surface-2)] px-2.5 py-2">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium text-zinc-100">
-                      {fxTarget.name}
-                      {/* (правка 876) подпись дорожки: слой V2+ или базовая V1 */}
-                      {'track' in fxTarget ? (
-                        <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">слой V{fxTarget.track + 1}</span>
-                      ) : null}
-                    </div>
-                    <div className="text-[10px] text-zinc-400">
-                      {hasFx(fxTarget.fx) ? 'Эффекты активны (видны в превью и рендере)' : 'Без эффектов'}
-                    </div>
-                  </div>
-                  {hasFx(fxTarget.fx) && (
-                    <button
-                      onClick={resetSelectedFx}
-                      className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-zinc-300 hover:border-red-500/50 hover:text-red-300"
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-
-                {/* 1. КРИВЫЕ ЦВЕТА (RGB Curves, правка 861: 5 узлов [x,y] с 2D-перетаскиванием как в DaVinci Resolve) */}
+                {/* (правка 884) шапка выбранного клипа + общий байпас (До/После) + сброс */}
                 {(() => {
-                  const curCurves = fxTarget.fx?.curves || {}
-                  const activePts: CurvePts = normalizeCurvePts(curCurves[curveCh])
-                  const strokeColor =
-                    curveCh === 'r' ? '#f87171' : curveCh === 'g' ? '#4ade80' : curveCh === 'b' ? '#60a5fa' : '#A78BFA'
-                  const setChannelPts = (pts: CurvePts | undefined) => {
+                  const isAllBypassed = !!fxTarget.fx?.bypass
+                  const isByp = (k: FxBypassKey) => !!fxTarget.fx?.bypassed?.[k]
+                  const toggleOneBypass = (k: FxBypassKey) => {
+                    pushHistory()
                     updateSelectedFx((cur) => {
-                      const nextCurves: ShotCurves = { ...(cur.curves || {}) }
-                      if (!pts || !isCurveActive(pts)) delete nextCurves[curveCh]
-                      else nextCurves[curveCh] = pts
-                      return { ...cur, curves: hasCurves(nextCurves) ? nextCurves : undefined }
+                      const nextMap = { ...(cur.bypassed || {}) }
+                      if (nextMap[k]) delete nextMap[k]
+                      else nextMap[k] = true
+                      return {
+                        ...cur,
+                        bypassed: Object.keys(nextMap).length ? nextMap : undefined,
+                      }
                     })
                   }
-                  const startPointDrag = (idx: 0 | 1 | 2 | 3 | 4, ev: React.PointerEvent) => {
-                    ev.preventDefault()
-                    ev.stopPropagation()
-                    pushHistory()
-                    const svg = curveSvgRef.current
-                    if (!svg) return
-                    // (правка 862) переводим координаты курсора в систему viewBox
-                    // (0..200 × 0..140) через CTM: раньше делили на getBoundingClientRect,
-                    // а SVG вписан с полями -> ручка «улетала» при захвате
-                    const VIEW_W = 200
-                    const VIEW_H = 140
-                    const toNorm = (clientX: number, clientY: number): [number, number] => {
-                      const m = svg.getScreenCTM()
-                      if (!m) return [0, 0]
-                      const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse())
-                      return [
-                        Math.max(0, Math.min(1, p.x / VIEW_W)),
-                        Math.max(0, Math.min(1, 1 - p.y / VIEW_H)),
-                      ]
-                    }
-                    const basePts = activePts.map(([x, y]) => [x, y] as CurveNode) as CurvePts
-                    const start = toNorm(ev.clientX, ev.clientY)
-                    const startNode = basePts[idx]
-                    const minX = idx === 0 ? 0 : +(basePts[idx - 1][0] + 0.03).toFixed(3)
-                    const maxX = idx === 4 ? 1 : +(basePts[idx + 1][0] - 0.03).toFixed(3)
-                    const onMove = (me: PointerEvent) => {
-                      const cur = toNorm(me.clientX, me.clientY)
-                      // тянем ОТНОСИТЕЛЬНО точки захвата: клик по ручке не сдвигает её рывком
-                      const nx = Math.max(minX, Math.min(maxX, startNode[0] + (cur[0] - start[0])))
-                      const ny = Math.max(0, Math.min(1, startNode[1] + (cur[1] - start[1])))
-                      const next = basePts.map(([x, y], i) =>
-                        i === idx ? ([+nx.toFixed(3), +ny.toFixed(3)] as CurveNode) : ([x, y] as CurveNode),
-                      ) as CurvePts
-                      setChannelPts(next)
-                    }
-                    const onUp = () => {
-                      window.removeEventListener('pointermove', onMove)
-                      window.removeEventListener('pointerup', onUp)
-                    }
-                    window.addEventListener('pointermove', onMove)
-                    window.addEventListener('pointerup', onUp)
+                  const renderBypassBtn = (k: FxBypassKey, titleLabel: string) => {
+                    const off = isAllBypassed || isByp(k)
+                    return (
+                      <button
+                        type="button"
+                        data-fx-bypass={k}
+                        onClick={() => toggleOneBypass(k)}
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+                          isByp(k)
+                            ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+                            : off
+                              ? 'border-border bg-[var(--surface-1)] text-zinc-500'
+                              : 'border-[#A78BFA]/40 bg-[#7C3AED]/20 text-zinc-200 hover:border-[#A78BFA]',
+                        )}
+                        title={
+                          isByp(k)
+                            ? `Включить эффект «${titleLabel}» (сейчас в байпасе — До)`
+                            : `Байпас эффекта «${titleLabel}» (сравнить До/После)`
+                        }
+                      >
+                        {isByp(k) ? <EyeOffIcon className="h-3 w-3" /> : <EyeIcon className="h-3 w-3" />}
+                        <span>{isByp(k) ? 'До' : 'Вкл'}</span>
+                      </button>
+                    )
                   }
-                  const pointLabels = ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые'] as const
                   return (
-                    <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-medium text-zinc-200">Кривые цвета (5 точек)</span>
-                        <button
-                          onClick={() => { pushHistory(); setChannelPts(undefined) }}
-                          className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
-                          title="Сбросить выбранный канал кривой"
-                        >
-                          Сброс канала
-                        </button>
-                      </div>
-                      {/* переключатель канала RGB / R / G / B */}
-                      <div className="grid grid-cols-4 gap-1">
-                        {([
-                          ['master', 'RGB', 'text-zinc-200'],
-                          ['r', 'R (Красн)', 'text-red-400'],
-                          ['g', 'G (Зел)', 'text-emerald-400'],
-                          ['b', 'B (Син)', 'text-blue-400'],
-                        ] as const).map(([ch, label, col]) => (
-                          <button
-                            key={ch}
-                            onClick={() => setCurveCh(ch)}
-                            className={cn(
-                              'rounded border py-1 text-[10px] font-medium transition-colors',
-                              curveCh === ch
-                                ? 'border-[#A78BFA] bg-[#7C3AED]/25 ' + col
-                                : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
-                            )}
-                          >
-                            {label}
-                            {isCurveActive(curCurves[ch]) && ' •'}
-                          </button>
-                        ))}
-                      </div>
-                      {/* интерактивный график 2D-кривой (5 узлов двигаются в любые стороны) */}
-                      <div className="relative overflow-hidden rounded border border-border bg-black/70">
-                        <svg
-                          ref={curveSvgRef}
-                          viewBox="0 0 200 140"
-                          className="block h-[140px] w-full select-none"
-                        >
-                          {/* сетка 4x4 */}
-                          {[1, 2, 3].map((g) => (
-                            <g key={g} stroke="rgba(255,255,255,0.08)" strokeWidth="1">
-                              <line x1={g * 50} y1={0} x2={g * 50} y2={140} />
-                              <line x1={0} y1={g * 35} x2={200} y2={g * 35} />
-                            </g>
-                          ))}
-                          {/* базовая диагональ */}
-                          <line x1={0} y1={140} x2={200} y2={0} stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" strokeWidth="1" />
-                          {/* фоновые неактивные каналы */}
-                          {(['master', 'r', 'g', 'b'] as const).map((ch) => {
-                            if (ch === curveCh || !isCurveActive(curCurves[ch])) return null
-                            const c = ch === 'r' ? '#f87171' : ch === 'g' ? '#4ade80' : ch === 'b' ? '#60a5fa' : '#a78bfa'
-                            return (
-                              <path
-                                key={ch}
-                                d={buildCurveSvgPath(normalizeCurvePts(curCurves[ch]), 200, 140)}
-                                fill="none"
-                                stroke={c}
-                                strokeOpacity={0.35}
-                                strokeWidth="1.5"
-                              />
-                            )
-                          })}
-                          {/* активная кривая */}
-                          <path
-                            d={buildCurveSvgPath(activePts, 200, 140)}
-                            fill="none"
-                            stroke={strokeColor}
-                            strokeWidth="2.2"
-                          />
-                          {/* 5 узловых точек: Чёрные (0), Тени (1), Средние (2), Света (3), Белые (4) */}
-                          {([0, 1, 2, 3, 4] as const).map((idx) => {
-                            const [pxNorm, pyNorm] = activePts[idx]
-                            const cx = Math.max(5, Math.min(195, pxNorm * 200))
-                            const cy = Math.max(5, Math.min(135, (1 - pyNorm) * 140))
-                            const defVal = idx * 0.25
-                            return (
-                              <circle
-                                key={idx}
-                                data-curve-handle={idx}
-                                cx={cx}
-                                cy={cy}
-                                r={5.2}
-                                fill="#18181b"
-                                stroke={strokeColor}
-                                strokeWidth="2.2"
-                                className="cursor-move"
-                                onPointerDown={(ev) => startPointDrag(idx, ev)}
-                                onDoubleClick={() => {
-                                  pushHistory()
-                                  const next = activePts.map(([x, y], i) =>
-                                    i === idx ? ([defVal, defVal] as CurveNode) : ([x, y] as CurveNode),
-                                  ) as CurvePts
-                                  setChannelPts(next)
-                                }}
-                              >
-                                <title>{`${pointLabels[idx]}: X=${Math.round(pxNorm * 100)}%, Y=${Math.round(pyNorm * 100)}% (тяните в любую сторону, двойной клик — сброс)`}</title>
-                              </circle>
-                            )
-                          })}
-                        </svg>
-                        <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-zinc-500">
-                          <span>Чёрн {Math.round(activePts[0][1] * 100)}%</span>
-                          <span>Тени {Math.round(activePts[1][1] * 100)}%</span>
-                          <span>Сред {Math.round(activePts[2][1] * 100)}%</span>
-                          <span>Света {Math.round(activePts[3][1] * 100)}%</span>
-                          <span>Бел {Math.round(activePts[4][1] * 100)}%</span>
+                    <>
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-[var(--surface-2)] px-2.5 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium text-zinc-100">
+                            {fxTarget.name}
+                            {/* (правка 876) подпись дорожки: слой V2+ или базовая V1 */}
+                            {'track' in fxTarget ? (
+                              <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">слой V{fxTarget.track + 1}</span>
+                            ) : null}
+                          </div>
+                          <div className="text-[10px] text-zinc-400">
+                            {!hasFx(fxTarget.fx)
+                              ? 'Без эффектов'
+                              : isAllBypassed
+                                ? 'Общий байпас включён — показан исходник (До)'
+                                : hasActiveFx(fxTarget.fx)
+                                  ? 'Эффекты активны (После)'
+                                  : 'Все настроенные эффекты в байпасе (До)'}
+                          </div>
                         </div>
-                      </div>
-                      {/* пресеты кривых */}
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {([
-                          [
-                            'S-контраст',
-                            { master: [[0, 0], [0.25, 0.18], [0.5, 0.5], [0.75, 0.82], [1, 1]] as CurvePts },
-                          ],
-                          [
-                            'Мягкие тени',
-                            { master: [[0, 0.06], [0.25, 0.3], [0.5, 0.52], [0.75, 0.76], [1, 0.96]] as CurvePts },
-                          ],
-                          [
-                            'Тёплое кино',
-                            {
-                              master: [[0, 0.02], [0.25, 0.22], [0.5, 0.5], [0.75, 0.8], [1, 0.98]] as CurvePts,
-                              r: [[0, 0], [0.25, 0.27], [0.5, 0.54], [0.75, 0.79], [1, 1]] as CurvePts,
-                              b: [[0, 0.03], [0.25, 0.22], [0.5, 0.46], [0.75, 0.71], [1, 0.94]] as CurvePts,
-                            },
-                          ],
-                          [
-                            'Холодный циан',
-                            {
-                              master: [[0, 0], [0.25, 0.21], [0.5, 0.5], [0.75, 0.81], [1, 1]] as CurvePts,
-                              r: [[0, 0], [0.25, 0.21], [0.5, 0.46], [0.75, 0.72], [1, 0.95]] as CurvePts,
-                              b: [[0, 0.03], [0.25, 0.28], [0.5, 0.54], [0.75, 0.8], [1, 1]] as CurvePts,
-                            },
-                          ],
-                        ] as const).map(([name, preset]) => (
+                        <div className="flex shrink-0 items-center gap-1">
                           <button
-                            key={name}
+                            type="button"
+                            data-fx-bypass="all"
                             onClick={() => {
                               pushHistory()
-                              updateSelectedFx((cur) => ({ ...cur, curves: preset }))
+                              updateSelectedFx((cur) => ({ ...cur, bypass: !cur.bypass }))
                             }}
-                            className="rounded border border-border bg-[var(--surface-1)] px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[#A78BFA] hover:text-white"
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium transition-colors',
+                              isAllBypassed
+                                ? 'border-amber-500/60 bg-amber-500/20 text-amber-200'
+                                : 'border-[#A78BFA]/50 bg-[#7C3AED]/25 text-white hover:bg-[#7C3AED]/40',
+                            )}
+                            title="Общий байпас всех эффектов клипа: сравнить До / После одним кликом"
                           >
-                            {name}
+                            {isAllBypassed ? <EyeOffIcon className="h-3.5 w-3.5" /> : <EyeIcon className="h-3.5 w-3.5" />}
+                            <span>{isAllBypassed ? 'До (Байпас)' : 'До / После'}</span>
                           </button>
-                        ))}
+                          {hasFx(fxTarget.fx) && (
+                            <button
+                              onClick={resetSelectedFx}
+                              className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-zinc-300 hover:border-red-500/50 hover:text-red-300"
+                            >
+                              Сбросить
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
+
+                      {/* 1. КРИВЫЕ ЦВЕТА (RGB Curves, правка 861: 5 узлов [x,y] с 2D-перетаскиванием как в DaVinci Resolve) */}
+                      {(() => {
+                        const curCurves = fxTarget.fx?.curves || {}
+                        const activePts: CurvePts = normalizeCurvePts(curCurves[curveCh])
+                        const strokeColor =
+                          curveCh === 'r' ? '#f87171' : curveCh === 'g' ? '#4ade80' : curveCh === 'b' ? '#60a5fa' : '#A78BFA'
+                        const setChannelPts = (pts: CurvePts | undefined) => {
+                          updateSelectedFx((cur) => {
+                            const nextCurves: ShotCurves = { ...(cur.curves || {}) }
+                            if (!pts || !isCurveActive(pts)) delete nextCurves[curveCh]
+                            else nextCurves[curveCh] = pts
+                            return { ...cur, curves: hasCurves(nextCurves) ? nextCurves : undefined }
+                          })
+                        }
+                        const startPointDrag = (idx: 0 | 1 | 2 | 3 | 4, ev: React.PointerEvent) => {
+                          ev.preventDefault()
+                          ev.stopPropagation()
+                          pushHistory()
+                          const svg = curveSvgRef.current
+                          if (!svg) return
+                          // (правка 862) переводим координаты курсора в систему viewBox
+                          // (0..200 × 0..140) через CTM: раньше делили на getBoundingClientRect,
+                          // а SVG вписан с полями -> ручка «улетала» при захвате
+                          const VIEW_W = 200
+                          const VIEW_H = 140
+                          const toNorm = (clientX: number, clientY: number): [number, number] => {
+                            const m = svg.getScreenCTM()
+                            if (!m) return [0, 0]
+                            const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse())
+                            return [
+                              Math.max(0, Math.min(1, p.x / VIEW_W)),
+                              Math.max(0, Math.min(1, 1 - p.y / VIEW_H)),
+                            ]
+                          }
+                          const basePts = activePts.map(([x, y]) => [x, y] as CurveNode) as CurvePts
+                          const start = toNorm(ev.clientX, ev.clientY)
+                          const startNode = basePts[idx]
+                          const minX = idx === 0 ? 0 : +(basePts[idx - 1][0] + 0.03).toFixed(3)
+                          const maxX = idx === 4 ? 1 : +(basePts[idx + 1][0] - 0.03).toFixed(3)
+                          const onMove = (me: PointerEvent) => {
+                            const cur = toNorm(me.clientX, me.clientY)
+                            // тянем ОТНОСИТЕЛЬНО точки захвата: клик по ручке не сдвигает её рывком
+                            const nx = Math.max(minX, Math.min(maxX, startNode[0] + (cur[0] - start[0])))
+                            const ny = Math.max(0, Math.min(1, startNode[1] + (cur[1] - start[1])))
+                            const next = basePts.map(([x, y], i) =>
+                              i === idx ? ([+nx.toFixed(3), +ny.toFixed(3)] as CurveNode) : ([x, y] as CurveNode),
+                            ) as CurvePts
+                            setChannelPts(next)
+                          }
+                          const onUp = () => {
+                            window.removeEventListener('pointermove', onMove)
+                            window.removeEventListener('pointerup', onUp)
+                          }
+                          window.addEventListener('pointermove', onMove)
+                          window.addEventListener('pointerup', onUp)
+                        }
+                        const pointLabels = ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые'] as const
+                        return (
+                          <div className={cn('space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5', (isAllBypassed || isByp('curves')) && 'opacity-65')}>
+                            <div className="flex items-center justify-between gap-1">
+                              <div className="flex items-center gap-1.5">
+                                {renderBypassBtn('curves', 'Кривые цвета')}
+                                <span className="text-[11px] font-medium text-zinc-200">Кривые цвета (5 точек)</span>
+                              </div>
+                              <button
+                                onClick={() => { pushHistory(); setChannelPts(undefined) }}
+                                className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                                title="Сбросить выбранный канал кривой"
+                              >
+                                Сброс канала
+                              </button>
+                            </div>
+                            {/* переключатель канала RGB / R / G / B */}
+                            <div className="grid grid-cols-4 gap-1">
+                              {([
+                                ['master', 'RGB', 'text-zinc-200'],
+                                ['r', 'R (Красн)', 'text-red-400'],
+                                ['g', 'G (Зел)', 'text-emerald-400'],
+                                ['b', 'B (Син)', 'text-blue-400'],
+                              ] as const).map(([ch, label, col]) => (
+                                <button
+                                  key={ch}
+                                  onClick={() => setCurveCh(ch)}
+                                  className={cn(
+                                    'rounded border py-1 text-[10px] font-medium transition-colors',
+                                    curveCh === ch
+                                      ? 'border-[#A78BFA] bg-[#7C3AED]/25 ' + col
+                                      : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                                  )}
+                                >
+                                  {label}
+                                  {isCurveActive(curCurves[ch]) && ' •'}
+                                </button>
+                              ))}
+                            </div>
+                            {/* интерактивный график 2D-кривой (5 узлов двигаются в любые стороны) */}
+                            <div className="relative overflow-hidden rounded border border-border bg-black/70">
+                              <svg
+                                ref={curveSvgRef}
+                                viewBox="0 0 200 140"
+                                className="block h-[140px] w-full select-none"
+                              >
+                                {/* сетка 4x4 */}
+                                {[1, 2, 3].map((g) => (
+                                  <g key={g} stroke="rgba(255,255,255,0.08)" strokeWidth="1">
+                                    <line x1={g * 50} y1={0} x2={g * 50} y2={140} />
+                                    <line x1={0} y1={g * 35} x2={200} y2={g * 35} />
+                                  </g>
+                                ))}
+                                {/* базовая диагональ */}
+                                <line x1={0} y1={140} x2={200} y2={0} stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" strokeWidth="1" />
+                                {/* фоновые неактивные каналы */}
+                                {(['master', 'r', 'g', 'b'] as const).map((ch) => {
+                                  if (ch === curveCh || !isCurveActive(curCurves[ch])) return null
+                                  const c = ch === 'r' ? '#f87171' : ch === 'g' ? '#4ade80' : ch === 'b' ? '#60a5fa' : '#a78bfa'
+                                  return (
+                                    <path
+                                      key={ch}
+                                      d={buildCurveSvgPath(normalizeCurvePts(curCurves[ch]), 200, 140)}
+                                      fill="none"
+                                      stroke={c}
+                                      strokeOpacity={0.35}
+                                      strokeWidth="1.5"
+                                    />
+                                  )
+                                })}
+                                {/* активная кривая */}
+                                <path
+                                  d={buildCurveSvgPath(activePts, 200, 140)}
+                                  fill="none"
+                                  stroke={strokeColor}
+                                  strokeWidth="2.2"
+                                />
+                                {/* 5 узловых точек: Чёрные (0), Тени (1), Средние (2), Света (3), Белые (4) */}
+                                {([0, 1, 2, 3, 4] as const).map((idx) => {
+                                  const [pxNorm, pyNorm] = activePts[idx]
+                                  const cx = Math.max(5, Math.min(195, pxNorm * 200))
+                                  const cy = Math.max(5, Math.min(135, (1 - pyNorm) * 140))
+                                  const defVal = idx * 0.25
+                                  return (
+                                    <circle
+                                      key={idx}
+                                      data-curve-handle={idx}
+                                      cx={cx}
+                                      cy={cy}
+                                      r={5.2}
+                                      fill="#18181b"
+                                      stroke={strokeColor}
+                                      strokeWidth="2.2"
+                                      className="cursor-move"
+                                      onPointerDown={(ev) => startPointDrag(idx, ev)}
+                                      onDoubleClick={() => {
+                                        pushHistory()
+                                        const next = activePts.map(([x, y], i) =>
+                                          i === idx ? ([defVal, defVal] as CurveNode) : ([x, y] as CurveNode),
+                                        ) as CurvePts
+                                        setChannelPts(next)
+                                      }}
+                                    >
+                                      <title>{`${pointLabels[idx]}: X=${Math.round(pxNorm * 100)}%, Y=${Math.round(pyNorm * 100)}% (тяните в любую сторону, двойной клик — сброс)`}</title>
+                                    </circle>
+                                  )
+                                })}
+                              </svg>
+                              <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-zinc-500">
+                                <span>Чёрн {Math.round(activePts[0][1] * 100)}%</span>
+                                <span>Тени {Math.round(activePts[1][1] * 100)}%</span>
+                                <span>Сред {Math.round(activePts[2][1] * 100)}%</span>
+                                <span>Света {Math.round(activePts[3][1] * 100)}%</span>
+                                <span>Бел {Math.round(activePts[4][1] * 100)}%</span>
+                              </div>
+                            </div>
+                            {/* пресеты кривых */}
+                            <div className="flex flex-wrap gap-1 pt-0.5">
+                              {([
+                                [
+                                  'S-контраст',
+                                  { master: [[0, 0], [0.25, 0.18], [0.5, 0.5], [0.75, 0.82], [1, 1]] as CurvePts },
+                                ],
+                                [
+                                  'Мягкие тени',
+                                  { master: [[0, 0.06], [0.25, 0.3], [0.5, 0.52], [0.75, 0.76], [1, 0.96]] as CurvePts },
+                                ],
+                                [
+                                  'Тёплое кино',
+                                  {
+                                    master: [[0, 0.02], [0.25, 0.22], [0.5, 0.5], [0.75, 0.8], [1, 0.98]] as CurvePts,
+                                    r: [[0, 0], [0.25, 0.27], [0.5, 0.54], [0.75, 0.79], [1, 1]] as CurvePts,
+                                    b: [[0, 0.03], [0.25, 0.22], [0.5, 0.46], [0.75, 0.71], [1, 0.94]] as CurvePts,
+                                  },
+                                ],
+                                [
+                                  'Холодный циан',
+                                  {
+                                    master: [[0, 0], [0.25, 0.21], [0.5, 0.5], [0.75, 0.81], [1, 1]] as CurvePts,
+                                    r: [[0, 0], [0.25, 0.21], [0.5, 0.46], [0.75, 0.72], [1, 0.95]] as CurvePts,
+                                    b: [[0, 0.03], [0.25, 0.28], [0.5, 0.54], [0.75, 0.8], [1, 1]] as CurvePts,
+                                  },
+                                ],
+                              ] as const).map(([name, preset]) => (
+                                <button
+                                  key={name}
+                                  onClick={() => {
+                                    pushHistory()
+                                    updateSelectedFx((cur) => ({ ...cur, curves: preset }))
+                                  }}
+                                  className="rounded border border-border bg-[var(--surface-1)] px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[#A78BFA] hover:text-white"
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      {/* 2. ЦВЕТ И ТОН: ТЕМПЕРАТУРА, ОТТЕНОК (HUE), ЯРКОСТЬ, КОНТРАСТ, НАСЫЩЕННОСТЬ + ИНДИВИДУАЛЬНЫЙ БАЙПАС */}
+                      <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-medium text-zinc-200">Цвет и тон</span>
+                          <button
+                            onClick={() => {
+                              pushHistory()
+                              updateSelectedFx({
+                                temp: undefined,
+                                hue: undefined,
+                                bright: undefined,
+                                contrast: undefined,
+                                sat: undefined,
+                              })
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                            title="Сбросить температуру, оттенок, яркость, контраст и насыщенность"
+                          >
+                            Сброс
+                          </button>
+                        </div>
+                        {/* Температура (-100 .. +100) */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('temp')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('temp', 'Температура')}
+                              <span className="text-zinc-300" title="Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)">
+                                Температура
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ temp: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — сбросить в 0"
+                            >
+                              {Math.round(fxTarget.fx?.temp ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.temp ?? 0)}` : `${Math.round(fxTarget.fx?.temp ?? 0)}`}
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={-100}
+                            max={100}
+                            step={1}
+                            value={Math.round(fxTarget.fx?.temp ?? 0)}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              updateSelectedFx({ temp: Math.abs(v) < 1 ? undefined : v })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                        {/* Оттенок / HUE (-180° .. +180°) */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('hue')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('hue', 'Оттенок (HUE)')}
+                              <span className="text-zinc-300" title="Сдвиг цветового тона по кругу (HUE)">
+                                Оттенок (HUE)
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ hue: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — сбросить в 0°"
+                            >
+                              {Math.round(fxTarget.fx?.hue ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.hue ?? 0)}°` : `${Math.round(fxTarget.fx?.hue ?? 0)}°`}
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={-180}
+                            max={180}
+                            step={1}
+                            value={Math.round(fxTarget.fx?.hue ?? 0)}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              updateSelectedFx({ hue: Math.abs(v) < 1 ? undefined : v })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                        {/* Яркость */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('bright')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('bright', 'Яркость')}
+                              <span className="text-zinc-300">Яркость</span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ bright: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — сбросить в 0"
+                            >
+                              {Math.round((fxTarget.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%`}
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={-50}
+                            max={50}
+                            value={Math.round((fxTarget.fx?.bright ?? 0) * 100)}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) / 100
+                              updateSelectedFx({ bright: Math.abs(v) < 0.005 ? undefined : v })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                        {/* Контраст */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('contrast')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('contrast', 'Контраст')}
+                              <span className="text-zinc-300">Контраст</span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ contrast: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — сбросить в 0"
+                            >
+                              {Math.round((fxTarget.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%`}
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={-50}
+                            max={50}
+                            value={Math.round((fxTarget.fx?.contrast ?? 0) * 100)}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) / 100
+                              updateSelectedFx({ contrast: Math.abs(v) < 0.005 ? undefined : v })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                        {/* Насыщенность */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('sat')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('sat', 'Насыщенность')}
+                              <span className="text-zinc-300">Насыщенность</span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ sat: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — сбросить в 100%"
+                            >
+                              {Math.round((fxTarget.fx?.sat ?? 1) * 100)}%
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={200}
+                            value={Math.round((fxTarget.fx?.sat ?? 1) * 100)}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const sat = Number(e.target.value) / 100
+                              updateSelectedFx({ sat: Math.abs(sat - 1) < 0.005 ? undefined : sat })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 3. ОПТИКА И ПЛЁНКА: РАДИАЛЬНАЯ ДИСПЕРСИЯ + МАСКА ЦЕНТРА + КИНОШНЫЙ ШУМ */}
+                      <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-medium text-zinc-200">Оптика и плёнка</span>
+                          <button
+                            onClick={() => {
+                              pushHistory()
+                              updateSelectedFx({ dispersion: undefined, dispersionMask: undefined, grain: undefined })
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                            title="Сбросить дисперсию, радиальную маску и киношный шум"
+                          >
+                            Сброс
+                          </button>
+                        </div>
+                        {/* Дисперсия (радиальная: центр чистый, к краям нарастает) + радиальная маска центра */}
+                        <div className={cn('space-y-2', (isAllBypassed || isByp('dispersion')) && 'opacity-65')}>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <div className="flex items-center gap-1.5">
+                                {renderBypassBtn('dispersion', 'Дисперсия')}
+                                <span className="text-zinc-300" title="Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB">
+                                  Дисперсия (к краям)
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => { pushHistory(); updateSelectedFx({ dispersion: undefined }) }}
+                                className="font-mono text-[#A78BFA] hover:underline"
+                                title="Клик — выключить дисперсию"
+                              >
+                                {fxTarget.fx?.dispersion ?? 0} пикс
+                              </button>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={20}
+                              step={1}
+                              value={fxTarget.fx?.dispersion ?? 0}
+                              onPointerDown={pushHistory}
+                              onChange={(e) => {
+                                const v = Number(e.target.value)
+                                updateSelectedFx({ dispersion: v <= 0 ? undefined : v })
+                              }}
+                              className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                            />
+                          </div>
+                          {/* (правка 884) Радиальная маска центра для дисперсии (0..90%, по умолчанию 35%) */}
+                          <div className="space-y-1 rounded border border-border/60 bg-black/25 p-2">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span
+                                className="text-zinc-400"
+                                title="Размер чистой зоны в центре кадра, не затронутой дисперсией (0% — от самого центра, 90% — только у самых углов)"
+                              >
+                                Радиальная маска центра
+                              </span>
+                              <button
+                                onClick={() => { pushHistory(); updateSelectedFx({ dispersionMask: undefined }) }}
+                                className="font-mono text-[#A78BFA] hover:underline"
+                                title="Клик — сбросить маску центра в 35%"
+                              >
+                                {Math.round(fxTarget.fx?.dispersionMask ?? 35)}%
+                              </button>
+                            </div>
+                            <input
+                              type="range"
+                              data-dispersion-mask="1"
+                              min={0}
+                              max={90}
+                              step={1}
+                              value={Math.round(fxTarget.fx?.dispersionMask ?? 35)}
+                              onPointerDown={pushHistory}
+                              onChange={(e) => {
+                                const v = Number(e.target.value)
+                                updateSelectedFx({ dispersionMask: Math.abs(v - 35) < 1 ? undefined : v })
+                              }}
+                              className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                            />
+                          </div>
+                        </div>
+                        {/* Киношный анимированный шум */}
+                        <div className={cn('space-y-1', (isAllBypassed || isByp('grain')) && 'opacity-65')}>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              {renderBypassBtn('grain', 'Киношный шум')}
+                              <span className="text-zinc-300" title="Живое анимированное зерно 35mm плёнки (noise=allf=t+u)">
+                                Киношный анимированный шум
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => { pushHistory(); updateSelectedFx({ grain: undefined }) }}
+                              className="font-mono text-[#A78BFA] hover:underline"
+                              title="Клик — выключить шум"
+                            >
+                              {fxTarget.fx?.grain ?? 0}%
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={fxTarget.fx?.grain ?? 0}
+                            onPointerDown={pushHistory}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              updateSelectedFx({ grain: v <= 0 ? undefined : v })
+                            }}
+                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                          />
+                        </div>
+                      </div>
+                    </>
                   )
                 })()}
-
-                {/* 2. ЦВЕТ И ТОН: ТЕМПЕРАТУРА, ОТТЕНОК (HUE), ЯРКОСТЬ, КОНТРАСТ, НАСЫЩЕННОСТЬ + КНОПКА СБРОСА */}
-                <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-zinc-200">Цвет и тон</span>
-                    <button
-                      onClick={() => {
-                        pushHistory()
-                        updateSelectedFx({
-                          temp: undefined,
-                          hue: undefined,
-                          bright: undefined,
-                          contrast: undefined,
-                          sat: undefined,
-                        })
-                      }}
-                      className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
-                      title="Сбросить температуру, оттенок, яркость, контраст и насыщенность"
-                    >
-                      Сброс
-                    </button>
-                  </div>
-                  {/* Температура (-100 .. +100) */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400" title="Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)">
-                        Температура
-                      </span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ temp: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 0"
-                      >
-                        {Math.round(fxTarget.fx?.temp ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.temp ?? 0)}` : `${Math.round(fxTarget.fx?.temp ?? 0)}`}
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={-100}
-                      max={100}
-                      step={1}
-                      value={Math.round(fxTarget.fx?.temp ?? 0)}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        updateSelectedFx({ temp: Math.abs(v) < 1 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                  {/* Оттенок / HUE (-180° .. +180°) */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400" title="Сдвиг цветового тона по кругу (HUE)">
-                        Оттенок (HUE)
-                      </span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ hue: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 0°"
-                      >
-                        {Math.round(fxTarget.fx?.hue ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.hue ?? 0)}°` : `${Math.round(fxTarget.fx?.hue ?? 0)}°`}
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={-180}
-                      max={180}
-                      step={1}
-                      value={Math.round(fxTarget.fx?.hue ?? 0)}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        updateSelectedFx({ hue: Math.abs(v) < 1 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                  {/* Яркость */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Яркость</span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ bright: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 0"
-                      >
-                        {Math.round((fxTarget.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%`}
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      value={Math.round((fxTarget.fx?.bright ?? 0) * 100)}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value) / 100
-                        updateSelectedFx({ bright: Math.abs(v) < 0.005 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                  {/* Контраст */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Контраст</span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ contrast: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 0"
-                      >
-                        {Math.round((fxTarget.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%`}
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      value={Math.round((fxTarget.fx?.contrast ?? 0) * 100)}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value) / 100
-                        updateSelectedFx({ contrast: Math.abs(v) < 0.005 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                  {/* Насыщенность */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Насыщенность</span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ sat: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 100%"
-                      >
-                        {Math.round((fxTarget.fx?.sat ?? 1) * 100)}%
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={200}
-                      value={Math.round((fxTarget.fx?.sat ?? 1) * 100)}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const sat = Number(e.target.value) / 100
-                        updateSelectedFx({ sat: Math.abs(sat - 1) < 0.005 ? undefined : sat })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                </div>
-
-                {/* 3. ОПТИКА И ПЛЁНКА: РАДИАЛЬНАЯ ДИСПЕРСИЯ + КИНОШНЫЙ АНИМИРОВАННЫЙ ШУМ + КНОПКА СБРОСА */}
-                <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-zinc-200">Оптика и плёнка</span>
-                    <button
-                      onClick={() => {
-                        pushHistory()
-                        updateSelectedFx({ dispersion: undefined, grain: undefined })
-                      }}
-                      className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
-                      title="Сбросить дисперсию и киношный шум"
-                    >
-                      Сброс
-                    </button>
-                  </div>
-                  {/* Дисперсия (радиальная: центр чистый, к краям нарастает) */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400" title="Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB">
-                        Дисперсия (к краям)
-                      </span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ dispersion: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить дисперсию"
-                      >
-                        {fxTarget.fx?.dispersion ?? 0} пикс
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={20}
-                      step={1}
-                      value={fxTarget.fx?.dispersion ?? 0}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        updateSelectedFx({ dispersion: v <= 0 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                  {/* Киношный анимированный шум */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400" title="Живое анимированное зерно 35mm плёнки (noise=allf=t+u)">
-                        Киношный анимированный шум
-                      </span>
-                      <button
-                        onClick={() => { pushHistory(); updateSelectedFx({ grain: undefined }) }}
-                        className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить шум"
-                      >
-                        {fxTarget.fx?.grain ?? 0}%
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={fxTarget.fx?.grain ?? 0}
-                      onPointerDown={pushHistory}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        updateSelectedFx({ grain: v <= 0 ? undefined : v })
-                      }}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
-                    />
-                  </div>
-                </div>
 
                 {/* 4. КОПИРОВАНИЕ ЭФФЕКТОВ НА ДРУГИЕ КЛИПЫ */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">

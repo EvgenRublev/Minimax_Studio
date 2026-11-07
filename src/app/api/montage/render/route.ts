@@ -210,8 +210,14 @@ interface ShotFx {
   curves?: CurveChannels | null
   /** (правка 859, 861) радиальная хроматическая дисперсия (центр 0, к краям до 20) */
   dispersion?: number | null
+  /** (правка 884) радиальная маска чистого центра для дисперсии, 0..90% (по умолчанию 35%) */
+  dispersionMask?: number | null
   /** (правка 859) киношный анимированный шум (зерно плёнки), 0..100% */
   grain?: number | null
+  /** (правка 884) общий байпас всех эффектов клипа (true = эффекты выключены) */
+  bypass?: boolean | null
+  /** (правка 884) индивидуальный байпас по ключу эффекта */
+  bypassed?: Record<string, boolean> | null
 }
 
 /** (правка 847) переход: тип xfade и длительность, сек */
@@ -375,21 +381,36 @@ function cleanCurveChannel(raw: unknown): CurveNode[] | null {
 }
 
 function cleanFx(fx?: ShotFx | null): ShotFx {
-  if (!fx || typeof fx !== 'object') return {}
+  if (!fx || typeof fx !== 'object' || fx.bypass === true) return {}
+  const byp = fx.bypassed && typeof fx.bypassed === 'object' ? fx.bypassed : {}
   const num = (v: unknown, lo: number, hi: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null
-  const r: ShotFx = { flipH: fx.flipH === true, flipV: fx.flipV === true, gray: fx.gray === true }
-  const b = num(fx.bright, -0.5, 0.5)
-  if (b) r.bright = b
-  const c = num(fx.contrast, -0.5, 0.5)
-  if (c) r.contrast = c
-  const s = num(fx.sat, 0, 2)
-  if (s !== null && s !== 1) r.sat = s
-  const temp = num(fx.temp, -100, 100)
-  if (temp && Math.abs(temp) >= 1) r.temp = temp
-  const hue = num(fx.hue, -180, 180)
-  if (hue && Math.abs(hue) >= 1) r.hue = hue
-  if (fx.curves && typeof fx.curves === 'object') {
+  const r: ShotFx = {
+    flipH: !byp.flip && fx.flipH === true,
+    flipV: !byp.flip && fx.flipV === true,
+    gray: fx.gray === true,
+  }
+  if (!byp.bright) {
+    const b = num(fx.bright, -0.5, 0.5)
+    if (b) r.bright = b
+  }
+  if (!byp.contrast) {
+    const c = num(fx.contrast, -0.5, 0.5)
+    if (c) r.contrast = c
+  }
+  if (!byp.sat) {
+    const s = num(fx.sat, 0, 2)
+    if (s !== null && s !== 1) r.sat = s
+  }
+  if (!byp.temp) {
+    const temp = num(fx.temp, -100, 100)
+    if (temp && Math.abs(temp) >= 1) r.temp = temp
+  }
+  if (!byp.hue) {
+    const hue = num(fx.hue, -180, 180)
+    if (hue && Math.abs(hue) >= 1) r.hue = hue
+  }
+  if (!byp.curves && fx.curves && typeof fx.curves === 'object') {
     const cm = cleanCurveChannel(fx.curves.master)
     const cr = cleanCurveChannel(fx.curves.r)
     const cg = cleanCurveChannel(fx.curves.g)
@@ -398,10 +419,18 @@ function cleanFx(fx?: ShotFx | null): ShotFx {
       r.curves = { ...(cm ? { master: cm } : {}), ...(cr ? { r: cr } : {}), ...(cg ? { g: cg } : {}), ...(cb ? { b: cb } : {}) }
     }
   }
-  const disp = num(fx.dispersion, 0, 20)
-  if (disp && disp > 0) r.dispersion = disp
-  const grain = num(fx.grain, 0, 100)
-  if (grain && grain > 0) r.grain = grain
+  if (!byp.dispersion) {
+    const disp = num(fx.dispersion, 0, 20)
+    if (disp && disp > 0) {
+      r.dispersion = disp
+      const mask = num(fx.dispersionMask, 0, 90)
+      if (mask !== null) r.dispersionMask = mask
+    }
+  }
+  if (!byp.grain) {
+    const grain = num(fx.grain, 0, 100)
+    if (grain && grain > 0) r.grain = grain
+  }
   return r
 }
 
@@ -438,12 +467,12 @@ function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): stri
     fxv.push(`colorbalance=rs=${t}:gs=${g}:bs=${-t}:rm=${t}:gm=${g}:bm=${-t}:rh=${th}:bh=${-th}`)
   }
   if (fx.dispersion && fx.dispersion > 0) {
-    // (правка 861, 862) радиальная дисперсия как в DaVinci Resolve: центр кадра
-    // не затрагивается (смещение = 0), а к краям и углам R и B расходятся.
-    // Кадр предварительно чуть увеличиваем, а после эффекта обрезаем обратно:
-    // смещённая кромка уходит за кадр и не оставляет цветной «рамки».
-    const k1 = +(fx.dispersion * 0.0018).toFixed(4)
-    const k2 = +(fx.dispersion * 0.001).toFixed(4)
+    // (правка 861, 862, 884) радиальная дисперсия с настраиваемой маской центра:
+    // dispersionMask (0..90%, по умолчанию 35%) задаёт радиус чистого центра.
+    const maskPct = typeof fx.dispersionMask === 'number' ? Math.max(0, Math.min(90, fx.dispersionMask)) : 35
+    const m = maskPct / 100
+    const k1 = +(fx.dispersion * 0.0024 * Math.max(0.05, 1 - m * 0.9)).toFixed(4)
+    const k2 = +(fx.dispersion * 0.0013 * Math.max(0.15, 1 - m * 0.4)).toFixed(4)
     // (правка 862) запас кадра считаем от силы линзы: смещение кромки равно
     // (k1+k2) от половины меньшей стороны, поэтому zoom = 1 + k1 + k2 + запас.
     // Фиксированные 1.14 не хватало на максимальной дисперсии — оставалась рамка.
