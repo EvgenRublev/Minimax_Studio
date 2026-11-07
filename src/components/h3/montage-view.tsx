@@ -2727,9 +2727,22 @@ export function MontageView() {
     if (!vis.length) return selectedLayer
     return vis.reduce((top, cur) => (cur.track >= top.track ? cur : top), vis[0])
   }, [result, layers, playT, layerLen, selectedLayer])
-  const activeGrain = !result
-    ? (effectiveFx(activeTopLayer?.fx)?.grain ?? effectiveFx(activePreviewShot?.fx)?.grain ?? 0)
-    : 0
+  // (правка 886) источник киношного шума и порядок его отрисовки: в рендере шум
+  // применяется к каждому клипу отдельно, поэтому зерно слоя V2+ должно лежать НАД
+  // видео слоёв (z 5+track), а зерно базы — ПОД ними (иначе шум слоя не видно).
+  // Источник — самый верхний видимый слой, поэтому над ним рисовать нечего: z=999.
+  const grainSrc = useMemo(() => {
+    if (result) return null
+    const lg = effectiveFx(activeTopLayer?.fx)?.grain ?? 0
+    if (lg > 0 && activeTopLayer && !activeTopLayer.hidden &&
+        playT >= activeTopLayer.at && playT < activeTopLayer.at + layerLen(activeTopLayer)) {
+      return { grain: lg, zIndex: 999 }
+    }
+    const sg = effectiveFx(activePreviewShot?.fx)?.grain ?? 0
+    if (sg > 0) return { grain: sg, zIndex: 1 }
+    return null
+  }, [result, activeTopLayer, activePreviewShot, playT, layerLen])
+  const activeGrain = grainSrc?.grain ?? 0
   useEffect(() => {
     if (!activeGrain || activeGrain <= 0) return
     const iv = setInterval(() => {
@@ -4076,6 +4089,9 @@ export function MontageView() {
                 backgroundRepeat: 'repeat',
                 mixBlendMode: 'overlay',
                 opacity: Math.min(0.78, (activeGrain / 100) * 0.72),
+                // (правка 886) над видеобуферами базы и слоем-источником шума, под
+                // более высокими чистыми слоями (у слоёв zIndex = 5 + track)
+                zIndex: grainSrc?.zIndex ?? 1,
               }}
             />
           )}
