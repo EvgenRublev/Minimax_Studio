@@ -11,7 +11,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
 import { playNotificationSound } from '@/lib/sound'
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas } from '@/lib/comfy/minimax-h3-template'
+import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
 
 /** (правка 158) flf: вычисляем номинал из пресета + размеров кадра —
  *  ТОЖЕ формула, что и на сервере (body.targetDimensions в route.ts).
@@ -1130,7 +1130,7 @@ export function useVideoGen() {
           clientToken, // (правка 331) inflight-восстановление prompt_id
           mode: genMode, // (правка 146) ref | t2v | flf | extend
           pipeline: genMode === 'extend' ? 'full' : (params.pipeline || 'full'), // draft | full
-          draftSteps: genMode === 'extend' ? undefined : params.draftSteps,
+          draftSteps: genMode === 'extend' ? undefined : (params.draftSteps != null ? Math.max(MIN_FIRST_PASS_STEPS, params.draftSteps) : undefined),
           firstFrame: genMode === 'flf' ? params.firstFrame : undefined,
           lastFrame: genMode === 'flf' ? params.lastFrame : undefined,
           firstFrameWidth: genMode === 'flf' ? params.firstFrameWidth : undefined,
@@ -1154,11 +1154,12 @@ export function useVideoGen() {
           targetDimensions, // (правка 124) точный номинал — приоритет над MP
           finalResolution,
           lowResMP: params.lowResMP ?? 0.2,
-          firstSamplerSteps: params.firstSamplerSteps ?? 6,
+          // (правка 890) кламп MIN_FIRST_PASS_STEPS — синхронно с шаблоном
+          firstSamplerSteps: Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerSteps ?? 6),
           // Всего шагов расписания pass 1. Раньше поле не доходило до
           // сервера — шаблон всегда брал 2× сплита («6 из 12»), и слайдер
           // «Всего шагов» в UI ни на что не влиял. Дефолт — 6/6.
-          firstSamplerTotalSteps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
+          firstSamplerTotalSteps: Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6),
           sigmaVariant: params.sigmaVariant || '3step',
           pass2Sampler: params.pass2Sampler || 'euler', // (правка 69)
           pass1Sampler: params.pass1Sampler || 'euler', // (правка 70)
@@ -1390,10 +1391,10 @@ export function useVideoGen() {
           // Extend: фактические шаги КЛИПА (override > шаги исходника/first) —
           // мету результата читает следующее продление как «авто».
           pass1_steps: genMode === 'extend'
-            ? (params.extendClipSteps ?? params.firstSamplerSteps ?? 6)
-            : (params.firstSamplerSteps ?? 6),
-          pass1_total_steps: params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6,
-          ...(draft && { draft_steps: params.draftSteps ?? 4 }),
+            ? Math.max(MIN_FIRST_PASS_STEPS, params.extendClipSteps ?? params.firstSamplerSteps ?? 6)
+            : Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerSteps ?? 6),
+          pass1_total_steps: Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6),
+          ...(draft && { draft_steps: Math.max(MIN_FIRST_PASS_STEPS, params.draftSteps ?? 6) }),
           pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[params.sigmaVariant || '3step'] ?? 3,
           sigma_variant: params.sigmaVariant || '3step',
           pass2_sampler: params.pass2Sampler || 'euler', // (правка 69)

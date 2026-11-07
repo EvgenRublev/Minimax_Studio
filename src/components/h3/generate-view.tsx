@@ -39,7 +39,7 @@ import { SettingSlider } from './setting-slider'
 import { useVideoGen, computeOutputDimensions } from '@/hooks/use-video-gen'
 // (правка 829) «Зациклено»: фактическое число кадров — та же формула, что у
 // узла 46:19 и в метаданных (сетка 17n+5).
-import { framesForDuration, flfNominalFromMegapixels } from '@/lib/comfy/minimax-h3-template'
+import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
 
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
@@ -855,7 +855,7 @@ export function GenerateView() {
       firstSamplerSteps: v.firstSamplerSteps ?? 6,
       // Всего шагов расписания pass 1. По умолчанию = точке сплита («6 из 6»).
       firstSamplerTotalSteps: v.firstSamplerTotalSteps ?? v.firstSamplerSteps ?? 6,
-      draftSteps: v.mode === 'extend' ? undefined : (v.draftSteps ?? 4),
+      draftSteps: v.mode === 'extend' ? undefined : (v.draftSteps != null ? Math.max(MIN_FIRST_PASS_STEPS, v.draftSteps) : 6),
       sigmaVariant: v.sigmaVariant || '3step',
       pass2Sampler: v.pass2Sampler || 'euler',
       pass1Sampler: v.pass1Sampler || 'euler',
@@ -1204,8 +1204,8 @@ export function GenerateView() {
             const loopDisabled = video.mode === 'extend'
             const loopOn = video.loop === true && !loopDisabled
             const stepsNow = video.pipeline === 'draft'
-              ? (video.draftSteps ?? 4)
-              : (video.firstSamplerSteps ?? 6)
+              ? Math.max(MIN_FIRST_PASS_STEPS, video.draftSteps ?? 6)
+              : Math.max(MIN_FIRST_PASS_STEPS, video.firstSamplerSteps ?? 6)
             return (
               <div className="space-y-1.5">
                 <label
@@ -1827,32 +1827,34 @@ export function GenerateView() {
                             )}
 
                             {/* (правка 802) Шаги Pass 1 — один слайдер: сплита
-                                сигм больше нет, это ровно число шагов pass 1. */}
+                                сигм больше нет, это ровно число шагов pass 1.
+                                (правка 890) минимум 6: на 2–5 шагах тряска в
+                                «Кадрах» и сетка в «Референсах». */}
                             <div className="space-y-1">
                               <SettingSlider
                                 label={isDraft ? 'Шаги драфта' : 'Шаги (pass 1)'}
                                 labelTitle={
                                   isDraft
-                                    ? 'Сколько шагов делает модель, рисуя видео. 4 — стандарт: быстро и хорошо; больше — аккуратнее, но медленнее.'
-                                    : 'Сколько шагов делает черновой проход (low-res). Больше — точнее композиция, но дольше; списка сигм и сплита больше нет.'
+                                    ? 'Сколько шагов делает модель, рисуя видео. 6 — стандарт: меньше нельзя, на 4 шагах появляется тряска/сетка; больше — аккуратнее, но медленнее.'
+                                    : 'Сколько шагов делает черновой проход (low-res). Меньше 6 — тряска или сетка на переднем плане; больше — точнее композиция, но дольше.'
                                 }
-                                value={isDraft ? (video.draftSteps ?? 4) : (video.firstSamplerSteps ?? 6)}
+                                value={isDraft ? Math.max(MIN_FIRST_PASS_STEPS, video.draftSteps ?? 6) : Math.max(MIN_FIRST_PASS_STEPS, video.firstSamplerSteps ?? 6)}
                                 onChange={(v) =>
                                   patchVideo(
                                     isDraft
-                                      ? { draftSteps: Math.round(v) }
-                                      : { firstSamplerSteps: Math.round(v) },
+                                      ? { draftSteps: Math.max(MIN_FIRST_PASS_STEPS, Math.round(v)) }
+                                      : { firstSamplerSteps: Math.max(MIN_FIRST_PASS_STEPS, Math.round(v)) },
                                   )
                                 }
-                                min={2}
+                                min={MIN_FIRST_PASS_STEPS}
                                 max={isDraft ? 16 : 30}
                                 step={1}
-                                inputMin={2}
+                                inputMin={MIN_FIRST_PASS_STEPS}
                                 inputMax={isDraft ? 30 : 128}
                                 inputHint={
                                   isDraft
-                                    ? '2–30 шагов единственного прохода (стандарт — 4)'
-                                    : '2–128 шагов pass 1. Выше 30 — заметно дольше генерация'
+                                    ? `${MIN_FIRST_PASS_STEPS}–30 шагов единственного прохода (стандарт — ${MIN_FIRST_PASS_STEPS})`
+                                    : `${MIN_FIRST_PASS_STEPS}–128 шагов pass 1. Выше 30 — заметно дольше генерация`
                                 }
                               />
                               {/* Живая сводка: pass 1 рисует весь график, pass 2

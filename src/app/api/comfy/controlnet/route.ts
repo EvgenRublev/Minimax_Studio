@@ -20,7 +20,7 @@ import { probeVideoFile } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
-import { videoSamplerStages, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { videoSamplerStages, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 
 /**
  * POST /api/comfy/controlnet — генерация H3 по контрольному видео
@@ -134,14 +134,15 @@ export async function POST(req: NextRequest) {
     const cnPipeline = body.pipeline === 'full' ? 'full' : 'draft'
     const cnCommonMeta = {
       pipeline: cnPipeline,
-      pass1_steps: body.firstSamplerSteps ?? 6,
-      pass1_total_steps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
+      // (правка 890) пол шагов = MIN_FIRST_PASS_STEPS (синхронно с шаблоном).
+      pass1_steps: Math.max(MIN_FIRST_PASS_STEPS, body.firstSamplerSteps ?? 6),
+      pass1_total_steps: Math.max(MIN_FIRST_PASS_STEPS, body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6),
       pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[body.sigmaVariant || '3step'] ?? 3,
       sigma_variant: body.sigmaVariant || '3step',
       pass1_sampler: body.pass1Sampler || 'euler',
       pass1_scheduler: body.pass1Scheduler || 'simple',
       pass2_sampler: body.pass2Sampler || 'euler',
-      ...(cnPipeline === 'draft' && { draft_steps: body.draftSteps ?? 4 }),
+      ...(cnPipeline === 'draft' && { draft_steps: Math.max(MIN_FIRST_PASS_STEPS, body.draftSteps ?? 6) }),
       low_res_mp: body.lowResMP ?? 0.2,
       sparse_attention: body.sparseAttention === true,
       ...(body.sparseAttention === true && {

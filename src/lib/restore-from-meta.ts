@@ -7,6 +7,7 @@
 import { toast } from 'sonner'
 import { useGenStore, type VideoRefItem } from './gen-store'
 import { FALLBACK_H3_PRESETS, collectResolutionValues } from '@/components/h3/video-shared'
+import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
 
 /** (правка 124) Все номиналы пресетов — чтобы «Повторить» вернул режим
  *  пресета, а не свободный MP (иначе итог снова не был бы точным). */
@@ -192,10 +193,11 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
 
     // Pass 1 steps
     if (typeof params.pass1_steps === 'number') {
-      patch.firstSamplerSteps = params.pass1_steps
+      // (правка 890) повтор старых роликов с 2–5 шагами: поднимаем до минимума.
+      patch.firstSamplerSteps = Math.max(MIN_FIRST_PASS_STEPS, params.pass1_steps)
     }
     if (typeof params.pass1_total_steps === 'number') {
-      patch.firstSamplerTotalSteps = params.pass1_total_steps
+      patch.firstSamplerTotalSteps = Math.max(MIN_FIRST_PASS_STEPS, params.pass1_total_steps)
     }
 
     // (правка 722) Пайплайн «Драфт»/«Полное» — из сайдкара. Раньше он туда
@@ -210,7 +212,8 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     // но форма их не подхватывала — драфт повторялся с дефолтными 4 шагами
     // вместо использованных.
     if (typeof params.draft_steps === 'number' && params.draft_steps > 0) {
-      patch.draftSteps = params.draft_steps
+      // (правка 890) тот же пол — сайдкары драфта эпохи «4 шагов».
+      patch.draftSteps = Math.max(MIN_FIRST_PASS_STEPS, params.draft_steps)
     }
 
     // Sigma variant (pass 2 steps)

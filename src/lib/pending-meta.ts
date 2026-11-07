@@ -21,7 +21,7 @@ import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe' // (правка 410)
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, computePass1Canvas, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, computePass1Canvas, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { replaceVideoAudio, resolveOriginalAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
 
 /* ──────────────────── shared helpers ──────────────────── */
@@ -383,15 +383,15 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     // Extend: фактические шаги КЛИПА (override > фолбэк firstSamplerSteps) —
     // по этой мете следующее продление берёт значение «авто».
     pass1_steps: genMode === 'extend'
-      ? (body.extendClipSteps ?? body.firstSamplerSteps ?? 6)
-      : (body.firstSamplerSteps ?? 6),
+      ? Math.max(MIN_FIRST_PASS_STEPS, body.extendClipSteps ?? body.firstSamplerSteps ?? 6)
+      : Math.max(MIN_FIRST_PASS_STEPS, body.firstSamplerSteps ?? 6),
     // Всего шагов в расписании pass 1 (точка сплита = это число → «6 из 6»).
-    pass1_total_steps: body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6,
+    pass1_total_steps: Math.max(MIN_FIRST_PASS_STEPS, body.firstSamplerTotalSteps ?? body.firstSamplerSteps ?? 6),
     // (правка 722) Шаги ЕДИНСТВЕННОГО прохода драфта. Без этого поля серверный
     // сайдкар драфта показывал в диалоге метаданных «6» (значение точки
     // сплита) вместо реально использованных шагов драфта — а «Повторить»
     // вообще не умел восстанавливать draftSteps.
-    ...(draft && { draft_steps: body.draftSteps ?? 4 }),
+    ...(draft && { draft_steps: Math.max(MIN_FIRST_PASS_STEPS, body.draftSteps ?? 6) }),
     pass2_steps: { '3step': 3, '4step': 4, '5step': 5, '6step': 6, '7step': 7 }[body.sigmaVariant || '3step'] ?? 3,
     sigma_variant: body.sigmaVariant || '3step',
     pass2_sampler: body.pass2Sampler || 'euler', // (правка 69)

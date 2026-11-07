@@ -49,6 +49,7 @@ import { MentionTextarea, type MentionItem } from './mention-textarea'
 import { useVideoGallery } from './use-video-gallery'
 import { isStreamActive } from '@/lib/assistant-stream'
 import { useExtendTarget } from '@/lib/extend-target-store' // (правка 370) цель «Продлить» из галереи
+import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
 import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правка 427) «Улучшить промпт клипа» → extend-чат
 import { AssistantPanel } from './assistant/assistant-panel' // (правка 442) ассистент — правая панель вкладки
 import { PromptEditorDialog, PromptFixDialog, PromptFixButton, PromptClearButton, PromptFieldTools } from './prompt-editor-dialog' // (правка 443) редактор клипа + (правка 691) диалог «Исправить» + (правка 692) кнопки на поле
@@ -184,13 +185,14 @@ export function ExtendView() {
         const steps = typeof p.pass1_steps === 'number' ? p.pass1_steps
           : typeof p.draft_steps === 'number' ? p.draft_steps
           : null
-        setAutoClipSteps(steps && steps >= 2 ? steps : null)
+        // (правка 890) шаги из меты старого ролика (2–5) тоже поднимаем до минимума
+        setAutoClipSteps(steps && steps >= MIN_FIRST_PASS_STEPS ? steps : (steps != null ? MIN_FIRST_PASS_STEPS : null))
       })
       .catch(() => { if (!cancelled) setAutoClipSteps(null) })
     return () => { cancelled = true }
   }, [video.extendSourceName, video.extendSourceSubfolder])
   // Эффективное значение для инпута: override → авто из меты → firstSamplerSteps.
-  const effectiveClipSteps = video.extendClipSteps ?? autoClipSteps ?? video.firstSamplerSteps ?? 6
+  const effectiveClipSteps = Math.max(MIN_FIRST_PASS_STEPS, video.extendClipSteps ?? autoClipSteps ?? video.firstSamplerSteps ?? 6)
 
   const extendRefs = video.extendImageRefs
   const progressPercent = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0
@@ -1009,10 +1011,10 @@ export function ExtendView() {
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
-                            min={2}
+                            min={MIN_FIRST_PASS_STEPS}
                             max={30}
                             value={effectiveClipSteps}
-                            onChange={(e) => patchVideo({ extendClipSteps: Math.max(2, Math.min(30, parseInt(e.target.value, 10) || 2)) })}
+                            onChange={(e) => patchVideo({ extendClipSteps: Math.max(MIN_FIRST_PASS_STEPS, Math.min(30, parseInt(e.target.value, 10) || MIN_FIRST_PASS_STEPS)) })}
                             className="w-20 text-xs bg-[var(--surface-3)] border border-border rounded-md px-2 py-1.5 text-foreground"
                           />
                           {video.extendClipSteps != null ? (
@@ -1031,7 +1033,7 @@ export function ExtendView() {
                                 : `как в генерации · ${video.firstSamplerSteps ?? 6}`}
                             </span>
                           )}
-                          <span className="text-[10px] text-muted-foreground/70">2–30</span>
+                          <span className="text-[10px] text-muted-foreground/70">{MIN_FIRST_PASS_STEPS}–30</span>
                         </div>
                       </div>
 

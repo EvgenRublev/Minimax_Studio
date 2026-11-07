@@ -62,6 +62,7 @@ import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from '@/components/h3/video-galle
 import { GenerationStatus } from '@/components/h3/generation-status'
 import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useControlNetTarget, type ControlNetSource } from '@/lib/controlnet-target-store'
+import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
 import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { uploadInputFile } from '@/lib/upload'
 import { AssistantPanel } from './assistant/assistant-panel' // (правка 502)
@@ -903,20 +904,20 @@ export function ControlNetView() {
                         <SettingSlider
                           label={isDraft ? 'Шаги драфта' : 'Шаги (Pass 1)'}
                           labelTitle={isDraft
-                            ? 'Сколько шагов делает модель, рисуя видео. 4 — стандарт: быстро и хорошо; больше — аккуратнее, но медленнее.'
-                            : 'Сколько шагов делает черновой проход (low-res). Больше — точнее, но медленнее.'}
-                          value={isDraft ? params.draftSteps : params.firstSamplerSteps}
+                            ? 'Сколько шагов делает модель, рисуя видео. 6 — стандарт: меньше нельзя, на 4 шагах появляется тряска/сетка; больше — аккуратнее, но медленнее.'
+                            : 'Сколько шагов делает черновой проход (low-res). Меньше 6 — тряска или сетка; больше — точнее, но медленнее.'}
+                          value={isDraft ? Math.max(MIN_FIRST_PASS_STEPS, params.draftSteps) : Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerSteps)}
                           onChange={(v) => {
-                            const n = Math.round(v)
+                            const n = Math.max(MIN_FIRST_PASS_STEPS, Math.round(v))
                             if (isDraft) patchParams({ draftSteps: n })
                             else patchParams({ firstSamplerSteps: n })
                           }}
-                          min={2}
+                          min={MIN_FIRST_PASS_STEPS}
                           max={isDraft ? 16 : 30}
                           step={1}
-                          inputMin={2}
+                          inputMin={MIN_FIRST_PASS_STEPS}
                           inputMax={isDraft ? 30 : 128}
-                          inputHint={isDraft ? '2–30 шагов единственного прохода (стандарт — 4)' : '2–128 шагов pass 1. Выше 30 — заметно дольше генерация'}
+                          inputHint={isDraft ? `${MIN_FIRST_PASS_STEPS}–30 шагов единственного прохода (стандарт — ${MIN_FIRST_PASS_STEPS})` : `${MIN_FIRST_PASS_STEPS}–128 шагов pass 1. Выше 30 — заметно дольше генерация`}
                         />
                         {!isDraft && (
                           <p className="text-[10px] text-muted-foreground/70 leading-snug">
