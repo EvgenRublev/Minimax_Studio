@@ -36,6 +36,7 @@ import { sweepOrphanRefineItems } from '@/lib/refine-queue'
 // «Продлении»; событие «открыть ассистента» разворачивает панель через стор.
 import { useAssistantPanel } from '@/lib/assistant-panel-store'
 import { toast } from 'sonner' // (правка 790) тосты проверки обновлений
+import { notesSummary } from '@/components/h3/release-notes' // (правка 891)
 
 const TAB_CONTENT = {
   generate: GenerateView,
@@ -161,8 +162,18 @@ export default function Home() {
       try {
         const res = await fetch('/api/update')
         const j = await res.json()
+        // (правка 891) Короткая сводка чейнджлога прямо в тосте: видно, что
+        // принёс релиз, не заходя в настройки (полный текст — там же).
+        const pendingVer = j.armed?.version ?? j.downloadedVersion ?? j.update?.version ?? null
+        const notesSrc = pendingVer
+          ? (j.update?.version === pendingVer
+              ? j.update
+              : j.latest?.version === pendingVer ? j.latest : null)
+          : null
+        const summary = notesSrc?.notes ? notesSummary(notesSrc.notes) : ''
         if (j.armed) {
           toast.info(`Обновление до v${j.armed.version} готово — перезапустите студию для установки`, {
+            description: summary || undefined,
             // (правка 794) duration: Infinity — тост не исчезает сам, только
             // крестиком: стартовое уведомление об обновлении нельзя пропустить.
             duration: Infinity,
@@ -175,6 +186,7 @@ export default function Home() {
           })
         } else if (j.update) {
           toast.warning(`Доступно обновление студии: v${j.update.version}`, {
+            description: summary || undefined,
             // (правка 794) Не исчезает сам — см. выше.
             duration: Infinity,
             action: {

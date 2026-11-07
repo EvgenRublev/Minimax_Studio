@@ -205,6 +205,12 @@ export interface CheckResult {
   /** есть ли уже скачанное/взведённое обновление (кнопка «Перезапустить и установить») */
   armed?: ArmedUpdate
   downloadedVersion?: string
+  /**
+   * (правка 891) данные ПОСЛЕДНЕГО релиза всегда, даже когда обновлений нет.
+   * Нужны, чтобы в «О программе» показывать чейнджлог уже установленной версии —
+   * описание висит до прихода следующей обновы.
+   */
+  latest?: UpdateInfo
 }
 
 export async function checkForUpdate(force = false): Promise<CheckResult> {
@@ -220,6 +226,8 @@ export async function checkForUpdate(force = false): Promise<CheckResult> {
   if (!feed.info) {
     return { ...base, ok: false, error: feed.error ?? 'Не удалось получить данные релиза' }
   }
+  // (правка 891) latest — всегда (чейнджлог установленной версии в «О программе»)
+  base.latest = feed.info
   if (compareVersions(feed.info.version, current) > 0) base.update = feed.info
   return base
 }

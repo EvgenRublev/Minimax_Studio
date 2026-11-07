@@ -5,11 +5,17 @@
  * Живёт вверху вкладки «О программе» в настройках.
  *
  * Состояния (одно из):
- *   • актуальная версия            — «Проверить обновления»;
- *   • доступно обновление          — «Скачать (N МБ)» + «Открыть релиз»;
+ *   • актуальная версия            — «Проверить обновления» + чейнджлог установленной версии;
+ *   • доступно обновление          — «Скачать (N МБ)» + «Открыть релиз» + чейнджлог;
  *   • загрузка                     — прогресс, скорость, «Отменить»;
- *   • скачано/распаковано (armed) — «Перезапустить и установить»;
+ *   • скачано/распаковано (armed) — «Перезапустить и установить» (кнопки «Скачать» больше нет);
  *   • ошибка                      — текст + «Повторить».
+ *
+ * (правка 891) Кнопка «Скачать» прячется, как только обновление уже скачано
+ * (downloadedVersion === версии релиза): она оставалась рядом с «Установить»
+ * и путала — второй раз качать то же самое незачем. Плюс под кнопками везде
+ * показывается чейнджлог релиза (see release-notes.tsx); после установки он
+ * остаётся как «чейнджлог установленной версии» — до прихода следующей обновы.
  *
  * «Перезапустить и установить» дергает POST /api/update/apply (на всякий
  * случай повторяет подготовку), затем window.h3desktop.applyUpdate():
@@ -29,6 +35,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ReleaseNotes } from './release-notes' // (правка 891)
 
 interface UpdateInfo {
   version: string
@@ -56,6 +63,8 @@ interface CheckResult {
   update?: UpdateInfo
   armed?: ArmedUpdate
   downloadedVersion?: string
+  /** (правка 891) последний релиз всегда — чейнджлог установленной версии */
+  latest?: UpdateInfo
   download?: DlState | null
 }
 
@@ -195,6 +204,27 @@ export function UpdatePanel() {
   const dlActive = dl?.status === 'downloading'
   const desktop = typeof window !== 'undefined' && !!window.h3desktop?.applyUpdate
 
+  // (правка 891) Кнопка «Скачать» лишена смысла, если этот релиз уже скачан
+  // (панель тогда предлагает «Установить»). Раньше обе кнопки висели рядом.
+  const alreadyDownloaded = !!data.downloadedVersion &&
+    (!data.update || data.downloadedVersion === data.update.version)
+
+  // (правка 891) Чейнджлог показываем в любом состоянии: для доступного или
+  // скачанного обновления — его релистные заметки; при актуальной версии —
+  // заметки установленного релиза (они остаются до прихода следующей обновы).
+  const pendingVersion = data.armed?.version ?? data.downloadedVersion ?? data.update?.version ?? null
+  const notesSource = pendingVersion
+    ? (data.update?.version === pendingVersion
+        ? data.update
+        : data.latest?.version === pendingVersion ? data.latest : undefined)
+    : (data.latest?.version === data.current ? data.latest : undefined)
+  const notes = notesSource?.notes?.trim() ?? ''
+  const notesTitle = !pendingVersion
+    ? `Что нового в v${data.current}`
+    : data.armed || data.downloadedVersion
+      ? `Скачано v${pendingVersion} — что внутри`
+      : `Доступно v${pendingVersion} — что внутри`
+
   // Приложения «взведено» — ждём только перезапуска.
   if (data.armed && !dlActive) {
     return (
@@ -227,6 +257,12 @@ export function UpdatePanel() {
             Отменить
           </Button>
         </div>
+        {notes && (
+          <div className="space-y-1 pt-1">
+            <div className="text-[11px] font-medium text-muted-foreground">{notesTitle}</div>
+            <ReleaseNotes notes={notes} />
+          </div>
+        )}
       </div>
     )
   }
@@ -254,6 +290,12 @@ export function UpdatePanel() {
           <XIcon className="w-3.5 h-3.5" />
           Отменить загрузку
         </Button>
+        {notes && (
+          <div className="space-y-1 pt-1">
+            <div className="text-[11px] font-medium text-muted-foreground">{notesTitle}</div>
+            <ReleaseNotes notes={notes} />
+          </div>
+        )}
       </div>
     )
   }
@@ -265,7 +307,9 @@ export function UpdatePanel() {
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
           Обновления студии
-          {data.update ? (
+          {alreadyDownloaded && data.downloadedVersion ? (
+            <span className="text-emerald-400"> — v{data.downloadedVersion} скачано, ждёт установки</span>
+          ) : data.update ? (
             <span className="text-violet-400 font-medium"> — доступно v{data.update.version}</span>
           ) : data.ok ? (
             <span className="text-emerald-400"> — актуальная версия</span>
@@ -294,10 +338,14 @@ export function UpdatePanel() {
 
       {data.update && !failedDl && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => void startDownload()} disabled={busy} className="gap-1.5">
-            <DownloadIcon className="w-3.5 h-3.5" />
-            Скачать {data.update.sizeBytes ? `(${fmtSize(data.update.sizeBytes)})` : ''}
-          </Button>
+          {/* (правка 891) после скачивания кнопка «Скачать» убирается: второй раз
+              качать тот же релиз незачем, остаётся «Установить» ниже. */}
+          {!alreadyDownloaded && (
+            <Button size="sm" onClick={() => void startDownload()} disabled={busy} className="gap-1.5">
+              <DownloadIcon className="w-3.5 h-3.5" />
+              Скачать {data.update.sizeBytes ? `(${fmtSize(data.update.sizeBytes)})` : ''}
+            </Button>
+          )}
           {data.update.htmlUrl && (
             <Button
               size="sm"
@@ -324,6 +372,15 @@ export function UpdatePanel() {
             <XIcon className="w-3.5 h-3.5" />
             Удалить
           </Button>
+        </div>
+      )}
+
+      {/* (правка 891) чейнджлог: заметки доступного/скачанного релиза, а при
+          актуальной версии — заметки установленной (до следующей обновы). */}
+      {notes && (
+        <div className="space-y-1 pt-1">
+          <div className="text-[11px] font-medium text-muted-foreground">{notesTitle}</div>
+          <ReleaseNotes notes={notes} />
         </div>
       )}
     </div>
