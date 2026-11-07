@@ -2107,6 +2107,187 @@ export function MontageView() {
     [layerTracks, pushHistory],
   )
 
+  /**
+   * (правка 878) базовая дорожка — обычная дорожка: клип V1 можно перетащить
+   * на любой ряд V2+ (и обратно). Здесь шот базы превращается в клип слоя:
+   * сохраняются подрезка, скорость, эффекты, громкость/фейды; на месте шота в
+   * базе остаётся дырка, чтобы клипы справа не прыгали.
+   */
+  const shotToLayer = useCallback(
+    (key: string, track: number, at: number, opts?: { history?: boolean }) => {
+      const row = seqRef.current.find((r) => r.shot.key === key)
+      if (!row) return
+      if (layersRef.current.length >= MAX_LAYER_CLIPS) {
+        showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
+        return
+      }
+      const shot = row.shot
+      const sp = shotSpeed(shot)
+      const r = effRange(shot)
+      const duration = shot.duration > 0 ? shot.duration : r.end
+      const trimStart = Math.max(0, Math.min(r.start, duration))
+      const trimEnd = Math.max(0, duration - r.end)
+      const trk = Math.min(MAX_TRACKS, Math.max(1, track))
+      const lay: LayerClip = {
+        key: newLayerKey(),
+        filename: shot.filename,
+        subfolder: shot.subfolder || '',
+        name: shot.name,
+        url: shot.url,
+        at: Math.max(0, at),
+        track: trk,
+        trimStart: +trimStart.toFixed(3),
+        trimEnd: +trimEnd.toFixed(3),
+        speed: sp,
+        fit: 'cover',
+        duration,
+        fx: shot.fx,
+        vol: shot.vol,
+        fadeIn: shot.fadeIn,
+        fadeOut: shot.fadeOut,
+      }
+      if (opts?.history !== false) {
+        pushHistory()
+        stopSeq(false)
+      }
+      setShots((prev) => {
+        const i = prev.findIndex((s) => s.key === key)
+        if (i < 0) return prev
+        const next = prev.map((s) => ({ ...s }))
+        const removed = next.splice(i, 1)[0]
+        const gapBefore = Math.max(0, typeof removed.gap === 'number' ? removed.gap : 0)
+        // освободившееся место отдаём следующему клипу как паузу — правые клипы
+        // остаются на тех же абсолютных позициях
+        if (i < next.length) {
+          const curGap = Math.max(0, typeof next[i].gap === 'number' ? next[i].gap : 0)
+          const g = +(curGap + gapBefore + row.len).toFixed(3)
+          next[i] = { ...next[i], gap: g < 0.01 ? undefined : g }
+        }
+        return next
+      })
+      setLayers((prev) => [...prev, lay])
+      setLayerTracks((cur) => Math.max(cur, trk))
+      setSelectedLayerKey(lay.key)
+      setSelectedKey(null)
+      setSelectedAudioKey(null)
+      setResult(null)
+      if (!(shot.duration > 0)) {
+        getVideoDuration(shot.url).then((d) => {
+          if (d > 0 && mountedRef.current) {
+            setLayers((cur) =>
+              cur.map((x) =>
+                x.key === lay.key
+                  ? { ...x, duration: Math.max(d, x.trimStart + x.trimEnd + 0.05) }
+                  : x,
+              ),
+            )
+          }
+        })
+      }
+    },
+    [pushHistory, stopSeq],
+  )
+
+  /**
+   * (правка 878) слой V2+ → базовая дорожка V1. Вставка с overwrite-логикой,
+   * как в DaVinci: новый клип кладётся в точку `at` и перекрывает базу —
+   * пересекающиеся клипы обрезаются, полностью закрытые удаляются, а длинный
+   * клип под ним делится на две части. Подрезка/скорость/эффекты/звук клипа
+   * слоя переносятся в шот; паузы базы пересчитываются по абсолютным позициям.
+   */
+  const layerToShot = useCallback(
+    (key: string, at: number, opts?: { history?: boolean }) => {
+      const layer = layersRef.current.find((l) => l.key === key)
+      if (!layer) return
+      const sp = layer.speed || 1
+      const len = layerLen(layer)
+      const start = Math.max(0, at)
+      const end = start + len
+      const ts = Math.max(0, layer.trimStart)
+      const te = Math.max(0, layer.trimEnd)
+      const duration = layer.duration > 0 ? layer.duration : ts + te + len * sp
+      type Seg = { shot: MontageShot; s: number; e: number }
+      const segs: Seg[] = []
+      for (const row of seqRef.current) {
+        const s = row.offset
+        const e = row.offset + row.len
+        // вне окна вставки — клип остаётся как есть
+        if (e <= start + 0.001 || s >= end - 0.001) {
+          segs.push({ shot: row.shot, s, e })
+          continue
+        }
+        const rowSp = shotSpeed(row.shot)
+        const rr = effRange(row.shot)
+        if (s < start - 0.001 && e > end + 0.001) {
+          // клип длиннее окна — делим на левую и правую части
+          const leftEndSrc = rr.start + (start - s) * rowSp
+          const rightStartSrc = rr.start + (end - s) * rowSp
+          segs.push({ shot: { ...row.shot, trimEnd: leftEndSrc.toFixed(3) }, s, e: start })
+          segs.push({
+            shot: { ...row.shot, key: newShotKey(), trimStart: rightStartSrc.toFixed(3) },
+            s: end,
+            e,
+          })
+        } else if (s < start - 0.001) {
+          // перекрыт хвост — обрезаем конец
+          const srcEnd = rr.start + (start - s) * rowSp
+          segs.push({ shot: { ...row.shot, trimEnd: srcEnd.toFixed(3) }, s, e: start })
+        } else if (e > end + 0.001) {
+          // перекрыто начало — обрезаем начало
+          const srcStart = rr.start + (end - s) * rowSp
+          segs.push({ shot: { ...row.shot, trimStart: srcStart.toFixed(3) }, s: end, e })
+        }
+        // полностью закрыт — удаляем
+      }
+      if (segs.length + 1 > MAX_SHOTS) {
+        showToast(`Максимум ${MAX_SHOTS} шотов на таймлайне`, 'error')
+        return
+      }
+      const newShot: MontageShot = {
+        key: newShotKey(),
+        filename: layer.filename,
+        subfolder: layer.subfolder || '',
+        url: layer.url,
+        name: layer.name,
+        trimStart: ts > 0.001 ? ts.toFixed(3) : '',
+        trimEnd: te > 0.001 ? te.toFixed(3) : '',
+        duration,
+        vol: layer.vol,
+        fadeIn: layer.fadeIn,
+        fadeOut: layer.fadeOut,
+        speed: sp,
+        fx: layer.fx,
+        gap: undefined,
+      }
+      segs.push({ shot: newShot, s: start, e: end })
+      segs.sort((a, b) => a.s - b.s)
+      let prevEnd = 0
+      const nextShots: MontageShot[] = segs.map((seg) => {
+        const gap = Math.max(0, +(seg.s - prevEnd).toFixed(3))
+        prevEnd = seg.e
+        return { ...seg.shot, gap: gap < 0.01 ? undefined : gap }
+      })
+      if (opts?.history !== false) {
+        pushHistory()
+        stopSeq(false)
+      }
+      setShots(nextShots)
+      setLayers((prev) => prev.filter((l) => l.key !== key))
+      setSelectedLayerKey(null)
+      setSelectedKey(newShot.key)
+      setSelectedAudioKey(null)
+      setResult(null)
+      if (!(layer.duration > 0)) {
+        getVideoDuration(layer.url).then((d) => {
+          if (d > 0 && mountedRef.current) {
+            setShots((cur) => cur.map((x) => (x.key === newShot.key ? { ...x, duration: d } : x)))
+          }
+        })
+      }
+    },
+    [layerLen, pushHistory, stopSeq],
+  )
+
   const removeLayerClip = useCallback((key: string) => {
     pushHistory()
     setLayers((prev) => prev.filter((l) => l.key !== key))
@@ -2638,11 +2819,64 @@ export function MontageView() {
       if (dragIdx < 0) return
       const dragItem = sq0[dragIdx]
       const others = sq0.filter((_, idx) => idx !== dragIdx)
+      const startY = e.clientY
+      const trackLeft = trackRef.current?.getBoundingClientRect().left ?? 0
+      const grabOffset = Math.max(
+        0,
+        (startX - trackLeft) / Math.max(8, ppsRef.current) - dragItem.offset,
+      )
+      // (правка 878) ряды слоёв: при вертикальном перетаскивании клип базы
+      // превращается в клип слоя (V1 → V2+)
+      const layerBoxes: Array<{ track: number; top: number; bottom: number }> = []
+      for (const el of Array.from(
+        scrollerRef.current?.querySelectorAll<HTMLElement>('[data-layer-row]') || [],
+      )) {
+        const r = el.getBoundingClientRect()
+        layerBoxes.push({
+          track: Number(el.dataset.layerRow) || 1,
+          top: r.top,
+          bottom: r.bottom,
+        })
+      }
+      const detectLayerTrack = (clientY: number): number | null => {
+        for (const b of layerBoxes) {
+          if (clientY >= b.top - 3 && clientY <= b.bottom + 3) return b.track
+        }
+        const baseTop = trackRef.current?.getBoundingClientRect().top
+        if (baseTop == null) return null
+        const topRowTop = layerBoxes.length
+          ? Math.min(...layerBoxes.map((b) => b.top))
+          : baseTop
+        const rowH = layerBoxes.length
+          ? Math.max(20, Math.max(...layerBoxes.map((b) => b.bottom - b.top)))
+          : Math.max(28, Math.round(trackHRef.current * 0.7))
+        if (clientY >= topRowTop - rowH && clientY < topRowTop) {
+          const maxT = layerBoxes.length ? Math.max(...layerBoxes.map((b) => b.track)) : 0
+          if (maxT + 1 > MAX_TRACKS) return null
+          return maxT + 1
+        }
+        return null
+      }
+      const atFromX = (clientX: number) =>
+        Math.max(0, (clientX - trackLeft) / Math.max(8, ppsRef.current) - grabOffset)
       let moved = false
       let dragRaf = 0
       let latestX = startX
+      let latestY = startY
 
-      const applyMove = (clientX: number) => {
+      const applyMove = (clientX: number, clientY: number) => {
+        // (правка 878) курсор над рядом слоя — базу не двигаем, на отпускании
+        // клип уедет на этот ряд
+        const vTrack = detectLayerTrack(clientY)
+        if (vTrack != null) {
+          const at = atFromX(clientX)
+          setTrimBadge({
+            x: clientX,
+            y: clientY,
+            text: `→ V${vTrack + 1} · ${at.toFixed(2)} с`,
+          })
+          return
+        }
         const curPps = Math.max(8, ppsRef.current)
         const dt = (clientX - startX) / curPps
         let wantStart = Math.max(0, dragItem.offset + dt)
@@ -2697,15 +2931,16 @@ export function MontageView() {
         setShots(nextShots)
         setTrimBadge({
           x: clientX,
-          y: e.clientY,
+          y: clientY,
           text: `${actualDragStart.toFixed(2)} с${actualDragGap >= 0.02 ? ` (пауза +${actualDragGap.toFixed(2)} с)` : ' (встык)'}`,
         })
       }
 
       const onMove = (ev: PointerEvent) => {
         latestX = ev.clientX
+        latestY = ev.clientY
         if (!moved) {
-          if (Math.abs(ev.clientX - startX) < 3) return
+          if (Math.abs(ev.clientX - startX) < 3 && Math.abs(ev.clientY - startY) < 3) return
           moved = true
           suppressDrag.current = true
           stopSeq(false)
@@ -2716,7 +2951,7 @@ export function MontageView() {
         if (!dragRaf) {
           dragRaf = requestAnimationFrame(() => {
             dragRaf = 0
-            applyMove(latestX)
+            applyMove(latestX, latestY)
           })
         }
       }
@@ -2730,7 +2965,13 @@ export function MontageView() {
         }
         setTrimBadge(null)
         if (moved) {
-          applyMove(ev.clientX)
+          // (правка 878) финальная проверка: курсор над рядом слоя — конвертация
+          const vTrack = detectLayerTrack(ev.clientY)
+          if (vTrack != null) {
+            shotToLayer(row.shot.key, vTrack, atFromX(ev.clientX), { history: false })
+          } else {
+            applyMove(ev.clientX, ev.clientY)
+          }
           setTimeout(() => { suppressDrag.current = false }, 0)
         } else {
           // обычный клик без перетаскивания: выбираем клип и переносим плейхед в точку клика
@@ -2750,7 +2991,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo],
+    [stopSeq, pushHistory, seekTo, shotToLayer],
   )
 
   /**
@@ -2774,6 +3015,29 @@ export function MontageView() {
         if (el.dataset.layerRow != null) rows.push({ kind: 'layer', track: Number(el.dataset.layerRow) || 1, top: r.top, bottom: r.bottom })
         else if (el.dataset.audioRow != null) rows.push({ kind: 'audio', track: Number(el.dataset.audioRow) || 1, top: r.top, bottom: r.bottom })
       }
+      // (правка 878) слой можно бросить на V1 (превратится в клип базы) или
+      // выше верхнего ряда — тогда создаётся новый ряд V(N+1)
+      const baseRect = trackRef.current?.getBoundingClientRect() ?? null
+      const layerRowsGeo = rows.filter((r) => r.kind === 'layer')
+      const topLayerTop = layerRowsGeo.length
+        ? Math.min(...layerRowsGeo.map((r) => r.top))
+        : baseRect?.top ?? null
+      const layerRowH = layerRowsGeo.length
+        ? Math.max(20, Math.max(...layerRowsGeo.map((r) => r.bottom - r.top)))
+        : Math.max(28, Math.round(trackHRef.current * 0.7))
+      const isOverBase = (y: number) =>
+        !!baseRect && y >= baseRect.top - 4 && y <= baseRect.bottom + 4
+      const newTopTrack = (y: number): number | null => {
+        if (topLayerTop == null) return null
+        if (y >= topLayerTop - layerRowH && y < topLayerTop) {
+          const maxT = layerRowsGeo.length
+            ? Math.max(...layerRowsGeo.map((r) => r.track))
+            : 0
+          if (maxT + 1 > MAX_TRACKS) return null
+          return maxT + 1
+        }
+        return null
+      }
       const setClip = (at: number, track: number) => {
         if (kind === 'layer') setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
         else setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
@@ -2796,6 +3060,19 @@ export function MontageView() {
             snapPts.push(o.at, o.at + (kind === 'layer' ? layerLen(o as LayerClip) : audioLen(o as AudioClip)))
           }
           for (const sp of snapPts) if (Math.abs(want - sp) <= tol) { want = sp; break }
+        }
+        // (правка 878) над V1 — превращаем слой в клип базы; над верхним рядом —
+        // новый ряд. В этих зонах слой пока не двигаем, только показываем бейдж.
+        if (kind === 'layer') {
+          if (isOverBase(clientY)) {
+            setTrimBadge({ x: clientX, y: clientY, text: `→ V1 · ${want.toFixed(2)} с` })
+            return
+          }
+          const nt = newTopTrack(clientY)
+          if (nt != null) {
+            setTrimBadge({ x: clientX, y: clientY, text: `→ V${nt + 1} · ${want.toFixed(2)} с` })
+            return
+          }
         }
         let track = curTrack
         for (const r of rows) {
@@ -2833,6 +3110,23 @@ export function MontageView() {
         if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0 }
         setTrimBadge(null)
         if (moved) {
+          // (правка 878) вертикальные зоны: на V1 слой превращается в клип базы,
+          // над верхним рядом — переносится на новый ряд V(N+1)
+          if (kind === 'layer') {
+            const at = Math.max(0, at0 + (ev.clientX - startX) / Math.max(8, ppsRef.current))
+            if (isOverBase(ev.clientY)) {
+              layerToShot(clip.key, +at.toFixed(3), { history: false })
+              setTimeout(() => { suppressDrag.current = false }, 0)
+              return
+            }
+            const nt = newTopTrack(ev.clientY)
+            if (nt != null) {
+              setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, track: nt } : x)))
+              setLayerTracks((cur) => Math.max(cur, nt))
+              setTimeout(() => { suppressDrag.current = false }, 0)
+              return
+            }
+          }
           applyMove(ev.clientX, ev.clientY)
           setTimeout(() => { suppressDrag.current = false }, 0)
         } else {
@@ -2846,7 +3140,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo, layerLen, audioLen],
+    [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot],
   )
 
   /** (правка 874) подрезка клипа слоя/аудио за край: trimStart/trimEnd — числа (сек исходника) */
@@ -2943,6 +3237,18 @@ export function MontageView() {
     window.dispatchEvent(new CustomEvent('h3:goto-refine'))
   }, [])
 
+  // (правка 878) «В Refine» для клипа слоя — паритет с базовой дорожкой:
+  // по возврату чистовик заменит файл слоя, сохранив подрезку/скорость/звук.
+  const sendLayerToRefine = useCallback((layer: LayerClip) => {
+    useRefineTarget.getState().setTarget({ filename: layer.filename, subfolder: layer.subfolder || '' })
+    useMontageReturn.getState().add({
+      shotKey: layer.key,
+      filename: layer.filename,
+      subfolder: layer.subfolder || '',
+    })
+    window.dispatchEvent(new CustomEvent('h3:goto-refine'))
+  }, [])
+
   // (правка 857) возврат чистовика из Refine: шот, отправленный кнопкой
   // «В Refine», подменяется отрефайненным файлом. Ждём, пока файл появится в
   // галерее (иначе правка 843 сняла бы шот как «удалённый»); все настройки
@@ -2957,7 +3263,11 @@ export function MontageView() {
     if (!keys.length) return
     for (const key of keys) {
       const p = pendingReturn[key]
-      if (!shotsRef.current.some((s) => s.key === key)) {
+      // (правка 878) чистовик может ждать как клип базы, так и клип слоя V2+
+      if (
+        !shotsRef.current.some((s) => s.key === key) &&
+        !layersRef.current.some((l) => l.key === key)
+      ) {
         useMontageReturn.getState().drop(key)
         continue
       }
@@ -2983,6 +3293,21 @@ export function MontageView() {
             : s,
         ),
       )
+      // (правка 878) подмена файла у клипа слоя — подрезка и звук остаются
+      setLayers((prev) =>
+        prev.map((l) =>
+          l.key === key
+            ? {
+                ...l,
+                filename: f.filename,
+                subfolder: f.subfolder || '',
+                url: f.url,
+                name: f.filename.replace(/\.[^.]+$/, ''),
+                duration: 0,
+              }
+            : l,
+        ),
+      )
       useMontageReturn.getState().drop(key)
       useMontageReturn.getState().dropArrival(a.filename)
       // реальная длительность чистовика (у Refine она может отличаться на доли
@@ -2990,6 +3315,7 @@ export function MontageView() {
       getVideoDuration(f.url).then((d) => {
         if (d > 0 && mountedRef.current) {
           setShots((cur) => cur.map((x) => (x.key === key ? { ...x, duration: d } : x)))
+          setLayers((cur) => cur.map((x) => (x.key === key ? { ...x, duration: d } : x)))
         }
       })
       showToast(`Клип заменён чистовиком Refine: ${f.filename}`, 'success')
@@ -3661,8 +3987,18 @@ export function MontageView() {
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                           />
                         )}
+                        {/* (правка 878) маркер: клип слоя ждёт чистовик из Refine */}
+                        {pendingReturn[l.key] && (
+                          <span
+                            className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/85 px-1 py-0.5 text-[9px] font-semibold text-white animate-pulse"
+                            title="Отправлен в Refine — придёт и заменит этот клип слоя"
+                          >
+                            <Wand2Icon className="h-2.5 w-2.5" />
+                            Refine
+                          </span>
+                        )}
                         {/* (правка 876) маркер активных эффектов на слое */}
-                        {hasFx(l.fx) && (
+                        {!pendingReturn[l.key] && hasFx(l.fx) && (
                           <span
                             className="pointer-events-none absolute left-1 top-1 rounded bg-[#7C3AED]/80 px-1 py-0.2 text-[9px] font-semibold text-white"
                             title="На слое применены эффекты"
@@ -3686,6 +4022,13 @@ export function MontageView() {
                           title="Подрезать конец"
                         />
                         <button
+                          onClick={(e) => { e.stopPropagation(); sendLayerToRefine(l) }}
+                          className="absolute right-5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-[#A78BFA] group-hover:block"
+                          title="В Refine (исходник слоя целиком)"
+                        >
+                          <Wand2Icon className="h-2.5 w-2.5" />
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); removeLayerClip(l.key) }}
                           className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
                           title="Убрать слой"
@@ -3701,6 +4044,7 @@ export function MontageView() {
             {/* дорожка с клипами (правка 860: клипы позиционируются по offset и двигаются свободно с паузами gap) */}
             <div
               ref={trackRef}
+              data-base-row="1"
               className="relative overflow-hidden rounded border border-border/50 bg-black/30"
               style={{
                 height: trackH,
@@ -4018,6 +4362,21 @@ export function MontageView() {
                     Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук микшируется с базой.
                     Тяните клип по ряду или между рядами, за края — подрезка.
                   </div>
+                  {/* (правка 878) паритет с базой: слой тоже можно отправить в Refine */}
+                  <button
+                    onClick={() => sendLayerToRefine(selectedLayer)}
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-[#7C3AED]/50 bg-[#7C3AED]/15 px-2 py-1.5 text-[11px] text-[#C4B5FD] hover:bg-[#7C3AED]/25"
+                    title="Отправить исходник слоя в Refine целиком (без подрезки)"
+                  >
+                    <Wand2Icon className="h-3 w-3" />
+                    В Refine (исходник целиком)
+                  </button>
+                  {pendingReturn[selectedLayer.key] && (
+                    <div className="mt-1 flex items-center gap-1 text-[10px] text-[#A78BFA]">
+                      <Wand2Icon className="h-2.5 w-2.5 animate-pulse" />
+                      Ждём чистовик из Refine — он заменит файл слоя
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="text-[11px] font-medium text-zinc-300">Позиция на шкале, с</div>
