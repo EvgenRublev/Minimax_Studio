@@ -88,6 +88,11 @@ export interface FaceRefineUiParams {
   denoiseSmall: number
   /** Множитель denoise для крупных лиц. */
   denoiseLarge: number
+  /**
+   * (правка 889) «Использовать аудио»: дорожка исходника как аудио-гайд —
+   * при перерисовке лица сохраняется мимика говорящего. Звук итога — из исходника.
+   */
+  audioGuide: boolean
 }
 
 const DEFAULT_PARAMS: FaceRefineUiParams = {
@@ -108,6 +113,8 @@ const DEFAULT_PARAMS: FaceRefineUiParams = {
   fallback: true,
   denoiseSmall: 1,
   denoiseLarge: 0.35,
+  // (правка 889) по умолчанию выкл — включает тот же аудио-путь, что в генерации
+  audioGuide: false,
 }
 
 interface FaceRefineState {

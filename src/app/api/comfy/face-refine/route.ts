@@ -115,6 +115,8 @@ export async function POST(req: NextRequest) {
       denoiseLarge?: number
       refImages?: string[]
       refImageSize?: 'match' | 'max'
+      /** (правка 889) Аудио-гайд мимики: дорожка исходника → MiniMaxH3AddGuide. */
+      audioGuide?: boolean
       /** (правка 722) Детектор человека на кадрах, где лица не видно. */
       fallback?: boolean
       /** (правка 723) Клик по лицу в превью: пиксели кадра + его номер. */
@@ -292,6 +294,8 @@ export async function POST(req: NextRequest) {
       denoiseLarge: body.denoiseLarge,
       refImages: usedRefs,
       refImageSize: body.refImageSize,
+      // (правка 889) аудио-гайд: дорожка исходника как гайд мимики (см. шаблон).
+      audioGuide: body.audioGuide === true,
       // Размеры/длина исходника — для .latent-сайдкара итога (ceil32-канва,
       // тишина нужной длины у беззвучных): повторный рефайн этого видео
       // пойдёт по lossless-латентному пути.
@@ -335,6 +339,8 @@ export async function POST(req: NextRequest) {
         ...(identityReferenceForRun && { identity_reference: identityReferenceForRun }),
         ...(facePoint && identityReference && { identity_reference_ignored: identityReference }),
         ...(body.identityModel && { identity_model: body.identityModel }),
+        // (правка 889) галочка «Использовать аудио» — в сайдкар для повторов.
+        audio_guide: body.audioGuide === true,
         crop_factor: body.cropFactor ?? 2.5,
         confidence: body.confidence ?? 0.35,
         detector: detectors.detector,

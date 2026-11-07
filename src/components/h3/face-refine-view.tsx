@@ -262,6 +262,8 @@ export function FaceRefineView() {
       undetectedFrames: params.undetectedFrames,
       denoiseSmall: params.denoiseSmall,
       denoiseLarge: params.denoiseLarge,
+      // (правка 889) аудио-гайд мимики (дорожка исходника → AddGuide).
+      audioGuide: params.audioGuide,
       // (правка 722) детектор человека — только если он реально есть в списке
       // комбо ComfyUI (иначе сервер молча оставит 'none').
       fallback: params.fallback && fallbackAvailable === true,
@@ -651,6 +653,33 @@ export function FaceRefineView() {
             formatValue={(v) => v.toFixed(2)}
             disabled={busy}
           />
+
+          {/* (правка 889) Аудио-гайд: перерисовка лица на низком denoise размывает
+              артикуляцию речи — гайд дорожкой исходника возвращает мимику. */}
+          <label
+            className={cn(
+              'flex items-start gap-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5 transition-all',
+              busy ? 'opacity-60' : 'cursor-pointer hover:border-yellow-500/40',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={params.audioGuide}
+              onChange={(e) => patchParams({ audioGuide: e.target.checked })}
+              disabled={busy}
+              className="mt-0.5 accent-yellow-400"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-medium text-foreground">
+                Использовать аудио
+              </span>
+              <span className="block text-[10px] text-muted-foreground leading-relaxed">
+                Дорожка исходника подаётся модели как гайд на всём ролике: мимика и
+                артикуляция говорящего подчёркиваются, а не размываются перерисовкой.
+                Звук на выходе — всё равно из исходника.
+              </span>
+            </span>
+          </label>
 
           {/* Дополнительные параметры */}
           <div className="space-y-2">

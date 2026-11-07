@@ -129,6 +129,14 @@ export interface FaceRefineParams {
   refImages?: string[]
   /** Размер референсов: 'match' | 'max' (max — лучше идентичность). */
   refImageSize?: 'match' | 'max'
+  /**
+   * (правка 889) Аудио-гайд: дорожка исходника подаётся модели как гайд на всём
+   * таймлайне (MiniMaxH3AddGuide + сидинг в аудио-стрим латента, механика
+   * правки 888). При перерисовке лица с низким denoise модель теряет артикуляцию
+   * говорящего — гайд возвращает мимику, синхронную речи. Итоговый звук — всё
+   * равно из исходника (fr_out), гайд влияет только на видео.
+   */
+  audioGuide?: boolean
   /** Diffusion model name. */
   diffusionModel?: string
   /** Турбо-LoRA (шаги должны совпадать с ней). */
@@ -360,12 +368,47 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
     },
 
     // ═══════════════════════════════════════════════
+    //  АУДИО-ГАЙД (правка 889) — мимика говорящего
+    // ═══════════════════════════════════════════════
+    // При перерисовке лица (низкий denoise) артикуляция речи размывается.
+    // Галочка «Использовать аудио» отдаёт дорожку исходника в MiniMaxH3AddGuide
+    // на кадр 0: нода закалывает cond-строки гайда и зашивает аудио в
+    // аудио-стрим AV-латента с маской 0 (механика правки 888) — видео в
+    // кропах генерится синхронно с речью. MiniMaxH3AudioOrSilent спасает
+    // беззвучные исходники (гайд = тишина нужной длины). Итоговый звук —
+    // по-прежнему из исходника (fr_out), гайд влияет только на видео.
+    ...(p.audioGuide === true
+      ? {
+          fr_aguard: {
+            inputs: {
+              audio: ['fr_src', 2],
+              fallback_seconds: Number(((p.frames ?? 120) / 24).toFixed(2)),
+            },
+            class_type: 'MiniMaxH3AudioOrSilent',
+            _meta: { title: 'Аудио исходника (гайд)' },
+          },
+          fr_aguide: {
+            inputs: {
+              positive: ['fr_h3', 0],
+              latent: ['fr_inject', 0],
+              frame_idx: 0,
+              audio: ['fr_aguard', 0],
+              audio_vae: ['fr_vae_audio', 0],
+            },
+            class_type: 'MiniMaxH3AddGuide',
+            _meta: { title: 'Audio Guide (аудио исходника)' },
+          },
+        }
+      : {}),
+
+    // ═══════════════════════════════════════════════
     //  ПЕР-КАДРОВЫЙ ДЕНОЙЗ (сила ~ размеру лица)
     // ═══════════════════════════════════════════════
     fr_denoise: {
       inputs: {
         model: modelSrc,
-        av_latent: ['fr_inject', 0],
+        // (правка 889) латент из хвоста гайда (без галочки = fr_inject как раньше)
+        av_latent: p.audioGuide === true ? ['fr_aguide', 1] : ['fr_inject', 0],
         transform: ['fr_track', 1],
         denoise_multiplier_small_face: Math.max(0, Math.min(1, p.denoiseSmall ?? 1.0)),
         denoise_multiplier_large_face: Math.max(0, Math.min(1, p.denoiseLarge ?? 0.35)),
@@ -404,7 +447,8 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
     },
     fr_guider: {
       // (правка 722) модель с KJ-обёрткой превью; fr_sigmas — без неё.
-      inputs: { model: ['fr_preview', 0], conditioning: ['fr_h3', 0] },
+      // (правка 889) conditioning — хвост цепочки аудио-гайда (без галочки = fr_h3).
+      inputs: { model: ['fr_preview', 0], conditioning: p.audioGuide === true ? ['fr_aguide', 0] : ['fr_h3', 0] },
       class_type: 'BasicGuider',
       _meta: { title: 'Guider' },
     },
