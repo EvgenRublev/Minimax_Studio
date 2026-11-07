@@ -3623,7 +3623,9 @@ export function MontageView() {
 
         {/* большое превью: видео чуть меньше панели, масштаб настраивается;
             два буфера — видимый и прогретый под следующий клип (стык без скачка) */}
-        <div className={cn('relative min-h-0 flex-1 overflow-hidden bg-black', isFs && 'fixed inset-0 z-[9999]')}>
+        {/* (правка 881) min-h-[120px] вместо min-h-0: панель превью больше никогда
+            не схлопнется в ноль, когда ряды таймлайна не влезают в окно */}
+        <div className={cn('relative min-h-[120px] flex-1 overflow-hidden bg-black', isFs && 'fixed inset-0 z-[9999]')}>
           {/* (правка 859, 861) живые SVG-фильтры для каждого буфера: 5-точечные кривые цвета RGB,
               температура и радиальная дисперсия (центр кадра чистый, к краям нарастает) */}
           <svg width="0" height="0" className="pointer-events-none absolute opacity-0" aria-hidden>
@@ -4047,10 +4049,13 @@ export function MontageView() {
           </div>
         </div>
 
-        {/* таймлайн: линейка + дорожка + плейхед */}
+        {/* таймлайн: линейка + дорожка + плейхед.
+            (правка 881) раньше ряды дорожек (shrink-0 + overflow-y-hidden) переполняли
+            окно при большой высоте дорожек — превью сминалось и обрезалось. Теперь
+            контейнер может сжиматься и листается по вертикали. */}
         <div
           ref={scrollerRef}
-          className="shrink-0 overflow-x-auto overflow-y-hidden border-t border-border bg-[var(--surface-1)] px-2 py-2"
+          className="min-h-0 overflow-x-auto overflow-y-auto border-t border-border bg-[var(--surface-1)] px-2 py-2"
           onDragOver={(e) => {
             const el = e.target as HTMLElement | null
             const aRow = el?.closest('[data-audio-row]')
