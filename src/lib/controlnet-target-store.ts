@@ -74,7 +74,7 @@ const DEFAULT_PARAMS: ControlNetUiParams = {
   refImageSize: 'max', // (правка 511) было 'match'
   pipeline: 'draft',
   compressSource: true, // (правка 512) default ON — во всех режимах
-  draftSteps: 6, // (правка 890) минимум 6 — ниже тряска/сетка
+  draftSteps: 6, // (правки 890, 892) стандарт; вручную можно от 4
   firstSamplerSteps: 6,
   firstSamplerTotalSteps: 6,
   pass1Sampler: 'euler',

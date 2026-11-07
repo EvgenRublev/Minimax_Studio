@@ -193,7 +193,7 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
 
     // Pass 1 steps
     if (typeof params.pass1_steps === 'number') {
-      // (правка 890) повтор старых роликов с 2–5 шагами: поднимаем до минимума.
+      // (правки 890, 892) повтор старых роликов с 2–3 шагами: поднимаем до пола.
       patch.firstSamplerSteps = Math.max(MIN_FIRST_PASS_STEPS, params.pass1_steps)
     }
     if (typeof params.pass1_total_steps === 'number') {

@@ -58,13 +58,16 @@ export const PASS1_SCHEDULERS = [
 export const DEFAULT_PASS1_SCHEDULER = 'simple'
 
 /**
- * (правка 890) Минимум шагов ПЕРВОГО прохода генерации — везде.
- * На 4 шагах при сдвиге sigma 12 траектория не успевает сойтись: в «Кадрах»
- * начинается тряска изображения, в «Референсах» — сетка на переднем плане;
- * с 6 шагов артефактов нет (подтверждено тестами). Кламп стоит и в UI
- * (ползунки/инпуты), и здесь — защита от старых сайдкаров и протухших сеттингов.
+ * (правки 890, 892) НИЖНЯЯ ГРАНИЦА шагов первого прохода, которую можно выставить
+ * вручную — 4. Это пол, а не рекомендация: по умолчанию везде стоит 6 (на 4 шагах
+ * при сдвиге sigma 12 траектория иногда не сходится — тряска в «Кадрах», сетка в
+ * «Референсах», — но часть сюжетов на 4 шагах работает и экономит время).
+ * Кламп ниже 4 оставлен: 2–3 шага результат почти никогда не дают.
  */
-export const MIN_FIRST_PASS_STEPS = 6
+export const MIN_FIRST_PASS_STEPS = 4
+
+/** (правка 892) Рекомендуемое (дефолтное) число шагов первого прохода. */
+export const DEFAULT_FIRST_PASS_STEPS = 6
 
 /* ── (правка 399) Veda Sparse Attention — настройки ноды ── */
 
@@ -170,7 +173,7 @@ export interface MiniMaxH3Params {
    *  (low-res → LatentUpscaler3D → Pass 2), как раньше. */
   pipeline?: 'draft' | 'full'
   /** Шаги единственного прохода в пайплайне 'draft' (default 6;
-   *  (правка 890) минимум MIN_FIRST_PASS_STEPS — на 2–4 шагах тряска/сетка). */
+   *  (правки 890, 892) вручную — от MIN_FIRST_PASS_STEPS = 4). */
   draftSteps?: number
   /** (правка 124) Точные номинальные (финальные) размеры видео, напр.
    *  1920×1080 для 16:9 1080p. Ставятся для пресетов качества: апскейлер
@@ -772,7 +775,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // (правка 802) Pass 1 — единственный счётчик шагов. Сплита сигм больше нет:
   // BasicScheduler отдаёт полное расписание прямо в сэмплер pass 1, а Pass 2
   // дорисовывает по своему sigma-профилю (ManualSigmas) после апскейла.
-  const firstSteps = Math.max(MIN_FIRST_PASS_STEPS, Math.min(128, Math.round(p.firstSamplerSteps ?? 6)))
+  const firstSteps = Math.max(MIN_FIRST_PASS_STEPS, Math.min(128, Math.round(p.firstSamplerSteps ?? DEFAULT_FIRST_PASS_STEPS)))
 
   // (правка 258) Ограничение: pass 1 (low-res) максимум min(2.0, finalResolution).
   // Это черновик — не должен быть больше финального разрешения.
@@ -958,7 +961,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // (шаги = draftSteps). Без апскейлера и второго прохода. Выход = черновик
   // для отбора; апгрейд — вкладка Refine.
   const draft = p.pipeline === 'draft'
-  const draftSteps = Math.min(30, Math.max(MIN_FIRST_PASS_STEPS, Math.round(p.draftSteps ?? 6)))
+  const draftSteps = Math.min(30, Math.max(MIN_FIRST_PASS_STEPS, Math.round(p.draftSteps ?? DEFAULT_FIRST_PASS_STEPS)))
   // Канва одиночного прохода (flf и draft) берётся из ОСНОВНЫХ настроек
   // разрешения: пресет → targetDimensions (ceil32), свободное → finalRes MP.
   // lowResMP из доп. настроек управляет только канвой Pass 1 в 'full'.
@@ -2621,8 +2624,8 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             scheduler: p.pass1Scheduler || 'simple',
             // (правка 719) Шаги клипа — отдельное поле (extendClipSteps),
             // НЕ точка сплита генерации: в Extend сплита нет вообще.
-            // (правка 890) не ниже MIN_FIRST_PASS_STEPS — на 2–4 шагах тряска/сетка.
-            steps: Math.max(MIN_FIRST_PASS_STEPS, p.extendClipSteps ?? p.firstSamplerSteps ?? 6),
+            // (правки 890, 892) не ниже пола (4): на 2–3 шагах тряска/сетка.
+            steps: Math.max(MIN_FIRST_PASS_STEPS, p.extendClipSteps ?? p.firstSamplerSteps ?? DEFAULT_FIRST_PASS_STEPS),
             // (правка 291) denoise=1 + SetLatentNoiseMask (правка 252) — эталонная
             // схема из V2V Extend Any Video: шум добавляется только в зону маски
             // (белая = новое содержимое), зона маски=0 (чёрная = хвост предыдущего

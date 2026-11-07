@@ -39,7 +39,7 @@ import { SettingSlider } from './setting-slider'
 import { useVideoGen, computeOutputDimensions } from '@/hooks/use-video-gen'
 // (правка 829) «Зациклено»: фактическое число кадров — та же формула, что у
 // узла 46:19 и в метаданных (сетка 17n+5).
-import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
+import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS, DEFAULT_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
 
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
@@ -1828,17 +1828,17 @@ export function GenerateView() {
 
                             {/* (правка 802) Шаги Pass 1 — один слайдер: сплита
                                 сигм больше нет, это ровно число шагов pass 1.
-                                (правка 890) минимум 6: на 2–5 шагах тряска в
-                                «Кадрах» и сетка в «Референсах». */}
+                                (правки 890, 892) стандарт — 6, вручную можно от 4:
+                                4 быстрее, но на части сюжетов тряска/сетка. */}
                             <div className="space-y-1">
                               <SettingSlider
                                 label={isDraft ? 'Шаги драфта' : 'Шаги (pass 1)'}
                                 labelTitle={
                                   isDraft
-                                    ? 'Сколько шагов делает модель, рисуя видео. 6 — стандарт: меньше нельзя, на 4 шагах появляется тряска/сетка; больше — аккуратнее, но медленнее.'
-                                    : 'Сколько шагов делает черновой проход (low-res). Меньше 6 — тряска или сетка на переднем плане; больше — точнее композиция, но дольше.'
+                                    ? 'Сколько шагов делает модель, рисуя видео. Стандарт — 6: надёжно сходится; 4 — быстрее, но на части сюжетов появляется тряска или сетка. Ниже 4 смысла нет.'
+                                    : 'Сколько шагов делает черновой проход (low-res). Стандарт — 6; 4 — быстрее, но возможен тряска/сетка на переднем плане. Ниже 4 смысла нет.'
                                 }
-                                value={isDraft ? Math.max(MIN_FIRST_PASS_STEPS, video.draftSteps ?? 6) : Math.max(MIN_FIRST_PASS_STEPS, video.firstSamplerSteps ?? 6)}
+                                value={isDraft ? Math.max(MIN_FIRST_PASS_STEPS, video.draftSteps ?? DEFAULT_FIRST_PASS_STEPS) : Math.max(MIN_FIRST_PASS_STEPS, video.firstSamplerSteps ?? DEFAULT_FIRST_PASS_STEPS)}
                                 onChange={(v) =>
                                   patchVideo(
                                     isDraft
@@ -1853,7 +1853,7 @@ export function GenerateView() {
                                 inputMax={isDraft ? 30 : 128}
                                 inputHint={
                                   isDraft
-                                    ? `${MIN_FIRST_PASS_STEPS}–30 шагов единственного прохода (стандарт — ${MIN_FIRST_PASS_STEPS})`
+                                    ? `${MIN_FIRST_PASS_STEPS}–30 шагов единственного прохода (стандарт — ${DEFAULT_FIRST_PASS_STEPS})`
                                     : `${MIN_FIRST_PASS_STEPS}–128 шагов pass 1. Выше 30 — заметно дольше генерация`
                                 }
                               />

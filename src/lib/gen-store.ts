@@ -221,7 +221,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   firstSamplerTotalSteps: 6,
   // Шаги клипа продления — undefined = «авто» (шаги исходника из его меты).
   extendClipSteps: undefined,
-  draftSteps: 6, // (правка 890) эталон драфта; ниже MIN_FIRST_PASS_STEPS — тряска/сетка
+  draftSteps: 6, // (правки 890, 892) стандарт драфта; вручную — от 4 (ниже не сходится)
   sigmaVariant: '3step',
   pass2Sampler: 'euler',
   pass1Sampler: 'euler',
@@ -387,10 +387,9 @@ export const useGenStore = create<GenStoreState>()(
       // (обычно старый дефолт 4) вдруг стало бы работать — сбрасываем в авто,
       // чтобы поведение не изменилось молча. Ручной выбор делается ПОСЛЕ
       // миграции и уже сохраняется честно.
-      // (правка 890) version 9: минимум шагов первого прохода = 6. Сохранённые
-      // «2–5» поднимаются до 6: на 4 шагах тряска в «Кадрах» и сетка в
-      // «Референсах» (под выбор «осознанно ниже 6» до этой правки смысл был
-      // только в скорости — теперь это брак, кламп везде).
+      // (правки 890, 892) version 9: нижняя граница шагов первого прохода — 4
+      // (выставлять вручную можно от 4; стандарт — 6). Сохранённые 2–3 поднимаются
+      // до 4: на них результат почти никогда не сходится.
       version: 9,
       // (правка 804) Настройки пишутся в два места: localStorage + файл на сервере
       // (data/settings/h3-gen-store.json). Выбирается более свежая копия, поэтому
@@ -436,7 +435,8 @@ export const useGenStore = create<GenStoreState>()(
           const { extendClipSteps: _wiped, ...rest } = state.video
           state.video = rest
         }
-        // (правка 890) version 9: все счётчики шагов первого прохода — не ниже 6.
+        // (правки 890, 892) version 9: счётчики шагов первого прохода — не ниже
+        // пола (4). Значения 4–5 сохраняются: их выбрали осознанно.
         if (oldVersion < 9 && state?.video) {
           const v = state.video
           const patch: Record<string, unknown> = {}
@@ -462,8 +462,9 @@ export const useGenStore = create<GenStoreState>()(
           if (typeof result.video.draftSteps !== 'number' || isNaN(result.video.draftSteps)) {
             result.video.draftSteps = DEFAULT_VIDEO_STATE.draftSteps
           }
-          // (правка 890) пол — MIN_FIRST_PASS_STEPS: ниже траектория не сходится
-          // (тряска/сетка). Слайдеры клампят, это — страховка для старых снимков.
+          // (правки 890, 892) пол = MIN_FIRST_PASS_STEPS (4): ниже траектория почти
+          // не сходится. Слайдеры не пускают ниже, это — страховка для старых
+          // снимков localStorage.
           if (typeof result.video.draftSteps === 'number' && result.video.draftSteps < MIN_FIRST_PASS_STEPS) {
             result.video.draftSteps = MIN_FIRST_PASS_STEPS
           }

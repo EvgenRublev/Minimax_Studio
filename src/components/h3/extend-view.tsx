@@ -185,7 +185,7 @@ export function ExtendView() {
         const steps = typeof p.pass1_steps === 'number' ? p.pass1_steps
           : typeof p.draft_steps === 'number' ? p.draft_steps
           : null
-        // (правка 890) шаги из меты старого ролика (2–5) тоже поднимаем до минимума
+        // (правки 890, 892) шаги из меты старого ролика (2–3) поднимаем до пола
         setAutoClipSteps(steps && steps >= MIN_FIRST_PASS_STEPS ? steps : (steps != null ? MIN_FIRST_PASS_STEPS : null))
       })
       .catch(() => { if (!cancelled) setAutoClipSteps(null) })
