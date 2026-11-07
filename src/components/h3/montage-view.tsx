@@ -572,7 +572,11 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
   const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
   const bTab = buildChannelTable(c?.master, c?.b, -temp)
   return (
-    <filter id={id} colorInterpolationFilters="sRGB" x="-2%" y="-2%" width="104%" height="104%">
+    /* (правка 897) Регион фильтра — ровно кадр: раньше x/y/width/height
+       расширяли его на 4%, и «нулевая» кромка карты дисперсии оказывалась за
+       пределами кадра — у краёв оставалась видимая рамка из разложенных
+       цветов. */
+    <filter id={id} colorInterpolationFilters="sRGB" x="0%" y="0%" width="100%" height="100%">
       <feComponentTransfer in="SourceGraphic" result="curved">
         <feFuncR type="table" tableValues={rTab} />
         <feFuncG type="table" tableValues={gTab} />
@@ -581,13 +585,21 @@ function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: st
       {disp > 0 && mapUrl && (
         <>
           <feImage href={mapUrl} x="0%" y="0%" width="100%" height="100%" preserveAspectRatio="none" result="dispMap" />
+          {/* (правка 897) «Подложки» исходных R/B: там, где feDisplacementMap
+              вышел за кадр и вернул прозрачность (у краёв картинки/полей),
+              канал добирается из исходного пикселя. Без этого screen-сборка
+              теряла канал и рисовала цветную рамку по периметру. */}
+          <feColorMatrix in="curved" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR0" />
+          <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB0" />
           <feDisplacementMap in="curved" in2="dispMap" scale={disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radR" />
           <feColorMatrix in="radR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
+          <feComposite in="chR" in2="chR0" operator="over" result="chRFull" />
           <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
           <feDisplacementMap in="curved" in2="dispMap" scale={-disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radB" />
           <feColorMatrix in="radB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
-          <feBlend in="chR" in2="chG" mode="screen" result="rg" />
-          <feBlend in="rg" in2="chB" mode="screen" result="abFull" />
+          <feComposite in="chB" in2="chB0" operator="over" result="chBFull" />
+          <feBlend in="chRFull" in2="chG" mode="screen" result="rg" />
+          <feBlend in="rg" in2="chBFull" mode="screen" result="abFull" />
           <feComposite in="abFull" in2="dispMap" operator="in" result="abEdges" />
           <feMerge>
             <feMergeNode in="curved" />
