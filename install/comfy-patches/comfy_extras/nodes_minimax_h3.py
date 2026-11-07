@@ -539,10 +539,21 @@ class MiniMaxH3AudioOrSilent(io.ComfyNode):
 
     @classmethod
     def execute(cls, audio, fallback_seconds) -> io.NodeOutput:
-        waveform = audio.get("waveform") if isinstance(audio, dict) else None
-        if waveform is not None and waveform.numel() > 0:
-            return io.NodeOutput(audio)
+        # (правка 885) VHS_LoadVideo отдаёт ленивый Mapping (не dict): старая
+        # проверка isinstance(audio, dict) всегда уходила в тишину — рефайн с
+        # Audio Guide генерировал якорь на тишину и муксил тихую дорожку.
+        # Материалзуем lazy-аудио в обычный dict; у беззвучного источника
+        # get_audio бросает исключение — оно означает «тишины нет».
+        waveform = None
         sample_rate = 32000  # native rate of the H3 audio VAE; VAEEncodeAudio resamples anyway
+        if audio is not None:
+            try:
+                waveform = audio["waveform"]
+                sample_rate = int(audio["sample_rate"])
+            except Exception:
+                waveform = None
+            if waveform is not None and waveform.numel() > 0:
+                return io.NodeOutput({"waveform": waveform, "sample_rate": sample_rate})
         length = max(1, round(fallback_seconds * sample_rate))
         silence = torch.zeros([1, 2, length], device=comfy.model_management.intermediate_device())
         return io.NodeOutput({"waveform": silence, "sample_rate": sample_rate})
