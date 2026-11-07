@@ -1109,9 +1109,9 @@ export function GenerateView() {
           меньше запроса, поэтому бейдж показывает фактическую длительность
           ролика, а не длину запроса (она видна под галочкой). */}
       <Badge variant="secondary" className="text-[10px]">
-        {(video.loop === true && video.mode !== 'extend'
+        {Math.round((video.loop === true && video.mode !== 'extend'
           ? loopInfo.seconds
-          : video.videoLength / fps).toFixed(1)} с · {fps} fps
+          : video.videoLength / fps))} с · {fps} fps
       </Badge>
       {video.loop === true && video.mode !== 'extend' && (
         <Badge className="text-[10px] bg-violet-500/15 text-violet-300 border-violet-500/30 hover:bg-violet-500/15">
@@ -1240,7 +1240,7 @@ export function GenerateView() {
                       </span>
                       {loopOn && (
                         <span className="text-[10px] font-mono text-violet-300/80">
-                          {loopInfo.frames} кадр · {loopInfo.seconds.toFixed(1)} с
+                          {loopInfo.frames} кадр · {Math.round(loopInfo.seconds)} с
                         </span>
                       )}
                     </span>
@@ -1435,7 +1435,7 @@ export function GenerateView() {
             max={framesMax}
             step={framesStep}
             fps={fps}
-            hint="выравнивание 17n+5 · максимум 30 с"
+            hint="внутри — ближайшие валидные кадры модели (до 30 с)"
           />
 
           <Separator className="bg-border opacity-50" />

@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { useGenStore } from '@/lib/gen-store'
 import type { ModelOptions } from '@/hooks/use-model-options'
 import { uploadInputFile } from '@/lib/upload'
+import { framesForDuration } from '@/lib/comfy/minimax-h3-template'
 
 /* ──────────────── Shared helpers ──────────────── */
 
@@ -112,24 +113,41 @@ interface DurationSliderProps {
   disabled?: boolean
 }
 
-export function DurationSlider({ min, max, step, fps, hint, disabled }: DurationSliderProps) {
+export function DurationSlider({ min, max, fps, hint, disabled }: DurationSliderProps) {
   const videoLength = useGenStore((s) => s.video.videoLength)
   const setVideoLength = useGenStore((s) => s.setVideoLength)
   // Guard against undefined/NaN from stale localStorage
   const safeLength = typeof videoLength === 'number' && !isNaN(videoLength) ? videoLength : min
   const clamped = Math.min(Math.max(safeLength, min), max)
 
-  // (правка 107) Ручной ввод кадров. Длительность НЕ выходит за границы модели:
-  // бэкенд тихо климпает вне диапазона (знаковая ошибка «запросили 2 с, получили 5 с»),
-  // поэтому при коммите значение привязывается к сетке (min + k·step ≡ 17n+5)
-  // и ограничивается [min, max].
+  /**
+   * (правка 894) UI длительности — В ЦЕЛЫХ СЕКУНДАХ. В сторе по-прежнему
+   * лежат кадры на валидной сетке модели (17n+5) — их ждёт шаблон ComfyUI,
+   * — но ползунок и ручной ввод работают в секундах с шагом 1 с. Секунда
+   * переводится в ближайшее валидное число кадров (framesForDuration),
+   * поэтому «5 с» в интерфейсе = честные ~5.0–5.2 с в генерации.
+   */
+  const framesForSec = React.useCallback(
+    (sec: number) => Math.max(min, Math.min(max, framesForDuration(sec, fps))),
+    [fps, min, max],
+  )
+  /** допустимый диапазон ЦЕЛЫХ секунд: от первой валидной до последней */
+  const secMin = Math.ceil(min / fps)
+  const secMax = Math.max(secMin, Math.floor(max / fps))
+  /** текущее значение в целых секундах (ближайшая секунда к сохранённым кадрам) */
+  const curSec = Math.max(secMin, Math.min(secMax, Math.round(clamped / fps)))
+
+  // (правка 107) Ручной ввод. Длительность НЕ выходит за границы модели:
+  // бэкенд тихо климпает вне диапазона, поэтому при коммите значение
+  // привязывается к ближайшей валидной сетке кадров и к [secMin, secMax].
   const [draft, setDraft] = React.useState<string | null>(null)
   const commitLength = () => {
     if (draft === null) return
     const n = Number.parseFloat(draft.replace(',', '.'))
     setDraft(null)
     if (!Number.isFinite(n)) return // некорректно — откат к текущему
-    const v = alignFrames(n, min, max, step)
+    const sec = Math.max(secMin, Math.min(secMax, Math.round(n)))
+    const v = framesForSec(sec)
     if (v !== safeLength) setVideoLength(v)
   }
 
@@ -141,9 +159,9 @@ export function DurationSlider({ min, max, step, fps, hint, disabled }: Duration
           <input
             type="text"
             inputMode="numeric"
-            aria-label={`Длительность: ручной ввод (${min}–${max} кадров)`}
-            title={`Кадров: ${min}–${max} (сетка 17n+5, ${fps} fps)`}
-            value={draft ?? String(clamped)}
+            aria-label={`Длительность: ручной ввод в секундах (${secMin}–${secMax} с)`}
+            title={`Секунды: ${secMin}–${secMax} · внутри — ближайшие валидные кадры (${min}–${max}, 17n+5, ${fps} fps)`}
+            value={draft ?? String(curSec)}
             onChange={(e) => setDraft(e.target.value)}
             onFocus={(e) => {
               setDraft(null)
@@ -166,27 +184,30 @@ export function DurationSlider({ min, max, step, fps, hint, disabled }: Duration
               disabled && 'opacity-40 pointer-events-none',
             )}
           />
-          {/* (правка 107) Бейдж показывает только секунды: кадры и так видны
-              в поле ручного ввода рядом — дублируем нечего. */}
-          <Badge variant="secondary" className="text-xs">
-            {(clamped / fps).toFixed(1)} с
+          {/* (правка 894) Бейдж — целые секунды; реальные кадры в подсказке. */}
+          <Badge
+            variant="secondary"
+            className="text-xs"
+            title={`Фактически: ${(clamped / fps).toFixed(2)} с · ${clamped} кадров`}
+          >
+            {curSec} с
           </Badge>
         </span>
       </Label>
       <input
         type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={clamped}
-        onChange={(e) => setVideoLength(Number(e.target.value))}
+        min={secMin}
+        max={secMax}
+        step={1}
+        value={curSec}
+        onChange={(e) => setVideoLength(framesForSec(Number(e.target.value)))}
         disabled={disabled}
         className="w-full accent-cyan-500"
       />
       <p className="text-[10px] text-muted-foreground/60">
-        {fps} кадр/с · от {(min / fps).toFixed(1)} до {(max / fps).toFixed(1)} с{hint ? ` · ${hint}` : ''}
+        {fps} кадр/с · от {secMin} до {secMax} с, шаг 1 с{hint ? ` · ${hint}` : ''}
         {' · '}
-        <span title="Значение вне 17n+5 округляется до ближайшей валидной точки, вне границ модели — к границе">ручной ввод: {min}–{max} кадр.</span>
+        <span title="Секунда переводится в ближайшее валидное число кадров модели; вне диапазона — к границе">ручной ввод в секундах: {secMin}–{secMax} с.</span>
       </p>
     </div>
   )
