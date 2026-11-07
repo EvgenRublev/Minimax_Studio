@@ -241,6 +241,8 @@ interface MontageLayerInput {
   speed?: number | string | null
   /** вписывание в кадр слоя: stretch | cover | contain | blur */
   fit?: string | null
+  /** (правка 876) картинные эффекты слоя — те же, что у шотов */
+  fx?: ShotFx | null
 }
 
 /**
@@ -359,6 +361,78 @@ function cleanFx(fx?: ShotFx | null): ShotFx {
   const grain = num(fx.grain, 0, 100)
   if (grain && grain > 0) r.grain = grain
   return r
+}
+
+/** (правка 876) построение ffmpeg-фрагментов картинных эффектов (курвы, температура,
+ * радиальная дисперсия, HUE, EQ, шум). Раньше строилось только для шотов базы, теперь
+ * тем же кодом пользуются клипы слоёв V2+. tag — уникальный суффикс промежуточных
+ * меток дисперсии ([pg][pb][pr]), чтобы ветки разных клипов не конфликтовали. */
+function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): string[] {
+  const fxv: string[] = []
+  if (fx.flipH) fxv.push('hflip')
+  if (fx.flipV) fxv.push('vflip')
+  if (fx.gray) fxv.push('hue=s=0')
+  if (fx.curves) {
+    const fmtCurve = (raw: CurveSpec) => {
+      const nodes = cleanCurveChannel(raw)
+      if (!nodes) return ''
+      const pts: string[] = []
+      if (nodes[0][0] > 0.002) pts.push(`0/${nodes[0][1].toFixed(3)}`)
+      for (const [x, y] of nodes) pts.push(`${x.toFixed(3)}/${y.toFixed(3)}`)
+      if (nodes[nodes.length - 1][0] < 0.998) pts.push(`1/${nodes[nodes.length - 1][1].toFixed(3)}`)
+      return pts.join(' ')
+    }
+    const cparts: string[] = []
+    if (fx.curves.master) { const s = fmtCurve(fx.curves.master); if (s) cparts.push(`all='${s}'`) }
+    if (fx.curves.r) { const s = fmtCurve(fx.curves.r); if (s) cparts.push(`r='${s}'`) }
+    if (fx.curves.g) { const s = fmtCurve(fx.curves.g); if (s) cparts.push(`g='${s}'`) }
+    if (fx.curves.b) { const s = fmtCurve(fx.curves.b); if (s) cparts.push(`b='${s}'`) }
+    if (cparts.length) fxv.push(`curves=${cparts.join(':')}`)
+  }
+  if (fx.temp && Math.abs(fx.temp) >= 1) {
+    const t = +(fx.temp / 250).toFixed(3)
+    const g = +(t * 0.2).toFixed(3)
+    const th = +(t * 0.6).toFixed(3)
+    fxv.push(`colorbalance=rs=${t}:gs=${g}:bs=${-t}:rm=${t}:gm=${g}:bm=${-t}:rh=${th}:bh=${-th}`)
+  }
+  if (fx.dispersion && fx.dispersion > 0) {
+    // (правка 861, 862) радиальная дисперсия как в DaVinci Resolve: центр кадра
+    // не затрагивается (смещение = 0), а к краям и углам R и B расходятся.
+    // Кадр предварительно чуть увеличиваем, а после эффекта обрезаем обратно:
+    // смещённая кромка уходит за кадр и не оставляет цветной «рамки».
+    const k1 = +(fx.dispersion * 0.0018).toFixed(4)
+    const k2 = +(fx.dispersion * 0.001).toFixed(4)
+    // (правка 862) запас кадра считаем от силы линзы: смещение кромки равно
+    // (k1+k2) от половины меньшей стороны, поэтому zoom = 1 + k1 + k2 + запас.
+    // Фиксированные 1.14 не хватало на максимальной дисперсии — оставалась рамка.
+    const zoom = Math.min(1.5, 1 + k1 + k2 + 0.01)
+    const upW = Math.max(2, Math.round((srcW * zoom) / 2) * 2)
+    const upH = Math.max(2, Math.round((srcH * zoom) / 2) * 2)
+    const cropW = Math.max(2, srcW - (srcW % 2))
+    const cropH = Math.max(2, srcH - (srcH % 2))
+    // (правка 863) extractplanes отдаёт каналы в порядке R,G,B, а не в порядке
+    // букв «g+b+r»: раньше R/B подмешивались в чужие плоскости и рендер зеленел.
+    // Раскладка mergeplanes: G (без сдвига), B (сдвиг +k), R (сдвиг -k).
+    fxv.push(
+      `scale=${upW}:${upH},format=gbrp,extractplanes=g+b+r[pg${tag}][pb${tag}][pr${tag}];[pg${tag}]lenscorrection=k1=${-k1}:k2=${-k2}[sr${tag}];[pr${tag}]lenscorrection=k1=${k1}:k2=${k2}[sb${tag}];[pb${tag}][sb${tag}][sr${tag}]mergeplanes=0x001020:gbrp,crop=${cropW}:${cropH}`,
+    )
+  }
+  if (fx.hue && Math.abs(fx.hue) >= 1) {
+    fxv.push(`format=yuv420p,hue=h=${fx.hue.toFixed(1)}`)
+  }
+  const satv = fx.sat ?? 1
+  if (fx.bright || fx.contrast || satv !== 1) {
+    const eq: string[] = []
+    if (fx.bright) eq.push(`brightness=${fx.bright.toFixed(3)}`)
+    if (fx.contrast) eq.push(`contrast=${(1 + fx.contrast).toFixed(3)}`)
+    eq.push(`saturation=${satv.toFixed(3)}`)
+    fxv.push(`format=yuv420p,eq=${eq.join(':')}`)
+  }
+  if (fx.grain && fx.grain > 0) {
+    const strength = Math.max(1, Math.round(fx.grain * 0.45))
+    fxv.push(`format=yuv420p,noise=alls=${strength}:allf=t+u`)
+  }
+  return fxv
 }
 
 /** (правка 847) чистка перехода: неизвестный тип или длительность вне 0.1..3 = null */
@@ -607,6 +681,8 @@ export async function POST(req: Request) {
       end: number | null
       speed: number
       fit: string
+      /** (правка 876) картинные эффекты слоя — те же, что у шотов */
+      fx: ShotFx
     }> = []
     for (const l of rawLayers) {
       const name = String(l?.name || '')
@@ -636,6 +712,7 @@ export async function POST(req: Request) {
         end: parseSec(l.trimEnd),
         speed: parseSpeed(l.speed),
         fit: ['stretch', 'cover', 'contain', 'blur'].includes(String(l.fit)) ? String(l.fit) : 'cover',
+        fx: cleanFx(l.fx),
       })
     }
 
@@ -784,72 +861,8 @@ export async function POST(req: Request) {
       durs[i] = dur
       totalOut += dur
       const trimV = s > 0.001 || e != null ? `trim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},` : ''
-      // (правка 848, 859, 861) картинные эффекты шота: отражения, 5-точечные 2D-кривые,
-      // температура, HUE, яркость/контраст/насыщенность, радиальная дисперсия (центр 0, к краям), шум
-      const fxv: string[] = []
-      if (it.fx.flipH) fxv.push('hflip')
-      if (it.fx.flipV) fxv.push('vflip')
-      if (it.fx.gray) fxv.push('hue=s=0')
-      if (it.fx.curves) {
-        const fmtCurve = (raw: CurveSpec) => {
-          const nodes = cleanCurveChannel(raw)
-          if (!nodes) return ''
-          const pts: string[] = []
-          if (nodes[0][0] > 0.002) pts.push(`0/${nodes[0][1].toFixed(3)}`)
-          for (const [x, y] of nodes) pts.push(`${x.toFixed(3)}/${y.toFixed(3)}`)
-          if (nodes[nodes.length - 1][0] < 0.998) pts.push(`1/${nodes[nodes.length - 1][1].toFixed(3)}`)
-          return pts.join(' ')
-        }
-        const cparts: string[] = []
-        if (it.fx.curves.master) { const s = fmtCurve(it.fx.curves.master); if (s) cparts.push(`all='${s}'`) }
-        if (it.fx.curves.r) { const s = fmtCurve(it.fx.curves.r); if (s) cparts.push(`r='${s}'`) }
-        if (it.fx.curves.g) { const s = fmtCurve(it.fx.curves.g); if (s) cparts.push(`g='${s}'`) }
-        if (it.fx.curves.b) { const s = fmtCurve(it.fx.curves.b); if (s) cparts.push(`b='${s}'`) }
-        if (cparts.length) fxv.push(`curves=${cparts.join(':')}`)
-      }
-      if (it.fx.temp && Math.abs(it.fx.temp) >= 1) {
-        const t = +(it.fx.temp / 250).toFixed(3)
-        const g = +(t * 0.2).toFixed(3)
-        const th = +(t * 0.6).toFixed(3)
-        fxv.push(`colorbalance=rs=${t}:gs=${g}:bs=${-t}:rm=${t}:gm=${g}:bm=${-t}:rh=${th}:bh=${-th}`)
-      }
-      if (it.fx.dispersion && it.fx.dispersion > 0) {
-        // (правка 861, 862) радиальная дисперсия как в DaVinci Resolve: центр кадра
-        // не затрагивается (смещение = 0), а к краям и углам R и B расходятся.
-        // Кадр предварительно чуть увеличиваем, а после эффекта обрезаем обратно:
-        // смещённая кромка уходит за кадр и не оставляет цветной «рамки».
-        const k1 = +(it.fx.dispersion * 0.0018).toFixed(4)
-        const k2 = +(it.fx.dispersion * 0.001).toFixed(4)
-        // (правка 862) запас кадра считаем от силы линзы: смещение кромки равно
-        // (k1+k2) от половины меньшей стороны, поэтому zoom = 1 + k1 + k2 + запас.
-        // Фиксированные 1.14 не хватало на максимальной дисперсии — оставалась рамка.
-        const zoom = Math.min(1.5, 1 + k1 + k2 + 0.01)
-        const upW = Math.max(2, Math.round((info.width * zoom) / 2) * 2)
-        const upH = Math.max(2, Math.round((info.height * zoom) / 2) * 2)
-        const cropW = Math.max(2, info.width - (info.width % 2))
-        const cropH = Math.max(2, info.height - (info.height % 2))
-        // (правка 863) extractplanes отдаёт каналы в порядке R,G,B, а не в порядке
-        // букв «g+b+r»: раньше R/B подмешивались в чужие плоскости и рендер зеленел.
-        // Раскладка mergeplanes: G (без сдвига), B (сдвиг +k), R (сдвиг -k).
-        fxv.push(
-          `scale=${upW}:${upH},format=gbrp,extractplanes=g+b+r[pg${i}][pb${i}][pr${i}];[pg${i}]lenscorrection=k1=${-k1}:k2=${-k2}[sr${i}];[pr${i}]lenscorrection=k1=${k1}:k2=${k2}[sb${i}];[pb${i}][sb${i}][sr${i}]mergeplanes=0x001020:gbrp,crop=${cropW}:${cropH}`,
-        )
-      }
-      if (it.fx.hue && Math.abs(it.fx.hue) >= 1) {
-        fxv.push(`format=yuv420p,hue=h=${it.fx.hue.toFixed(1)}`)
-      }
-      const satv = it.fx.sat ?? 1
-      if (it.fx.bright || it.fx.contrast || satv !== 1) {
-        const eq: string[] = []
-        if (it.fx.bright) eq.push(`brightness=${it.fx.bright.toFixed(3)}`)
-        if (it.fx.contrast) eq.push(`contrast=${(1 + it.fx.contrast).toFixed(3)}`)
-        eq.push(`saturation=${satv.toFixed(3)}`)
-        fxv.push(`format=yuv420p,eq=${eq.join(':')}`)
-      }
-      if (it.fx.grain && it.fx.grain > 0) {
-        const strength = Math.max(1, Math.round(it.fx.grain * 0.45))
-        fxv.push(`format=yuv420p,noise=alls=${strength}:allf=t+u`)
-      }
+      // (правка 848, 859, 861, 876) картинные эффекты шота — построение общее с клипами слоёв
+      const fxv = fxChainParts(it.fx, info.width, info.height, String(i))
       // (правка 848) setpts делит на скорость: (PTS-STARTPTS)/speed
       const pts = it.speed !== 1 ? `setpts=(PTS-STARTPTS)/${it.speed}` : 'setpts=PTS-STARTPTS'
       const fxStr = fxv.length ? `,${fxv.join(',')}` : ''
@@ -911,6 +924,9 @@ export async function POST(req: Request) {
       const at = li.at
       const trimV = s > 0.001 || e != null ? `trim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},` : ''
       const pts = li.speed !== 1 ? `setpts=(PTS-STARTPTS)/${li.speed}` : 'setpts=PTS-STARTPTS'
+      // (правка 876) картинные эффекты слоя — та же цепочка, что у шотов базы
+      const lfx = fxChainParts(li.fx, info.width, info.height, `L${j}`)
+      const fxStr = lfx.length ? `,${lfx.join(',')}` : ''
       const inIdx = items.length + j
       let ox = '0'
       let oy = '0'
@@ -928,7 +944,7 @@ export async function POST(req: Request) {
         const k = Math.min(evW / info.width, evH / info.height)
         const fw = Math.max(2, Math.floor((info.width * k) / 2) * 2)
         const fh = Math.max(2, Math.floor((info.height * k) / 2) * 2)
-        parts.push(`[${inIdx}:v]${trimV}${pts},split=2[bgL${j}][fgL${j}]`)
+        parts.push(`[${inIdx}:v]${trimV}${pts}${fxStr},split=2[bgL${j}][fgL${j}]`)
         parts.push(`[bgL${j}]scale=${evW}:${evH}:force_original_aspect_ratio=increase,crop=${evW}:${evH},gblur=sigma=20[bgLz${j}]`)
         parts.push(`[fgL${j}]scale=${fw}:${fh}[fgLz${j}]`)
         parts.push(`[bgLz${j}][fgLz${j}]overlay=(W-w)/2:(H-h)/2[bl${j}]`)
@@ -943,7 +959,7 @@ export async function POST(req: Request) {
           ? `scale=${evW}:${evH}:force_original_aspect_ratio=decrease`
           : `scale=${evW}:${evH}`
       }
-      parts.push(`[${inIdx}:v]${trimV}${pts},${fitStr},fps=${FPS},format=yuv420p,setsar=1,setpts=PTS+${at.toFixed(4)}/TB[lv${j}]`)
+      parts.push(`[${inIdx}:v]${trimV}${pts}${fxStr},${fitStr},fps=${FPS},format=yuv420p,setsar=1,setpts=PTS+${at.toFixed(4)}/TB[lv${j}]`)
       layerChains.push({ j, tag: `lv${j}`, x: ox, y: oy, at, end: at + dur })
     }
 

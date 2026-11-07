@@ -115,6 +115,8 @@ type LayerClip = {
   fit: 'stretch' | 'cover' | 'contain' | 'blur'
   duration: number
   hidden?: boolean
+  /** (правка 876) картинные эффекты слоя — те же, что у клипа базовой дорожки */
+  fx?: ShotFx
 }
 
 // (правка 874) аудиоклип звуковой дорожки (A1+): файл импортирован на сервер (.montage-audio)
@@ -490,6 +492,48 @@ function shotFxCss(fx: ShotFx | undefined, svgFilterId?: string): { filter?: str
   }
 }
 
+/** (правка 876) нужны ли эффектам SVG-фильтр (кривые/температура/дисперсия) */
+function needsSvgFx(fx?: ShotFx): boolean {
+  return !!(fx && (hasCurves(fx.curves) || (fx.dispersion && fx.dispersion > 0) || (fx.temp && Math.abs(fx.temp) >= 1)))
+}
+
+/** (правка 876) SVG-фильтр цветокоррекции для мгновенного превью (кривые + температура +
+ * радиальная дисперсия); общий для буферов плеера и клипов слоёв V2+ */
+function FxSvgFilter({ fx, id, dispMap }: { fx?: ShotFx; id: string; dispMap: string }) {
+  const c = fx?.curves
+  const temp = fx?.temp && Math.abs(fx.temp) >= 1 ? fx.temp / 380 : 0
+  const disp = fx?.dispersion && fx.dispersion > 0 ? fx.dispersion : 0
+  const rTab = buildChannelTable(c?.master, c?.r, temp)
+  const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
+  const bTab = buildChannelTable(c?.master, c?.b, -temp)
+  return (
+    <filter id={id} colorInterpolationFilters="sRGB" x="-2%" y="-2%" width="104%" height="104%">
+      <feComponentTransfer in="SourceGraphic" result="curved">
+        <feFuncR type="table" tableValues={rTab} />
+        <feFuncG type="table" tableValues={gTab} />
+        <feFuncB type="table" tableValues={bTab} />
+      </feComponentTransfer>
+      {disp > 0 && dispMap && (
+        <>
+          <feImage href={dispMap} x="0%" y="0%" width="100%" height="100%" preserveAspectRatio="none" result="dispMap" />
+          <feDisplacementMap in="curved" in2="dispMap" scale={disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radR" />
+          <feColorMatrix in="radR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
+          <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
+          <feDisplacementMap in="curved" in2="dispMap" scale={-disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radB" />
+          <feColorMatrix in="radB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
+          <feBlend in="chR" in2="chG" mode="screen" result="rg" />
+          <feBlend in="rg" in2="chB" mode="screen" result="abFull" />
+          <feComposite in="abFull" in2="dispMap" operator="in" result="abEdges" />
+          <feMerge>
+            <feMergeNode in="curved" />
+            <feMergeNode in="abEdges" />
+          </feMerge>
+        </>
+      )}
+    </filter>
+  )
+}
+
 /**
  * (правка 861) Генерирует карту радиальной линзовой дисперсии 256×256 (как в DaVinci Resolve):
  * - В центре кадра (радиус <= 32%) R=128, G=128, Alpha=0 -> центр НЕ задействуется вообще (100% чистый)!
@@ -737,6 +781,8 @@ export function MontageView() {
   const gapPlayRef = useRef<{ startWall: number; startT: number; endT: number; nextIdx: number } | null>(null)
   /** (правка 860) последняя готовая кинополоса каждого шота (чтобы при ресайзе дорожки не мигало) */
   const lastStripByShotRef = useRef<Record<string, string>>({})
+  // (правка 876) последняя готовая полоса для клипа слоя (пока строится новая)
+  const lastStripByLayerRef = useRef<Record<string, string>>({})
   /** (правка 859, 861) dataURL тайла киношного зерна, карты радиальной дисперсии и DOM-реф анимированного слоя */
   const [grainTile, setGrainTile] = useState('')
   const [radialDispMap, setRadialDispMap] = useState('')
@@ -891,7 +937,7 @@ export function MontageView() {
     host.tagName === 'VIDEO' ? [host as HTMLVideoElement] : Array.from(host.querySelectorAll('video'))
   useEffect(() => {
     const live = new Set<string>()
-    if (playing && !result) {
+    if (!result) {
       for (const l of layers) {
         if (l.hidden) continue
         const sp = l.speed || 1
@@ -901,8 +947,15 @@ export function MontageView() {
         live.add(l.key)
         const want = Math.min(l.trimStart + (playT - l.at) * sp, Math.max(0, (l.duration || 0) - 0.01))
         for (const v of layerVideosOf(host)) {
-          if (Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = Math.max(0, want) } catch { /* ignore */ } }
-          if (v.paused) void v.play().catch(() => {})
+          // (правка 876) скорость слоя учитываем и в превью (playbackRate)
+          if (Math.abs(v.playbackRate - sp) > 0.01) v.playbackRate = sp
+          if (playing) {
+            if (Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = Math.max(0, want) } catch { /* ignore */ } }
+            if (v.paused) void v.play().catch(() => {})
+          } else if (Math.abs(v.currentTime - want) > 0.02) {
+            // (правка 876) на паузе кадр слоя позиционируется по плейхеду — как у базы
+            try { v.currentTime = Math.max(0, want) } catch { /* ignore */ }
+          }
         }
       }
       for (const a of audios) {
@@ -912,9 +965,14 @@ export function MontageView() {
         if (!el) continue
         live.add(a.key)
         const want = Math.min(a.trimStart + (playT - a.at), Math.max(0, (a.duration || 0) - 0.01))
-        if (Math.abs(el.currentTime - want) > 0.35) { try { el.currentTime = Math.max(0, want) } catch { /* ignore */ } }
-        el.volume = muted ? 0 : Math.max(0, Math.min(1, ((a.vol ?? 100) / 100) * masterVol))
-        if (el.paused) void el.play().catch(() => {})
+        if (playing) {
+          if (Math.abs(el.currentTime - want) > 0.35) { try { el.currentTime = Math.max(0, want) } catch { /* ignore */ } }
+          el.volume = muted ? 0 : Math.max(0, Math.min(1, ((a.vol ?? 100) / 100) * masterVol))
+          if (el.paused) void el.play().catch(() => {})
+        } else if (Math.abs(el.currentTime - want) > 0.02) {
+          // (правка 876) готовим позицию звука к старту воспроизведения
+          try { el.currentTime = Math.max(0, want) } catch { /* ignore */ }
+        }
       }
     }
     for (const [k, host] of layerElsRef.current) {
@@ -956,6 +1014,8 @@ export function MontageView() {
           fit: (['stretch', 'cover', 'contain', 'blur'] as const).includes(x.fit as 'blur') ? (x.fit as LayerClip['fit']) : 'stretch',
           duration: Number.isFinite(x.duration as number) ? Math.max(0, x.duration as number) : 0,
           hidden: x.hidden === true,
+          // (правка 876) эффекты слоя: валидируем через cloneFx, мусор отбрасываем
+          fx: x.fx && typeof x.fx === 'object' && hasFx(x.fx as ShotFx) ? cloneFx(x.fx as ShotFx) : undefined,
         }))
       setLayers(ls)
       setLayerTracks(ls.reduce((m, l) => Math.max(m, l.track), 0))
@@ -1732,14 +1792,34 @@ export function MontageView() {
     }),
     [pps, trackH],
   )
+  // (правка 876) размеры/окно кинополосы для чипа слоя (тот же кэш strips, что у базы)
+  const layerStripReq = useCallback(
+    (l: LayerClip) => {
+      const w = Math.max(14, layerLen(l) * pps)
+      const h = Math.max(30, Math.round(trackH * 0.7))
+      const start = l.trimStart
+      const end = Math.max(start + 0.05, (l.duration || 0) - l.trimEnd)
+      return { w, h, r: { start, end } }
+    },
+    [layerLen, pps, trackH],
+  )
   useEffect(() => {
     if (playing) return
+    type StripJob = { url: string; r: { start: number; end: number }; w: number; h: number; shotKey?: string; layerKey?: string }
+    const jobs: StripJob[] = []
+    for (const row of seq) {
+      const { w, h } = stripDims(row)
+      jobs.push({ url: row.shot.url, r: row.r, w, h, shotKey: row.shot.key })
+    }
+    // (правка 876) полосы для чипов слоёв V2+ — как у базовой дорожки
+    for (const l of layers) {
+      if (!l.duration) continue
+      const { w, h, r } = layerStripReq(l)
+      jobs.push({ url: l.url, r, w, h, layerKey: l.key })
+    }
     // (правка 841) чистим полосы ушедших шотов/подрезок: без этого кэш dataURL
     // растёт всю жизнь вкладки (единицы МБ на каждые 60 клипов с правками)
-    const live = new Set(seq.map((row) => {
-      const { w, h } = stripDims(row)
-      return stripKey(row.shot.url, row.r, w, h)
-    }))
+    const live = new Set(jobs.map((j) => stripKey(j.url, j.r, j.w, j.h)))
     setStrips((prev) => {
       const keys = Object.keys(prev)
       if (!keys.some((k) => !live.has(k))) return prev
@@ -1747,29 +1827,28 @@ export function MontageView() {
       for (const k of keys) if (live.has(k)) next[k] = prev[k]
       return next
     })
-    const need = seq.filter((row) => {
-      const { w, h } = stripDims(row)
-      const k = stripKey(row.shot.url, row.r, w, h)
+    const need = jobs.filter((j) => {
+      const k = stripKey(j.url, j.r, j.w, j.h)
       return !strips[k] && !stripBusy.current.has(k)
     })
     if (!need.length) return
     const timer = setTimeout(() => {
       if (playingRef.current || scrubbingRef.current || suppressDrag.current) return
-      const row = need[0]
-      const { w, h } = stripDims(row)
-      const k = stripKey(row.shot.url, row.r, w, h)
+      const job = need[0]
+      const k = stripKey(job.url, job.r, job.w, job.h)
       if (stripBusy.current.has(k)) return
       stripBusy.current.add(k)
-      makeStrip(row.shot.url, row.r, w, h).then((data) => {
+      makeStrip(job.url, job.r, job.w, job.h).then((data) => {
         stripBusy.current.delete(k)
         // (правка 842) вкладка могла закрыться/шот удалиться, пока полоса строилась
         if (!mountedRef.current || !live.has(k)) return
-        if (data) lastStripByShotRef.current[row.shot.key] = data
+        if (data && job.shotKey) lastStripByShotRef.current[job.shotKey] = data
+        if (data && job.layerKey) lastStripByLayerRef.current[job.layerKey] = data
         setStrips((prev) => ({ ...prev, [k]: data ?? '' }))
       })
     }, 240)
     return () => clearTimeout(timer)
-  }, [seq, strips, stripDims, playing])
+  }, [seq, strips, stripDims, layerStripReq, playing, layers])
 
   // скраб по линейке и за головку плейхеда
   const startScrub = useCallback((e: React.PointerEvent) => {
@@ -1845,10 +1924,66 @@ export function MontageView() {
 
   /** разрез шота под плейхедом на две части (S) */
   const splitAtPlayhead = useCallback(() => {
+    const t = seqTRef.current
+    // (правка 876) разрез по плейхеду работает для любого выделенного клипа:
+    // очерёдность та же, что у Del/D и панели свойств — слой → аудио → база
+    const lay = selectedLayerKey ? layersRef.current.find((x) => x.key === selectedLayerKey) : null
+    if (lay) {
+      stopSeq(false)
+      if (!lay.duration) {
+        showToast('Длительность исходника ещё не известна — попробуйте позже', 'error')
+        return
+      }
+      const len = layerLen(lay)
+      if (t < lay.at + 0.05 || t >= lay.at + len - 0.05) {
+        showToast('Поставьте плейхед внутрь клипа слоя (не на его край)', 'error')
+        return
+      }
+      if (layersRef.current.length >= MAX_LAYER_CLIPS) {
+        showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
+        return
+      }
+      const local = lay.trimStart + (t - lay.at) * (lay.speed || 1)
+      if (local >= lay.duration - lay.trimEnd - 0.05) {
+        showToast('Поставьте плейхед внутри исходника (не на его край)', 'error')
+        return
+      }
+      pushHistory()
+      const left: LayerClip = { ...lay, trimEnd: Math.max(0, +(lay.duration - local).toFixed(3)) }
+      const right: LayerClip = { ...lay, key: newLayerKey(), at: +t.toFixed(3), trimStart: +Math.max(0, local).toFixed(3) }
+      setLayers((prev) => prev.flatMap((x) => (x.key === lay.key ? [left, right] : [x])))
+      setSelectedLayerKey(right.key)
+      setResult(null)
+      return
+    }
+    const aud = selectedAudioKey ? audiosRef.current.find((x) => x.key === selectedAudioKey) : null
+    if (aud) {
+      stopSeq(false)
+      if (!aud.duration) {
+        showToast('Длительность файла ещё не известна — попробуйте позже', 'error')
+        return
+      }
+      const len = audioLen(aud)
+      if (t < aud.at + 0.05 || t >= aud.at + len - 0.05) {
+        showToast('Поставьте плейхед внутрь аудиоклипа (не на его край)', 'error')
+        return
+      }
+      if (audiosRef.current.length >= MAX_AUDIO_CLIPS) {
+        showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
+        return
+      }
+      const local = Math.max(0, Math.min(aud.duration - 0.05, aud.trimStart + (t - aud.at)))
+      pushHistory()
+      const left: AudioClip = { ...aud, trimEnd: Math.max(0, +(aud.duration - local).toFixed(3)) }
+      const right: AudioClip = { ...aud, key: newAudioKey(), at: +t.toFixed(3), trimStart: +local.toFixed(3) }
+      setAudios((prev) => prev.flatMap((x) => (x.key === aud.key ? [left, right] : [x])))
+      setSelectedAudioKey(right.key)
+      setResult(null)
+      return
+    }
     const sq = seqRef.current
     if (!sq.length) return
     stopSeq(false)
-    const t = seqTRef.current
     const loc = findAtTime(t)
     if (loc.inGap) {
       showToast('Поставьте плейхед внутрь клипа (не в пустой промежуток)', 'error')
@@ -1879,7 +2014,7 @@ export function MontageView() {
       return next
     })
     setSelectedKey(right.key)
-  }, [stopSeq, pushHistory])
+  }, [stopSeq, pushHistory, selectedLayerKey, selectedAudioKey, layerLen, audioLen])
 
   /** копия шота сразу за оригиналом (D) */
   const duplicateShot = useCallback((key: string) => {
@@ -2031,29 +2166,43 @@ export function MontageView() {
    */
 
   // (правка 859) обновление эффектов выбранного клипа и копирование между клипами
+  // (правка 876) цель панели «Эффекты»: выделенный слой важнее базового клипа
+  // (та же очерёдность, что в панели свойств и у хоткеев Del/D)
+  const fxTarget: (MontageShot | LayerClip) | null = selectedLayer || selected
   const updateSelectedFx = useCallback((patch: Partial<ShotFx> | ((prev: ShotFx) => ShotFx)) => {
-    setShots((prev) =>
-      prev.map((x) => {
-        if (x.key !== selectedKey) return x
-        const cur = x.fx || {}
-        const nextFx = typeof patch === 'function' ? patch(cur) : { ...cur, ...patch }
-        return { ...x, fx: nextFx }
-      }),
-    )
-  }, [selectedKey])
+    const apply = <T extends { fx?: ShotFx }>(x: T): T => {
+      const cur = x.fx || {}
+      const nextFx = typeof patch === 'function' ? patch(cur) : { ...cur, ...patch }
+      return { ...x, fx: nextFx }
+    }
+    if (selectedLayerKey) {
+      setLayers((prev) => prev.map((x) => (x.key === selectedLayerKey ? apply(x) : x)))
+    } else if (selectedKey) {
+      setShots((prev) => prev.map((x) => (x.key === selectedKey ? apply(x) : x)))
+    }
+  }, [selectedKey, selectedLayerKey])
 
   const resetSelectedFx = useCallback(() => {
-    if (!selectedKey) return
-    pushHistory()
-    setShots((prev) => prev.map((x) => (x.key === selectedKey ? { ...x, fx: undefined } : x)))
-    showToast('Эффекты клипа сброшены')
-  }, [selectedKey, pushHistory])
+    if (selectedLayerKey) {
+      pushHistory()
+      setLayers((prev) => prev.map((x) => (x.key === selectedLayerKey ? { ...x, fx: undefined } : x)))
+      showToast('Эффекты слоя сброшены')
+    } else if (selectedKey) {
+      pushHistory()
+      setShots((prev) => prev.map((x) => (x.key === selectedKey ? { ...x, fx: undefined } : x)))
+      showToast('Эффекты клипа сброшены')
+    }
+  }, [selectedKey, selectedLayerKey, pushHistory])
 
   const applyFxToTargets = useCallback((sourceFx: ShotFx | undefined, targetKeys: string[], label: string) => {
     if (!targetKeys.length) return
     pushHistory()
     const targetSet = new Set(targetKeys)
+    // (правка 876) ключи могут быть у клипов базы и у слоёв — обновляем и тех, и других
     setShots((prev) =>
+      prev.map((x) => (targetSet.has(x.key) ? { ...x, fx: hasFx(sourceFx) ? cloneFx(sourceFx) : undefined } : x)),
+    )
+    setLayers((prev) =>
       prev.map((x) => (targetSet.has(x.key) ? { ...x, fx: hasFx(sourceFx) ? cloneFx(sourceFx) : undefined } : x)),
     )
     showToast(label)
@@ -2253,6 +2402,8 @@ export function MontageView() {
                 l.duration > 0 && l.trimEnd > 0.001 ? +Math.max(0.05, l.duration - l.trimEnd).toFixed(3) : undefined,
               speed: l.speed !== 1 ? l.speed : undefined,
               fit: l.fit,
+              // (правка 876) эффекты слоя едут в рендер так же, как у базовых клипов
+              fx: hasFx(l.fx) ? l.fx : undefined,
             })),
           // (правка 874) аудиоклипы звуковых дорожек (muted не едут в микс)
           audios: audios
@@ -2986,40 +3137,14 @@ export function MontageView() {
               {[0, 1].map((b) => {
                 const bKey = buf === b ? (previewVolKeyRef.current ?? bufShotKeyRef.current[b] ?? selectedKey) : bufShotKeyRef.current[b]
                 const bShot = !result && bKey ? shots.find((s) => s.key === bKey) : null
-                const fx = bShot?.fx
-                const c = fx?.curves
-                const temp = fx?.temp && Math.abs(fx.temp) >= 1 ? fx.temp / 380 : 0
-                const disp = fx?.dispersion && fx.dispersion > 0 ? fx.dispersion : 0
-                const rTab = buildChannelTable(c?.master, c?.r, temp)
-                const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
-                const bTab = buildChannelTable(c?.master, c?.b, -temp)
-                return (
-                  <filter key={b} id={`h3-fx-buf-${b}`} colorInterpolationFilters="sRGB" x="-2%" y="-2%" width="104%" height="104%">
-                    <feComponentTransfer in="SourceGraphic" result="curved">
-                      <feFuncR type="table" tableValues={rTab} />
-                      <feFuncG type="table" tableValues={gTab} />
-                      <feFuncB type="table" tableValues={bTab} />
-                    </feComponentTransfer>
-                    {disp > 0 && radialDispMap && (
-                      <>
-                        <feImage href={radialDispMap} x="0%" y="0%" width="100%" height="100%" preserveAspectRatio="none" result="dispMap" />
-                        <feDisplacementMap in="curved" in2="dispMap" scale={disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radR" />
-                        <feColorMatrix in="radR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
-                        <feColorMatrix in="curved" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
-                        <feDisplacementMap in="curved" in2="dispMap" scale={-disp * 1.1} xChannelSelector="R" yChannelSelector="G" result="radB" />
-                        <feColorMatrix in="radB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
-                        <feBlend in="chR" in2="chG" mode="screen" result="rg" />
-                        <feBlend in="rg" in2="chB" mode="screen" result="abFull" />
-                        <feComposite in="abFull" in2="dispMap" operator="in" result="abEdges" />
-                        <feMerge>
-                          <feMergeNode in="curved" />
-                          <feMergeNode in="abEdges" />
-                        </feMerge>
-                      </>
-                    )}
-                  </filter>
-                )
+                return <FxSvgFilter key={b} fx={bShot?.fx} id={`h3-fx-buf-${b}`} dispMap={radialDispMap} />
               })}
+              {/* (правка 876) SVG-фильтры эффектов клипов слоёв V2+ (только когда нужны) */}
+              {layers.map((l) =>
+                needsSvgFx(l.fx) ? (
+                  <FxSvgFilter key={`l-${l.key}`} fx={l.fx} id={`h3-fx-layer-${l.key}`} dispMap={radialDispMap} />
+                ) : null,
+              )}
             </defs>
           </svg>
           {/* (правка 874) видео-слои поверх базового кадра, синхронно playT.
@@ -3029,6 +3154,8 @@ export function MontageView() {
               const len = layerLen(l)
               if (l.hidden || playT < l.at || playT >= l.at + len) return null
               const objFit = l.fit === 'contain' ? 'contain' : l.fit === 'cover' ? 'cover' : l.fit === 'blur' ? 'contain' : 'fill'
+              // (правка 876) эффекты слоя показываем в превью так же, как у базовых клипов
+              const fxCss = shotFxCss(l.fx, `h3-fx-layer-${l.key}`)
               return (
                 <video
                   key={l.key}
@@ -3044,7 +3171,8 @@ export function MontageView() {
                   style={{
                     left: '50%',
                     top: '50%',
-                    transform: 'translate(-50%, -50%)',
+                    transform: `translate(-50%, -50%) scale(${fxCss.scaleX}, ${fxCss.scaleY})`,
+                    filter: fxCss.filter,
                     width: `${Math.round(vScale * 100)}%`,
                     maxWidth: '100%',
                     maxHeight: `${Math.round(vScale * 100)}%`,
@@ -3468,6 +3596,11 @@ export function MontageView() {
                   </span>
                   {clips.map((l) => {
                     const w = Math.max(14, layerLen(l) * pps)
+                    // (правка 876) кинополоса на чипе слоя — как у базовой дорожки;
+                    // пока строится новая — показываем предыдущую с cover-кропом
+                    const { w: sw, h: sh, r: sr } = layerStripReq(l)
+                    const exactStrip = strips[stripKey(l.url, sr, sw, sh)]
+                    const strip = exactStrip || lastStripByLayerRef.current[l.key]
                     return (
                       <div
                         key={l.key}
@@ -3479,17 +3612,35 @@ export function MontageView() {
                             : 'border-[#7C3AED]/40 hover:border-[#A78BFA]/70',
                           l.hidden && 'opacity-40',
                         )}
-                        style={{ left: `${l.at * pps}px`, width: `${w}px` }}
+                        style={{
+                          left: `${l.at * pps}px`,
+                          width: `${w}px`,
+                          backgroundImage: strip ? `url(${strip})` : undefined,
+                          backgroundSize: exactStrip ? '100% 100%' : 'cover',
+                          backgroundPosition: 'center',
+                          backgroundRepeat: 'no-repeat',
+                        }}
                         title={`${l.name} · слой V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с · звук слоя в сборку не входит`}
                       >
-                        <img
-                          src={`${l.url}${l.url.includes('?') ? '&' : '?'}width=160`}
-                          alt=""
-                          draggable={false}
-                          loading="lazy"
-                          className="h-full w-full object-cover opacity-70"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
+                        {!strip && (
+                          <img
+                            src={`${l.url}${l.url.includes('?') ? '&' : '?'}width=160`}
+                            alt=""
+                            draggable={false}
+                            loading="lazy"
+                            className="h-full w-full object-cover opacity-70"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        )}
+                        {/* (правка 876) маркер активных эффектов на слое */}
+                        {hasFx(l.fx) && (
+                          <span
+                            className="pointer-events-none absolute left-1 top-1 rounded bg-[#7C3AED]/80 px-1 py-0.2 text-[9px] font-semibold text-white"
+                            title="На слое применены эффекты"
+                          >
+                            FX
+                          </span>
+                        )}
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
                           {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}
                         </div>
@@ -3740,7 +3891,7 @@ export function MontageView() {
               )}
             >
               {label}
-              {id === 'fx' && selected && hasFx(selected.fx) && (
+              {id === 'fx' && fxTarget && hasFx(fxTarget.fx) && (
                 <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 align-middle" />
               )}
             </button>
@@ -3894,6 +4045,32 @@ export function MontageView() {
                         )}
                       >
                         {v}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* (правка 876) отражения слоя — как у клипа базовой дорожки */}
+                <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="text-[11px] font-medium text-zinc-300">Отражение кадра</div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([
+                      ['flipH', '↔ По горизонтали'],
+                      ['flipV', '↕ По вертикали'],
+                    ] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() => {
+                          pushHistory()
+                          updateSelectedFx((cur) => ({ ...cur, [k]: !cur[k] }))
+                        }}
+                        className={cn(
+                          'rounded border px-2 py-1.5 text-[11px] transition-colors',
+                          selectedLayer.fx?.[k]
+                            ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
+                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                        )}
+                      >
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -4293,9 +4470,9 @@ export function MontageView() {
         {/* ВКЛАДКА 3: ЭФФЕКТЫ (Кривые цвета, Насыщенность, Яркость, Контраст, Дисперсия, Киношный шум + Копирование) */}
         {rightTab === 'fx' && (
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
-            {!selected ? (
+            {!fxTarget ? (
               <div className="rounded-lg border border-dashed border-border p-4 text-center text-zinc-500">
-                <div>Выберите клип на таймлайне, чтобы настроить его эффекты</div>
+                <div>Выберите клип на базовой дорожке или слой V2+, чтобы настроить его эффекты</div>
                 {shots.length > 0 && (
                   <button
                     onClick={() => setSelectedKey(shots[0].key)}
@@ -4310,12 +4487,18 @@ export function MontageView() {
                 {/* шапка выбранного клипа + сброс */}
                 <div className="flex items-center justify-between rounded-lg border border-border bg-[var(--surface-2)] px-2.5 py-2">
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-zinc-100">{selected.name}</div>
+                    <div className="truncate font-medium text-zinc-100">
+                      {fxTarget.name}
+                      {/* (правка 876) подпись дорожки: слой V2+ или базовая V1 */}
+                      {'track' in fxTarget ? (
+                        <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">слой V{fxTarget.track + 1}</span>
+                      ) : null}
+                    </div>
                     <div className="text-[10px] text-zinc-400">
-                      {hasFx(selected.fx) ? 'Эффекты активны (видны в превью и рендере)' : 'Без эффектов'}
+                      {hasFx(fxTarget.fx) ? 'Эффекты активны (видны в превью и рендере)' : 'Без эффектов'}
                     </div>
                   </div>
-                  {hasFx(selected.fx) && (
+                  {hasFx(fxTarget.fx) && (
                     <button
                       onClick={resetSelectedFx}
                       className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-zinc-300 hover:border-red-500/50 hover:text-red-300"
@@ -4327,7 +4510,7 @@ export function MontageView() {
 
                 {/* 1. КРИВЫЕ ЦВЕТА (RGB Curves, правка 861: 5 узлов [x,y] с 2D-перетаскиванием как в DaVinci Resolve) */}
                 {(() => {
-                  const curCurves = selected.fx?.curves || {}
+                  const curCurves = fxTarget.fx?.curves || {}
                   const activePts: CurvePts = normalizeCurvePts(curCurves[curveCh])
                   const strokeColor =
                     curveCh === 'r' ? '#f87171' : curveCh === 'g' ? '#4ade80' : curveCh === 'b' ? '#60a5fa' : '#A78BFA'
@@ -4570,7 +4753,7 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — сбросить в 0"
                       >
-                        {Math.round(selected.fx?.temp ?? 0) > 0 ? `+${Math.round(selected.fx?.temp ?? 0)}` : `${Math.round(selected.fx?.temp ?? 0)}`}
+                        {Math.round(fxTarget.fx?.temp ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.temp ?? 0)}` : `${Math.round(fxTarget.fx?.temp ?? 0)}`}
                       </button>
                     </div>
                     <input
@@ -4578,7 +4761,7 @@ export function MontageView() {
                       min={-100}
                       max={100}
                       step={1}
-                      value={Math.round(selected.fx?.temp ?? 0)}
+                      value={Math.round(fxTarget.fx?.temp ?? 0)}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value)
@@ -4598,7 +4781,7 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — сбросить в 0°"
                       >
-                        {Math.round(selected.fx?.hue ?? 0) > 0 ? `+${Math.round(selected.fx?.hue ?? 0)}°` : `${Math.round(selected.fx?.hue ?? 0)}°`}
+                        {Math.round(fxTarget.fx?.hue ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.hue ?? 0)}°` : `${Math.round(fxTarget.fx?.hue ?? 0)}°`}
                       </button>
                     </div>
                     <input
@@ -4606,7 +4789,7 @@ export function MontageView() {
                       min={-180}
                       max={180}
                       step={1}
-                      value={Math.round(selected.fx?.hue ?? 0)}
+                      value={Math.round(fxTarget.fx?.hue ?? 0)}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value)
@@ -4624,14 +4807,14 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — сбросить в 0"
                       >
-                        {Math.round((selected.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((selected.fx?.bright ?? 0) * 100)}%` : `${Math.round((selected.fx?.bright ?? 0) * 100)}%`}
+                        {Math.round((fxTarget.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%`}
                       </button>
                     </div>
                     <input
                       type="range"
                       min={-50}
                       max={50}
-                      value={Math.round((selected.fx?.bright ?? 0) * 100)}
+                      value={Math.round((fxTarget.fx?.bright ?? 0) * 100)}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value) / 100
@@ -4649,14 +4832,14 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — сбросить в 0"
                       >
-                        {Math.round((selected.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((selected.fx?.contrast ?? 0) * 100)}%` : `${Math.round((selected.fx?.contrast ?? 0) * 100)}%`}
+                        {Math.round((fxTarget.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%`}
                       </button>
                     </div>
                     <input
                       type="range"
                       min={-50}
                       max={50}
-                      value={Math.round((selected.fx?.contrast ?? 0) * 100)}
+                      value={Math.round((fxTarget.fx?.contrast ?? 0) * 100)}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value) / 100
@@ -4674,14 +4857,14 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — сбросить в 100%"
                       >
-                        {Math.round((selected.fx?.sat ?? 1) * 100)}%
+                        {Math.round((fxTarget.fx?.sat ?? 1) * 100)}%
                       </button>
                     </div>
                     <input
                       type="range"
                       min={0}
                       max={200}
-                      value={Math.round((selected.fx?.sat ?? 1) * 100)}
+                      value={Math.round((fxTarget.fx?.sat ?? 1) * 100)}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const sat = Number(e.target.value) / 100
@@ -4718,7 +4901,7 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — выключить дисперсию"
                       >
-                        {selected.fx?.dispersion ?? 0} пикс
+                        {fxTarget.fx?.dispersion ?? 0} пикс
                       </button>
                     </div>
                     <input
@@ -4726,7 +4909,7 @@ export function MontageView() {
                       min={0}
                       max={20}
                       step={1}
-                      value={selected.fx?.dispersion ?? 0}
+                      value={fxTarget.fx?.dispersion ?? 0}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value)
@@ -4746,7 +4929,7 @@ export function MontageView() {
                         className="font-mono text-[#A78BFA] hover:underline"
                         title="Клик — выключить шум"
                       >
-                        {selected.fx?.grain ?? 0}%
+                        {fxTarget.fx?.grain ?? 0}%
                       </button>
                     </div>
                     <input
@@ -4754,7 +4937,7 @@ export function MontageView() {
                       min={0}
                       max={100}
                       step={1}
-                      value={selected.fx?.grain ?? 0}
+                      value={fxTarget.fx?.grain ?? 0}
                       onPointerDown={pushHistory}
                       onChange={(e) => {
                         const v = Number(e.target.value)
@@ -4771,7 +4954,7 @@ export function MontageView() {
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => {
-                        setCopiedFx(cloneFx(selected.fx))
+                        setCopiedFx(cloneFx(fxTarget.fx))
                         showToast('Эффекты клипа скопированы в буфер')
                       }}
                       className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-zinc-200 hover:border-[#A78BFA]"
@@ -4783,25 +4966,29 @@ export function MontageView() {
                       disabled={!copiedFx}
                       onClick={() => {
                         if (!copiedFx) return
-                        applyFxToTargets(copiedFx, [selected.key], `Эффекты вставлены в «${selected.name}»`)
+                        applyFxToTargets(copiedFx, [fxTarget.key], `Эффекты вставлены в «${fxTarget.name}»`)
                       }}
                       className="rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-zinc-200 hover:border-[#A78BFA] disabled:opacity-40"
                     >
                       Вставить сюда
                     </button>
                   </div>
-                  {shots.length > 1 && (
+                  {shots.length + layers.length > 1 && (
                     <button
                       onClick={() =>
                         applyFxToTargets(
-                          selected.fx,
-                          shots.filter((s) => s.key !== selected.key).map((s) => s.key),
-                          `Эффекты применены ко всем клипам (${shots.length})`,
+                          fxTarget.fx,
+                          [
+                            ...shots.filter((s) => s.key !== fxTarget.key).map((s) => s.key),
+                            // (правка 876) «на все клипы» теперь захватывает и слои V2+
+                            ...layers.filter((l) => l.key !== fxTarget.key).map((l) => l.key),
+                          ],
+                          `Эффекты применены ко всем клипам и слоям (${shots.length + layers.length})`,
                         )
                       }
                       className="w-full rounded bg-[#7C3AED] py-1.5 text-[11px] font-medium text-white hover:bg-[#6D28D9]"
                     >
-                      Скопировать на все клипы таймлайна ({shots.length - 1})
+                      Скопировать на все клипы и слои ({shots.length + layers.length - 1})
                     </button>
                   )}
                 </div>
