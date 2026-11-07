@@ -221,11 +221,11 @@ interface TransitionSpec {
 }
 
 /**
- * (правка 874) клип видео-слоя поверх базовой дорожки (V2+). Картинка: звук
- * слоя не смешивается (как верхние видеодорожки в DaVinci). Позиция —
+ * (правка 874, 877) клип видео-слоя поверх базовой дорожки (V2+). Позиция —
  * абсолютная на шкале сборки (at, сек); порядок слоёв = track по возрастанию
  * (меньший номер ниже, больший перекрывает). Клипы за концом базовой
- * дорожки обрезаются длиной базы.
+ * дорожки обрезаются длиной базы. Звук слоя (правка 877) микшируется с базой
+ * по тем же правилам, что у шота: громкость/фейды + adelay по at.
  */
 interface MontageLayerInput {
   /** имя файла в папке output ComfyUI (как у шотов) */
@@ -243,6 +243,12 @@ interface MontageLayerInput {
   fit?: string | null
   /** (правка 876) картинные эффекты слоя — те же, что у шотов */
   fx?: ShotFx | null
+  /** (правка 877) громкость звука слоя, 0..1; не задана = 1 */
+  vol?: number | string | null
+  /** (правка 877) плавное появление звука слоя, сек */
+  fadeIn?: number | string | null
+  /** (правка 877) плавное затухание звука слоя, сек */
+  fadeOut?: number | string | null
 }
 
 /**
@@ -683,6 +689,10 @@ export async function POST(req: Request) {
       fit: string
       /** (правка 876) картинные эффекты слоя — те же, что у шотов */
       fx: ShotFx
+      /** (правка 877) звук слоя */
+      vol: number
+      fi: number
+      fo: number
     }> = []
     for (const l of rawLayers) {
       const name = String(l?.name || '')
@@ -713,6 +723,9 @@ export async function POST(req: Request) {
         speed: parseSpeed(l.speed),
         fit: ['stretch', 'cover', 'contain', 'blur'].includes(String(l.fit)) ? String(l.fit) : 'cover',
         fx: cleanFx(l.fx),
+        vol: parseVol(l.vol),
+        fi: parseFade(l.fadeIn),
+        fo: parseFade(l.fadeOut),
       })
     }
 
@@ -903,11 +916,13 @@ export async function POST(req: Request) {
         parts.push(`anullsrc=r=44100:cl=stereo,atrim=duration=${dur.toFixed(4)}[a${i}]`)
       }
     }
-    // ---- (правка 874) цепочки клипов видео-слоёв: картинка на канву секвенции,
+    // ---- (правка 874, 877) цепочки клипов видео-слоёв: картинка на канву секвенции,
     // PTS со сдвигом на at (overlay рисует по таймстемпам, поэтому без сдвига
-    // кадр слоя попал бы в начало шкалы). Звук слоя не участвует. ----
+    // кадр слоя попал бы в начало шкалы). Звук слоя строится отдельной цепочкой. ----
     interface LayerChain { j: number; tag: string; x: string; y: string; at: number; end: number }
     const layerChains: LayerChain[] = []
+    /** (правка 877) метки звуковых цепочек слоёв для общего amix */
+    const layerAudioTags: string[] = []
     for (let j = 0; j < layerItems.length; j++) {
       const li = layerItems[j]
       const info = layerInfos[j]
@@ -928,6 +943,27 @@ export async function POST(req: Request) {
       const lfx = fxChainParts(li.fx, info.width, info.height, `L${j}`)
       const fxStr = lfx.length ? `,${lfx.join(',')}` : ''
       const inIdx = items.length + j
+      // (правка 877) звук слоя: подрезка/скорость/фейды/громкость + сдвиг по at —
+      // та же схема, что у шотов базы; нет звука/нулевая громкость = цепочки нет
+      let aTag: string | null = null
+      if (info.hasAudio && li.vol > 0.001) {
+        const atrimV = s > 0.001 || e != null
+          ? `atrim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},asetpts=PTS-STARTPTS,`
+          : ''
+        const fi = Math.min(li.fi, Math.max(0, dur - 0.01))
+        const fo = Math.min(li.fo, Math.max(0, dur - 0.01))
+        // (правка 877) фейды считаем в секундах готовой дорожки: сначала atempo,
+        // затем afade — так превью и рендер совпадают и при speed ≠ 1
+        const spd = li.speed !== 1 ? `${atempoChain(li.speed)},` : ''
+        const af = (fi > 0.01 ? `afade=t=in:st=0:d=${fi.toFixed(4)},` : '')
+          + (fo > 0.01 ? `afade=t=out:st=${Math.max(0, dur - fo).toFixed(4)}:d=${fo.toFixed(4)},` : '')
+        const av = li.vol !== 1 ? `volume=${li.vol.toFixed(4)},` : ''
+        const ms = Math.round(at * 1000)
+        const dl = ms > 0 ? `,adelay=${ms}|${ms}` : ''
+        aTag = `la${j}`
+        parts.push(`[${inIdx}:a]${atrimV}${spd}${af}${av}aresample=44100,aformat=channel_layouts=stereo${dl}[${aTag}]`)
+        layerAudioTags.push(aTag)
+      }
       let ox = '0'
       let oy = '0'
       let fitStr: string
@@ -1025,10 +1061,11 @@ export async function POST(req: Request) {
     const pairs = runV.map((v, r) => `[${v}][${runA[r]}]`).join('')
     parts.push(`${pairs}concat=n=${runV.length}:v=1:a=1[vout][aout]`)
     let aOutTag = 'aout'
-    // ---- (правка 874) микс звуковых дорожек: базовый звук + аудиоклипы
-    // (atrim+фейды+громкость, сдвиг adelay по at), amix=normalize=0 чтобы
-    // громкость не делилась на количество входов; итог режем по длине базы. ----
-    if (audioItems.length) {
+    // ---- (правка 874, 877) микс звуковых дорожек: базовый звук + аудиоклипы
+    // + звук видео-слоёв (atrim+фейды+громкость, сдвиг adelay по at), amix=normalize=0
+    // чтобы громкость не делилась на количество входов; итог режем по длине базы. ----
+    const mixInputs = audioItems.length + layerAudioTags.length
+    if (mixInputs > 0) {
       for (let k = 0; k < audioItems.length; k++) {
         const ai = audioItems[k]
         const info = audioInfos[k]
@@ -1055,8 +1092,12 @@ export async function POST(req: Request) {
         const dl = ms > 0 ? `,adelay=${ms}|${ms}` : ''
         parts.push(`[${inIdx}:a]${at}${af}${av}aresample=44100,aformat=channel_layouts=stereo${dl}[ac${k}]`)
       }
-      const mixIn = [`[aout]`, ...audioItems.map((_, k) => `[ac${k}]`)].join('')
-      parts.push(`${mixIn}amix=inputs=${audioItems.length + 1}:normalize=0:duration=longest:dropout_transition=0[mix]`)
+      const mixIn = [
+        `[aout]`,
+        ...audioItems.map((_, k) => `[ac${k}]`),
+        ...layerAudioTags.map((t) => `[${t}]`),
+      ].join('')
+      parts.push(`${mixIn}amix=inputs=${mixInputs + 1}:normalize=0:duration=longest:dropout_transition=0[mix]`)
       const trimOut = totalOut > 0 ? `atrim=0:${totalOut.toFixed(4)},asetpts=PTS-STARTPTS,` : ''
       const vol = masterVol !== 1 ? `volume=${masterVol.toFixed(4)}` : 'anull'
       parts.push(`[mix]${trimOut}${vol}[aoutm]`)

@@ -98,9 +98,9 @@ type MontageShot = {
   gap?: number
 }
 
-// (правка 874) клип видео-слоя (дорожки V2+): лежит поверх базовой дорожки в окне [at, at+эфф.длит.).
+// (правка 874, 877) клип видео-слоя (дорожки V2+): лежит поверх базовой дорожки в окне [at, at+эфф.длит.).
 // trimStart/trimEnd — числа (сек), speed — множитель; fit — как кадрируется в кадре;
-// звук слоя НЕ смешивается (как верхние видеодорожки DaVinci)
+// звук слоя смешивается с базой так же, как у клипа базовой дорожки (громкость/фейды/mute)
 type LayerClip = {
   key: string
   filename: string
@@ -117,6 +117,14 @@ type LayerClip = {
   hidden?: boolean
   /** (правка 876) картинные эффекты слоя — те же, что у клипа базовой дорожки */
   fx?: ShotFx
+  /** (правка 877) громкость звука слоя, 0..1; не задана = 1 */
+  vol?: number
+  /** (правка 877) плавное появление звука слоя, сек; 0 = нет */
+  fadeIn?: number
+  /** (правка 877) плавное затухание звука слоя в конце, сек; 0 = нет */
+  fadeOut?: number
+  /** (правка 877) выключить звук слоя (картинка остаётся) */
+  muted?: boolean
 }
 
 // (правка 874) аудиоклип звуковой дорожки (A1+): файл импортирован на сервер (.montage-audio)
@@ -941,14 +949,27 @@ export function MontageView() {
       for (const l of layers) {
         if (l.hidden) continue
         const sp = l.speed || 1
-        if (playT < l.at || playT >= l.at + layerLen(l)) continue
+        const len = layerLen(l)
+        if (playT < l.at || playT >= l.at + len) continue
         const host = layerElsRef.current.get(l.key)
         if (!host) continue
         live.add(l.key)
         const want = Math.min(l.trimStart + (playT - l.at) * sp, Math.max(0, (l.duration || 0) - 0.01))
+        // (правка 877) звук слоя: громкость клипа × фейды × общая громкость, mute слоя/превью
+        const local = playT - l.at
+        let g = 1
+        const lfi = l.fadeIn || 0
+        const lfo = l.fadeOut || 0
+        if (lfi > 0.01) g = Math.min(g, clamp01(local / lfi))
+        if (lfo > 0.01) g = Math.min(g, clamp01((len - local) / lfo))
+        const lvol = clamp01((l.vol ?? 1) * g * masterVol)
+        const silent = muted || !!l.muted
         for (const v of layerVideosOf(host)) {
           // (правка 876) скорость слоя учитываем и в превью (playbackRate)
           if (Math.abs(v.playbackRate - sp) > 0.01) v.playbackRate = sp
+          // (правка 877) звук слоя в превью — как у базы и аудиодорожек
+          if (v.muted !== silent) v.muted = silent
+          v.volume = silent ? 0 : lvol
           if (playing) {
             if (Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = Math.max(0, want) } catch { /* ignore */ } }
             if (v.paused) void v.play().catch(() => {})
@@ -1016,6 +1037,11 @@ export function MontageView() {
           hidden: x.hidden === true,
           // (правка 876) эффекты слоя: валидируем через cloneFx, мусор отбрасываем
           fx: x.fx && typeof x.fx === 'object' && hasFx(x.fx as ShotFx) ? cloneFx(x.fx as ShotFx) : undefined,
+          // (правка 877) звук слоя
+          vol: Number.isFinite(x.vol as number) ? clamp01(x.vol as number) : undefined,
+          fadeIn: Number.isFinite(x.fadeIn as number) ? Math.max(0, Math.min(30, x.fadeIn as number)) : undefined,
+          fadeOut: Number.isFinite(x.fadeOut as number) ? Math.max(0, Math.min(30, x.fadeOut as number)) : undefined,
+          muted: x.muted === true,
         }))
       setLayers(ls)
       setLayerTracks(ls.reduce((m, l) => Math.max(m, l.track), 0))
@@ -2404,6 +2430,10 @@ export function MontageView() {
               fit: l.fit,
               // (правка 876) эффекты слоя едут в рендер так же, как у базовых клипов
               fx: hasFx(l.fx) ? l.fx : undefined,
+              // (правка 877) звук слоя: громкость/фейды; muted = vol 0
+              vol: l.muted ? 0 : (l.vol ?? 1),
+              fadeIn: (l.fadeIn || 0) > 0.04 ? +l.fadeIn!.toFixed(2) : undefined,
+              fadeOut: (l.fadeOut || 0) > 0.04 ? +l.fadeOut!.toFixed(2) : undefined,
             })),
           // (правка 874) аудиоклипы звуковых дорожек (muted не едут в микс)
           audios: audios
@@ -3147,8 +3177,8 @@ export function MontageView() {
               )}
             </defs>
           </svg>
-          {/* (правка 874) видео-слои поверх базового кадра, синхронно playT.
-              Рендерятся только активные в текущий момент; звук слоя не участвует (muted). */}
+          {/* (правка 874, 877) видео-слои поверх базового кадра, синхронно playT.
+              Рендерятся только активные в текущий момент; звук слоя играет вместе с базой. */}
           {!result &&
             layers.map((l) => {
               const len = layerLen(l)
@@ -3164,7 +3194,6 @@ export function MontageView() {
                     else layerElsRef.current.delete(l.key)
                   }}
                   src={l.url}
-                  muted
                   playsInline
                   preload="auto"
                   className="absolute object-contain"
@@ -3620,7 +3649,7 @@ export function MontageView() {
                           backgroundPosition: 'center',
                           backgroundRepeat: 'no-repeat',
                         }}
-                        title={`${l.name} · слой V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с · звук слоя в сборку не входит`}
+                        title={`${l.name} · слой V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с${l.muted ? ' · звук выключен' : ` · громкость ${Math.round((l.vol ?? 1) * 100)}%`}`}
                       >
                         {!strip && (
                           <img
@@ -3642,7 +3671,7 @@ export function MontageView() {
                           </span>
                         )}
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
-                          {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}
+                          {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}{l.muted ? ' · без звука' : ''}
                         </div>
                         <div
                           data-trim-handle="start"
@@ -3986,7 +4015,7 @@ export function MontageView() {
                     <span>Исходник: {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
                   </div>
                   <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
-                    Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук в сборку не входит.
+                    Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук микшируется с базой.
                     Тяните клип по ряду или между рядами, за края — подрезка.
                   </div>
                 </div>
@@ -4049,6 +4078,74 @@ export function MontageView() {
                     ))}
                   </div>
                 </div>
+                {/* (правка 877) звук слоя — как у клипа базовой дорожки: громкость/фейды/mute */}
+                <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-zinc-300">Громкость слоя</span>
+                      <button
+                        onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { vol: 1, muted: false }) }}
+                        className="font-mono text-[11px] text-[#A78BFA] hover:underline"
+                        title="Клик — сбросить в 100%"
+                      >
+                        {Math.round((selectedLayer.vol ?? 1) * 100)}%
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round((selectedLayer.vol ?? 1) * 100)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchLayer(selectedLayer.key, { vol: Number(e.target.value) / 100 })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">Плавный вход звука (↑)</span>
+                      <button
+                        onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeIn: 0 }) }}
+                        className="font-mono text-[#A78BFA] hover:underline"
+                        title="Клик — выключить плавный вход"
+                      >
+                        {(selectedLayer.fadeIn || 0).toFixed(1)} с
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(1, Math.min(10, +layerLen(selectedLayer).toFixed(1)))}
+                      step={0.1}
+                      value={Math.min(10, selectedLayer.fadeIn || 0)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchLayer(selectedLayer.key, { fadeIn: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">Затухание звука в конце (↓)</span>
+                      <button
+                        onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeOut: 0 }) }}
+                        className="font-mono text-[#A78BFA] hover:underline"
+                        title="Клик — выключить затухание"
+                      >
+                        {(selectedLayer.fadeOut || 0).toFixed(1)} с
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(1, Math.min(10, +layerLen(selectedLayer).toFixed(1)))}
+                      step={0.1}
+                      value={Math.min(10, selectedLayer.fadeOut || 0)}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchLayer(selectedLayer.key, { fadeOut: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
+                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                    />
+                  </div>
+                </div>
                 {/* (правка 876) отражения слоя — как у клипа базовой дорожки */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="text-[11px] font-medium text-zinc-300">Отражение кадра</div>
@@ -4075,7 +4172,17 @@ export function MontageView() {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  <button
+                    onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { muted: !selectedLayer.muted }) }}
+                    className={cn(
+                      'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
+                      selectedLayer.muted ? 'text-[#A78BFA]' : 'text-zinc-300',
+                    )}
+                    title="Выключить звук слоя в превью и сборке (картинка остаётся)"
+                  >
+                    {selectedLayer.muted ? 'Включить звук' : 'Заглушить'}
+                  </button>
                   <button
                     onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { hidden: !selectedLayer.hidden }) }}
                     className={cn(
