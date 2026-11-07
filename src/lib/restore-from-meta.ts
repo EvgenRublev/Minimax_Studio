@@ -308,11 +308,13 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
         const fw = parseInt(flfMatch[1], 10)
         const fh = parseInt(flfMatch[2], 10)
         if (fw > 0 && fh > 0) {
-          const flfMP = Math.round((fw * fh) / 1e6 * 100) / 100
-          patch.finalResolution = flfMP
-          patch.freeResolution = true
-          // resolution = номинал flf (ориентация из кадра)
+          // (правка 887) flf теперь умеет свободное разрешение честно: короткий
+          // путь — восстановить ТОЧНЫЙ номинал как пресет-путь. Короткая сторона
+          // номинала (min(fw,fh)) + пропорция кадра при повторе дают ровно fw×fh
+          // (та же формула flfNominalDimensions), поэтому free-режим не нужен.
           patch.resolution = metaFlfRes
+          patch.freeResolution = false
+          patch.finalResolution = 0
         }
       }
     } else if (metaRes && PRESET_RESOLUTIONS.has(metaRes)) {

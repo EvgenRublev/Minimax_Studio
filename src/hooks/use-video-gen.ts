@@ -11,7 +11,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
 import { playNotificationSound } from '@/lib/sound'
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, clampLowResMP, computePass1Canvas } from '@/lib/comfy/minimax-h3-template'
+import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas } from '@/lib/comfy/minimax-h3-template'
 
 /** (правка 158) flf: вычисляем номинал из пресета + размеров кадра —
  *  ТОЖЕ формула, что и на сервере (body.targetDimensions в route.ts).
@@ -34,6 +34,12 @@ function flfFinalResolution(p: {
   if (!match) return undefined
   const shortSide = Math.min(parseInt(match[1], 10), parseInt(match[2], 10))
   if (!shortSide) return undefined
+  // (правка 887) свободный режим в «Кадрах»: номинал из MP + точная пропорция кадра
+  // (free-режим в сторе эквивалентен finalResolution > 0 — см. toggleFreeResolution)
+  if ((p.finalResolution ?? 0) > 0) {
+    const dims = flfNominalFromMegapixels(p.firstFrameWidth, p.firstFrameHeight, p.finalResolution!)
+    return `${dims.w}x${dims.h}`
+  }
   const dims = flfNominalDimensions(shortSide, p.firstFrameWidth, p.firstFrameHeight)
   return `${dims.w}x${dims.h}`
 }
@@ -1041,7 +1047,15 @@ export function useVideoGen() {
               const pw = parseInt(match[1], 10)
               const ph = parseInt(match[2], 10)
               const shortSide = Math.min(pw, ph)
-              const dims = flfNominalDimensions(shortSide, params.firstFrameWidth, params.firstFrameHeight)
+              // (правка 887) свободное разрешение в «Кадрах»: номинальные размеры
+              // из MP (ползунок) при ТОЧНОЙ пропорции первого кадра. Как и с
+              // пресетом, они уходят в targetDimensions — flf остаётся
+              // single-pass, апскейлер делает early-return.
+              // free-режим эквивалентен finalResolution > 0 (см. toggleFreeResolution).
+              const freeMP = params.finalResolution ?? 0
+              const dims = freeMP > 0
+                ? flfNominalFromMegapixels(params.firstFrameWidth!, params.firstFrameHeight!, freeMP)
+                : flfNominalDimensions(shortSide, params.firstFrameWidth, params.firstFrameHeight)
               presetDims = { w: dims.w, h: dims.h }
               // MP для метаданных (не используется в расчёте, только для информации)
               qualityFinalRes = Math.round((dims.w * dims.h / 1_000_000) * 100) / 100
@@ -1100,7 +1114,10 @@ export function useVideoGen() {
         // иначе шаблон рассчитывает из lowRes (finalRes MP).
         // (правка 155) В flf с пресетом (480p/720p/1080p) targetDimensions = номинал,
         // чтобы 480p и 720p давали разные разрешения (480×854 vs 720×1280 для 9:16).
-        const freeMode = (params.finalResolution ?? 0) > 0
+        // (правка 887) В flf свободный режим тоже отдаёт ТОЧНЫЕ размеры через
+        // targetDimensions (MP × пропорция кадра), поэтому freeMode (расчёт по
+        // квантованному aspect) для flf не применяется.
+        const freeMode = genMode !== 'flf' && (params.finalResolution ?? 0) > 0
         const targetDimensions = presetDims && !freeMode
           ? { width: presetDims.w, height: presetDims.h }
           : undefined

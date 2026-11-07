@@ -39,7 +39,7 @@ import { SettingSlider } from './setting-slider'
 import { useVideoGen, computeOutputDimensions } from '@/hooks/use-video-gen'
 // (правка 829) «Зациклено»: фактическое число кадров — та же формула, что у
 // узла 46:19 и в метаданных (сетка 17n+5).
-import { framesForDuration } from '@/lib/comfy/minimax-h3-template'
+import { framesForDuration, flfNominalFromMegapixels } from '@/lib/comfy/minimax-h3-template'
 
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
@@ -1317,7 +1317,15 @@ export function GenerateView() {
               : 0.7
             // (правки 121, 124) Реальное разрешение по MP + соотношению — тот же
             // алгоритм, что и на бэкенде (генерация кратная 32 → точный кроп)
-            const freeDims = computeOutputDimensions(curAspect, freeMP)
+            // (правка 887) В «Кадрах» пропорция для свободного MP берётся из
+            // первого кадра (как и пресетный путь), а не из селектора соотношения.
+            const flfFrame = video.mode === 'flf' && video.startFrame?.width && video.startFrame?.height
+              ? { w: video.startFrame.width, h: video.startFrame.height }
+              : null
+            const freeDimsFor = (mp: number) => flfFrame
+              ? flfNominalFromMegapixels(flfFrame.w, flfFrame.h, mp)
+              : computeOutputDimensions(curAspect, mp)
+            const freeDims = freeDimsFor(freeMP)
             return (
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
@@ -1366,11 +1374,9 @@ export function GenerateView() {
                   </div>
                 </div>
 
-                {/* Free-resolution toggle (правка 158) — в режиме «Кадры» не доступно:
-                    ориентация и номинал берутся из первого кадра (flfNominalDimensions),
-                    свободное разрешение (MP) ломало бы пропорции кадра. */}
-                {video.mode !== 'flf' && (
-                  <>
+                {/* Free-resolution toggle (правка 158) — (правка 887) доступна и в
+                    режиме «Кадры»: MP задаёт общий размер, пропорция остаётся
+                    точной из первого кадра (flfNominalFromMegapixels). */}
                 <button
                   type="button"
                   onClick={toggleFreeResolution}
@@ -1408,8 +1414,9 @@ export function GenerateView() {
                         max={3.0}
                         step={0.05}
                         formatValue={(v) => {
-                          // (правки 121, 124) итог: gen кратная 32 + точный кроп
-                          const d = computeOutputDimensions(curAspect, v)
+                          // (правки 121, 124, 887) итог: gen кратная 32 + точный кроп;
+                          // в «Кадрах» — точная пропорция первого кадра
+                          const d = freeDimsFor(v)
                           return `${v.toFixed(2)} MP (${d.w}×${d.h})`
                         }}
                         inputMin={0.2}
@@ -1418,8 +1425,6 @@ export function GenerateView() {
                       />
                     </div>
                   </motion.div>
-                )}
-                  </>
                 )}
               </div>
             )
@@ -1462,7 +1467,10 @@ export function GenerateView() {
                         if (f) void addFrameFile(f, isStart ? 'start' : 'end')
                         else toast.error('Нужна картинка')
                       }}
-                      onClick={() => frameInputRef.current?.click()}
+                      // (правка 887) занятый слот клик не открывает файловый диалог:
+                      // замена — через «убрать» + выбор заново. Плюс клик по фону
+                      // закрытого просмотрщика всплывает сюда же из портала.
+                      onClick={() => { if (!slot) frameInputRef.current?.click() }}
                       data-frame-slot={slotKey}
                       className={cn(
                         'border-2 border-dashed rounded-lg py-3 text-center cursor-pointer transition-all',

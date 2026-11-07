@@ -436,6 +436,27 @@ export function flfNominalDimensions(
   return { w, h: roundToEven(shortSide * (frameH / frameW)) }
 }
 
+/**
+ * (правка 887) flf-номинал в свободном режиме: НЕ короткая сторона из пресета,
+ * а общий размер в мегапикселях; пропорция — ТОЧНАЯ из первого кадра (как у
+ * flfNominalDimensions). Стороны округляются до чётных (yuv420p), нижняя
+ * граница 0.2 MP — как у ползунка «Свободное разрешение».
+ */
+export function flfNominalFromMegapixels(
+  frameW: number,
+  frameH: number,
+  megapixels: number,
+): { w: number; h: number } {
+  const targetPx = Math.max(0.2, megapixels) * 1024 * 1024
+  const ratio = frameW / frameH
+  if (ratio >= 1) {
+    const h = Math.sqrt(targetPx / ratio)
+    return { w: roundToEven(h * ratio), h: roundToEven(h) }
+  }
+  const w = Math.sqrt(targetPx * ratio)
+  return { w: roundToEven(w), h: roundToEven(w / ratio) }
+}
+
 export interface FinalDimensions {
   /** Размеры, которые реально выдаст апскейлер (кратные 32, ≥ номинала). */
   genW: number
