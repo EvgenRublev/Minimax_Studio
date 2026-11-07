@@ -20,10 +20,15 @@
  *     при бездействии мыши (как в плеере);
  *   • клик по чёрному фону закрывает, Esc закрывает, колесо скроллит.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { createPortal } from 'react-dom' // (правка 692) портал в body — без рамки, на весь экран
 import { motion, AnimatePresence } from 'framer-motion'
-import { FilmIcon, ImageIcon, AudioLinesIcon, PlayIcon, PauseIcon, XIcon } from 'lucide-react'
+import { FilmIcon, ImageIcon, AudioLinesIcon, PlayIcon, PauseIcon, XIcon, CropIcon } from 'lucide-react'
+
+/** (правка 895) Нормализованный кроп-прямоугольник (0..1 от размера картинки). */
+export interface CropRect { x: number; y: number; w: number; h: number }
+
+export const FULL_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 }
 
 export interface RefViewerData {
   kind: 'image' | 'video' | 'audio'
@@ -38,6 +43,11 @@ export interface RefViewerData {
   trimEnd?: number | null
   /** (правка 694) Audio: громкость 0–1 (default 0.5) — виртуальная (нода AudioGain). */
   audioVolume?: number
+  /** (правка 895) Изображения: текущий кроп (рамка для повторного редактирования). */
+  crop?: CropRect
+  /** (правка 895) Изображения: URL ОРИГИНАЛА (до кропа) — режим кропа всегда
+   *  показывает оригинал, даже если картинка уже обрезана. */
+  originalSrc?: string
 }
 
 /** Формат 0:00.0 для подписей времени. */
@@ -217,11 +227,185 @@ function AudioTrimEditor({
   )
 }
 
+/* ─────────── (правка 895) редактор кропа картинки-рефа ─────────── */
+
+/** Ручки рамки: 4 угла + 4 стороны. */
+const CROP_HANDLES: Array<{ dir: string; left: string; top: string; cursor: string }> = [
+  { dir: 'nw', left: '0%', top: '0%', cursor: 'nwse-resize' },
+  { dir: 'n', left: '50%', top: '0%', cursor: 'ns-resize' },
+  { dir: 'ne', left: '100%', top: '0%', cursor: 'nesw-resize' },
+  { dir: 'e', left: '100%', top: '50%', cursor: 'ew-resize' },
+  { dir: 'se', left: '100%', top: '100%', cursor: 'nwse-resize' },
+  { dir: 's', left: '50%', top: '100%', cursor: 'ns-resize' },
+  { dir: 'sw', left: '0%', top: '100%', cursor: 'nesw-resize' },
+  { dir: 'w', left: '0%', top: '50%', cursor: 'ew-resize' },
+]
+
+const CROP_MIN = 0.04
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
+
+/** (правка 895) Пересчёт рамки при перетаскивании ручки/самой рамки. */
+function dragCropRect(mode: string, r0: CropRect, dx: number, dy: number): CropRect {
+  let { x, y, w, h } = r0
+  if (mode === 'move') {
+    x = Math.min(clamp01(x + dx), 1 - w)
+    y = Math.min(clamp01(y + dy), 1 - h)
+    return { x, y, w, h }
+  }
+  if (mode.includes('w')) {
+    const nx = Math.max(0, Math.min(x + dx, x + w - CROP_MIN))
+    w += x - nx
+    x = nx
+  }
+  if (mode.includes('e')) w = Math.max(CROP_MIN, Math.min(w + dx, 1 - x))
+  if (mode.includes('n')) {
+    const ny = Math.max(0, Math.min(y + dy, y + h - CROP_MIN))
+    h += y - ny
+    y = ny
+  }
+  if (mode.includes('s')) h = Math.max(CROP_MIN, Math.min(h + dy, 1 - y))
+  return { x, y, w, h }
+}
+
+/**
+ * (правка 895) Свободная рамка кропа поверх ОРИГИНАЛА: двигается целиком,
+ * масштабируется за 8 ручек (углы + стороны), не выходит за картинку.
+ */
+function CropOverlay({
+  src,
+  initial,
+  onApply,
+  onCancel,
+}: {
+  src: string
+  initial: CropRect
+  onApply: (rect: CropRect, blob: Blob) => void
+  onCancel: () => void
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+  const dragRef = useRef<{ mode: string; startX: number; startY: number; rect: CropRect } | null>(null)
+  const [rect, setRect] = useState<CropRect>(() => {
+    const w = Math.max(CROP_MIN, Math.min(1, initial.w || 1))
+    const h = Math.max(CROP_MIN, Math.min(1, initial.h || 1))
+    return { x: clamp01(initial.x || 0), y: clamp01(initial.y || 0), w, h }
+  })
+  const [busy, setBusy] = useState(false)
+
+  const onDown = (e: RPointerEvent, mode: string) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    wrapRef.current?.setPointerCapture?.(e.pointerId)
+    dragRef.current = { mode, startX: e.clientX, startY: e.clientY, rect }
+  }
+  const onMove = (e: RPointerEvent) => {
+    const d = dragRef.current
+    const wr = wrapRef.current?.getBoundingClientRect()
+    if (!d || !wr || !wr.width || !wr.height) return
+    setRect(dragCropRect(d.mode, d.rect, (e.clientX - d.startX) / wr.width, (e.clientY - d.startY) / wr.height))
+  }
+  const onUp = () => {
+    dragRef.current = null
+  }
+
+  const apply = () => {
+    const img = imgRef.current
+    if (!img || !img.naturalWidth || !img.naturalHeight) return
+    const sx = Math.round(rect.x * img.naturalWidth)
+    const sy = Math.round(rect.y * img.naturalHeight)
+    const sw = Math.max(1, Math.round(rect.w * img.naturalWidth))
+    const sh = Math.max(1, Math.round(rect.h * img.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = sw
+    canvas.height = sh
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+    setBusy(true)
+    canvas.toBlob((b) => {
+      setBusy(false)
+      if (b) onApply(rect, b)
+    }, 'image/png')
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3 max-w-full max-h-full">
+      <div
+        ref={wrapRef}
+        className="relative select-none touch-none max-w-full"
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+      >
+        <img
+          ref={imgRef}
+          src={src}
+          alt=""
+          draggable={false}
+          className="block max-w-full object-contain"
+          style={{ maxHeight: 'calc(100vh - 11rem)' }}
+        />
+        {/* затемнение вокруг рамки: огромный box-shadow, сам «дыркой» не ставится */}
+        <div
+          className="absolute cursor-move border border-white/90"
+          style={{
+            left: `${rect.x * 100}%`,
+            top: `${rect.y * 100}%`,
+            width: `${rect.w * 100}%`,
+            height: `${rect.h * 100}%`,
+            boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
+          }}
+          onPointerDown={(e) => onDown(e, 'move')}
+        >
+          {/* сетка третей — чтобы кадрировать по композиции */}
+          <div className="pointer-events-none absolute inset-0 opacity-40">
+            <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/60" />
+            <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/60" />
+            <div className="absolute top-1/3 left-0 right-0 h-px bg-white/60" />
+            <div className="absolute top-2/3 left-0 right-0 h-px bg-white/60" />
+          </div>
+          {CROP_HANDLES.map((h) => (
+            <div
+              key={h.dir}
+              onPointerDown={(e) => onDown(e, h.dir)}
+              title="Тяните, чтобы изменить рамку"
+              className="absolute w-3 h-3 rounded-sm bg-white border border-black/40"
+              style={{ left: h.left, top: h.top, cursor: h.cursor, transform: 'translate(-50%, -50%)' }}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={apply}
+          disabled={busy}
+          className="px-4 py-1.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-black text-sm font-medium disabled:opacity-50"
+        >
+          Применить кроп
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white text-sm"
+        >
+          Отмена
+        </button>
+        <span className="text-xs text-white/60 hidden sm:inline">
+          тяните рамку · ручки по краям масштабируют
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export function RefViewerDialog({
   data,
   onOpenChange,
   onTrimChange,
   onVolumeChange,
+  onCropChange,
 }: {
   data: RefViewerData | null
   onOpenChange: (v: boolean) => void
@@ -229,10 +413,32 @@ export function RefViewerDialog({
   onTrimChange?: (start: number, end: number | null) => void
   /** (правка 694) Audio: колбэк сохранения громкости (0–1). */
   onVolumeChange?: (v: number) => void
+  /** (правка 895) Image: колбэк применения кропа — прямоугольник и PNG-blob.
+   *  Родитель загружает кроп в input/ и обновляет путь рефа. Если колбэка
+   *  нет, кнопка «Обрезать» не показывается (просмотр только). */
+  onCropChange?: (rect: CropRect, blob: Blob) => void
 }) {
   const src = data
     ? data.url || `/api/comfy/file?filename=${encodeURIComponent(data.path)}&type=input`
     : ''
+
+  // (правка 895) Кроп картинки: режим рамки + локальный предпросмотр кропа
+  // до того, как родитель обновит путь рефа после загрузки.
+  const [cropMode, setCropMode] = useState(false)
+  const [croppedSrc, setCroppedSrc] = useState('')
+  const [cropRect, setCropRect] = useState<CropRect>(FULL_CROP)
+  const lastKeyRef = useRef<string>('')
+
+  // Сброс при смене рефа/пути (после применения родитель меняет path —
+  // предпросмотр подхватывает уже обрезанный файл).
+  useEffect(() => {
+    const key = data ? `${data.path}|${data.url ?? ''}` : ''
+    if (key === lastKeyRef.current) return
+    lastKeyRef.current = key
+    setCropMode(false)
+    setCroppedSrc('')
+    setCropRect(data?.crop ?? FULL_CROP)
+  }, [data])
 
   // (правка 717) Автоскрытие верхней панели — как в видео-плеере.
   const [showControls, setShowControls] = useState(true)
@@ -243,6 +449,8 @@ export function RefViewerDialog({
   const handleMouseMove = () => {
     setShowControls(true)
     clearTimeout(controlsTimer.current)
+    // (правка 895) В режиме кропа панель не прячем — там кнопки управления.
+    if (cropMode) return
     controlsTimer.current = setTimeout(() => setShowControls(false), 3000)
   }
 
@@ -253,15 +461,27 @@ export function RefViewerDialog({
   useEffect(() => {
     if (!data) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
+      if (e.key === 'Escape') {
+        // (правка 895) В режиме кропа Esc отменяет рамку, а не закрывает.
+        if (cropMode) setCropMode(false)
+        else close()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [data, onOpenChange])
+  }, [data, onOpenChange, cropMode])
 
   // Таймер автоскрытия гасим при unmount (иначе колбэк стрелял бы по
   // размонтированному компоненту).
   useEffect(() => () => clearTimeout(controlsTimer.current), [])
+
+  // (правка 895) В режиме кропа верхняя панель должна быть видна всегда —
+  // сбрасываем уже запущенный таймер автоскрытия.
+  useEffect(() => {
+    if (!cropMode) return
+    clearTimeout(controlsTimer.current)
+    setShowControls(true)
+  }, [cropMode])
 
   // Пока открыт просмотрщик — фон не скроллится (иначе страница под
   // оверлеем ездила при прокрутке колесом над картинкой).
@@ -286,7 +506,7 @@ export function RefViewerDialog({
           onClick={(e) => {
             // Закрываем только по клику по ЧЁРНОМУ фону — клик по самой
             // картинке/плееру/редактору не должен ничего закрывать.
-            if (e.target === e.currentTarget) close()
+            if (!cropMode && e.target === e.currentTarget) close()
           }}
         >
           {/* Контент — во весь экран, без полей и рамок */}
@@ -297,16 +517,32 @@ export function RefViewerDialog({
                клик целиком в эту область (а не в motion.div) — и без второй
                проверки просмотрщик не закрывался бы. */
             onClick={(e) => {
-              if (e.target === e.currentTarget) close()
+              if (!cropMode && e.target === e.currentTarget) close()
             }}
           >
             {data.kind === 'image' && (
-              <img
-                src={src}
-                alt={data.name}
-                className="max-w-full max-h-full object-contain"
-                draggable={false}
-              />
+              cropMode && onCropChange ? (
+                <CropOverlay
+                  src={data.originalSrc || src}
+                  initial={cropRect}
+                  onApply={(rect, blob) => {
+                    setCropRect(rect)
+                    // Локальный предпросмотр сразу; после загрузки родитель
+                    // заменит путь, и покажется уже обрезанный файл.
+                    setCroppedSrc(URL.createObjectURL(blob))
+                    setCropMode(false)
+                    onCropChange(rect, blob)
+                  }}
+                  onCancel={() => setCropMode(false)}
+                />
+              ) : (
+                <img
+                  src={croppedSrc || src}
+                  alt={data.name}
+                  className="max-w-full max-h-full object-contain"
+                  draggable={false}
+                />
+              )
             )}
             {data.kind === 'video' && (
               <video
@@ -351,14 +587,29 @@ export function RefViewerDialog({
               {data.kind === 'audio' && <AudioLinesIcon className="w-4 h-4 text-emerald-400 shrink-0" />}
               <h3 className="text-sm text-white/90 font-medium truncate">{data.name}</h3>
             </div>
-            <button
-              type="button"
-              onClick={close}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors shrink-0"
-              title="Закрыть (Esc)"
-            >
-              <XIcon className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* (правка 895) Кнопка кропа — только для картинок, если родитель
+                  умеет сохранять кроп, и пока не в режиме рамки. */}
+              {data.kind === 'image' && onCropChange && !cropMode && (
+                <button
+                  type="button"
+                  onClick={() => setCropMode(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs transition-colors"
+                  title="Обрезать изображение"
+                >
+                  <CropIcon className="w-4 h-4" />
+                  <span>Обрезать</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={close}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors shrink-0"
+                title="Закрыть (Esc)"
+              >
+                <XIcon className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </motion.div>
       )}

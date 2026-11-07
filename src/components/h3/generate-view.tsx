@@ -1006,6 +1006,38 @@ export function GenerateView() {
             onVolumeChange={(v) => {
               updateRef(ref.id, { audioVolume: v })
             }}
+            // (правка 895) Кроп картинки-рефа: клиент режет в canvas, грузит
+            // PNG в input/ и подменяет путь рефа. Оригинал запоминается для
+            // повторного кропа; в генерацию уходит уже обрезанный файл.
+            crop={ref.kind === 'image' ? ref.crop : undefined}
+            originalSrc={
+              ref.kind === 'image'
+                ? ref.originalPath
+                  ? `/api/comfy/file?filename=${encodeURIComponent(ref.originalPath)}&type=input`
+                  : ref.previewUrl || undefined
+                : undefined
+            }
+            onCrop={
+              ref.kind === 'image'
+                ? async (rect, blob) => {
+                    try {
+                      const base = (ref.originalName || ref.name || 'ref').replace(/\.[^.]+$/, '')
+                      const file = new File([blob], `${base}-crop-${Date.now()}.png`, { type: 'image/png' })
+                      const { path } = await uploadInputFile(file)
+                      updateRef(ref.id, {
+                        originalPath: ref.originalPath ?? ref.path,
+                        originalName: ref.originalName ?? ref.name,
+                        crop: rect,
+                        path,
+                        previewUrl: '',
+                      })
+                      toast.success('Кроп применён')
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Не удалось применить кроп')
+                    }
+                  }
+                : undefined
+            }
           >
             {ref.kind === 'image' && ref.path && (
               <img src={`/api/comfy/file?filename=${encodeURIComponent(ref.path)}&type=input&width=200`} alt={ref.name} className="w-full h-full object-cover" />

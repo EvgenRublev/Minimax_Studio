@@ -13,7 +13,7 @@
  * body (как VideoLightbox). Родителю достаточно передать kind/name/path/url.
  */
 import { useState, type ReactNode } from 'react'
-import { RefViewerDialog, type RefViewerData } from './ref-viewer-dialog'
+import { RefViewerDialog, type CropRect, type RefViewerData } from './ref-viewer-dialog'
 
 export interface RefPreviewThumbProps {
   /** Тип рефа: картинка / видео / аудио. */
@@ -46,6 +46,13 @@ export interface RefPreviewThumbProps {
   onTrimChange?: (start: number, end: number | null) => void
   /** Аудио: громкость изменилась — сохранить в сторе. */
   onVolumeChange?: (v: number) => void
+  /** (правка 895) Картинки: текущий кроп (рамка при повторном кропе). */
+  crop?: CropRect
+  /** (правка 895) Картинки: URL оригинала — режим кропа всегда показывает его. */
+  originalSrc?: string
+  /** (правка 895) Картинки: применить кроп — родитель загружает PNG и
+   *  обновляет путь рефа. Без колбэка кнопка кропа не показывается. */
+  onCrop?: (rect: CropRect, blob: Blob) => void
 }
 
 export function RefPreviewThumb({
@@ -63,6 +70,9 @@ export function RefPreviewThumb({
   stopPropagation,
   onTrimChange,
   onVolumeChange,
+  crop,
+  originalSrc,
+  onCrop,
 }: RefPreviewThumbProps) {
   const [data, setData] = useState<RefViewerData | null>(null)
   const canOpen = !!(path || url)
@@ -70,7 +80,17 @@ export function RefPreviewThumb({
   const open = (e: React.MouseEvent) => {
     if (stopPropagation) e.stopPropagation()
     if (!canOpen) return
-    const next: RefViewerData = { kind, name, path: path ?? '', url, trimStart, trimEnd, audioVolume }
+    const next: RefViewerData = {
+      kind,
+      name,
+      path: path ?? '',
+      url,
+      trimStart,
+      trimEnd,
+      audioVolume,
+      crop,
+      originalSrc,
+    }
     setData(next)
     onOpen?.(next)
   }
@@ -99,6 +119,30 @@ export function RefPreviewThumb({
           setData((d) => (d ? { ...d, audioVolume: v } : d))
           onVolumeChange?.(v)
         }}
+        onCropChange={
+          onCrop
+            ? (rect, blob) => {
+                // Локально показываем кроп сразу и запоминаем оригинал,
+                // чтобы повторный кроп снова начинался с него.
+                setData((d) =>
+                  d
+                    ? {
+                        ...d,
+                        crop: rect,
+                        originalSrc:
+                          d.originalSrc ||
+                          d.url ||
+                          (d.path
+                            ? `/api/comfy/file?filename=${encodeURIComponent(d.path)}&type=input`
+                            : undefined),
+                        url: URL.createObjectURL(blob),
+                      }
+                    : d,
+                )
+                onCrop(rect, blob)
+              }
+            : undefined
+        }
       />
     </>
   )
