@@ -932,6 +932,9 @@ export function MontageView() {
   // зеркала для rAF/клавиатурных обработчиков, чтобы не зависеть от замыканий
   const seqRef = useRef<SeqRow[]>([])
   useEffect(() => { seqRef.current = seq }, [seq])
+  /** (правка 879) полная длина композиции: учитывает все дорожки, не только V1 */
+  const tlEndRef = useRef(0)
+  useEffect(() => { tlEndRef.current = tlEnd }, [tlEnd])
   useEffect(() => { ppsRef.current = pps }, [pps])
   useEffect(() => { seqTRef.current = playT }, [playT])
   useEffect(() => { trackHRef.current = trackH }, [trackH])
@@ -973,9 +976,13 @@ export function MontageView() {
           if (playing) {
             if (Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = Math.max(0, want) } catch { /* ignore */ } }
             if (v.paused) void v.play().catch(() => {})
-          } else if (Math.abs(v.currentTime - want) > 0.02) {
+          } else {
+            // (правка 879) пауза останавливает и слои, которые играли в текущем окне
+            if (!v.paused) v.pause()
             // (правка 876) на паузе кадр слоя позиционируется по плейхеду — как у базы
-            try { v.currentTime = Math.max(0, want) } catch { /* ignore */ }
+            if (Math.abs(v.currentTime - want) > 0.02) {
+              try { v.currentTime = Math.max(0, want) } catch { /* ignore */ }
+            }
           }
         }
       }
@@ -990,9 +997,13 @@ export function MontageView() {
           if (Math.abs(el.currentTime - want) > 0.35) { try { el.currentTime = Math.max(0, want) } catch { /* ignore */ } }
           el.volume = muted ? 0 : Math.max(0, Math.min(1, ((a.vol ?? 100) / 100) * masterVol))
           if (el.paused) void el.play().catch(() => {})
-        } else if (Math.abs(el.currentTime - want) > 0.02) {
+        } else {
+          // (правка 879) пауза останавливает и звук, играющий в текущем окне
+          if (!el.paused) el.pause()
           // (правка 876) готовим позицию звука к старту воспроизведения
-          try { el.currentTime = Math.max(0, want) } catch { /* ignore */ }
+          if (Math.abs(el.currentTime - want) > 0.02) {
+            try { el.currentTime = Math.max(0, want) } catch { /* ignore */ }
+          }
         }
       }
     }
@@ -1247,7 +1258,7 @@ export function MontageView() {
     if (ph) ph.style.left = `${t * ppsRef.current}px`
     const tc = timecodeRef.current
     if (tc) {
-      const tot = total ?? (seqRef.current.length ? seqRef.current[seqRef.current.length - 1].offset + seqRef.current[seqRef.current.length - 1].len : 0)
+      const tot = total ?? tlEndRef.current
       tc.textContent = `${fmtT(t)} / ${fmtT(tot)}`
     }
   }, [])
@@ -1464,14 +1475,21 @@ export function MontageView() {
 
   const playSeq = useCallback(() => {
     const sq = seqRef.current
-    if (!sq.length) return
+    // (правка 879) дорожки равноценны: играем всю композицию, даже если V1 пуста
+    const endT = tlEndRef.current
+    if (endT <= 0) return
     setResult(null)
-    const start = seqTRef.current >= totalSec - 0.05 ? 0 : seqTRef.current
-    const loc = findAtTime(start)
-    syncPlayheadDOM(start, totalSec)
+    const start = seqTRef.current >= endT - 0.05 ? 0 : seqTRef.current
+    syncPlayheadDOM(start, endT)
     setPlayT(start)
     setPlaying(true)
     playingRef.current = true
+    // пустая V1 или позиция за её концом — идём по часам, слои/звук играют сами
+    if (!sq.length || start >= totalSec - 0.001) {
+      startGapPlay(start, endT, -1)
+      return
+    }
+    const loc = findAtTime(start)
     if (loc.inGap) {
       startGapPlay(start, sq[loc.idx].offset, loc.idx)
       return
@@ -1501,19 +1519,21 @@ export function MontageView() {
    */
   const seekTo = useCallback((t: number, fastScrub = false) => {
     const sq = seqRef.current
-    if (!sq.length) return
-    const total = sq[sq.length - 1].offset + sq[sq.length - 1].len
-    let ct = Math.max(0, Math.min(total, t))
+    // (правка 879) шкала принадлежит всей композиции, а не только V1
+    const endT = tlEndRef.current
+    if (endT <= 0) return
+    const baseEnd = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
+    let ct = Math.max(0, Math.min(endT, t))
     // (правка 720 v11) магнит: рядом с границей клипа плейхед прилипает к ней
     if (snapRef.current) {
       const tol = Math.min(0.15, 7 / Math.max(8, ppsRef.current))
       for (const r of sq) {
         if (Math.abs(ct - r.offset) <= tol) { ct = r.offset; break }
-        if (Math.abs(ct - (r.offset + r.len)) <= tol) { ct = Math.min(total, r.offset + r.len); break }
+        if (Math.abs(ct - (r.offset + r.len)) <= tol) { ct = Math.min(endT, r.offset + r.len); break }
       }
     }
     // (правка 858) мгновенно двигаем плейхед и таймкод в DOM без ожидания React
-    syncPlayheadDOM(ct, total)
+    syncPlayheadDOM(ct, endT)
     if (fastScrub) {
       if (!scrubRafRef.current) {
         scrubRafRef.current = requestAnimationFrame(() => {
@@ -1524,10 +1544,13 @@ export function MontageView() {
     } else {
       setPlayT(ct)
     }
-    const loc = findAtTime(ct)
-    if (loc.inGap) {
+    // (правка 879) пустая V1 или время за её концом: кадр пустой, слои/звук идут
+    const pastBase = !sq.length || ct >= baseEnd - 0.001
+    const loc = pastBase ? { inGap: true, idx: 0 } : findAtTime(ct)
+    if (pastBase || loc.inGap) {
+      const gapEnd = pastBase ? endT : sq[loc.idx].offset
       if (playingRef.current) {
-        startGapPlay(ct, sq[loc.idx].offset, loc.idx)
+        startGapPlay(ct, gapEnd, pastBase ? -1 : loc.idx)
       } else {
         gapPlayRef.current = null
         idxRef.current = -1
@@ -1536,10 +1559,12 @@ export function MontageView() {
           inGapRef.current = true
           setInGap(true)
         }
-        const nrow = sq[loc.idx]
-        if (nrow) {
-          setPreviewSrc(nrow.shot.url)
-          stageClip(bufRef.current === 0 ? 1 : 0, loc.idx, nrow.r.start)
+        if (!pastBase) {
+          const nrow = sq[loc.idx]
+          if (nrow) {
+            setPreviewSrc(nrow.shot.url)
+            stageClip(bufRef.current === 0 ? 1 : 0, loc.idx, nrow.r.start)
+          }
         }
       }
       return
@@ -1678,7 +1703,8 @@ export function MontageView() {
     let lastStateCommit = 0
     const tick = (now: number) => {
       const sq = seqRef.current
-      const tot = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
+      const tot = tlEndRef.current
+      const baseEnd = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
       const gp = gapPlayRef.current
       if (gp) {
         const t = Math.min(gp.endT, gp.startT + (now - gp.startWall) / 1000)
@@ -1695,12 +1721,22 @@ export function MontageView() {
         }
         if (t >= gp.endT - 0.015) {
           const ni = gp.nextIdx
-          const sb = bufRef.current === 0 ? 1 : 0
-          const sel = bufEl(sb)
-          const stg = stageSeekRef.current
-          if (stg && stg.idx === ni && sel && sel.readyState >= 2) swapTo(sb)
-          else if (sq[ni]) showClip(ni, sq[ni].r.start, true)
-          else stopSeq(false)
+          if (ni < 0) {
+            // (правка 879) хвост композиции без клипов V1: луп или стоп
+            if (loop) {
+              syncPlayheadDOM(0, tot)
+              setPlayT(0)
+              if (sq.length && sq[0].gap < 0.02) showClip(0, sq[0].r.start, true)
+              else startGapPlay(0, sq.length ? sq[0].offset : tot, sq.length ? 0 : -1)
+            } else stopSeq(false)
+          } else {
+            const sb = bufRef.current === 0 ? 1 : 0
+            const sel = bufEl(sb)
+            const stg = stageSeekRef.current
+            if (stg && stg.idx === ni && sel && sel.readyState >= 2) swapTo(sb)
+            else if (sq[ni]) showClip(ni, sq[ni].r.start, true)
+            else stopSeq(false)
+          }
         }
         rafRef.current = requestAnimationFrame(tick)
         return
@@ -1754,7 +1790,11 @@ export function MontageView() {
             }
           }
         } else if (ct >= row.r.end - endMargin) {
-          if (loop) {
+          // (правка 879) за концом последнего клипа V1 композиция может продолжаться
+          // слоями/аудио — доигрываем хвост по часам, а не обрываем воспроизведение
+          if (tot > baseEnd + 0.02) {
+            startGapPlay(baseEnd, tot, -1)
+          } else if (loop) {
             syncPlayheadDOM(0, tot)
             setPlayT(0)
             if (sq[0].gap >= 0.02) startGapPlay(0, sq[0].offset, 0)
@@ -1822,7 +1862,7 @@ export function MontageView() {
   const layerStripReq = useCallback(
     (l: LayerClip) => {
       const w = Math.max(14, layerLen(l) * pps)
-      const h = Math.max(30, Math.round(trackH * 0.7))
+      const h = Math.max(24, trackH)
       const start = l.trimStart
       const end = Math.max(start + 0.05, (l.duration || 0) - l.trimEnd)
       return { w, h, r: { start, end } }
@@ -2849,7 +2889,7 @@ export function MontageView() {
           : baseTop
         const rowH = layerBoxes.length
           ? Math.max(20, Math.max(...layerBoxes.map((b) => b.bottom - b.top)))
-          : Math.max(28, Math.round(trackHRef.current * 0.7))
+          : Math.max(24, trackHRef.current)
         if (clientY >= topRowTop - rowH && clientY < topRowTop) {
           const maxT = layerBoxes.length ? Math.max(...layerBoxes.map((b) => b.track)) : 0
           if (maxT + 1 > MAX_TRACKS) return null
@@ -3024,7 +3064,7 @@ export function MontageView() {
         : baseRect?.top ?? null
       const layerRowH = layerRowsGeo.length
         ? Math.max(20, Math.max(...layerRowsGeo.map((r) => r.bottom - r.top)))
-        : Math.max(28, Math.round(trackHRef.current * 0.7))
+        : Math.max(24, trackHRef.current)
       const isOverBase = (y: number) =>
         !!baseRect && y >= baseRect.top - 4 && y <= baseRect.bottom + 4
       const newTopTrack = (y: number): number | null => {
@@ -3202,11 +3242,12 @@ export function MontageView() {
   /** (правка 720 v11) вписать всю сборку в видимую ширину таймлайна */
   const fitZoom = useCallback(() => {
     const el = scrollerRef.current
-    if (!el || totalSec <= 0) return
+    const endT = tlEndRef.current
+    if (!el || endT <= 0) return
     const w = el.clientWidth - 20
     if (w <= 0) return
-    setPps(Math.max(8, Math.min(240, Math.floor(w / totalSec))))
-  }, [totalSec])
+    setPps(Math.max(8, Math.min(240, Math.floor(w / endT))))
+  }, [])
 
   /** (правка 720 v11) позиция вставки сразу за клипом, где стоит плейхед */
   const insertAtPlayheadIdx = useCallback((): number | undefined => {
@@ -3348,12 +3389,12 @@ export function MontageView() {
     requestAnimationFrame(() => ctl.blur())
   }, [])
 
-  // деления линейки
-  const rulerStep = totalSec > 0 ? pickStep(totalSec, pps) : 1
+  // (правка 879) линейка и вписывание считаются по всей композиции (все дорожки)
+  const rulerStep = tlEnd > 0 ? pickStep(tlEnd, pps) : 1
   const rulerTicks: number[] = []
   // (правка 720 v10) шаг через индекс: накопление "+0.1" в float уезжало
   // (метки вида 0.30000000000000004, лишний последний штрих)
-  if (totalSec > 0) for (let i = 0; i * rulerStep <= totalSec + 0.001; i++) rulerTicks.push(+(i * rulerStep).toFixed(3))
+  if (tlEnd > 0) for (let i = 0; i * rulerStep <= tlEnd + 0.001; i++) rulerTicks.push(+(i * rulerStep).toFixed(3))
 
   // (правка 720 v11) стеки истории живут в ref, а histTick заставляет
   // перерисовать состояние кнопок Отмены/Повтора
@@ -3369,7 +3410,7 @@ export function MontageView() {
           <ScissorsIcon className="h-4 w-4 shrink-0 text-[#A78BFA]" />
           <span className="text-sm font-medium">Монтаж</span>
           <span className="text-xs text-zinc-500">
-            {shots.length} шот{shots.length === 1 ? '' : 'ов'} · ≈ {totalSec.toFixed(1)} с
+            {shots.length} шот{shots.length === 1 ? '' : 'ов'} · ≈ {tlEnd.toFixed(1)} с
           </span>
           <div className="ml-auto flex items-center gap-2">
             {/* (правка 853) настройки секвенции — как проект/секвенция в Premiere */}
@@ -3605,7 +3646,10 @@ export function MontageView() {
                   if (!playingRef.current || bufRef.current !== b) return
                   const i = idxRef.current
                   const sq = seqRef.current
+                  const baseEnd = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
                   if (i >= 0 && i + 1 < sq.length) showClip(i + 1, sq[i + 1].r.start, true)
+                  // (правка 879) хвост композиции за концом V1 доигрываем по часам
+                  else if (tlEndRef.current > baseEnd + 0.02) startGapPlay(baseEnd, tlEndRef.current, -1)
                   else if (loop && sq.length) { syncPlayheadDOM(0); setPlayT(0); showClip(0, sq[0].r.start, true) }
                   else stopSeq(false)
                 }}
@@ -3638,13 +3682,13 @@ export function MontageView() {
               }}
             />
           )}
-          {!previewSrc && (
+          {!previewSrc && !layers.length && !audios.length && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-zinc-500">
               <FilmIcon className="h-10 w-10 opacity-40" />
               <div className="text-sm">
                 {shots.length
                   ? 'Выберите клип на таймлайне или нажмите «Играть»'
-                  : 'Перетащите видео из галереи на таймлайн снизу'}
+                  : 'Перетащите видео из галереи на любую дорожку'}
               </div>
             </div>
           )}
@@ -3736,13 +3780,13 @@ export function MontageView() {
               onClick={() => {
                 const rowsNow = Math.max(layerTracks, layers.reduce((m, l) => Math.max(m, l.track), 0))
                 if (rowsNow >= MAX_TRACKS) {
-                  showToast(`Не более ${MAX_TRACKS} слоёв`, 'error')
+                  showToast(`Не более ${MAX_TRACKS} видеодорожек`, 'error')
                   return
                 }
                 setLayerTracks(rowsNow + 1)
-                showToast('Добавлен ряд слоя — перетащите файл из галереи на него')
+                showToast('Добавлена дорожка — перетащите файл из галереи на неё')
               }}
-              title="Добавить ряд видео-слоя (файл кладётся перетаскиванием из галереи на ряд)"
+              title="Добавить видеодорожку (файл кладётся перетаскиванием из галереи на дорожку)"
             >
               <LayersIcon className="h-3.5 w-3.5" />
             </button>
@@ -3780,7 +3824,7 @@ export function MontageView() {
             <button
               className="rounded border border-border px-1.5 py-1 hover:bg-[var(--surface-2)] disabled:opacity-40"
               onClick={() => seekTo(0)}
-              disabled={!shots.length}
+              disabled={tlEnd <= 0}
               title="В начало"
             >
               <SkipBackIcon className="h-3.5 w-3.5" />
@@ -3788,7 +3832,7 @@ export function MontageView() {
             <button
               className="rounded-md bg-[#7C3AED] px-2.5 py-1.5 text-white hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-50"
               onClick={togglePlay}
-              disabled={!shots.length}
+              disabled={tlEnd <= 0}
               title="Играть / пауза (пробел)"
             >
               {playing ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
@@ -3837,7 +3881,7 @@ export function MontageView() {
               />
               <span className="w-8 font-mono text-[10px] text-zinc-400">{Math.round(masterVol * 100)}%</span>
             </label>
-            <span ref={timecodeRef} className="font-mono text-xs text-zinc-400">{fmtT(playT)} / {fmtT(totalSec)}</span>
+            <span ref={timecodeRef} className="font-mono text-xs text-zinc-400">{fmtT(playT)} / {fmtT(tlEnd)}</span>
           </div>
 
           {/* справа: масштаб таймлайна + полный экран */}
@@ -3917,7 +3961,7 @@ export function MontageView() {
               className="relative h-6 cursor-pointer select-none"
               onPointerDown={startScrub}
               title="Клик или тяните — перемотка"
-              style={totalSec > 0 ? {
+              style={tlEnd > 0 ? {
                 backgroundImage: `repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${(rulerStep / 5) * pps}px)`,
               } : undefined}
             >
@@ -3933,20 +3977,21 @@ export function MontageView() {
             </div>
             {/* (правка 874) ряды видео-слоёв V2+ над базой: верхний ряд перекрывает нижние */}
             {layerRows.map((t) => {
-              const h = Math.max(30, Math.round(trackH * 0.7))
+              // (правка 879) все дорожки одинаковые: та же высота и оформление, что у V1
+              const h = trackH
               const clips = layers.filter((l) => l.track === t)
               return (
                 <div
                   key={`layer-${t}`}
                   data-layer-row={t}
-                  className="relative mb-1 rounded border border-[#7C3AED]/25 bg-[#7C3AED]/5"
+                  className="relative mb-1 overflow-hidden rounded border border-border/50 bg-black/30"
                   style={{ height: h }}
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
-                  title="Ряд видео-слоя: перетащите сюда файл из галереи"
+                  title={`Дорожка V${t + 1}: перетащите сюда файл из галереи`}
                 >
-                  <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-[#A78BFA]/60">
+                  <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-zinc-600">
                     V{t + 1}
                   </span>
                   {clips.map((l) => {
@@ -3961,10 +4006,10 @@ export function MontageView() {
                         key={l.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
                         className={cn(
-                          'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
+                          'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
                           selectedLayerKey === l.key
                             ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40'
-                            : 'border-[#7C3AED]/40 hover:border-[#A78BFA]/70',
+                            : 'border-border hover:border-zinc-500',
                           l.hidden && 'opacity-40',
                         )}
                         style={{
@@ -3975,7 +4020,7 @@ export function MontageView() {
                           backgroundPosition: 'center',
                           backgroundRepeat: 'no-repeat',
                         }}
-                        title={`${l.name} · слой V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с${l.muted ? ' · звук выключен' : ` · громкость ${Math.round((l.vol ?? 1) * 100)}%`}`}
+                        title={`${l.name} · дорожка V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с${l.muted ? ' · звук выключен' : ` · громкость ${Math.round((l.vol ?? 1) * 100)}%`}`}
                       >
                         {!strip && (
                           <img
@@ -3991,7 +4036,7 @@ export function MontageView() {
                         {pendingReturn[l.key] && (
                           <span
                             className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/85 px-1 py-0.5 text-[9px] font-semibold text-white animate-pulse"
-                            title="Отправлен в Refine — придёт и заменит этот клип слоя"
+                            title="Отправлен в Refine — придёт и заменит этот клип"
                           >
                             <Wand2Icon className="h-2.5 w-2.5" />
                             Refine
@@ -4001,24 +4046,24 @@ export function MontageView() {
                         {!pendingReturn[l.key] && hasFx(l.fx) && (
                           <span
                             className="pointer-events-none absolute left-1 top-1 rounded bg-[#7C3AED]/80 px-1 py-0.2 text-[9px] font-semibold text-white"
-                            title="На слое применены эффекты"
+                            title="На клипе применены эффекты"
                           >
                             FX
                           </span>
                         )}
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[10px] leading-4 text-white">
                           {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}{l.muted ? ' · без звука' : ''}
                         </div>
                         <div
                           data-trim-handle="start"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'start')}
-                          className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
                           title="Подрезать начало"
                         />
                         <div
                           data-trim-handle="end"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'end')}
-                          className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
                           title="Подрезать конец"
                         />
                         <button
@@ -4031,7 +4076,7 @@ export function MontageView() {
                         <button
                           onClick={(e) => { e.stopPropagation(); removeLayerClip(l.key) }}
                           className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
-                          title="Убрать слой"
+                          title="Убрать клип"
                         >
                           <XIcon className="h-2.5 w-2.5" />
                         </button>
@@ -4045,27 +4090,13 @@ export function MontageView() {
             <div
               ref={trackRef}
               data-base-row="1"
-              className="relative overflow-hidden rounded border border-border/50 bg-black/30"
-              style={{
-                height: trackH,
-                backgroundImage:
-                  seq.length > 0
-                    ? 'repeating-linear-gradient(-45deg, rgba(255,255,255,0.025) 0 6px, transparent 6px 12px)'
-                    : undefined,
-              }}
+              className="relative mb-1 overflow-hidden rounded border border-border/50 bg-black/30"
+              style={{ height: trackH }}
               onPointerDown={(e) => {
                 if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
               }}
             >
               <span className="pointer-events-none absolute left-1 top-0.5 z-10 font-mono text-[9px] font-semibold text-zinc-600">V1</span>
-              {seq.length === 0 && (
-                <div
-                  className="flex w-full items-center justify-center rounded border border-dashed border-border text-xs text-zinc-500"
-                  style={{ height: trackH }}
-                >
-                  Перетащите видео из галереи на эту дорожку
-                </div>
-              )}
               {seq.map((row) => {
                 const w = Math.max(16, row.len * pps)
                 const exactStrip = strips[stripKey(row.shot.url, row.r, w, Math.max(24, trackH))]
@@ -4159,7 +4190,7 @@ export function MontageView() {
                 <div
                   className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-[#A78BFA]"
                   style={{
-                    left: `${dropIdx < seq.length ? seq[dropIdx].offset * pps : totalSec * pps}px`,
+                    left: `${dropIdx < seq.length ? seq[dropIdx].offset * pps : tlEnd * pps}px`,
                   }}
                 />
               )}
@@ -4230,7 +4261,7 @@ export function MontageView() {
               )
             })}
             {/* плейхед: линия + ромб-головка (тяните — перемотка) */}
-            {seq.length > 0 && (
+            {tlEnd > 0 && (
               <div ref={playheadRef} className="pointer-events-none absolute inset-y-0 z-20" style={{ left: `${playT * pps}px` }}>
                 <div className="absolute inset-y-0 w-px -translate-x-px bg-red-400" />
                 <div
