@@ -222,9 +222,11 @@ type SeqSettings = {
   fps: number
   fit: 'stretch' | 'cover' | 'contain' | 'blur'
   quality: 'high' | 'standard' | 'fast'
+  /** (правка 882) кодировщик результата */
+  codec: 'auto' | 'cpu' | 'gpu'
 }
 
-const DEFAULT_SEQ: SeqSettings = { w: 0, h: 0, fps: 0, fit: 'stretch', quality: 'standard' }
+const DEFAULT_SEQ: SeqSettings = { w: 0, h: 0, fps: 0, fit: 'stretch', quality: 'standard', codec: 'auto' }
 
 /** (правка 849) пресеты секвенции: разрешение + соотношения сторон */
 const SEQ_SIZES: Array<{ label: string; w: number; h: number }> = [
@@ -624,10 +626,16 @@ function shotSpeed(s: MontageShot): number {
  * ТОЛЬКО по видимому диапазону — иначе при зуме кадры растягиваются, а после
  * разреза весь файл сжимается в половинку блока.
  */
+// (правка 882) размеры квантуются шагом 8 px: драг высоты дорожки или зума
+// переснимал ПОЛОСУ на каждый пиксель (ключ менялся каждые 4 px); теперь
+// перевыпуск только при смене бакета, погрешность растяжки ≤ 4 px незаметна.
+const stripBucketW = (w: number) => Math.max(16, Math.round(w / 8) * 8)
+const stripBucketH = (h: number) => Math.max(24, Math.round(h / 8) * 8)
+
 const stripKey = (url: string, r: { start: number; end: number }, w: number, h: number) =>
   // (правка 854) размер блока в ключе: ячейки снимаются в пропорции видео под
-  // конкретный блок, при зуме/высоте дорожки полоса переснимается.
-  `${url}|${r.start.toFixed(2)}|${r.end.toFixed(2)}|${Math.round(w / 8) * 8}x${Math.round(h / 4) * 4}`
+  // конкретный блок, при зуме/высоте дорожки полоса переснимается (с 882 — шаг 8 px).
+  `${url}|${r.start.toFixed(2)}|${r.end.toFixed(2)}|${stripBucketW(w)}x${stripBucketH(h)}`
 
 /**
  * кинополоса клипа: кадры диапазона [r.start, r.end] через canvas → dataURL.
@@ -1099,6 +1107,8 @@ export function MontageView() {
         fps: num(q.fps, 120),
         fit: (['stretch', 'cover', 'contain', 'blur'] as const).includes(q.fit as 'blur') ? q.fit as SeqSettings['fit'] : 'stretch',
         quality: (['high', 'standard', 'fast'] as const).includes(q.quality as 'fast') ? q.quality as SeqSettings['quality'] : 'standard',
+        // (правка 882) кодировщик: загодя недопустимое значение = «Авто»
+        codec: (['auto', 'cpu', 'gpu'] as const).includes(q.codec as 'cpu') ? q.codec as SeqSettings['codec'] : 'auto',
       })
     }
     hydrated.current = true
@@ -1853,16 +1863,16 @@ export function MontageView() {
   // мгновенного скраба и воспроизведения.
   const stripDims = useCallback(
     (row: { len: number }) => ({
-      w: Math.max(16, row.len * pps),
-      h: Math.max(24, trackH),
+      w: stripBucketW(row.len * pps),
+      h: stripBucketH(trackH),
     }),
     [pps, trackH],
   )
   // (правка 876) размеры/окно кинополосы для чипа слоя (тот же кэш strips, что у базы)
   const layerStripReq = useCallback(
     (l: LayerClip) => {
-      const w = Math.max(14, layerLen(l) * pps)
-      const h = Math.max(24, trackH)
+      const w = stripBucketW(layerLen(l) * pps)
+      const h = stripBucketH(trackH)
       const start = l.trimStart
       const end = Math.max(start + 0.05, (l.duration || 0) - l.trimEnd)
       return { w, h, r: { start, end } }
@@ -3588,6 +3598,25 @@ export function MontageView() {
                           seqSet.quality === k && 'text-[#A78BFA]',
                         )}
                         onClick={() => setSeqSet((q) => ({ ...q, quality: k }))}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    {/* (правка 882) кодировщик результата: NVENC быстрее libx264 в разы,
+                        но требует видеокарту NVIDIA; auto сам определит и откатится на CPU */}
+                    <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-zinc-500">Кодирование</div>
+                    {([
+                      ['auto', 'Авто (видеокарта, если есть)'],
+                      ['cpu', 'Процессор (x264)'],
+                      ['gpu', 'Видеокарта (NVENC)'],
+                    ] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        className={cn(
+                          'w-full rounded px-2 py-1 text-left hover:bg-[var(--surface-2)]',
+                          (seqSet.codec ?? 'auto') === k && 'text-[#A78BFA]',
+                        )}
+                        onClick={() => setSeqSet((q) => ({ ...q, codec: k }))}
                       >
                         {label}
                       </button>

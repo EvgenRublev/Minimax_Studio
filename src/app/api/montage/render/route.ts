@@ -274,6 +274,8 @@ interface MontageSeq {
   fps?: number | null
   fit?: string | null
   quality?: string | null
+  /** (правка 882) кодировщик: auto (GPU если есть) | cpu (libx264) | gpu (h264_nvenc) */
+  codec?: string | null
 }
 
 /** (правка 847) типы переходов, разрешённые к сборке (набор xfade ffmpeg) */
@@ -289,6 +291,40 @@ const QUALITY: Record<string, { crf: string; preset: string }> = {
   high: { crf: '18', preset: 'medium' },
   standard: { crf: '20', preset: 'veryfast' },
   fast: { crf: '28', preset: 'veryfast' },
+}
+
+/**
+ * (правка 882) профиль NVENC: crf у nvenc нет, качество задаётся vbr+сq.
+ * Presets nvenc: p1 (быстрейший) .. p7. p4 ≈ veryfast у x264.
+ */
+const QUALITY_GPU: Record<string, { cq: string; preset: string }> = {
+  high: { cq: '19', preset: 'p5' },
+  standard: { cq: '21', preset: 'p4' },
+  fast: { cq: '26', preset: 'p2' },
+}
+
+/**
+ * (правка 882) есть ли в ffmpeg аппаратный кодировщик h264_nvenc (NVIDIA).
+ * Определяем один раз на процесс — список кодировщиков не меняется.
+ */
+let nvencProbe: Promise<boolean> | null = null
+function hasNvenc(ffmpeg: string): Promise<boolean> {
+  if (!nvencProbe) {
+    nvencProbe = execFileAsync(ffmpeg, ['-hide_banner', '-encoders'], { timeout: 20_000 })
+      .then((r) => /h264_nvenc/.test(String(r.stdout ?? '') + String(r.stderr ?? '')))
+      .catch(() => false)
+  }
+  return nvencProbe
+}
+
+/** (правка 882) аргументы видео-кодировщика: cpu = libx264, gpu = h264_nvenc */
+function videoCodecArgs(kind: 'cpu' | 'gpu', qualKey: string): string[] {
+  if (kind === 'gpu') {
+    const q = QUALITY_GPU[qualKey] ?? QUALITY_GPU.standard
+    return ['-c:v', 'h264_nvenc', '-preset', q.preset, '-rc', 'vbr', '-cq', q.cq, '-b:v', '0']
+  }
+  const q = QUALITY[qualKey] ?? QUALITY.standard
+  return ['-c:v', 'libx264', '-preset', q.preset, '-crf', q.crf]
 }
 
 /** (правка 848) скорость клипа: вне диапазона или некорректная = 1 */
@@ -541,6 +577,48 @@ async function probeVideo(ffmpeg: string, filePath: string): Promise<ProbeInfo |
 }
 
 /**
+ * (правка 882) кэш probe по (путь + mtime + размер): повторные сборки одних и
+ * тех же клипов больше не тратят процессы ffmpeg на чтение метаданных.
+ * Инвалидация — по изменению файла; кэш только для успешных probe.
+ */
+const probeCache = new Map<string, { mtimeMs: number; size: number; info: ProbeInfo }>()
+
+/** probe с кэшем; для аудио без видео-кадра — только длительность/наличие звука */
+async function probeCached(ffmpeg: string, filePath: string, audioOnly: boolean): Promise<ProbeInfo | null> {
+  let st: Awaited<ReturnType<typeof fs.stat>> | null = null
+  try {
+    st = await fs.stat(filePath)
+  } catch { /* файл исчезнет — вернём null ниже по probe */ }
+  if (st) {
+    const hit = probeCache.get(filePath)
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.info
+  }
+  let info = await probeVideo(ffmpeg, filePath)
+  if (!info && audioOnly) {
+    // аудиофайл без видеокадра: probeVideo требует разрешение — для него
+    // берём только длительность и признак звука из stderr-разбора
+    let stderr = ''
+    try {
+      const r = await execFileAsync(ffmpeg, ['-hide_banner', '-i', filePath], { timeout: 15_000 })
+      stderr = r.stderr ?? ''
+    } catch (e) {
+      stderr = (e as { stderr?: string }).stderr ?? ''
+    }
+    const dm = /Duration:\s*(\d+):(\d{2}):(\d{2}\.\d{2})/.exec(stderr)
+    const dur = dm ? Number(dm[1]) * 3600 + Number(dm[2]) * 60 + Number(dm[3]) : 0
+    info = dur > 0 ? { duration: dur, width: 0, height: 0, hasAudio: true } : null
+  }
+  if (info && st) {
+    if (probeCache.size > 800) {
+      const first = probeCache.keys().next()
+      if (!first.done) probeCache.delete(first.value)
+    }
+    probeCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, info })
+  }
+  return info
+}
+
+/**
  * (правка 836) Рекурсивный поиск ВСЕХ файлов с таким именем в подпапках output
  * (глубина ≤ depth). Раньше брали первый попавшийся и игнорировали subfolder —
  * из-за чего в сборку мог попасть ДРУГОЙ видеофайл с тем же именем.
@@ -625,6 +703,10 @@ export async function POST(req: Request) {
       tr: TransitionSpec | null
       /** (правка 860) пауза (пустое место на таймлайне) перед этим клипом, сек */
       gap: number
+      /** (правка 882) установочный seek входа: -ss/-t вместо trim-фильтров;
+       *  задаётся в цикле filter_complex после сверки подрезки с реальной длиной */
+      seekS: number | null
+      seekT: number | null
     }> = []
     for (const inp of inputs) {
       const name = String(inp.name || '')
@@ -671,6 +753,8 @@ export async function POST(req: Request) {
         fx: cleanFx(inp.fx),
         tr: cleanTransition(inp.tr),
         gap: rawGap && rawGap >= 0.02 ? Math.min(300, rawGap) : 0,
+        seekS: null,
+        seekT: null,
       })
     }
 
@@ -693,6 +777,9 @@ export async function POST(req: Request) {
       vol: number
       fi: number
       fo: number
+      /** (правка 882) seek входа (см. items) */
+      seekS: number | null
+      seekT: number | null
     }> = []
     for (const l of rawLayers) {
       const name = String(l?.name || '')
@@ -726,6 +813,8 @@ export async function POST(req: Request) {
         vol: parseVol(l.vol),
         fi: parseFade(l.fadeIn),
         fo: parseFade(l.fadeOut),
+        seekS: null,
+        seekT: null,
       })
     }
 
@@ -742,6 +831,9 @@ export async function POST(req: Request) {
       vol: number
       fi: number
       fo: number
+      /** (правка 882) seek входа (см. items) */
+      seekS: number | null
+      seekT: number | null
     }> = []
     for (const a of rawAudios) {
       const f = String(a?.file || '')
@@ -766,6 +858,8 @@ export async function POST(req: Request) {
         vol: parseVol(a.vol),
         fi: parseFade(a.fadeIn),
         fo: parseFade(a.fadeOut),
+        seekS: null,
+        seekT: null,
       })
     }
 
@@ -773,6 +867,7 @@ export async function POST(req: Request) {
     // (правка 839) probe идёт параллельно (до 4 процессов): раньше 60 входов
     // давали ~1.26 с только на чтение метаданных перед началом кодирования.
     // (правка 874) probe покрывает также входы слоёв и аудиоклипов.
+    // (правка 882) probe проходит через кэш (путь+mtime+размер).
     const probeCount = items.length + layerItems.length + audioItems.length
     const probed: Array<ProbeInfo | null> = new Array(probeCount).fill(null)
     {
@@ -780,28 +875,12 @@ export async function POST(req: Request) {
       const worker = async () => {
         while (next < probeCount) {
           const i = next++
-          const p = await probeVideo(
-            ffmpeg,
-            i < items.length ? items[i].src : i < items.length + layerItems.length
+          const src = i < items.length
+            ? items[i].src
+            : i < items.length + layerItems.length
               ? layerItems[i - items.length].src
-              : audioItems[i - items.length - layerItems.length].src,
-          )
-          // аудиофайл без видеокадра: probeVideo требует разрешение — для него
-          // берём только длительность и признак звука из stderr-разбора
-          if (!p && i >= items.length + layerItems.length) {
-            let stderr = ''
-            try {
-              const r = await execFileAsync(ffmpeg, ['-hide_banner', '-i', audioItems[i - items.length - layerItems.length].src], { timeout: 15_000 })
-              stderr = r.stderr ?? ''
-            } catch (e) {
-              stderr = (e as { stderr?: string }).stderr ?? ''
-            }
-            const dm = /Duration:\s*(\d+):(\d{2}):(\d{2}\.\d{2})/.exec(stderr)
-            const dur = dm ? Number(dm[1]) * 3600 + Number(dm[2]) * 60 + Number(dm[3]) : 0
-            probed[i] = dur > 0 ? { duration: dur, width: 0, height: 0, hasAudio: true } : null
-          } else {
-            probed[i] = p
-          }
+              : audioItems[i - items.length - layerItems.length].src
+          probed[i] = await probeCached(ffmpeg, src, i >= items.length + layerItems.length)
         }
       }
       await Promise.all(Array.from({ length: Math.min(4, probeCount) }, worker))
@@ -833,8 +912,19 @@ export async function POST(req: Request) {
     const evH = rawH ? even(rawH, rawH - 1) : even(infos[0].height, infos[0].height + 1)
     const FPS = nInt(seqIn.fps, 1, 120) || 24
     const FIT = ['stretch', 'cover', 'contain', 'blur'].includes(String(seqIn.fit)) ? String(seqIn.fit) : 'stretch'
-    const QUAL = QUALITY[String(seqIn.quality)] ?? QUALITY.standard
+    const QUAL_KEY = QUALITY[String(seqIn.quality)] ? String(seqIn.quality) : 'standard'
     const masterVol = parseVol(body.masterVol)
+    // ---- (правка 882) выбор кодировщика: auto = NVENC если есть, cpu = libx264,
+    // gpu = только NVENC (400, если его нет). ----
+    const CODEC = ['cpu', 'gpu', 'auto'].includes(String(seqIn.codec)) ? String(seqIn.codec) : 'auto'
+    const gpuOk = CODEC !== 'cpu' && (await hasNvenc(ffmpeg))
+    if (CODEC === 'gpu' && !gpuOk) {
+      return NextResponse.json(
+        { error: 'Кодировщик NVENC не найден — выберите «Процессор» или «Авто»' },
+        { status: 400 },
+      )
+    }
+    const vKind: 'cpu' | 'gpu' = gpuOk ? 'gpu' : 'cpu'
 
     // ---- filter_complex: подрезка + скорость + эффекты + канва секвенции ----
     const parts: string[] = []
@@ -873,7 +963,14 @@ export async function POST(req: Request) {
       }
       durs[i] = dur
       totalOut += dur
-      const trimV = s > 0.001 || e != null ? `trim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},` : ''
+      // (правка 882) подрезка делается input-seek'ом -ss/-t: ffmpeg декодирует
+      // только нужный отрезок, а не весь вход целиком — главный выигрыш скорости
+      // на длинных клипах. Trim-фильтры при этом не нужны: PTS после -ss начинается с 0.
+      if (s > 0.001 || e != null) {
+        it.seekS = s > 0.001 ? s : null
+        it.seekT = e != null ? e - s : null
+      }
+      const trimV = ''
       // (правка 848, 859, 861, 876) картинные эффекты шота — построение общее с клипами слоёв
       const fxv = fxChainParts(it.fx, info.width, info.height, String(i))
       // (правка 848) setpts делит на скорость: (PTS-STARTPTS)/speed
@@ -899,9 +996,8 @@ export async function POST(req: Request) {
         parts.push(`[${i}:v]${trimV}${pts}${fxStr},${fit},setsar=1,${tail}`)
       }
       if (info.hasAudio) {
-        const at = s > 0.001 || e != null
-          ? `atrim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},asetpts=PTS-STARTPTS,`
-          : ''
+        // (правка 882) вход уже обрезан -ss/-t — atrim не нужен, PTS звука с 0
+        const at = ''
         // (правка 720 v11) фейды звука клипа (после asetpts локальное время начинается с 0)
         const fi = Math.min(it.fi, Math.max(0, dur - 0.01))
         const fo = Math.min(it.fo, Math.max(0, dur - 0.01))
@@ -937,7 +1033,12 @@ export async function POST(req: Request) {
       if (e != null && e - s < 0.05) e = s + 0.05
       const dur = ((e ?? info.duration) - s) / li.speed
       const at = li.at
-      const trimV = s > 0.001 || e != null ? `trim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},` : ''
+      // (правка 882) подрезка слоя — input-seek -ss/-t (см. шоты базы)
+      if (s > 0.001 || e != null) {
+        li.seekS = s > 0.001 ? s : null
+        li.seekT = e != null ? e - s : null
+      }
+      const trimV = ''
       const pts = li.speed !== 1 ? `setpts=(PTS-STARTPTS)/${li.speed}` : 'setpts=PTS-STARTPTS'
       // (правка 876) картинные эффекты слоя — та же цепочка, что у шотов базы
       const lfx = fxChainParts(li.fx, info.width, info.height, `L${j}`)
@@ -947,9 +1048,8 @@ export async function POST(req: Request) {
       // та же схема, что у шотов базы; нет звука/нулевая громкость = цепочки нет
       let aTag: string | null = null
       if (info.hasAudio && li.vol > 0.001) {
-        const atrimV = s > 0.001 || e != null
-          ? `atrim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},asetpts=PTS-STARTPTS,`
-          : ''
+        // (правка 882) вход слоя уже обрезан -ss/-t — atrim не нужен
+        const atrimV = ''
         const fi = Math.min(li.fi, Math.max(0, dur - 0.01))
         const fo = Math.min(li.fo, Math.max(0, dur - 0.01))
         // (правка 877) фейды считаем в секундах готовой дорожки: сначала atempo,
@@ -1080,9 +1180,12 @@ export async function POST(req: Request) {
         if (e != null && e - s < 0.05) e = s + 0.05
         const dur = (e ?? info.duration) - s
         const inIdx = items.length + layerItems.length + k
-        const at = s > 0.001 || e != null
-          ? `atrim=start=${s.toFixed(4)}${e != null ? `:end=${e.toFixed(4)}` : ''},asetpts=PTS-STARTPTS,`
-          : ''
+        // (правка 882) вход аудио уже обрезан -ss/-t — atrim не нужен
+        if (s > 0.001 || e != null) {
+          ai.seekS = s > 0.001 ? s : null
+          ai.seekT = e != null ? e - s : null
+        }
+        const at = ''
         const fi = Math.min(ai.fi, Math.max(0, dur - 0.01))
         const fo = Math.min(ai.fo, Math.max(0, dur - 0.01))
         const af = (fi > 0.01 ? `afade=t=in:st=0:d=${fi.toFixed(4)},` : '')
@@ -1155,23 +1258,41 @@ export async function POST(req: Request) {
 
     // ---- один проход: все входы + filter_complex ----
     // (правка 839) -progress pipe:1: прогресс кода времени читаем из stdout
-    const args: string[] = ['-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-y']
-    for (const it of items) args.push('-i', it.src)
+    // (правка 882) -nostdin: ffmpeg не ждёт ввод с терминала (защита от зависаний
+    // при наследовании stdin от сервера); подрезка входов — -ss/-t перед -i.
+    const args: string[] = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-progress', 'pipe:1', '-y']
+    const pushInput = (src: string, seekS: number | null, seekT: number | null) => {
+      if (seekS != null) args.push('-ss', seekS.toFixed(4))
+      if (seekT != null) args.push('-t', seekT.toFixed(4))
+      args.push('-i', src)
+    }
+    for (const it of items) pushInput(it.src, it.seekS, it.seekT)
     // (правка 874) входы слоёв и аудиоклипов идут после базовых — их индексы
     // (items.length + j) используются в filter_complex выше
-    for (const li of layerItems) args.push('-i', li.src)
-    for (const ai of audioItems) args.push('-i', ai.src)
-    args.push(
+    for (const li of layerItems) pushInput(li.src, li.seekS, li.seekT)
+    for (const ai of audioItems) pushInput(ai.src, ai.seekS, ai.seekT)
+    const baseArgsLen = args.length // (правка 882) хвост пересобирается при фолбэке NVENC
+    const tail = (kind: 'cpu' | 'gpu'): string[] => [
       '-filter_complex', parts.join(';'),
       '-map', `[${vMap}]`, '-map', `[${aOutTag}]`,
-      '-c:v', 'libx264', '-preset', QUAL.preset, '-crf', QUAL.crf,
+      ...videoCodecArgs(kind, QUAL_KEY),
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-ar', '44100', '-ac', '2',
       '-movflags', '+faststart',
       outPath,
-    )
+    ]
+    args.push(...tail(vKind))
     try {
-      await runFfmpegEncode(ffmpeg, args, req.signal, totalOut, outName)
+      try {
+        await runFfmpegEncode(ffmpeg, args, req.signal, totalOut, outName)
+      } catch (err) {
+        // (правка 882) сбой NVENC (нет кодека/драйвера/доступа к GPU) в режиме
+        // auto не роняет сборку: повторяем прогон на libx264. Отмена — не сбой.
+        if (!(vKind === 'gpu' && CODEC === 'auto' && !(err as { aborted?: boolean }).aborted)) throw err
+        args.length = baseArgsLen
+        args.push(...tail('cpu'))
+        await runFfmpegEncode(ffmpeg, args, req.signal, totalOut, outName)
+      }
     } catch (err) {
       // (правка 838) убирать неполный файл: раньше битые/брошенные сборки
       // оставались в output и забивали счётчик имён
