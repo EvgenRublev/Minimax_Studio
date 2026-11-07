@@ -3542,97 +3542,47 @@ export function MontageView() {
           const snapPts = snapPointsExcept({ shot: dragItem.shot.key })
           wantStart = snapClipStart(wantStart, dragItem.len, snapPts, tol)
         }
-        /* (правка 899) Соседи НЕ раздвигаются: «слоты» (границы на шкале)
-           зафиксированы по состоянию до перетаскивания. Перетаскиваемый клип
-           (или группа) едет внутри окна своего слота, а как только он залезает
-           на позицию соседнего клипа — они СРАЗУ меняются местами: сосед
-           занимает освободившийся слот, а всё остальное стоит на своих местах.
-           Раньше клип сначала тащил за собой весь хвост (sameOrderRightShift),
-           и только потом происходила смена порядка. */
+        /* (правка 899, v2) обмен слотами отключён: клип (или группа выделенных
+           клипов) скользит по шкале и УПИРАЕТСЯ в соседний клип — дальше не идёт.
+           Порядок клипов не меняется, соседи стоят на местах; встык ставится
+           ровно встык. */
         const shift = wantStart - dragItem.offset
-        const src = sq0.map((r, i) => ({
-          r,
-          i,
-          want: group.has(r.shot.key) ? Math.max(0, r.offset + shift) : r.offset,
-        }))
-        /* (правка 899) порядок: статичные клипы идут в своём порядке, а группа
-           подряд идущих выделенных клипов вставляется как единый «прогон».
-           Как только прогон зацепил соседний слот — они сразу меняются местами,
-           без «выталкивания» хвоста. */
-        const rest = src.filter((x) => !group.has(x.r.shot.key))
-        const runs: Array<typeof src> = []
-        for (const x of src) {
-          if (!group.has(x.r.shot.key)) continue
-          const last = runs[runs.length - 1]
-          if (last && last[last.length - 1].i === x.i - 1) last.push(x)
-          else runs.push([x])
-        }
-        const movers = runs
-          .map((items) => ({
-            items,
-            i: items[0].i,
-            want: Math.min(...items.map((x) => x.want)),
-            len: items[items.length - 1].want + items[items.length - 1].r.len - items[0].want,
-          }))
-          .sort((a, b) => a.want - b.want || a.i - b.i)
-        for (const mv of movers) {
-          let idx = 0
-          for (let s = 0; s < rest.length; s++) {
-            const st = rest[s]
-            // статик справа от mv: перестаёт быть «правым», как только mv его зацепил
-            const precedes =
-              st.i > mv.i ? mv.want + mv.len > st.r.offset + 1e-6 : mv.want >= st.r.offset + st.r.len + 1e-6
-            if (precedes) idx = s + 1
+        let dLow = -Infinity
+        let dHigh = Infinity
+        for (let i = 0; i < sq0.length; i++) {
+          if (!group.has(sq0[i].shot.key)) continue
+          const prev = sq0[i - 1]
+          if (!prev || !group.has(prev.shot.key)) {
+            const low = (prev ? prev.offset + prev.len : 0) - sq0[i].offset
+            if (low > dLow) dLow = low
           }
-          rest.splice(idx, 0, ...mv.items)
+          const next = sq0[i + 1]
+          if (next && !group.has(next.shot.key)) {
+            const hi = next.offset - (sq0[i].offset + sq0[i].len)
+            if (hi < dHigh) dHigh = hi
+          }
         }
-        const slotStarts = src.map((x) => x.r.offset)
-        const gapByPos = src.map((x) => x.r.gap ?? 0)
+        const d = Math.min(Math.max(shift, dLow), dHigh)
+        const blocked = Math.abs(d - shift) > 0.001
+        const offs = sq0.map((x) => (group.has(x.shot.key) ? Math.max(0, x.offset + d) : x.offset))
         const nextShots: MontageShot[] = []
         let prevEnd = 0
         let actualDragStart = dragItem.offset
         let actualDragGap = 0
-        const nOrd = rest.length
-        for (let m = 0; m < nOrd; m++) {
-          const it = rest[m]
-          // клип, не сдвинувшийся в порядке и не участвующий в группе, стоит в своём слоте
-          const pinned = it.i === m && !group.has(it.r.shot.key)
-          let e = m
-          if (!pinned) {
-            while (e + 1 < nOrd && !(rest[e + 1].i === e + 1 && !group.has(rest[e + 1].r.shot.key))) e++
+        for (let i = 0; i < sq0.length; i++) {
+          const gap = Math.max(0, +(offs[i] - prevEnd).toFixed(3))
+          if (i === dragIdx) {
+            actualDragStart = offs[i]
+            actualDragGap = gap
           }
-          let span = 0
-          for (let k = m; k <= e; k++) span += (k === m ? 0 : gapByPos[k]) + rest[k].r.len
-          let start: number
-          if (pinned) {
-            start = Math.max(prevEnd, slotStarts[m])
-          } else {
-            // затронутый блок укладываем от желаемой позиции ведущего, но так,
-            // чтобы следующий «приколотый» клип сохранил свой слот (хвост не едет)
-            const nextPinned = e + 1 < nOrd ? slotStarts[e + 1] : Infinity
-            const hi = nextPinned === Infinity ? Math.max(prevEnd, rest[m].want) : Math.max(prevEnd, nextPinned - span)
-            start = Math.min(Math.max(prevEnd, rest[m].want), hi)
-          }
-          let cur = start
-          for (let k = m; k <= e; k++) {
-            const x = rest[k]
-            cur += k === m ? 0 : gapByPos[k]
-            const gap = Math.max(0, +(cur - prevEnd).toFixed(3))
-            if (x.r.shot.key === row.shot.key) {
-              actualDragStart = cur
-              actualDragGap = gap
-            }
-            nextShots.push({ ...x.r.shot, gap: gap < 0.01 ? undefined : gap })
-            prevEnd = cur + x.r.len
-            cur = prevEnd
-          }
-          m = e
+          nextShots.push({ ...sq0[i].shot, gap: gap < 0.01 ? undefined : gap })
+          prevEnd = offs[i] + sq0[i].len
         }
         setShots(nextShots)
         setTrimBadge({
           x: clientX,
           y: clientY,
-          text: `${actualDragStart.toFixed(2)} с${actualDragGap >= 0.02 ? ` (пауза +${actualDragGap.toFixed(2)} с)` : ' (встык)'}`,
+          text: `${actualDragStart.toFixed(2)} с${actualDragGap >= 0.02 ? ` (пауза +${actualDragGap.toFixed(2)} с)` : ' (встык)'}${blocked ? ' · упор' : ''}`,
         })
       }
 
