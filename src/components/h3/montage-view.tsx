@@ -1019,11 +1019,56 @@ export function MontageView() {
    * сбрасывал выделенный слой (панель свойств приоритетнее), и «свойства
    * одного клипа» оставались на экране при выборе клипа на другой дорожке.
    */
+  /** (правка 899) доп. клипы мультивыбора по типам: «основной» клип (selectedKey /
+   *  selectedLayerKey / selectedAudioKey) нужен панели свойств, а группа задаётся
+   *  здесь. Ctrl/Cmd/Shift+клик добавляет или снимает клип с группы. */
+  const [selExtra, setSelExtra] = useState<{ shot: string[]; layer: string[]; audio: string[] }>({ shot: [], layer: [], audio: [] })
+  /** (правка 899) мультимножество всех выделенных клипов по типам — для обработчиков
+   *  перетаскивания/клавиш, которые живут вне замыкания рендера */
+  const selSetRef = useRef<{ shot: Set<string>; layer: Set<string>; audio: Set<string> }>({ shot: new Set(), layer: new Set(), audio: new Set() })
+
   const selectClip = useCallback((kind: 'shot' | 'layer' | 'audio', key: string | null) => {
     setSelectedKey(kind === 'shot' ? key : null)
     setSelectedLayerKey(kind === 'layer' ? key : null)
     setSelectedAudioKey(kind === 'audio' ? key : null)
+    // (правка 899) одиночный выбор всегда сбрасывает группу
+    setSelExtra((p) => (p.shot.length || p.layer.length || p.audio.length ? { shot: [], layer: [], audio: [] } : p))
   }, [])
+
+  /** (правка 899) Ctrl/Cmd/Shift+клик по клипу: добавить/убрать из группы */
+  const toggleClipSelection = useCallback((kind: 'shot' | 'layer' | 'audio', key: string) => {
+    setSelExtra((p) => {
+      const cur = p[kind]
+      const has = cur.includes(key)
+      return { ...p, [kind]: has ? cur.filter((k) => k !== key) : [...cur, key] }
+    })
+  }, [])
+
+  useEffect(() => {
+    selSetRef.current = {
+      shot: new Set(selectedKey ? [selectedKey, ...selExtra.shot] : selExtra.shot),
+      layer: new Set(selectedLayerKey ? [selectedLayerKey, ...selExtra.layer] : selExtra.layer),
+      audio: new Set(selectedAudioKey ? [selectedAudioKey, ...selExtra.audio] : selExtra.audio),
+    }
+  }, [selectedKey, selectedLayerKey, selectedAudioKey, selExtra])
+
+  /** (правка 899) снять выделение со всех клипов (клик по пустому месту таймлайна) */
+  const clearClipSelection = useCallback(() => {
+    setSelectedKey(null)
+    setSelectedLayerKey(null)
+    setSelectedAudioKey(null)
+    setSelExtra({ shot: [], layer: [], audio: [] })
+  }, [])
+
+  /** (правка 899) рисует ли клип «выбранным» (одиночный выбор или группа) */
+  const isClipSelected = useCallback(
+    (kind: 'shot' | 'layer' | 'audio', key: string) => {
+      if (selExtra[kind].includes(key)) return true
+      const primary = kind === 'shot' ? selectedKey : kind === 'layer' ? selectedLayerKey : selectedAudioKey
+      return primary === key
+    },
+    [selExtra, selectedKey, selectedLayerKey, selectedAudioKey],
+  )
   const patchLayer = useCallback((key: string, patch: Partial<LayerClip>) => {
     setLayers((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)))
   }, [])
@@ -2216,6 +2261,9 @@ export function MontageView() {
     const track = trackRef.current
     if (!track) return
     setResult(null)
+    // (правка 899) клик по фону таймлайна снимает группу выделения; на клип под
+    // плейхедом выделение вернётся в onUp, если плейхед реально на клипе
+    clearClipSelection()
     scrubbingRef.current = true
     const wasPlaying = playingRef.current
     if (wasPlaying) stopSeq(false)
@@ -2234,17 +2282,19 @@ export function MontageView() {
         scrubRafRef.current = 0
       }
       at(ev.clientX, false)
-      // выделяем клип, на котором остановился плейхед
+      // выделяем клип, на котором остановился плейхед (правка 899: если плейхед
+      // в пустом промежутке — выделение остаётся снятым)
       const sq = seqRef.current
       if (sq.length) {
-        const row = sq[findRow(seqTRef.current)]
-        if (row) setSelectedKey(row.shot.key)
+        const t = seqTRef.current
+        const row = sq[findRow(t)]
+        if (row && t >= row.offset - 0.001 && t < row.offset + row.len - 0.001) selectClip('shot', row.shot.key)
       }
       if (wasPlaying) playSeq()
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [seekTo, stopSeq, playSeq])
+  }, [seekTo, stopSeq, playSeq, clearClipSelection, selectClip])
 
   const addShot = useCallback(
     (f: VideoGalleryFile, atIdx?: number) => {
@@ -2278,8 +2328,24 @@ export function MontageView() {
   const removeShot = useCallback((key: string) => {
     pushHistory()
     stopSeq(false)
-    setShots((prev) => prev.filter((s) => s.key !== key))
+    setShots((prev) => {
+      const i = prev.findIndex((s) => s.key === key)
+      if (i < 0) return prev
+      // (правка 899) удаление БЕЗ ripple: место удалённого клипа (его пауза +
+      // длительность) передаётся следующему клипу, поэтому остальные стоят на
+      // своих местах, а не сдвигаются влево, заполняя пробел
+      const gone = prev[i]
+      const rg = effRange(gone)
+      const space = Math.max(0, (gone.gap ?? 0) + (rg.end - rg.start) / shotSpeed(gone))
+      const next = prev.filter((s) => s.key !== key)
+      if (space > 0.001 && i < next.length) {
+        const g = +(((next[i].gap ?? 0) + space)).toFixed(3)
+        next[i] = { ...next[i], gap: g < 0.01 ? undefined : g }
+      }
+      return next
+    })
     setSelectedKey((cur) => (cur === key ? null : cur))
+    setSelExtra((p) => (p.shot.includes(key) ? { ...p, shot: p.shot.filter((k) => k !== key) } : p))
   }, [stopSeq, pushHistory])
 
   /** разрез шота под плейхедом на две части (S) */
@@ -2675,6 +2741,7 @@ export function MontageView() {
     pushHistory()
     setLayers((prev) => prev.filter((l) => l.key !== key))
     setSelectedLayerKey((cur) => (cur === key ? null : cur))
+    setSelExtra((p) => (p.layer.includes(key) ? { ...p, layer: p.layer.filter((k) => k !== key) } : p))
   }, [pushHistory])
 
   const duplicateLayerClip = useCallback((key: string) => {
@@ -2745,7 +2812,44 @@ export function MontageView() {
     pushHistory()
     setAudios((prev) => prev.filter((a) => a.key !== key))
     setSelectedAudioKey((cur) => (cur === key ? null : cur))
+    setSelExtra((p) => (p.audio.includes(key) ? { ...p, audio: p.audio.filter((k) => k !== key) } : p))
   }, [pushHistory])
+
+  /** (правка 899) удалить все выделенные клипы (группу) сразу, одним снимком истории;
+   *  база — без ripple: освободившееся место каждого удалённого клипа переходит
+   *  следующему по позиции клипу */
+  const deleteSelectedClips = useCallback(() => {
+    const sel = selSetRef.current
+    if (!sel.shot.size && !sel.layer.size && !sel.audio.size) return false
+    pushHistory()
+    stopSeq(false)
+    if (sel.shot.size) {
+      setShots((prev) => {
+        let out = prev
+        for (const k of sel.shot) {
+          const i = out.findIndex((s) => s.key === k)
+          if (i < 0) continue
+          const gone = out[i]
+          const rg = effRange(gone)
+          const space = Math.max(0, (gone.gap ?? 0) + (rg.end - rg.start) / shotSpeed(gone))
+          const next = out.filter((s) => s.key !== k)
+          if (space > 0.001 && i < next.length) {
+            const g = +((next[i].gap ?? 0) + space).toFixed(3)
+            next[i] = { ...next[i], gap: g < 0.01 ? undefined : g }
+          }
+          out = next
+        }
+        return out
+      })
+    }
+    if (sel.layer.size) setLayers((prev) => prev.filter((l) => !sel.layer.has(l.key)))
+    if (sel.audio.size) setAudios((prev) => prev.filter((a) => !sel.audio.has(a.key)))
+    setSelectedKey(null)
+    setSelectedLayerKey(null)
+    setSelectedAudioKey(null)
+    setSelExtra({ shot: [], layer: [], audio: [] })
+    return true
+  }, [stopSeq, pushHistory])
 
   /**
    * (правка 883) удаление видеодорожки:
@@ -3010,17 +3114,9 @@ export function MontageView() {
         e.preventDefault()
         scrubBy(1 / (seqSet.fps || 24))
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // (правка 874) удаляем выделенное: слой, аудио или базовый клип
-        if (selectedLayerKey) {
-          e.preventDefault()
-          removeLayerClip(selectedLayerKey)
-        } else if (selectedAudioKey) {
-          e.preventDefault()
-          removeAudioClip(selectedAudioKey)
-        } else if (selectedKey) {
-          e.preventDefault()
-          removeShot(selectedKey)
-        }
+        // (правка 874, 899) удаляем выделение: слой, аудио или базовый клип;
+        // если выделена группа (Ctrl/Shift+клик) — удаляем всю группу сразу
+        if (deleteSelectedClips()) e.preventDefault()
       } else if (['s', 'S', 'ы', 'Ы'].includes(e.key)) {
         e.preventDefault()
         splitAtPlayhead()
@@ -3045,7 +3141,7 @@ export function MontageView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [
     togglePlay, scrubBy, selectedKey, selectedLayerKey, selectedAudioKey,
-    removeShot, removeLayerClip, removeAudioClip, splitAtPlayhead, duplicateShot,
+    deleteSelectedClips, splitAtPlayhead, duplicateShot,
     duplicateLayerClip, duplicateAudioClip, toggleFullscreen, moveShot, undo, redo, isFs, seqSet.fps,
   ])
 
@@ -3369,8 +3465,17 @@ export function MontageView() {
       const dragIdx = sq0.findIndex((r) => r.shot.key === row.shot.key)
       if (dragIdx < 0) return
       const dragItem = sq0[dragIdx]
-      const others = sq0.filter((_, idx) => idx !== dragIdx)
       const startY = e.clientY
+      /* (правка 899) мультивыбор: Ctrl/Cmd/Shift+клик добавляет/снимает клип с
+         группы и не начинает перенос. Если клип уже в группе — переносим всю
+         группу, иначе только его. */
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        e.stopPropagation()
+        toggleClipSelection('shot', row.shot.key)
+        return
+      }
+      const inGroup = selSetRef.current.shot.has(row.shot.key)
+      const group = new Set<string>(inGroup ? Array.from(selSetRef.current.shot) : [row.shot.key])
       const trackLeft = trackRef.current?.getBoundingClientRect().left ?? 0
       const grabOffset = Math.max(
         0,
@@ -3437,39 +3542,91 @@ export function MontageView() {
           const snapPts = snapPointsExcept({ shot: dragItem.shot.key })
           wantStart = snapClipStart(wantStart, dragItem.len, snapPts, tol)
         }
-        // определяем порядок клипов по положению центров
-        const dragCenter = wantStart + dragItem.len * 0.5
-        let insertIdx = 0
-        for (let i = 0; i < others.length; i++) {
-          if (others[i].offset + others[i].len * 0.5 < dragCenter) insertIdx = i + 1
+        /* (правка 899) Соседи НЕ раздвигаются: «слоты» (границы на шкале)
+           зафиксированы по состоянию до перетаскивания. Перетаскиваемый клип
+           (или группа) едет внутри окна своего слота, а как только он залезает
+           на позицию соседнего клипа — они СРАЗУ меняются местами: сосед
+           занимает освободившийся слот, а всё остальное стоит на своих местах.
+           Раньше клип сначала тащил за собой весь хвост (sameOrderRightShift),
+           и только потом происходила смена порядка. */
+        const shift = wantStart - dragItem.offset
+        const src = sq0.map((r, i) => ({
+          r,
+          i,
+          want: group.has(r.shot.key) ? Math.max(0, r.offset + shift) : r.offset,
+        }))
+        /* (правка 899) порядок: статичные клипы идут в своём порядке, а группа
+           подряд идущих выделенных клипов вставляется как единый «прогон».
+           Как только прогон зацепил соседний слот — они сразу меняются местами,
+           без «выталкивания» хвоста. */
+        const rest = src.filter((x) => !group.has(x.r.shot.key))
+        const runs: Array<typeof src> = []
+        for (const x of src) {
+          if (!group.has(x.r.shot.key)) continue
+          const last = runs[runs.length - 1]
+          if (last && last[last.length - 1].i === x.i - 1) last.push(x)
+          else runs.push([x])
         }
-        const ordered = [...others]
-        ordered.splice(insertIdx, 0, dragItem)
-
+        const movers = runs
+          .map((items) => ({
+            items,
+            i: items[0].i,
+            want: Math.min(...items.map((x) => x.want)),
+            len: items[items.length - 1].want + items[items.length - 1].r.len - items[0].want,
+          }))
+          .sort((a, b) => a.want - b.want || a.i - b.i)
+        for (const mv of movers) {
+          let idx = 0
+          for (let s = 0; s < rest.length; s++) {
+            const st = rest[s]
+            // статик справа от mv: перестаёт быть «правым», как только mv его зацепил
+            const precedes =
+              st.i > mv.i ? mv.want + mv.len > st.r.offset + 1e-6 : mv.want >= st.r.offset + st.r.len + 1e-6
+            if (precedes) idx = s + 1
+          }
+          rest.splice(idx, 0, ...mv.items)
+        }
+        const slotStarts = src.map((x) => x.r.offset)
+        const gapByPos = src.map((x) => x.r.gap ?? 0)
         const nextShots: MontageShot[] = []
         let prevEnd = 0
-        let actualDragStart = 0
+        let actualDragStart = dragItem.offset
         let actualDragGap = 0
-        const sameOrderRightShift = insertIdx === dragIdx && wantStart > dragItem.offset ? wantStart - dragItem.offset : 0
-        for (let m = 0; m < ordered.length; m++) {
-          const item = ordered[m]
-          let start: number
-          if (m < insertIdx) {
-            start = Math.max(prevEnd, item.offset)
-          } else if (m === insertIdx) {
-            start = Math.max(prevEnd, wantStart)
-            actualDragStart = start
-            actualDragGap = Math.max(0, start - prevEnd)
-          } else {
-            // если клип просто отодвигают вправо без смены порядка, а правый сосед
-            // стоял встык (gap===0) — сдвигаем хвост вместе с ним; если между ними
-            // было окно — сосед стоит на месте, пока его не коснутся
-            const desired = item.gap > 0.01 ? item.offset : item.offset + sameOrderRightShift
-            start = Math.max(prevEnd, desired)
+        const nOrd = rest.length
+        for (let m = 0; m < nOrd; m++) {
+          const it = rest[m]
+          // клип, не сдвинувшийся в порядке и не участвующий в группе, стоит в своём слоте
+          const pinned = it.i === m && !group.has(it.r.shot.key)
+          let e = m
+          if (!pinned) {
+            while (e + 1 < nOrd && !(rest[e + 1].i === e + 1 && !group.has(rest[e + 1].r.shot.key))) e++
           }
-          const gap = Math.max(0, +(start - prevEnd).toFixed(3))
-          nextShots.push({ ...item.shot, gap: gap < 0.01 ? undefined : gap })
-          prevEnd = start + item.len
+          let span = 0
+          for (let k = m; k <= e; k++) span += (k === m ? 0 : gapByPos[k]) + rest[k].r.len
+          let start: number
+          if (pinned) {
+            start = Math.max(prevEnd, slotStarts[m])
+          } else {
+            // затронутый блок укладываем от желаемой позиции ведущего, но так,
+            // чтобы следующий «приколотый» клип сохранил свой слот (хвост не едет)
+            const nextPinned = e + 1 < nOrd ? slotStarts[e + 1] : Infinity
+            const hi = nextPinned === Infinity ? Math.max(prevEnd, rest[m].want) : Math.max(prevEnd, nextPinned - span)
+            start = Math.min(Math.max(prevEnd, rest[m].want), hi)
+          }
+          let cur = start
+          for (let k = m; k <= e; k++) {
+            const x = rest[k]
+            cur += k === m ? 0 : gapByPos[k]
+            const gap = Math.max(0, +(cur - prevEnd).toFixed(3))
+            if (x.r.shot.key === row.shot.key) {
+              actualDragStart = cur
+              actualDragGap = gap
+            }
+            nextShots.push({ ...x.r.shot, gap: gap < 0.01 ? undefined : gap })
+            prevEnd = cur + x.r.len
+            cur = prevEnd
+          }
+          m = e
         }
         setShots(nextShots)
         setTrimBadge({
@@ -3488,7 +3645,8 @@ export function MontageView() {
           suppressDrag.current = true
           stopSeq(false)
           setResult(null)
-          selectClip('shot', row.shot.key)
+          // (правка 899) клип уже в группе — выделение (и панель свойств) не трогаем
+          if (!inGroup) selectClip('shot', row.shot.key)
           pushHistory()
         }
         if (!dragRaf) {
@@ -3509,9 +3667,16 @@ export function MontageView() {
         setTrimBadge(null)
         if (moved) {
           // (правка 878) финальная проверка: курсор над рядом слоя — конвертация
+          // (правка 899) если вели группу — конвертируем всю группу со своими
+          // относительными позициями
           const vTrack = detectLayerTrack(ev.clientY)
           if (vTrack != null) {
-            shotToLayer(row.shot.key, vTrack, atFromX(ev.clientX), { history: false })
+            const atBase = atFromX(ev.clientX)
+            for (const key of group) {
+              const r = sq0.find((x) => x.shot.key === key)
+              if (!r) continue
+              shotToLayer(key, vTrack, Math.max(0, atBase + (r.offset - dragItem.offset)), { history: false })
+            }
           } else {
             applyMove(ev.clientX, ev.clientY)
           }
@@ -3534,7 +3699,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo, shotToLayer, snapPointsExcept, snapClipStart],
+    [stopSeq, pushHistory, seekTo, shotToLayer, snapPointsExcept, snapClipStart, toggleClipSelection],
   )
 
   /**
@@ -3549,6 +3714,18 @@ export function MontageView() {
       if (targetEl && (targetEl.closest('button') || targetEl.closest('[data-trim-handle]'))) return
       e.preventDefault()
       e.stopPropagation()
+      /* (правка 899) мультивыбор на слоях и аудио: Ctrl/Cmd/Shift+клик — добавить/снять
+         клип с группы; перенос группы работает теми же дельтами по времени и ряду. */
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        toggleClipSelection(kind, clip.key)
+        return
+      }
+      const inGroup = selSetRef.current[kind].has(clip.key)
+      const group = new Set<string>(inGroup ? Array.from(selSetRef.current[kind]) : [clip.key])
+      const at0Map = new Map<string, number>()
+      for (const x of kind === 'layer' ? layersRef.current : audiosRef.current) {
+        if (group.has(x.key)) at0Map.set(x.key, x.at)
+      }
       const startX = e.clientX
       const at0 = clip.at
       const len = kind === 'layer' ? layerLen(clip as LayerClip) : audioLen(clip as AudioClip)
@@ -3599,8 +3776,16 @@ export function MontageView() {
         return null
       }
       const setClip = (at: number, track: number) => {
-        if (kind === 'layer') setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
-        else setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at, track } : x)))
+        // (правка 899) дельта применяется ко всей выделенной группе: клипы едут
+        // синхронно и сохраняют интервалы друг между другом
+        const applyTo = <T extends { key: string; at: number; track: number }>(x: T): T | null => {
+          if (!group.has(x.key)) return null
+          const base = at0Map.get(x.key)
+          const nextAt = +Math.max(0, (base ?? x.at) + (at - at0)).toFixed(3)
+          return { ...x, at: nextAt, track }
+        }
+        if (kind === 'layer') setLayers((prev) => prev.map((x) => applyTo(x) ?? x))
+        else setAudios((prev) => prev.map((x) => applyTo(x) ?? x))
       }
       let moved = false
       let dragRaf = 0
@@ -3657,7 +3842,8 @@ export function MontageView() {
           suppressDrag.current = true
           stopSeq(false)
           setResult(null)
-          selectClip(kind, clip.key)
+          // (правка 899) клип уже в группе — выделение не сбрасываем
+          if (!inGroup) selectClip(kind, clip.key)
           pushHistory()
         }
         if (!dragRaf) {
@@ -3678,13 +3864,17 @@ export function MontageView() {
           if (kind === 'layer') {
             const at = Math.max(0, at0 + (ev.clientX - startX) / Math.max(8, ppsRef.current))
             if (isOverBase(ev.clientY)) {
-              layerToShot(clip.key, +at.toFixed(3), { history: false })
+              // (правка 899) группа слоем на V1: каждый со своим смещением
+              for (const key of group) {
+                const base = at0Map.get(key) ?? at0
+                layerToShot(key, +Math.max(0, at + (base - at0)).toFixed(3), { history: false })
+              }
               setTimeout(() => { suppressDrag.current = false }, 0)
               return
             }
             const nt = newTopTrack(ev.clientY)
             if (nt != null) {
-              setLayers((prev) => prev.map((x) => (x.key === clip.key ? { ...x, track: nt } : x)))
+              setLayers((prev) => prev.map((x) => (group.has(x.key) ? { ...x, track: nt } : x)))
               setLayerTracks((cur) => Math.max(cur, nt))
               setTimeout(() => { suppressDrag.current = false }, 0)
               return
@@ -3695,7 +3885,13 @@ export function MontageView() {
             const at = Math.max(0, at0 + (ev.clientX - startX) / Math.max(8, ppsRef.current))
             const nt = newAudioTrack(ev.clientY)
             if (nt != null) {
-              setAudios((prev) => prev.map((x) => (x.key === clip.key ? { ...x, at: +at.toFixed(3), track: nt } : x)))
+              setAudios((prev) =>
+                prev.map((x) => {
+                  if (!group.has(x.key)) return x
+                  const base = at0Map.get(x.key) ?? x.at
+                  return { ...x, at: +Math.max(0, at + (base - at0)).toFixed(3), track: nt }
+                }),
+              )
               setAudioTracks((cur) => Math.max(cur, nt))
               setTimeout(() => { suppressDrag.current = false }, 0)
               return
@@ -3713,7 +3909,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot, snapPointsExcept, snapClipStart],
+    [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot, snapPointsExcept, snapClipStart, toggleClipSelection],
   )
 
   /** (правка 874, 884) подрезка клипа слоя/аудио за край:
@@ -4665,7 +4861,7 @@ export function MontageView() {
                         onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
                         className={cn(
                           'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
-                          selectedLayerKey === l.key
+                          isClipSelected('layer', l.key)
                             ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40'
                             : 'border-border hover:border-zinc-500',
                           l.hidden && 'opacity-40',
@@ -4786,7 +4982,7 @@ export function MontageView() {
                     onPointerDown={(e) => startClipDrag(e, row)}
                     className={cn(
                       'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
-                      selectedKey === row.shot.key ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40' : 'border-border hover:border-zinc-500',
+                      isClipSelected('shot', row.shot.key) ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40' : 'border-border hover:border-zinc-500',
                     )}
                     style={{
                       left: `${row.offset * pps}px`,
@@ -4911,7 +5107,7 @@ export function MontageView() {
                         onPointerDown={(e) => startFreeClipDrag(e, 'audio', a)}
                         className={cn(
                           'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-[2px] border bg-emerald-600/25 active:cursor-grabbing',
-                          selectedAudioKey === a.key
+                          isClipSelected('audio', a.key)
                             ? 'z-10 border-emerald-300 ring-1 ring-emerald-300/40'
                             : 'border-emerald-500/40 hover:border-emerald-400/70',
                           a.muted && 'opacity-40',
