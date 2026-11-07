@@ -1333,6 +1333,54 @@ export function MontageView() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
+  // (правка 896) панорамирование таймлайна: зажать ПРАВУЮ кнопку мыши и
+  // тянуть влево-вправо (или вверх-вниз по дорожкам). Контекстное меню на
+  // таймлайне не используется, поэтому подавляем его. Левая кнопка не
+  // затрагивается — клипы/бегунок продолжают работать как раньше.
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    let drag: { x: number; y: number; left: number; top: number } | null = null
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 2) return
+      e.preventDefault()
+      drag = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }
+      try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
+      el.style.cursor = 'grabbing'
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!drag) return
+      e.preventDefault()
+      el.scrollLeft = drag.left - (e.clientX - drag.x)
+      el.scrollTop = drag.top - (e.clientY - drag.y)
+    }
+    const end = (e?: PointerEvent) => {
+      if (!drag) return
+      drag = null
+      el.style.cursor = ''
+      if (e) { try { el.releasePointerCapture(e.pointerId) } catch { /* noop */ } }
+    }
+    const onUp = (e: PointerEvent) => {
+      if (e.button !== 2) return
+      end(e)
+    }
+    const onCancel = (e: PointerEvent) => end(e)
+    const onContextMenu = (e: MouseEvent) => e.preventDefault()
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onCancel)
+    el.addEventListener('contextmenu', onContextMenu)
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onCancel)
+      el.removeEventListener('contextmenu', onContextMenu)
+      el.style.cursor = ''
+    }
+  }, [])
+
   // после зума докручиваем скролл, чтобы момент времени под курсором не уехал
   useEffect(() => {
     const a = zoomAnchorRef.current
@@ -2077,6 +2125,7 @@ export function MontageView() {
 
   // скраб по линейке и за головку плейхеда
   const startScrub = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return // (правка 896) правой кнопкой — панорамирование таймлайна
     e.preventDefault()
     const track = trackRef.current
     if (!track) return
@@ -3143,6 +3192,7 @@ export function MontageView() {
   /** тяга за край блока — подрезка в секундах (+ подсказка новой длительности и живой кадр в превью) */
   const startTrimDrag = useCallback(
     (e: React.PointerEvent, shot: MontageShot, side: 'start' | 'end') => {
+      if (e.button !== 0) return // (правка 896) правой кнопкой — панорамирование таймлайна
       e.preventDefault()
       e.stopPropagation()
       stopSeq(false)
@@ -3585,6 +3635,7 @@ export function MontageView() {
    *  вправо за курсором мыши, а конечная граница остаётся на месте */
   const startFreeTrimDrag = useCallback(
     (e: React.PointerEvent, kind: 'layer' | 'audio', clip: LayerClip | AudioClip, side: 'start' | 'end') => {
+      if (e.button !== 0) return // (правка 896) правой кнопкой — панорамирование таймлайна
       e.preventDefault()
       e.stopPropagation()
       suppressDrag.current = true
