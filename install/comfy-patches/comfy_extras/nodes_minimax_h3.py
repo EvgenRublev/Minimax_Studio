@@ -279,7 +279,9 @@ class MiniMaxH3AddGuide(io.ComfyNode):
                 io.Int.Input("frame_idx", default=0, min=-9999, max=9999,
                              tooltip="Frame index to anchor the image or the clip's first frame at. Negative values are counted from the end of the video."),
             ],
-            outputs=[io.Conditioning.Output(display_name="positive")],
+            outputs=[io.Conditioning.Output(display_name="positive"),
+                     # (правка 888) второй выход — латент с зашитым гайд-аудио
+                     io.Latent.Output(display_name="latent")],
         )
 
     @classmethod
@@ -329,10 +331,38 @@ class MiniMaxH3AddGuide(io.ComfyNode):
                 audio_latent = audio_latent[..., :max_rt].clone()
             keyframe["audio_latent"] = audio_latent
 
+            # (правка 888) Тряска изображения при аудио-гайде: cond-строки гайда
+            # приколоты к таймлайну, но сам аудио-стрим латента — чистый шум, и на
+            # малом числе шагов он не успевает сойтись к гайду; видео приковано к
+            # стриму той же тайм-осью и следует за его «дрожанием» — это читается
+            # как тряска камеры. Фикс (тот же приём, что в рефайне и в нодах
+            # extend/FaceRefine): зашиваем гайд-аудио прямо в аудио-стрим на его
+            # тайм-координате (round(FRAME_RESCALE*frame_idx) — ровно ряд, который
+            # PackedLayout анкорит cond-строками гайда) и ставим там AV-маску 0:
+            # ядро превращает её в audio_denoise_mask (строки идут с «чистым»
+            # timestep и сэмплер их не меняет). Строки вне гайда остаются шумом
+            # (маска 1) — модель дозаполняет паузы сама.
+            tensors = list(samples.unbind())
+            off = min(round(FRAME_RESCALE * resolved_frame_index),
+                      tensors[1].shape[-1] - audio_latent.shape[-1])
+            off = max(0, off)
+            tensors[1] = tensors[1].clone()
+            tensors[1][..., off:off + audio_latent.shape[-1]] = audio_latent.to(tensors[1].dtype)
+            out_latent = dict(latent)
+            out_latent["samples"] = comfy.nested_tensor.NestedTensor(tuple(tensors))
+            mask = latent.get("noise_mask")
+            if mask is not None and getattr(mask, "is_nested", False):
+                masks = list(mask.unbind())
+                if masks[1].shape[-1] == tensors[1].shape[-1]:
+                    masks[1] = masks[1].clone()
+                    masks[1][..., off:off + audio_latent.shape[-1]] = 0.0
+                    out_latent["noise_mask"] = comfy.nested_tensor.NestedTensor(tuple(masks))
+            latent = out_latent
+
         keyframes = list(positive[0][1].get("minimax_keyframes", []))
         keyframes.append(keyframe)
         positive = node_helpers.conditioning_set_values(positive, {"minimax_keyframes": keyframes})
-        return io.NodeOutput(positive)
+        return io.NodeOutput(positive, latent)
 
 
 class MiniMaxH3ReferenceToVideo(io.ComfyNode):

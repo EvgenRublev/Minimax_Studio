@@ -1083,13 +1083,17 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // цепочки.
   const audioGuideNodes: Record<string, unknown> = {}
   let condSrc: [string, number] = ['46:11', 0]
+  // (правка 888) латент-выход цепочки гайдов: MiniMaxH3AddGuide дописывает
+  // гайд-аудио в аудио-стрим латента (маска 0 на этих рядах) — сэмплер pass 1
+  // обязан получить обновлённый латент, иначе фикс тряски не работает.
+  let latentGuideSrc: [string, number] = ['46:11', 1]
   if ((mode !== 'ref' || p.audioGuide === true) && refAudioCount > 0) {
     for (let i = 0; i < refAudioCount; i++) {
       const gid = AUDIO_GUIDE_NODE_IDS[i]
       audioGuideNodes[gid] = {
         inputs: {
           positive: condSrc,
-          latent: ['46:11', 1],
+          latent: latentGuideSrc,
           frame_idx: 0,
           audio: refAudioSrcs[i] ?? [REF_AUDIO_NODE_IDS[i], 0], // (правка 326) с учётом обрезки
           audio_vae: ['46:4', 0],
@@ -1098,6 +1102,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         _meta: { title: `Audio Guide ${i + 1}` },
       }
       condSrc = [gid, 0]
+      latentGuideSrc = [gid, 1]
     }
   }
 
@@ -1384,7 +1389,9 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         guider: ['46:29', 0],
         sampler: ['46:18a', 0],
         sigmas: ['46:24', 0],
-        latent_image: ['46:11', 1],
+        // (правка 888) латент из хвоста цепочки гайдов (пустой цепочки = '46:11') —
+        // содержит зашитое гайд-аудио с нулевой маской (фикс тряски).
+        latent_image: latentGuideSrc,
       },
       class_type: 'SamplerCustomAdvanced',
       _meta: { title: draft ? 'Draft Sampler (single pass, full schedule)' : 'Pass 1 Sampler (low-res, full schedule)' },
