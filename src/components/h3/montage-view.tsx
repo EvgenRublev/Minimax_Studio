@@ -956,6 +956,17 @@ export function MontageView() {
   // (правка 874) выделенные слой/аудио + точечные правки из панели свойств
   const selectedLayer = layers.find((l) => l.key === selectedLayerKey) || null
   const selectedAudio = audios.find((a) => a.key === selectedAudioKey) || null
+  /**
+   * (правка 893) Выбор клипа эксклюзивен для всех типов дорожек: клик по клипу
+   * базы/слоя/аудио снимает выделение с остальных. Раньше клик по базе не
+   * сбрасывал выделенный слой (панель свойств приоритетнее), и «свойства
+   * одного клипа» оставались на экране при выборе клипа на другой дорожке.
+   */
+  const selectClip = useCallback((kind: 'shot' | 'layer' | 'audio', key: string | null) => {
+    setSelectedKey(kind === 'shot' ? key : null)
+    setSelectedLayerKey(kind === 'layer' ? key : null)
+    setSelectedAudioKey(kind === 'audio' ? key : null)
+  }, [])
   const patchLayer = useCallback((key: string, patch: Partial<LayerClip>) => {
     setLayers((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)))
   }, [])
@@ -1019,6 +1030,49 @@ export function MontageView() {
   useEffect(() => { audiosRef.current = audios }, [audios])
   useEffect(() => { layerTracksRef.current = layerTracks }, [layerTracks])
   useEffect(() => { audioTracksRef.current = audioTracks }, [audioTracks])
+  /**
+   * (правка 893) Магнит — общий для ВСЕХ дорожек. Точки притяжения: 0, плейхед
+   * и оба края каждого клипа (база V1, слои V2+, аудио), кроме самого
+   * перетаскиваемого. Раньше база притягивалась только к базе, а слои — только
+   * к базе и соседям того же типа, поэтому клип не «прилипал» к клипу на
+   * другой дорожке.
+   */
+  const snapPointsExcept = useCallback(
+    (skip: { shot?: string; layer?: string; audio?: string }) => {
+      // (правка 893) плейхед — и его край для клипа, упирающегося в него концом
+      const pts: number[] = [0, seqTRef.current]
+      for (const r of seqRef.current) {
+        if (r.shot.key === skip.shot) continue
+        pts.push(r.offset, r.offset + r.len)
+      }
+      for (const l of layersRef.current) {
+        if (l.key === skip.layer) continue
+        pts.push(l.at, l.at + layerLen(l))
+      }
+      for (const a of audiosRef.current) {
+        if (a.key === skip.audio) continue
+        pts.push(a.at, a.at + audioLen(a))
+      }
+      return pts
+    },
+    [layerLen, audioLen],
+  )
+  /**
+   * (правка 893) Притягивает ЛЮБОЙ из двух краёв клипа (старт и конец) к
+   * ближайшей точке магнита: можно подтащить и началом к концу чужого клипа,
+   * и концом к началу. Возвращает скорректированный старт клипа.
+   */
+  const snapClipStart = useCallback((want: number, len: number, pts: number[], tol: number) => {
+    let best = want
+    let bestD = tol + 0.0001
+    for (const p of pts) {
+      const dStart = Math.abs(want - p)
+      if (dStart < bestD) { bestD = dStart; best = p }
+      const dEnd = Math.abs(want + len - p)
+      if (dEnd < bestD) { bestD = dEnd; best = p - len }
+    }
+    return bestD <= tol ? Math.max(0, best) : want
+  }, [])
   // (правка 874) синхронизация слоистых <video>/<audio> с курсором превью:
   // играем только окна клипов, рассинхрон > 0.35 с подтягиваем seek'ом
   const layerVideosOf = (host: HTMLVideoElement | HTMLDivElement): HTMLVideoElement[] =>
@@ -2252,9 +2306,9 @@ export function MontageView() {
       next.splice(i + 1, 0, copy)
       return next
     })
-    setSelectedKey(copy.key)
+    selectClip('shot', copy.key)
     setResult(null)
-  }, [stopSeq, pushHistory])
+  }, [stopSeq, pushHistory, selectClip])
 
   /** (правка 720 v11) сдвинуть клип в последовательности (Alt+← / Alt+→) */
   const moveShot = useCallback((key: string | null, dir: -1 | 1) => {
@@ -2498,8 +2552,8 @@ export function MontageView() {
     pushHistory()
     const copy: LayerClip = { ...src, key: newLayerKey(), at: src.at + layerLen(src) }
     setLayers((prev) => [...prev, copy])
-    setSelectedLayerKey(copy.key)
-  }, [pushHistory, layerLen])
+    selectClip('layer', copy.key)
+  }, [pushHistory, layerLen, selectClip])
 
   /** (правка 874) импорт звука с диска (POST /api/montage/audio) + клип на ряд track по плейхеду */
   const importAndAddAudio = useCallback(
@@ -2662,8 +2716,8 @@ export function MontageView() {
     pushHistory()
     const copy: AudioClip = { ...src, key: newAudioKey(), at: src.at + audioLen(src) }
     setAudios((prev) => [...prev, copy])
-    setSelectedAudioKey(copy.key)
-  }, [pushHistory, audioLen])
+    selectClip('audio', copy.key)
+  }, [pushHistory, audioLen, selectClip])
 
   /**
    * Превью на весь экран (F). (правка 720 v11) В кадре окна с невидимым
@@ -3093,7 +3147,7 @@ export function MontageView() {
       e.stopPropagation()
       stopSeq(false)
       setResult(null)
-      setSelectedKey(shot.key)
+      selectClip('shot', shot.key)
       suppressDrag.current = true
       const startX = e.clientX
       const r0 = effRange(shot)
@@ -3150,7 +3204,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [pps, setTrim, stopSeq, pushHistory, seekBufferTo],
+    [pps, setTrim, stopSeq, pushHistory, seekBufferTo, selectClip],
   )
 
   /**
@@ -3243,17 +3297,9 @@ export function MontageView() {
         let wantStart = Math.max(0, dragItem.offset + dt)
         if (snapRef.current) {
           const tol = Math.min(0.18, 8 / curPps)
-          const snapPts: number[] = [0, seqTRef.current, Math.max(0, seqTRef.current - dragItem.len)]
-          for (const o of others) {
-            snapPts.push(o.offset + o.len)
-            if (o.offset - dragItem.len >= 0) snapPts.push(o.offset - dragItem.len)
-          }
-          for (const sp of snapPts) {
-            if (Math.abs(wantStart - sp) <= tol) {
-              wantStart = sp
-              break
-            }
-          }
+          // (правка 893) магнит общий: база + слои + аудио, оба края клипа
+          const snapPts = snapPointsExcept({ shot: dragItem.shot.key })
+          wantStart = snapClipStart(wantStart, dragItem.len, snapPts, tol)
         }
         // определяем порядок клипов по положению центров
         const dragCenter = wantStart + dragItem.len * 0.5
@@ -3306,7 +3352,7 @@ export function MontageView() {
           suppressDrag.current = true
           stopSeq(false)
           setResult(null)
-          setSelectedKey(row.shot.key)
+          selectClip('shot', row.shot.key)
           pushHistory()
         }
         if (!dragRaf) {
@@ -3336,7 +3382,7 @@ export function MontageView() {
           setTimeout(() => { suppressDrag.current = false }, 0)
         } else {
           // обычный клик без перетаскивания: выбираем клип и переносим плейхед в точку клика
-          setSelectedKey(row.shot.key)
+          selectClip('shot', row.shot.key)
           setResult(null)
           const track = trackRef.current
           if (track) {
@@ -3352,7 +3398,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo, shotToLayer],
+    [stopSeq, pushHistory, seekTo, shotToLayer, snapPointsExcept, snapClipStart],
   )
 
   /**
@@ -3431,13 +3477,9 @@ export function MontageView() {
         let want = Math.max(0, at0 + (clientX - startX) / curPps)
         if (snapRef.current) {
           const tol = Math.min(0.18, 8 / curPps)
-          const snapPts: number[] = [0, seqTRef.current, Math.max(0, seqTRef.current - len)]
-          for (const r of seqRef.current) snapPts.push(r.offset, r.offset + r.len)
-          for (const o of kind === 'layer' ? layersRef.current : audiosRef.current) {
-            if (o.key === clip.key) continue
-            snapPts.push(o.at, o.at + (kind === 'layer' ? layerLen(o as LayerClip) : audioLen(o as AudioClip)))
-          }
-          for (const sp of snapPts) if (Math.abs(want - sp) <= tol) { want = sp; break }
+          // (правка 893) магнит общий: база + все слои + все аудио, оба края
+          const snapPts = snapPointsExcept(kind === 'layer' ? { layer: clip.key } : { audio: clip.key })
+          want = snapClipStart(want, len, snapPts, tol)
         }
         // (правка 878) над V1 — превращаем слой в клип базы; над верхним рядом —
         // новый ряд. В этих зонах слой пока не двигаем, только показываем бейдж.
@@ -3479,8 +3521,7 @@ export function MontageView() {
           suppressDrag.current = true
           stopSeq(false)
           setResult(null)
-          if (kind === 'layer') setSelectedLayerKey(clip.key)
-          else setSelectedAudioKey(clip.key)
+          selectClip(kind, clip.key)
           pushHistory()
         }
         if (!dragRaf) {
@@ -3527,8 +3568,7 @@ export function MontageView() {
           applyMove(ev.clientX, ev.clientY)
           setTimeout(() => { suppressDrag.current = false }, 0)
         } else {
-          if (kind === 'layer') setSelectedLayerKey(clip.key)
-          else setSelectedAudioKey(clip.key)
+          selectClip(kind, clip.key)
           setResult(null)
           const track = trackRef.current
           if (track) seekTo(Math.max(0, (ev.clientX - track.getBoundingClientRect().left) / ppsRef.current))
@@ -3537,7 +3577,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot],
+    [stopSeq, pushHistory, seekTo, layerLen, audioLen, layerToShot, snapPointsExcept, snapClipStart],
   )
 
   /** (правка 874, 884) подрезка клипа слоя/аудио за край:
@@ -3548,8 +3588,7 @@ export function MontageView() {
       e.preventDefault()
       e.stopPropagation()
       suppressDrag.current = true
-      if (kind === 'layer') setSelectedLayerKey(clip.key)
-      else setSelectedAudioKey(clip.key)
+      selectClip(kind, clip.key)
       const startX = e.clientX
       const at0 = clip.at
       const ts0 = clip.trimStart
@@ -3619,7 +3658,7 @@ export function MontageView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [pushHistory, layerLen, audioLen],
+    [pushHistory, layerLen, audioLen, selectClip],
   )
 
   /** (правка 720 v11) вписать всю сборку в видимую ширину таймлайна */
@@ -5247,7 +5286,7 @@ export function MontageView() {
                 <div>Кликните по клипу на таймлайне, чтобы настроить его свойства</div>
                 {shots.length > 0 && (
                   <button
-                    onClick={() => setSelectedKey(shots[0].key)}
+                    onClick={() => selectClip('shot', shots[0].key)}
                     className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-zinc-300 hover:border-[#A78BFA]"
                   >
                     Выбрать 1-й клип
@@ -5486,7 +5525,7 @@ export function MontageView() {
                 <div>Выберите клип на базовой дорожке или слой V2+, чтобы настроить его эффекты</div>
                 {shots.length > 0 && (
                   <button
-                    onClick={() => setSelectedKey(shots[0].key)}
+                    onClick={() => selectClip('shot', shots[0].key)}
                     className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-zinc-300 hover:border-[#A78BFA]"
                   >
                     Выбрать 1-й клип
