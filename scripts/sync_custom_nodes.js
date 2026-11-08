@@ -109,11 +109,43 @@ function syncStudioNodes(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, resolveComfyRoot }
+// (правка 901) Core patches need the same self-heal as custom nodes.
+// install.ps1 copies "install\comfy-patches\*" over <ComfyUI>\ComfyUI at install
+// time, and the in-app updater never touches ComfyUI. 7.1.17 added the second
+// (latent) output to MiniMaxH3AddGuide and the generation workflow now feeds it
+// into SamplerCustomAdvanced; on an in-app update the old one-output node stayed
+// behind and every audio-guide generation died with HTTP 400:
+//   exception_during_inner_validation / IndexError "list index out of range".
+// Re-sync the patch files before EVERY ComfyUI launch, same as custom nodes.
+function syncCorePatches(appRoot, comfyRoot) {
+  const synced = []
+  const srcRoot = path.join(appRoot, 'install', 'comfy-patches')
+  const dstRoot = path.join(comfyRoot, 'ComfyUI')
+  if (!existsSync(srcRoot) || !existsSync(dstRoot)) return synced
+  for (const rel of listFiles(srcRoot)) {
+    const sp = path.join(srcRoot, rel)
+    const dp = path.join(dstRoot, rel)
+    try {
+      let same = false
+      try { same = existsSync(dp) && readFileSync(dp).equals(readFileSync(sp)) } catch { same = false }
+      if (same) continue
+      mkdirSync(path.dirname(dp), { recursive: true })
+      copyFileSync(sp, dp)
+      synced.push(rel)
+    } catch (err) {
+      console.error(`[comfy-patches] ${rel}: ${err && err.message ? err.message : err}`)
+    }
+  }
+  return synced
+}
+
+module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')
   const comfyRoot = process.argv[2] || resolveComfyRoot(appRoot)
   const synced = syncStudioNodes(appRoot, comfyRoot)
   if (synced.length) console.log('[custom-nodes] installed: ' + synced.join(', '))
+  const patched = syncCorePatches(appRoot, comfyRoot)
+  if (patched.length) console.log('[comfy-patches] updated: ' + patched.join(', '))
 }

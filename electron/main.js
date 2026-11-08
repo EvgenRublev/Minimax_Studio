@@ -26,7 +26,7 @@ const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
 // (правка 866) само-восстановление студийных custom_nodes (см. scripts/sync_custom_nodes.js)
-const { syncStudioNodes } = require('../scripts/sync_custom_nodes')
+const { syncStudioNodes, syncCorePatches } = require('../scripts/sync_custom_nodes')
 
 const APP_ROOT = path.resolve(__dirname, '..')
 const PORT = 3000
@@ -378,6 +378,16 @@ function startComfy() {
     }
   } catch (err) {
     console.log(`[desktop] синхронизация custom_nodes не удалась: ${err && err.message ? err.message : err}`)
+  }
+  // (правка 901) То же для патчей ядра: внутрипрограммный апдейт не трогает
+  // ComfyUI, и новая нода MiniMaxH3AddGuide (второй выход latent) не доезжала —
+  // аудио-гайд падал с HTTP 400 / IndexError при валидации воркфлоу.
+  try {
+    for (const rel of syncCorePatches(APP_ROOT, COMFY_ROOT)) {
+      appendConsole(`[desktop] патч ядра ComfyUI обновлён: ${rel}\n`)
+    }
+  } catch (err) {
+    console.log(`[desktop] синхронизация патчей ядра не удалась: ${err && err.message ? err.message : err}`)
   }
   const args = [
     '-I', path.join(COMFY_ROOT, 'ComfyUI', 'main.py'),
