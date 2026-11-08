@@ -460,6 +460,35 @@ function Get-Download {
     Info ("скачано " + [Math]::Round($mb, 1) + " МБ за " + [Math]::Round($sec, 1) + " с (" + [Math]::Round($mb / $sec, 1) + " МБ/с)")
 }
 
+# (правка 900) Один файл с нескольких зеркал: GitHub-releases периодически
+# отвечает 404 на валидную ссылку (release-assets CDN), а curl --retry такой
+# ответ не повторяет — установка обрывалась на ffmpeg. Пробуем ссылки по
+# очереди; перед сменой зеркала чистим недокачанный .part и сегменты, чтобы
+# не склеить байты разных сборок.
+function Get-DownloadAny {
+    param([string[]]$Urls, [string]$Dest)
+    $lastErr = ''
+    for ($i = 0; $i -lt $Urls.Count; $i++) {
+        $u = $Urls[$i]
+        if ($i -gt 0) {
+            Info ('  пробую другое зеркало: ' + $u)
+            Remove-Item $Dest -Force -ErrorAction SilentlyContinue
+            $leaf = Split-Path -Leaf $Dest
+            Get-ChildItem (Split-Path -Parent $Dest) -Filter ($leaf + '.*') -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+        try {
+            Get-Download $u $Dest
+            if ((Test-Path $Dest) -and (Get-Item $Dest).Length -gt 0) { return }
+        } catch {
+            $lastErr = $_.Exception.Message
+            Info ('  зеркало не ответило: ' + $lastErr)
+        }
+    }
+    if ($lastErr) { throw $lastErr }
+    throw ('не удалось скачать: ' + ($Urls -join ' | '))
+}
+
 # (правка 761) Много мелких файлов параллельно (архивы кастомных нод с GitHub).
 function Get-DownloadMany {
     param([object[]]$Jobs, [int]$Max = 6)
@@ -1043,7 +1072,15 @@ if (-not $SkipApp) {
         } else {
             Info 'скачиваю ffmpeg + ffprobe (~130 МБ, один раз)...'
             $ffZip = Join-Path $Cache 'ffmpeg-win64-gpl.zip'
-            Get-Download 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip' $ffZip
+            # (правка 900) несколько зеркал: прямой адрес новой организации,
+            # старый BtbN-редирект, зеркало yt-dlp и сборка gyan.dev (все
+            # содержат ffmpeg.exe + ffprobe.exe в подпапке bin).
+            Get-DownloadAny @(
+                'https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+                'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip',
+                'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip',
+                'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+            ) $ffZip
             $ffTmp = Join-Path $Cache 'ffmpeg-extract'
             if (Test-Path $ffTmp) { Remove-Item $ffTmp -Recurse -Force -ErrorAction SilentlyContinue }
             Expand-ZipSafe $ffZip $ffTmp
