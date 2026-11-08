@@ -19,6 +19,7 @@
     "prepare:electron": "node scripts/prepare-electron.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
+    "check:comfy-sync": "node scripts/check-comfy-sync.mjs",
     "clean": "node scripts/clean.mjs",
     "release": "node scripts/release.mjs"
   },

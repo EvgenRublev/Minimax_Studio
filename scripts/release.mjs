@@ -78,6 +78,11 @@ if (!VERIFY_ONLY) {
 // ── 4. Проверка артефактов ───────────────────────────────────────────────
 console.log(`\n[release] === verify ===`);
 
+// (правка 902) Связка «новые ноды доезжают до ComfyUI» — обязательный инвариант.
+// Апдейтер не трогает ComfyUI, поэтому синхронизация custom nodes и патчей ядра
+// при запуске должна оставаться на месте. Подробности — AGENTS.md.
+if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.mjs'])) process.exit(1);
+
 const checks = [];
 const check = (ok, label, hint) => checks.push({ ok, label, hint });
 
