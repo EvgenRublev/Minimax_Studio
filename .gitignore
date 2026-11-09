@@ -57,6 +57,8 @@ next-env.d.ts
 
 # locally staged reference uploads (ComfyUI offline fallback)
 /.local-input
+# аудиоклипы звуковых дорожек монтажа (правка 874): папку создаёт приложение
+/.montage-audio
 
 # python bytecode cache
 __pycache__/
