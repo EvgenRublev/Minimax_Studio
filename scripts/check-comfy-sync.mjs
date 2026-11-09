@@ -79,6 +79,46 @@ if (existsSync(nodePatch)) {
     'MiniMaxH3AddGuide отдаёт выход latent (иначе аудио-гайд падает на av_latent)')
 }
 
+// 6. (правка 904) Ядро 0.44: core-патчи не нужны, ядро пиновано, ноды полные.
+const legacyCore = [
+  'comfy/ldm/minimax/model.py',
+  'comfy/model_detection.py',
+]
+for (const rel of legacyCore) {
+  expect(!existsSync(join(patchDir, rel)),
+    `ядро 0.44: нет устаревшего патча ${rel} (в 0.44 он уже в upstream)`)
+}
+expect(/function\s+readComfyVersion\s*\(/.test(sync),
+  'sync_custom_nodes.js: читает версию ядра (readComfyVersion)')
+expect(/CORE_MIN_VERSION\s*=\s*['"]0\.44\.0['"]/.test(sync),
+  'sync_custom_nodes.js: патчи применяются только к ядру 0.44+')
+
+const installPs1 = read('install/install.ps1')
+expect(/\$ComfyVersion\s*=\s*['"]0\.44\.0['"]/.test(installPs1),
+  'install.ps1: ядро пиновано на 0.44.0')
+expect(/v0\.44\.0\.zip/.test(installPs1), 'install.ps1: качает тег v0.44.0')
+expect(/function\s+Get-ComfyCoreVersion\s*[({]/.test(installPs1),
+  'install.ps1: умеет определять установленную версию ядра')
+expect(/ComfyUI\.old/.test(installPs1),
+  'install.ps1: при смене ядра сохраняет данные пользователя (ComfyUI.old)')
+
+const lock = read('install/requirements.lock.txt')
+expect(/^comfy-aimdo==0\.6\.0$/m.test(lock), 'requirements.lock.txt: comfy-aimdo 0.6.0')
+expect(/^comfy-kitchen==0\.2\.40$/m.test(lock), 'requirements.lock.txt: comfy-kitchen 0.2.40')
+expect(/^comfyui_frontend_package==1\.57\.6$/m.test(lock), 'requirements.lock.txt: фронтенд 1.57.6')
+expect(/^comfyui_workflow_templates==0\.11\.101$/m.test(lock), 'requirements.lock.txt: шаблоны 0.11.101')
+
+if (existsSync(nodePatch)) {
+  const py = readFileSync(nodePatch, 'utf-8')
+  expect(/node_id\s*=\s*["']MiniMaxH3AudioOrSilent["']/.test(py),
+    'патч содержит MiniMaxH3AudioOrSilent (рефайн/продление на видео без звука)')
+  expect(/node_id\s*=\s*["']MiniMaxH3AudioSliceFrom["']/.test(py),
+    'патч содержит MiniMaxH3AudioSliceFrom (хвост аудио для продления)')
+  expect(/_install_h3_flf_fix/.test(py), 'патч содержит flf-фикс (два прохода, правка 149)')
+  expect(/_resize\(first_frame\[:1\],\s*width,\s*height,\s*"center"\)/.test(py),
+    'first_frame ресайзится через center (без растяжения, правка 154)')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

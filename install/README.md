@@ -10,7 +10,7 @@
 | 1 | Проверки: Windows x64, свободное место, интернет, драйвер NVIDIA |
 | 2 | Node.js 22 (портативный в `runtime\`) — если в системе нет 18+ |
 | 3 | `node_modules` (`npm ci`) + production-сборка `.next` |
-| 4 | ComfyUI (сборка `5f0c4e1` + патчи проекта) + Python **3.12.10** (embedded) |
+| 4 | ComfyUI (**0.44.0** + патчи проекта) + Python **3.12.10** (embedded) |
 | 5 | torch **2.11.0+cu130** и 288 пакетов по зафиксированным версиям |
 | 6 | 22 кастомные ноды по зафиксированным коммитам + 4 собственные ноды студии |
 | 7 | Папки моделей, `extra_model_paths.yaml`, блокировка автообновления |
@@ -71,19 +71,24 @@ CPU-бэкенд) и раскладывает DLL в `stt\`. Модель рас
 
 ## Версия ComfyUI и патчи проекта
 
-Ядро ComfyUI скачивается не из тега, а из конкретного коммита
-`5f0c4e18cb7e98f0e7c46c2c7ce928d641351e67` (25.08.2026) — именно на нём
-построена рабочая установка студии (`__version__` при этом остаётся `0.33.0`).
+Ядро ComfyUI скачивается из тега `v0.44.0` (0.44.0). Если на диске уже стоит
+другая версия ядра, установщик обновляет его сам: скачивает новое в кэш,
+переносит из старой папки модели, `custom_nodes`, `user`, `output`, `input`,
+`temp`, `extra_model_paths.yaml`, а остальное (сам код ComfyUI) заменяет
+целиком. При сбое старое ядро возвращается на место.
 
-Поверх ядра установщик при каждом запуске копирует 4 файла из
+Поверх ядра установщик при каждом запуске копирует 2 файла из
 `install/comfy-patches/`:
 
 | Файл | Зачем |
 | --- | --- |
-| `comfy/ldm/minimax/model.py` | слой `to_gate_compress` для VSA-весов, `minimax_h3_layout` и `block_index` для Veda sparse attention |
-| `comfy/model_detection.py` | определение `gate_compress` в VSA-чекпоинтах |
-| `comfy_extras/nodes_minimax_h3.py` | правки keyframe-latent (правки 146/149) + ноды `MiniMaxH3AudioOrSilent` / `MiniMaxH3AudioSliceFrom` (аудио исходника/тишина и срез хвоста — нужны рефайну, face-refine и продлению) |
+| `comfy_extras/nodes_minimax_h3.py` | наши ноды и правки H3: второй выход `latent` у `MiniMaxH3AddGuide`, `MiniMaxH3AudioOrSilent` / `MiniMaxH3AudioSliceFrom`, flf-фикс keyframe-латентов (правки 146/149), `first_frame` через cover-crop, сохранение пропорций референсов |
 | `utils/extra_config.py` | списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
+
+`comfy/ldm/minimax/model.py` и `comfy/model_detection.py` больше не патчим: всё,
+что мы в них добавляли (`gate_compress`, `minimax_h3_layout`, `block_index`),
+уже есть в 0.44, а наши старые копии удаляли поддержку PDD, FLUX.3, Ming-Image
+и ID-V2V.
 
 Копирование идемпотентно: повторный запуск установщика восстанавливает патчи,
 даже если ComfyUI уже был установлен или обновлён.

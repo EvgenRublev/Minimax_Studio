@@ -109,6 +109,41 @@ function syncStudioNodes(appRoot, comfyRoot) {
   return synced
 }
 
+// (правка 904) Ядро ComfyUI перешло на 0.44.0. Наши патчи рассчитаны именно на
+// него: файл нод импортирует новые модули ComfyUI, а в 0.44 уже есть то, что мы
+// раньше патчили в model.py/model_detection.py (gate_compress, minimax_h3_layout,
+// block_index). Если ядро осталось 0.33 (пользователь обновился только внутри
+// приложения), патчи класть нельзя - иначе ComfyUI может не запуститься или
+// упасть на импорте. В этом случае честно предупреждаем: нужен установщик.
+const CORE_MIN_VERSION = '0.44.0'
+
+/** Версия ядра ComfyUI: comfyui_version.py, иначе pyproject.toml. '' - не знаем. */
+function readComfyVersion(comfyRoot) {
+  const app = path.join(comfyRoot, 'ComfyUI')
+  try {
+    const txt = readFileSync(path.join(app, 'comfyui_version.py'), 'utf8')
+    const m = /__version__\s*=\s*["']([^"']+)["']/.exec(txt)
+    if (m) return m[1]
+  } catch { /* fall through */ }
+  try {
+    const txt = readFileSync(path.join(app, 'pyproject.toml'), 'utf8')
+    const m = /^version\s*=\s*["']([^"']+)["']/m.exec(txt)
+    if (m) return m[1]
+  } catch { /* fall through */ }
+  return ''
+}
+
+/** Сравнение версий вида 0.44.0: <0 - a старее b, 0 - равны, >0 - a новее. */
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 // (правка 901) Core patches need the same self-heal as custom nodes.
 // install.ps1 copies "install\comfy-patches\*" over <ComfyUI>\ComfyUI at install
 // time, and the in-app updater never touches ComfyUI. 7.1.17 added the second
@@ -122,6 +157,14 @@ function syncCorePatches(appRoot, comfyRoot) {
   const srcRoot = path.join(appRoot, 'install', 'comfy-patches')
   const dstRoot = path.join(comfyRoot, 'ComfyUI')
   if (!existsSync(srcRoot) || !existsSync(dstRoot)) return synced
+  // (правка 904) Патчи предназначены для ядра 0.44+. На старом ядре они
+  // ломают импорт - лучше не трогать и сказать, что делать.
+  const version = readComfyVersion(comfyRoot)
+  if (version && compareVersions(version, CORE_MIN_VERSION) < 0) {
+    console.error(`[comfy-patches] ядро ComfyUI ${version} старее ${CORE_MIN_VERSION}: ` +
+      'патчи не применены. Запустите установщик студии, чтобы обновить ядро.')
+    return synced
+  }
   for (const rel of listFiles(srcRoot)) {
     const sp = path.join(srcRoot, rel)
     const dp = path.join(dstRoot, rel)
@@ -139,7 +182,7 @@ function syncCorePatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot }
+module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot, readComfyVersion, compareVersions }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

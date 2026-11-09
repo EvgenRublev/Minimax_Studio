@@ -7,7 +7,7 @@
     Восстанавливает окружение проекта на чистой машине Windows x64:
       * Node.js 22 (портативный, если в системе нет 18+)
       * node_modules + production-сборку .next
-      * ComfyUI 0.33.0 + Python 3.12.10 + torch 2.11.0+cu130 + 288 пакетов
+      * ComfyUI 0.44.0 + Python 3.12.10 + torch 2.11.0+cu130 + 288 пакетов
       * 22 кастомные ноды по зафиксированным коммитам + 5 локальных нод
       * STT-рантайм transcribe.cpp v0.1.3 (голосовой ввод; CPU-only)
       * папки моделей, extra_model_paths.yaml, .no-auto-update
@@ -1109,39 +1109,104 @@ $pythonDir = Join-Path $comfyRoot 'python_embeded'
 $python = Join-Path $pythonDir 'python.exe'
 $script:Python = $python
 
+# (правка 904) Ядро ComfyUI 0.44.0. В нём уже есть то, что мы раньше патчили
+# (gate_compress, minimax_h3_layout, block_index), плюс новые ноды H3 и PDD.
+$ComfyVersion = '0.44.0'
+$ComfyZipName = 'ComfyUI-v0.44.0.zip'
+$ComfyUrl = 'https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v0.44.0.zip'
+
+# Версия ядра: сначала comfyui_version.py (его пишет сборка ComfyUI), затем
+# pyproject.toml. Пустая строка - версию определить не удалось.
+function Get-ComfyCoreVersion {
+    param([string]$App)
+    $vf = Join-Path $App 'comfyui_version.py'
+    if (Test-Path $vf) {
+        $m = Select-String -Path $vf -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($m) { return $m.Matches[0].Groups[1].Value }
+    }
+    $pf = Join-Path $App 'pyproject.toml'
+    if (Test-Path $pf) {
+        $m = Select-String -Path $pf -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($m) { return $m.Matches[0].Groups[1].Value }
+    }
+    return ''
+}
+
 if (-not $SkipComfy) {
-    Step 4 9 'ComfyUI (сборка 5f0c4e1)'
+    Step 4 9 ('ComfyUI ' + $ComfyVersion)
 
     if ($Force -and (Test-Path $comfyApp)) {
         Info 'удаляю ComfyUI (-Force)'
         Remove-Item $comfyApp -Recurse -Force
     }
 
-    if (-not (Test-Path (Join-Path $comfyApp 'main.py'))) {
-        if (Test-Path $comfyApp) { Remove-Item $comfyApp -Recurse -Force }
-        $zip = Join-Path $Cache 'ComfyUI-5f0c4e1.zip'
-        Get-Download 'https://github.com/comfyanonymous/ComfyUI/archive/5f0c4e18cb7e98f0e7c46c2c7ce928d641351e67.zip' $zip
+    $hasCore = Test-Path (Join-Path $comfyApp 'main.py')
+    $installedComfy = ''
+    if ($hasCore) { $installedComfy = Get-ComfyCoreVersion $comfyApp }
+
+    if ($hasCore -and $installedComfy -eq $ComfyVersion) {
+        Ok ('ComfyUI уже на месте (' + $ComfyVersion + ')')
+    } else {
+        if ($installedComfy) {
+            Info ('обновляю ядро ComfyUI ' + $installedComfy + ' -> ' + $ComfyVersion)
+        } elseif ($hasCore) {
+            Info 'версия ядра не определилась - переустанавливаю ядро'
+        } else {
+            Info ('ставлю ядро ComfyUI ' + $ComfyVersion)
+        }
+
+        $zip = Join-Path $Cache $ComfyZipName
+        Get-Download $ComfyUrl $zip
         $tmp = Join-Path $Cache 'comfy-extract'
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         Expand-ZipSafe $zip $tmp
         $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
+        if (-not $inner) { throw 'архив ComfyUI распаковался пустым' }
         if (-not (Test-Path $comfyRoot)) { New-Item -ItemType Directory -Force -Path $comfyRoot | Out-Null }
-        Move-Item $inner.FullName $comfyApp
+
+        # Данные пользователя, которые переносятся в новое ядро: модели, ноды,
+        # настройки, готовые видео и подключённые внешние папки моделей.
+        $keep = @('models', 'custom_nodes', 'user', 'output', 'input', 'temp', 'extra_model_paths.yaml', 'comfy.settings.json')
+        $backup = Join-Path $comfyRoot 'ComfyUI.old'
+        $movedOld = $false
+        try {
+            if ($hasCore) {
+                if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
+                Move-Item $comfyApp $backup
+                $movedOld = $true
+            }
+            Move-Item $inner.FullName $comfyApp
+        } catch {
+            # Откат: вернуть старое ядро, чтобы не оставить пользователя без ComfyUI.
+            if ($movedOld -and -not (Test-Path $comfyApp) -and (Test-Path $backup)) {
+                Move-Item $backup $comfyApp
+            }
+            throw ('не удалось развернуть ядро ComfyUI: ' + $_.Exception.Message)
+        }
+
+        if ($movedOld) {
+            foreach ($k in $keep) {
+                $src = Join-Path $backup $k
+                if (-not (Test-Path $src)) { continue }
+                $dst = Join-Path $comfyApp $k
+                if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+                Move-Item $src $dst
+            }
+            Remove-Item $backup -Recurse -Force
+        }
         Remove-Item $tmp -Recurse -Force
-        Ok 'ComfyUI распакован'
-    } else {
-        Ok 'ComfyUI уже на месте'
+        Ok ('ComfyUI ' + $ComfyVersion + ' распакован')
     }
 
     # Патчи проекта поверх ядра ComfyUI. Применяются при каждом запуске установщика,
     # поэтому повторный запуск чинит и уже испорченную установку.
-    # Без них не работает часть узлов MiniMax H3:
-    #   comfy/ldm/minimax/model.py      - слой to_gate_compress для VSA-весов,
-    #                                     minimax_h3_layout и block_index для Veda;
-    #   comfy/model_detection.py        - определение gate_compress в чекпоинтах VSA;
-    #   comfy_extras/nodes_minimax_h3.py - правки keyframe-latent (правки 146/149);
+    # На 0.44 патчим только два файла:
+    #   comfy_extras/nodes_minimax_h3.py - наши ноды и правки H3 (второй выход
+    #                                     AddGuide, audio-ноды, flf-фикс, ref-aspect);
     #   utils/extra_config.py           - списки путей в extra_model_paths.yaml
     #                                     (студия пишет их именно списками).
+    # model.py и model_detection.py больше НЕ патчим: gate_compress и Veda-хуки
+    # уже есть в ядре 0.44, а наши старые копии удаляли PDD/FLUX.3/Ming/ID-V2V.
     $patchDir = Join-Path $InstallDir 'comfy-patches'
     if (Test-Path $patchDir) {
         $patched = 0
