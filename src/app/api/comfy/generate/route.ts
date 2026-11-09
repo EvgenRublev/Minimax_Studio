@@ -418,7 +418,7 @@ export async function POST(req: NextRequest) {
     // (правка 89) Файл мог быть удалён с диска после выбора — проверяем
     // существование, иначе шаблон падает на UNETLoader с отсутствующим файлом.
     if (cfg.diffusionModel) {
-      const modelPath = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'diffusion_models', cfg.diffusionModel)
+      const modelPath = path.join(cfg.comfyCore, 'models', 'diffusion_models', cfg.diffusionModel)
       if (fs.existsSync(modelPath)) {
         body.diffusionModel = cfg.diffusionModel
       }

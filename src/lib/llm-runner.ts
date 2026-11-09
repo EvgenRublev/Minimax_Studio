@@ -243,7 +243,7 @@ export function llmModelPath(): string {
   // Резолвим через MODELS + активную модель (правка 52): так корректно
   // работают и кванты Gemma в llm/, и Qwen3.5 9B в подпапке llm/qwen3.5-9b/.
   const def = MODELS.find((m) => m.id === activeLlmModelId())
-  const raw = path.join(cfg.comfyRoot, 'ComfyUI', 'models', def?.relPath ?? 'llm')
+  const raw = path.join(cfg.comfyCore, 'models', def?.relPath ?? 'llm')
   // (правка 732) Модель могла быть положена папкой с именем файла — отдаём
   // путь к самому файлу, иначе llama-server получал каталог и падал.
   return resolveModelFilePath(raw) ?? raw
@@ -271,7 +271,7 @@ function llmMmprojPath(): string | null {
     : 'llm_assistant_mmproj'
   const def = MODELS.find((m) => m.id === mmId)
   if (!def) return null
-  const p = path.join(cfg.comfyRoot, 'ComfyUI', 'models', def.relPath)
+  const p = path.join(cfg.comfyCore, 'models', def.relPath)
   // (правка 732) Каталог с именем файла (пользователь так разложил модель)
   // разворачиваем в сам файл — см. resolveModelFilePath.
   return resolveModelFilePath(p)

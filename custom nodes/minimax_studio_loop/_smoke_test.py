@@ -1,6 +1,20 @@
 """Smoke-тест математики MiniMax Studio Loop на CPU (без ComfyUI-графа)."""
 import sys, os
-ROOT = r"D:\Minimax_Studio_V7.1\ComfyUI-Easy-Install\ComfyUI"
+
+
+def _comfy_root() -> str:
+    """Каталог ядра ComfyUI: плоская раскладка (<проект>/ComfyUI) или старая
+    (<проект>/ComfyUI-Easy-Install/ComfyUI). (правка 905)"""
+    project = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for cand in (os.path.join(project, "ComfyUI"),
+                 os.path.join(project, "ComfyUI-Easy-Install", "ComfyUI"),
+                 os.path.join(project, "ComfyUI-Easy-Install")):
+        if os.path.isfile(os.path.join(cand, "main.py")):
+            return cand
+    raise SystemExit("не найдено ядро ComfyUI (проверь, что папка бэкенда на месте)")
+
+
+ROOT = _comfy_root()
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "custom_nodes"))
 

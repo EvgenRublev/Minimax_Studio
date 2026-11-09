@@ -196,7 +196,7 @@ export async function submitWorkflowJson(
           msg =
             'Модели не найдены на диске. ' +
             'Откройте «Настройки → Модели» и скачайте необходимые файлы, ' +
-            'либо положите их вручную в ComfyUI-Easy-Install/ComfyUI/models/ (vae/, text_encoders/, diffusion_models/).'
+            'либо положите их вручную в папку models ядра ComfyUI (ComfyUI/models/: vae/, text_encoders/, diffusion_models/).'
         }
       }
     } catch { /* не JSON — оставляем оригинальное сообщение */ }

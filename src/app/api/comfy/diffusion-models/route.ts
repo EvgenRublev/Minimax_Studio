@@ -40,7 +40,7 @@ export async function GET() {
   let config: ReturnType<typeof getAppConfig> | null = null
   try {
     config = getAppConfig()
-    const modelsDir = join(config.comfyRoot, 'ComfyUI', 'models', 'diffusion_models')
+    const modelsDir = join(config.comfyCore, 'models', 'diffusion_models')
     // (правка 102) Регистронезависимо: файл X.SAFETENSORS раньше
     // принимался POST'ом, но не показывался в списке.
     const files = readdirSync(modelsDir).filter(f => f.toLowerCase().endsWith('.safetensors'))
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     }
 
     const config = getAppConfig()
-    const dir = join(config.comfyRoot, 'ComfyUI', 'models', 'diffusion_models')
+    const dir = join(config.comfyCore, 'models', 'diffusion_models')
     mkdirSync(dir, { recursive: true })
     const dest = join(dir, safeName)
     if (existsSync(dest)) {

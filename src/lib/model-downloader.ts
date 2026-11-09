@@ -73,27 +73,27 @@ function modelAbsPath(model: ModelDef): string {
   // (правка 269) Кастомный корневой каталог — для моделей кастомных нод,
   // которые ищут файлы НЕ в ComfyUI/models (например, VFI: ckpts/ в папке
   // ComfyUI-Frame-Interpolation). baseDir может быть абсолютным или
-  // относительным от cwd (папка проекта).
+  // относительным от каталога ядра ComfyUI (правка 905).
   if (model.target === 'custom' && model.baseDir) {
     // (правка 269) baseDir: абсолютный (E:\...) или относительный от
-    // comfyRoot (ComfyUI-Easy-Install/...) или от cwd (проект).
+    // comfyCore (ядро ComfyUI) или от cwd (проект).
     const isAbsolute = model.baseDir.startsWith('/')
       || model.baseDir.startsWith('\\')
       || /^[a-zA-Z]:[\\/]/.test(model.baseDir)
     // (правка 507) Если папки нет ни там ни там (первое скачивание — нода
-    // ещё не создала свой ckpts), резолвим от comfyRoot, а НЕ от cwd:
-    // иначе качалка создавала лишнюю папку <проект>/ComfyUI/... рядом с
-    // настоящей ComfyUI-Easy-Install и клала модель туда.
+    // ещё не создала свой ckpts), резолвим от ядра ComfyUI, а НЕ от cwd:
+    // иначе качалка создавала лишнюю папку рядом с настоящей установкой и
+    // клала модель туда.
     const base = isAbsolute
       ? model.baseDir
-      : (existsSync(join(cfg.comfyRoot, model.baseDir))
-          ? join(cfg.comfyRoot, model.baseDir)
+      : (existsSync(join(cfg.comfyCore, model.baseDir))
+          ? join(cfg.comfyCore, model.baseDir)
           : existsSync(join(process.cwd(), model.baseDir))
             ? join(process.cwd(), model.baseDir)
-            : join(cfg.comfyRoot, model.baseDir))
+            : join(cfg.comfyCore, model.baseDir))
     return join(base, model.relPath)
   }
-  return join(cfg.comfyRoot, 'ComfyUI', 'models', model.relPath)
+  return join(cfg.comfyCore, 'models', model.relPath)
 }
 
 /** (правка 505) Проверка размера: файл близок к ожидаемому (±10%) */

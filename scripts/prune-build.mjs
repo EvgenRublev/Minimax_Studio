@@ -39,6 +39,9 @@ const DRY = process.argv.includes('--dry');
  * Сравнение — по нормализованному пути (без обратных слэшей).
  */
 const EXCLUDE_SEGMENTS = [
+  // (правка 905) папка бэкенда переименована в ComfyUI; старое имя остаётся
+  // в списке для установок, сделанных до переименования.
+  'ComfyUI',
   'ComfyUI-Easy-Install',
   'upscale\\bin',
   'upscale/bin',

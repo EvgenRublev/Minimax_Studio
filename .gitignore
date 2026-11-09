@@ -43,6 +43,9 @@ next-env.d.ts
 /install/cache/
 
 # ComfyUI portable install (copied separately, huge)
+# (правка 905) папка бэкенда переименована в ComfyUI (официальное ядро +
+# портативный Python); старое имя остаётся в списке для старых установок.
+/ComfyUI
 /ComfyUI-Easy-Install
 
 # LLM-ассистент Bonsai 2 27B (докачивается на месте, huge)

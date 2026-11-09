@@ -64,9 +64,9 @@ export async function POST(req: NextRequest) {
     // или 'bonsai' (prism llama-server, OpenAI-протокол).
     const backend = llmBackend()
     try {
-      // (правка 108) ВАЖНО: путь берётся из cfg.comfyRoot — реальный корень
-      // ComfyUI конфигурируемый (по умолчанию ./ComfyUI-Easy-Install), а не cwd.
-      const sweepDir = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'llm', '_tmp_vision')
+      // (правка 108) ВАЖНО: путь берётся из cfg.comfyCore — каталога ядра
+      // ComfyUI (по умолчанию ./ComfyUI), а не из cwd.
+      const sweepDir = path.join(cfg.comfyCore, 'models', 'llm', '_tmp_vision')
       const now = Date.now()
       for (const f of readdirSync(sweepDir)) {
         try {
@@ -169,9 +169,9 @@ export async function POST(req: NextRequest) {
         )
       }
       if (cappedReferences?.length) {
-        const inputDir = path.join(cfg.comfyRoot, 'ComfyUI', 'input')
+        const inputDir = path.join(cfg.comfyCore, 'input')
         const outputDir = cfg.outputDir
-        const tmpDir = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'llm', '_tmp_vision')
+        const tmpDir = path.join(cfg.comfyCore, 'models', 'llm', '_tmp_vision')
         mkdirSync(tmpDir, { recursive: true })
         const mediaParts: Array<Record<string, unknown>> = []
         const textParts: string[] = []
@@ -531,8 +531,8 @@ export async function POST(req: NextRequest) {
       }> | undefined
       if (chatAttachments?.length) {
         const attachDir = path.resolve(process.cwd(), 'data', 'chat-attachments')
-        const caInputDir = path.join(cfg.comfyRoot, 'ComfyUI', 'input')
-        const caTmpDir = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'llm', '_tmp_vision')
+        const caInputDir = path.join(cfg.comfyCore, 'input')
+        const caTmpDir = path.join(cfg.comfyCore, 'models', 'llm', '_tmp_vision')
         mkdirSync(caTmpDir, { recursive: true })
         const caMediaParts: Array<Record<string, unknown>> = []
         const caTextParts: string[] = []

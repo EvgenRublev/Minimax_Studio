@@ -1893,23 +1893,25 @@ const EXTRA_CATEGORY_OPTIONS: Array<[string, string]> = [
 /* ─── Manual download links (all models: URLs + target paths) ─── */
 
 function ManualDownloadPanel() {
-  const [comfyDir, setComfyDir] = useState('')
+  const [comfyCore, setComfyCore] = useState('')
   const [bonsaiDir, setBonsaiDir] = useState('')
 
   useEffect(() => {
     fetch('/api/config')
       .then((r) => r.json())
       .then((d) => {
-        setComfyDir(d.comfy_dir || '')
+        // (правка 905) папки моделей/ввода-вывода живут в каталоге ядра
+        // ComfyUI (comfy_core), а не в корне бэкенда.
+        setComfyCore(d.comfy_core || d.comfy_dir || '')
         setBonsaiDir(d.llm_bonsai_dir || '')
       })
       .catch(() => {
-        setComfyDir('')
+        setComfyCore('')
         setBonsaiDir('')
       })
   }, [])
 
-  const comfyModelsRoot = comfyDir ? `${comfyDir}\\ComfyUI\\models\\` : '<ComfyUI-Easy-Install>\\ComfyUI\\models\\'
+  const comfyModelsRoot = comfyCore ? `${comfyCore}\\models\\` : '<ComfyUI>\\models\\'
   const bonsaiModelsRoot = bonsaiDir ? `${bonsaiDir}\\` : '<Bonsai_2_27B>\\'
 
   const copy = async (text: string, what: string) => {
@@ -1973,7 +1975,12 @@ function ManualDownloadPanel() {
             <div className="text-xs font-medium text-foreground/80">{label}</div>
             {models.map((m) => {
               const isBonsai = m.target === 'bonsai'
-              const fullRoot = isBonsai ? bonsaiModelsRoot : comfyModelsRoot
+              // (правка 905) модели кастомных нод (VFI, controlnet_aux) лежат
+              // в своей папке baseDir внутри ядра ComfyUI, а не в models/.
+              const customRoot = m.target === 'custom' && m.baseDir && comfyCore
+                ? `${comfyCore}\\${m.baseDir.replace(/\//g, '\\')}\\`
+                : ''
+              const fullRoot = isBonsai ? bonsaiModelsRoot : (customRoot || comfyModelsRoot)
               const fullPath = fullRoot + m.relPath
               // (правка 769) если по ссылке скачается файл с ДРУГИМ именем, чем
               // ждёт приложение — подсказать юзеру переименовать (автозагрузка

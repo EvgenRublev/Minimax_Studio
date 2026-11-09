@@ -87,7 +87,7 @@ export function detectExtraEntries(dir: string): Array<{ path: string; category:
 /** Путь до yaml рядом с main.py ComfyUI (форк читает его сам при старте). */
 function yamlPath(): string {
   const cfg = getAppConfig()
-  return join(cfg.comfyRoot, 'ComfyUI', 'extra_model_paths.yaml')
+  return join(cfg.comfyCore, 'extra_model_paths.yaml')
 }
 
 /**

@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         source = (await stagedPath(filename)) || null
         if (!source) {
           const cfg = getAppConfig()
-          const candidate = path.join(cfg.comfyRoot, 'ComfyUI', 'input', path.basename(filename))
+          const candidate = path.join(cfg.comfyCore, 'input', path.basename(filename))
           if (existsSync(candidate)) source = candidate
         }
       }
@@ -225,7 +225,7 @@ export async function HEAD(req: NextRequest) {
   if (type === 'input' && !subfolder) {
     if (await stagedPath(filename)) return new Response(null, { status: 200 })
     const cfg = getAppConfig()
-    const candidate = path.join(cfg.comfyRoot, 'ComfyUI', 'input', path.basename(filename))
+    const candidate = path.join(cfg.comfyCore, 'input', path.basename(filename))
     if (existsSync(candidate)) return new Response(null, { status: 200 })
   }
   // Не нашли локально — HEAD в ComfyUI /view (файл мог лежать в подпапке input).

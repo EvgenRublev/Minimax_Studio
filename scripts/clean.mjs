@@ -12,7 +12,7 @@
  *                          с зарезервированным именем Windows (см. .gitignore)
  *
  * Что НЕ трогает:
- *   node_modules/, ComfyUI-Easy-Install/, data/, .env, config/config.ini
+ *   node_modules/, ComfyUI/ (портативный бэкенд), data/, .env, config/config.ini
  *
  * Использование:
  *   node scripts/clean.mjs          — очистить

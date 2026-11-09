@@ -146,7 +146,7 @@ export async function POST() {
   const dirs: Array<[string, string]> = [
     ['ComfyUI/input', cfg.inputDir],
     ['ComfyUI/output', cfg.outputDir],
-    ['ComfyUI/temp', path.join(cfg.comfyRoot, 'ComfyUI', 'temp')],
+    ['ComfyUI/temp', path.join(cfg.comfyCore, 'temp')],
     ['data/chat-attachments', path.join(cwd, 'data', 'chat-attachments')],
     ['data/upscale-input', path.join(cwd, 'data', 'upscale-input')],
     ['data/upscale-output', path.join(cwd, 'data', 'upscale-output')],
@@ -167,7 +167,7 @@ export async function POST() {
   //      (см. purgeComfyUserDir): сбои идут в warnings, а не errors — сброс
   //      не считается неполным из-за работающего ComfyUI; после перезапуска
   //      программы папка пересоздаётся чистой.
-  const user = await purgeComfyUserDir(path.join(cfg.comfyRoot, 'ComfyUI', 'user'))
+  const user = await purgeComfyUserDir(path.join(cfg.comfyCore, 'user'))
   deleted += user.deleted + user.truncated
   details['ComfyUI/user'] = user.deleted + user.truncated
   if (user.failed.length) {

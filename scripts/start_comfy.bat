@@ -7,7 +7,12 @@ REM парсер ходит по байтам корректно.
 setlocal EnableExtensions
 cd /d "%~dp0.."
 
-set "COMFY_ROOT=ComfyUI-Easy-Install"
+set "COMFY_ROOT=ComfyUI"
+REM (правка 905) Папка бэкенда — ComfyUI (официальное ядро + python_embeded).
+REM Старая раскладка ComfyUI-Easy-Install\ComfyUI тоже поддерживается.
+if not exist "%COMFY_ROOT%\python_embeded\python.exe" if exist "ComfyUI-Easy-Install\python_embeded\python.exe" set "COMFY_ROOT=ComfyUI-Easy-Install"
+set "COMFY_CORE=%COMFY_ROOT%"
+if not exist "%COMFY_ROOT%\main.py" if exist "%COMFY_ROOT%\ComfyUI\main.py" set "COMFY_CORE=%COMFY_ROOT%\ComfyUI"
 
 REM Read VRAM config from config.ini (optional, defaults: reserve=1, dynamic=1)
 REM (правка 803) Дефолты снижены: reserve 3→1, headroom 2→1.
@@ -59,38 +64,34 @@ if not "%VRAM_HEADROOM%"=="0" set "HEADROOM_FLAG=--vram-headroom %VRAM_HEADROOM%
 REM ============================================================
 REM  [CHECK] Block auto-update if .no-auto-update flag exists
 REM ============================================================
-REM (правка 132) ComfyUI-Easy-Install может автоматически обновляться
-REM  и подтянуть новую версию, несовместимую со старой структурой.
-REM  Папка .no-auto-update — флаг: если она существует, обновления
-REM  запрещены. Это защищает от случайного обновления до несовместимой
-REM  версии.
+REM (правка 132) Ядро ComfyUI может автоматически обновляться и подтянуть
+REM  версию, несовместимую со структурой студии. Папка .no-auto-update —
+REM  флаг: если она существует, обновления запрещены.
 if exist "%COMFY_ROOT%\.no-auto-update" (
     echo  [OK] Auto-update blocked (.no-auto-update flag present).
     echo       ComfyUI will NOT update itself.
 ) else (
     echo  [WARN] Auto-update NOT blocked.
-    echo         ComfyUI-Easy-Install may update itself and break.
-    echo         To block: mkdir ComfyUI-Easy-Install\.no-auto-update
+    echo         The ComfyUI backend may update itself and break.
+    echo         To block: mkdir %COMFY_ROOT%\.no-auto-update
 )
 
 REM ============================================================
 REM  [CHECK] Verify ComfyUI version compatibility
 REM ============================================================
-REM (правка 131) ComfyUI-Easy-Install может автоматически обновляться
-REM  и подтянуть новую версию, несовместимую со старой структурой
-REM  (comfy.ldm убрали, но execution.py всё ещё импортирует).
-REM  Проверяем, что comfy.ldm существует — иначе ComfyUI упадёт
-REM  с ModuleNotFoundError.
-if not exist "%COMFY_ROOT%\ComfyUI\comfy\ldm\models\autoencoder.py" (
+REM (правка 131) Ядро ComfyUI может автоматически обновиться до версии,
+REM  несовместимой со структурой студии (comfy.ldm убрали, но execution.py
+REM  всё ещё импортирует). Проверяем, что comfy.ldm существует - иначе
+REM  ComfyUI упадёт с ModuleNotFoundError.
+if not exist "%COMFY_CORE%\comfy\ldm\models\autoencoder.py" (
     echo.
     echo  [ERROR] Incompatible ComfyUI version detected.
     echo          The 'comfy.ldm' module is missing, but execution.py
-    echo          still imports it. This happens when ComfyUI-Easy-Install
+    echo          still imports it. This happens when the backend
     echo          auto-updates to a new version.
     echo.
-    echo  Solution: revert to a stable version.
-    echo    cd ComfyUI-Easy-Install\update
-    echo    update_comfyui_stable.bat
+    echo  Solution: re-run the studio installer (install.bat) - it puts
+    echo          the pinned ComfyUI core back in place.
     echo.
     pause
     exit /b 1
@@ -99,9 +100,9 @@ echo  [OK] ComfyUI version compatible.
 
 REM Launch ComfyUI
 if "%DYNAMIC_VRAM%"=="0" (
-    "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_ROOT%\ComfyUI\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% --disable-dynamic-vram %EXTRA_FLAGS% %HEADROOM_FLAG%
+    "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% --disable-dynamic-vram %EXTRA_FLAGS% %HEADROOM_FLAG%
     exit /b %errorlevel%
 ) else (
-    "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_ROOT%\ComfyUI\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %EXTRA_FLAGS% %HEADROOM_FLAG%
+    "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %EXTRA_FLAGS% %HEADROOM_FLAG%
     exit /b %errorlevel%
 )

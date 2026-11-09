@@ -54,7 +54,23 @@ if exist config\config.ini (
 )
 if defined COMFY_ROOT_CONFIG set "COMFY_ROOT_CONFIG=%COMFY_ROOT_CONFIG:"=%"
 if defined COMFY_ROOT_CONFIG set "COMFY_ROOT=%COMFY_ROOT_CONFIG%"
-if not defined COMFY_ROOT set "COMFY_ROOT=ComfyUI-Easy-Install"
+REM (правка 905) Папка бэкенда переименована в ComfyUI (это официальное ядро,
+REM а не сборка Pixaroma). Старая ComfyUI-Easy-Install поддерживается: если
+REM новой папки нет, а старая есть - работаем с ней.
+if not defined COMFY_ROOT (
+    if not exist "%~dp0ComfyUI\python_embeded\python.exe" if exist "%~dp0ComfyUI-Easy-Install\python_embeded\python.exe" set "COMFY_ROOT=ComfyUI-Easy-Install"
+)
+if not defined COMFY_ROOT set "COMFY_ROOT=ComfyUI"
+REM (правка 905) Путь из config.ini/env мог указать в несуществующую папку
+REM (например, папку переименовали) - ищем установку под известными именами.
+if not exist "%COMFY_ROOT%\python_embeded\python.exe" (
+    if exist "%~dp0ComfyUI\python_embeded\python.exe" set "COMFY_ROOT=%~dp0ComfyUI"
+    if not exist "%~dp0ComfyUI\python_embeded\python.exe" if exist "%~dp0ComfyUI-Easy-Install\python_embeded\python.exe" set "COMFY_ROOT=%~dp0ComfyUI-Easy-Install"
+)
+REM (правка 905) Каталог ядра ComfyUI: плоская раскладка (0.44+, main.py лежит
+REM в COMFY_ROOT) или старая (COMFY_ROOT\ComfyUI\main.py).
+set "COMFY_CORE=%COMFY_ROOT%"
+if not exist "%COMFY_ROOT%\main.py" if exist "%COMFY_ROOT%\ComfyUI\main.py" set "COMFY_CORE=%COMFY_ROOT%\ComfyUI"
 
 echo.
 echo  ============================================
@@ -112,7 +128,7 @@ if exist "%COMFY_ROOT%\python_embeded\python.exe" goto comfy_ok
 echo.
 echo  [WARN] ComfyUI not found at: %COMFY_ROOT%
 echo         Expected folder: %~dp0%COMFY_ROOT%\python_embeded\python.exe
-echo         Place the ComfyUI-Easy-Install folder next to this project.
+echo         Place the ComfyUI folder (portable ComfyUI + python_embeded) next to this project.
 echo.
 REM (правка 587) Скрытое окно не может спросить пользователя — по умолчанию Y
 REM (frontend-only), причина пишется в start_error.log.
@@ -402,7 +418,7 @@ set "DYN_FLAG="
 if "%DYNAMIC_VRAM%"=="0" set "DYN_FLAG=--disable-dynamic-vram"
 
 REM Запускаем ComfyUI напрямую
-start /b "" "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_ROOT%\ComfyUI\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %DYN_FLAG% %EXTRA_FLAGS% %HEADROOM_FLAG%
+start /b "" "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %DYN_FLAG% %EXTRA_FLAGS% %HEADROOM_FLAG%
 
 REM Wait for ComfyUI to be ready (заставка в браузере покажет это сама)
 echo       Waiting for ComfyUI (first start can take 30-90s)...

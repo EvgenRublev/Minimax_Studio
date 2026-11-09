@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
   // POSIX-сборок, где path.join даёт прямые слэши.
   outputFileTracingExcludes: {
     '*': [
+      'ComfyUI/**',
       'ComfyUI-Easy-Install/**',
       'upscale/bin/**',
       'upscale/logs/**',

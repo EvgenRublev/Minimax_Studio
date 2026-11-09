@@ -9,7 +9,7 @@ and produces matching output (max diff ~1e-5 in the 64x64 test).
 
 Run:
     python scripts/patch-film-vfi.py
-    python scripts/patch-film-vfi.py --comfy-root path/to/ComfyUI-Easy-Install/ComfyUI
+    python scripts/patch-film-vfi.py --comfy-root path/to/ComfyUI   # каталог ядра
 """
 
 from __future__ import annotations
@@ -24,7 +24,16 @@ PATCHED_ARCH = "class SamePadConv(nn.Module):"
 
 
 def default_comfy_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "ComfyUI-Easy-Install" / "ComfyUI"
+    """Каталог ядра ComfyUI: плоская раскладка (<проект>/ComfyUI) или старая
+    (<проект>/ComfyUI-Easy-Install/ComfyUI). (правка 905)"""
+    project = Path(__file__).resolve().parents[1]
+    flat = project / "ComfyUI"
+    if (flat / "custom_nodes").is_dir():
+        return flat
+    legacy = project / "ComfyUI-Easy-Install" / "ComfyUI"
+    if (legacy / "custom_nodes").is_dir():
+        return legacy
+    return flat
 
 
 def patch_film_arch(path: Path) -> bool:

@@ -1103,8 +1103,29 @@ if (-not $SkipApp) {
 
 # ---------------------------------------------------- 4. ComfyUI и Python ---
 
-$comfyRoot = Join-Path $Root 'ComfyUI-Easy-Install'
-$comfyApp = Join-Path $comfyRoot 'ComfyUI'
+# (правка 905) Папка бэкенда называется ComfyUI: это официальное ядро
+# ComfyUI + портативный Python, а не сборка Pixaroma. Раскладка плоская:
+#   <Root>\ComfyUI\main.py, ...\models, ...\custom_nodes, ...\python_embeded.
+# Старые установки (ComfyUI-Easy-Install\ComfyUI + python_embeded рядом)
+# определяются сами и продолжают обновляться на месте - переименование
+# папки пользователь делает сам, если хочет.
+$comfyRootNew = Join-Path $Root 'ComfyUI'
+$comfyRootOld = Join-Path $Root 'ComfyUI-Easy-Install'
+if (Test-Path (Join-Path $comfyRootNew 'main.py')) {
+    $comfyRoot = $comfyRootNew
+    $comfyApp = $comfyRootNew
+} elseif (Test-Path (Join-Path $comfyRootOld 'ComfyUI\main.py')) {
+    $comfyRoot = $comfyRootOld
+    $comfyApp = Join-Path $comfyRootOld 'ComfyUI'
+} elseif (Test-Path (Join-Path $comfyRootOld 'main.py')) {
+    $comfyRoot = $comfyRootOld
+    $comfyApp = $comfyRootOld
+} else {
+    $comfyRoot = $comfyRootNew
+    $comfyApp = $comfyRootNew
+}
+# $flat: ядро лежит прямо в корне бэкенда (тогда python_embeded - тоже там)
+$flat = ($comfyApp -eq $comfyRoot)
 $pythonDir = Join-Path $comfyRoot 'python_embeded'
 $python = Join-Path $pythonDir 'python.exe'
 $script:Python = $python
@@ -1167,33 +1188,58 @@ if (-not $SkipComfy) {
         # Данные пользователя, которые переносятся в новое ядро: модели, ноды,
         # настройки, готовые видео и подключённые внешние папки моделей.
         $keep = @('models', 'custom_nodes', 'user', 'output', 'input', 'temp', 'extra_model_paths.yaml', 'comfy.settings.json')
-        $backup = Join-Path $comfyRoot 'ComfyUI.old'
+        # (правка 905) В плоской раскладке python_embeded лежит ВНУТРИ папки
+        # ядра, поэтому его тоже уносим и возвращаем: пересобирать 7 ГБ
+        # пакетов при смене ядра незачем.
+        if ($flat) { $keep += 'python_embeded' }
+        # Резервная копия и временная папка - СНАРУЖИ ядра: в плоской
+        # раскладке comfyApp это comfyRoot, и перенос «внутрь себя» упал бы.
+        $stage = Join-Path $Root 'ComfyUI.keep'
+        $backup = Join-Path $Root 'ComfyUI.old'
         $movedOld = $false
         try {
             if ($hasCore) {
+                if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+                New-Item -ItemType Directory -Force -Path $stage | Out-Null
+                foreach ($k in $keep) {
+                    $src = Join-Path $comfyApp $k
+                    if (-not (Test-Path $src)) { continue }
+                    Move-Item $src (Join-Path $stage $k)
+                }
                 if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
                 Move-Item $comfyApp $backup
                 $movedOld = $true
             }
             Move-Item $inner.FullName $comfyApp
         } catch {
-            # Откат: вернуть старое ядро, чтобы не оставить пользователя без ComfyUI.
+            # Откат: вернуть старое ядро и данные, чтобы не оставить
+            # пользователя без ComfyUI.
             if ($movedOld -and -not (Test-Path $comfyApp) -and (Test-Path $backup)) {
                 Move-Item $backup $comfyApp
+            }
+            if (Test-Path $stage) {
+                foreach ($k in $keep) {
+                    $src = Join-Path $stage $k
+                    if (-not (Test-Path $src)) { continue }
+                    $dst = Join-Path $comfyApp $k
+                    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+                    Move-Item $src $dst -ErrorAction SilentlyContinue
+                }
             }
             throw ('не удалось развернуть ядро ComfyUI: ' + $_.Exception.Message)
         }
 
         if ($movedOld) {
             foreach ($k in $keep) {
-                $src = Join-Path $backup $k
+                $src = Join-Path $stage $k
                 if (-not (Test-Path $src)) { continue }
                 $dst = Join-Path $comfyApp $k
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                 Move-Item $src $dst
             }
-            Remove-Item $backup -Recurse -Force
         }
+        if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+        if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
         Remove-Item $tmp -Recurse -Force
         Ok ('ComfyUI ' + $ComfyVersion + ' распакован')
     }
@@ -1244,21 +1290,24 @@ if (-not $SkipComfy) {
     }
 
     # Патчим python312._pth при каждом запуске (а не только при первой установке).
-    # Строка ../ComfyUI обязательна: start.bat запускает python с ключом -I,
+    # Строка с каталогом ядра обязательна: start.bat запускает python с ключом -I,
     # который отключает добавление папки скрипта в sys.path, и без неё
     # main.py падает с ModuleNotFoundError: No module named 'comfy'.
+    # (правка 905) Путь зависит от раскладки: плоская (python_embeded внутри
+    # ядра) - '..', старая (python_embeded рядом с ядром) - '../ComfyUI'.
     $pth = Get-ChildItem $pythonDir -Filter 'python*._pth' | Select-Object -First 1
     if ($pth) {
+        $coreRel = if ($flat) { '..' } else { '..\ComfyUI' }
         $lines = @(Get-Content $pth.FullName)
         $lines = @($lines | ForEach-Object { $_ -replace '^#\s*import site', 'import site' })
         if (-not ($lines | Where-Object { $_ -match '^Lib[\\/]site-packages' })) {
             $lines = @('Lib\site-packages') + $lines
         }
-        if (-not ($lines | Where-Object { $_ -match '^\.\.[\\/]ComfyUI\s*$' })) {
-            $lines = @('../ComfyUI') + $lines
-        }
-        if ($lines -match '^\.\./ComfyUI\s*$') {
-            Ok 'python312._pth настроен (../ComfyUI + Lib\site-packages)'
+        # убираем любую прежнюю запись о ядре ('..' или '..\ComfyUI') и ставим актуальную
+        $lines = @($lines | Where-Object { $_ -notmatch '^\.\.([\\/]+ComfyUI)?\s*$' })
+        $lines = @($coreRel) + $lines
+        if ($lines[0] -eq $coreRel) {
+            Ok ('python312._pth настроен (' + $coreRel + ' + Lib\site-packages)')
         } else {
             Warn 'не удалось проверить python312._pth'
         }

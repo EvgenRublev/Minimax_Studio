@@ -96,9 +96,11 @@ function resolveGgufPath(input: string, kind: 'model' | 'mmproj'): { path: strin
  * GET /api/config — runtime app settings (config.ini).
  * POST /api/config — update settings: { reserve_gb?, dynamic_vram?, llm_device?, comfy_dir? }.
  *
- * comfy_dir is the root of the portable backend install (the folder that
- * contains ComfyUI/ and python_embeded/). Changing it re-points every
- * file route immediately — no restart needed.
+ * comfy_dir is the root of the portable backend install (the folder with
+ * python_embeded/ and the ComfyUI core — flat layout: <comfy_dir>/main.py;
+ * legacy layout: <comfy_dir>/ComfyUI/main.py). comfy_core in the response
+ * is the resolved core directory. Changing comfy_dir re-points every file
+ * route immediately — no restart needed.
  *
  * llm_device ('auto'|'gpu'|'cpu') re-modes the LLM assistant: the running
  * instance (if any) is stopped so the next chat message reloads it with
@@ -115,6 +117,8 @@ export async function GET() {
       llm_context_size: config.llmContextSize,
       llm_max_output_tokens: config.llmMaxOutputTokens,
       comfy_dir: config.comfyRoot,
+      // (правка 905) каталог ядра ComfyUI внутри comfy_dir
+      comfy_core: config.comfyCore,
       diffusion_model: config.diffusionModel,
       llm_model: config.llmModel,
       // (правка 136 / Bonsai) папка портативной сборки Bonsai 2 27B
@@ -335,7 +339,7 @@ export async function POST(request: Request) {
 
     // (правка 310) comfy_dir: непустое значение должно быть СУЩЕСТВУЮЩЕЙ
     // папкой (раньше писалось вслепую — и все файловые роуты молча ломались);
-    // пустая строка = сброс к дефолту (<проект>/ComfyUI-Easy-Install), раньше
+    // пустая строка = сброс к дефолту (<проект>/ComfyUI), раньше
     // пустая строка отсекалась и сбросить путь было нельзя.
     if (typeof body.comfy_dir === 'string') {
       // (правка 716) Значение уже проверено в пре-валидации (см. начало POST).

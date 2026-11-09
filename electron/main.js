@@ -26,13 +26,17 @@ const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
 // (правка 866) само-восстановление студийных custom_nodes (см. scripts/sync_custom_nodes.js)
-const { syncStudioNodes, syncCorePatches } = require('../scripts/sync_custom_nodes')
+const { syncStudioNodes, syncCorePatches, resolveComfyCore } = require('../scripts/sync_custom_nodes')
 
 const APP_ROOT = path.resolve(__dirname, '..')
 const PORT = 3000
 const COMFY_PORT = 8188
 const CONFIG_INI = path.join(APP_ROOT, 'config', 'config.ini')
 const COMFY_ROOT = resolveComfyRoot()
+// (правка 905) каталог ядра ComfyUI: плоская раскладка (0.44+) — сам
+// COMFY_ROOT, старая — COMFY_ROOT\ComfyUI. Резолвится на старте ComfyUI
+// (resolveComfyCore), а не при загрузке модуля: при первом запуске ядро
+// может ещё не быть установлено (Electron сам запускает install.ps1).
 const COMFY_PY = path.join(COMFY_ROOT, 'python_embeded', 'python.exe')
 const ICON = path.join(__dirname, 'icons', 'icon.ico')
 
@@ -63,8 +67,25 @@ function resolveComfyRoot() {
       }
     }
   } catch { /* использовать env/default */ }
-  const raw = configured || (process.env.COMFY_ROOT || '').trim() || 'ComfyUI-Easy-Install'
-  return path.resolve(APP_ROOT, raw)
+  const raw = configured || (process.env.COMFY_ROOT || '').trim() || defaultComfyRootName()
+  const primary = path.resolve(APP_ROOT, raw)
+  // (правка 905) путь мог указать в несуществующую папку (переименование
+  // ComfyUI-Easy-Install -> ComfyUI): ищем установку под известными именами.
+  if (existsSync(primary)) return primary
+  for (const name of ['ComfyUI', 'ComfyUI-Easy-Install']) {
+    const p = path.join(APP_ROOT, name)
+    if (existsSync(p)) return p
+  }
+  return primary
+}
+
+/* (правка 905) Папка бэкенда по умолчанию — ComfyUI. Установки, сделанные до
+ * переименования, подхватывают старую ComfyUI-Easy-Install. */
+function defaultComfyRootName() {
+  const flat = path.join(APP_ROOT, 'ComfyUI')
+  const legacy = path.join(APP_ROOT, 'ComfyUI-Easy-Install')
+  if (!existsSync(flat) && existsSync(legacy)) return 'ComfyUI-Easy-Install'
+  return 'ComfyUI'
 }
 
 /* ── (правка 567) Захват консоли ────────────────────────────────
@@ -390,7 +411,7 @@ function startComfy() {
     console.log(`[desktop] синхронизация патчей ядра не удалась: ${err && err.message ? err.message : err}`)
   }
   const args = [
-    '-I', path.join(COMFY_ROOT, 'ComfyUI', 'main.py'),
+    '-I', path.join(resolveComfyCore(COMFY_ROOT), 'main.py'),
     '--windows-standalone-build',
     '--use-ck-attention',
     '--disable-auto-launch',

@@ -305,17 +305,23 @@ async function freeComfy(): Promise<void> {
 
 /* ── Поиск PID ComfyUI ── */
 
-const PS_FIND_COMFY = [
-  "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\"",
-  "Where-Object { $_.CommandLine -like '*ComfyUI*main.py*' }",
-  'Select-Object -ExpandProperty ProcessId',
-].join(' | ')
+/** (правка 905) Фильтр PowerShell по командной строке ядра: путь каталога
+ *  ComfyUI (плоский или старый <root>\ComfyUI) + main.py. Кавычки в пути
+ *  удваиваем — как требует одинарное кавычение строки в PowerShell. */
+function psFindComfy(coreDir: string): string {
+  const esc = coreDir.replace(/'/g, "''")
+  return [
+    "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\"",
+    `Where-Object { $_.CommandLine -like '*${esc}*main.py*' }`,
+    'Select-Object -ExpandProperty ProcessId',
+  ].join(' | ')
+}
 
 /** PID python-процесса ComfyUI (по командной строке). null = не запущен. */
 async function findComfyPid(): Promise<number | null> {
   const { stdout } = await execFileAsync(
     'powershell',
-    ['-NoProfile', '-Command', PS_FIND_COMFY],
+    ['-NoProfile', '-Command', psFindComfy(getAppConfig().comfyCore)],
     { timeout: 10_000 },
   )
   const pid = parseInt((stdout.trim().split(/\r?\n/)[0] ?? ''), 10)

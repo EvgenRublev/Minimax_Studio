@@ -30,7 +30,7 @@ E:\Minimax_Studio_V7_Portable.zip    — zip64-архив (~5.4 ГБ)
 Исключайте только **точные полные пути**:
 
 ```powershell
-$comfySrc = Join-Path $src 'ComfyUI-Easy-Install'
+$comfySrc = Join-Path $src 'ComfyUI'
 # ...
 (Join-Path $comfySrc 'ComfyUI\models')
 (Join-Path $comfySrc 'ComfyUI\user')
@@ -89,12 +89,12 @@ runtime\ffmpeg\ffprobe.exe
 `padding='same'` с чётным ядром. На `torch 2.11 + cuDNN 9.19` это даёт
 нативный `Fatal Python error: Aborted` в `Convolution.cpp`.
 
-В ComfyUI-Easy-Install уже применён рабочий патч: FILM загружается как
+В ComfyUI уже применён рабочий патч: FILM загружается как
 eager `Interpolator` с явным padding и тем же `state_dict`. Для новой копии
 ComfyUI повторите:
 
 ```powershell
-python scripts/patch-film-vfi.py --comfy-root <порт portable>/ComfyUI-Easy-Install/ComfyUI
+python scripts/patch-film-vfi.py --comfy-root <порт portable>/ComfyUI
 ```
 
 После патча FILM работает на GPU и совпадает с оригиналом по выходу
@@ -126,7 +126,7 @@ $rootExcl = @(
   (Join-Path $src '.local-input'),
   (Join-Path $src 'data'),
   (Join-Path $src 'install'),
-  (Join-Path $src 'ComfyUI-Easy-Install'),
+  (Join-Path $src 'ComfyUI'),
   (Join-Path $src '.next\cache')
 )
 $rcArgs = @(
@@ -159,9 +159,9 @@ foreach ($f in @('config/config.ini', '.env')) {
   [IO.File]::WriteAllLines($out, $factory, [Text.UTF8Encoding]::new($false))
 }
 
-# ── 3. ComfyUI-Easy-Install (кроме моделей и пользовательских папок) ──
-$comfySrc = Join-Path $src 'ComfyUI-Easy-Install'
-$comfyDst = Join-Path $dst 'ComfyUI-Easy-Install'
+# ── 3. ComfyUI (кроме моделей и пользовательских папок) ──
+$comfySrc = Join-Path $src 'ComfyUI'
+$comfyDst = Join-Path $dst 'ComfyUI'
 $comfyExcl = @(
   (Join-Path $comfySrc 'ComfyUI\models'),
   (Join-Path $comfySrc 'ComfyUI\user'),
@@ -198,10 +198,10 @@ $dirs = @(
   'data\chat-attachments',
   'data\upscale-input',
   'data\upscale-output',
-  'ComfyUI-Easy-Install\ComfyUI\input',
-  'ComfyUI-Easy-Install\ComfyUI\output',
-  'ComfyUI-Easy-Install\ComfyUI\temp',
-  'ComfyUI-Easy-Install\ComfyUI\user',
+  'ComfyUI\input',
+  'ComfyUI\output',
+  'ComfyUI\temp',
+  'ComfyUI\user',
   'upscale\logs',
   'upscale\jobs'
 )
@@ -227,7 +227,7 @@ try {
 ```powershell
 $src = 'E:\Minimax_Studio_V7'
 $dst = 'E:\Minimax_Studio_V7_Portable'
-$py  = Join-Path $dst 'ComfyUI-Easy-Install\python_embeded\python.exe'
+$py  = Join-Path $dst 'ComfyUI\python_embeded\python.exe'
 $node = Join-Path $dst 'runtime\node.exe'
 
 # 1) Ключевые файлы
@@ -239,9 +239,9 @@ $must = @(
   'node_modules\caniuse-lite\data\browsers.js',
   'runtime\ffmpeg\ffmpeg.exe',
   'runtime\ffmpeg\ffprobe.exe',
-  'ComfyUI-Easy-Install\python_embeded\python.exe',
-  'ComfyUI-Easy-Install\python_embeded\Lib\site-packages\torchvision\models\__init__.py',
-  'ComfyUI-Easy-Install\ComfyUI\main.py',
+  'ComfyUI\python_embeded\python.exe',
+  'ComfyUI\python_embeded\Lib\site-packages\torchvision\models\__init__.py',
+  'ComfyUI\main.py',
   'config\config.ini',
   '.env'
 )
@@ -259,11 +259,11 @@ if ($LASTEXITCODE -ne 0) { throw 'python imports failed' }
 if ($LASTEXITCODE -ne 0) { throw 'ffmpeg/ffprobe failed' }
 
 # 3) ComfyUI загружает все custom nodes
-& $py -I (Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI\main.py') --quick-test-for-ci
+& $py -I (Join-Path $dst 'ComfyUI\main.py') --quick-test-for-ci
 if ($LASTEXITCODE -ne 0) { throw 'ComfyUI quick test failed' }
 
 # 4) Тест создал user-данные — чистим
-$comfy = Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI'
+$comfy = Join-Path $dst 'ComfyUI'
 foreach ($d in @('user', 'input', 'output', 'temp')) {
   Get-ChildItem (Join-Path $comfy $d) -Force -ErrorAction SilentlyContinue |
     Remove-Item -Recurse -Force
@@ -307,7 +307,7 @@ Remove-Item Env:PORT -ErrorAction SilentlyContinue
 
 ```powershell
 $dst = 'E:\Minimax_Studio_V7_Portable'
-$comfy = Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI'
+$comfy = Join-Path $dst 'ComfyUI'
 foreach ($d in @('user', 'input', 'output', 'temp')) {
   Get-ChildItem (Join-Path $comfy $d) -Force -ErrorAction SilentlyContinue |
     Remove-Item -Recurse -Force
@@ -326,8 +326,8 @@ Remove-Item (Join-Path $dst '.next\cache') -Recurse -Force -ErrorAction Silently
 
 ```powershell
 $dst = 'E:\Minimax_Studio_V7_Portable'
-$models = Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI\models'
-$comfy  = Join-Path $dst 'ComfyUI-Easy-Install\ComfyUI'
+$models = Join-Path $dst 'ComfyUI\models'
+$comfy  = Join-Path $dst 'ComfyUI'
 
 # Не должно быть весов в models/ (кроме insightface/buffalo_l.zip —
 # это небольшой bundle, которого нет в менеджере моделей приложения).
@@ -381,16 +381,16 @@ $zip = 'E:\Minimax_Studio_V7_Portable.zip'
   'Minimax_Studio_V7_Portable/\.next/BUILD_ID$',
   'Minimax_Studio_V7_Portable/node_modules/electron/dist/MinimaxH3Studio\.exe$',
   'Minimax_Studio_V7_Portable/node_modules/caniuse-lite/data/browsers\.js$',
-  'Minimax_Studio_V7_Portable/ComfyUI-Easy-Install/python_embeded/Lib/site-packages/torchvision/models/__init__\.py$'
+  'Minimax_Studio_V7_Portable/ComfyUI/python_embeded/Lib/site-packages/torchvision/models/__init__\.py$'
 )
 ```
 
 В архиве **не должно быть**:
 
-- `ComfyUI-Easy-Install/ComfyUI/user/...` с файлами;
-- `ComfyUI-Easy-Install/ComfyUI/input|output|temp` с файлами;
+- `ComfyUI/user/...` с файлами;
+- `ComfyUI/input|output|temp` с файлами;
 - `data/assistant-chats.json`, `data/inflight-generate.json`, `data/loras.json`;
-- `ComfyUI-Easy-Install/ComfyUI/models/**/*.safetensors` и других весов H3.
+- `ComfyUI/models/**/*.safetensors` и других весов H3.
 
 Размеры-ориентиры:
 

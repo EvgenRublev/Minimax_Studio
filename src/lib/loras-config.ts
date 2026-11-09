@@ -84,7 +84,7 @@ export function resetLorasToDefaults(): LoraEntry[] {
 /** Path to the ComfyUI models/loras/ directory. */
 export function lorasDir(): string {
   const cfg = getAppConfig()
-  return path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'loras')
+  return path.join(cfg.comfyCore, 'models', 'loras')
 }
 
 /** List all .safetensors files in the LoRAs folder.

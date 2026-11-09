@@ -15,12 +15,33 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 нужно ComfyUI, должно доезжать до него при запуске. Это уже реализовано:
 
 - `scripts/sync_custom_nodes.js` → `syncStudioNodes()` копирует `custom nodes/*`
-  в `<ComfyUI>/ComfyUI/custom_nodes`;
+  в `<comfyCore>/custom_nodes`;
 - `scripts/sync_custom_nodes.js` → `syncCorePatches()` пофайлово копирует
-  `install/comfy-patches/*` поверх `<ComfyUI>/ComfyUI`;
+  `install/comfy-patches/*` поверх `<comfyCore>`;
 - вызывается в `electron/main.js` (`startComfy`) и в `start.bat`;
 - `scripts/release.mjs` на шаге verify запускает `scripts/check-comfy-sync.mjs`
   и падает, если эта связка нарушена.
+
+## Раскладка бэкенда (правка 905)
+
+Папка бэкенда называется `ComfyUI` (до 7.1.19 — `ComfyUI-Easy-Install`, это
+была сборка Pixaroma; теперь ставим официальное ядро по тегу). Раскладка
+плоская, каталог ядра (`main.py`, `models`, `custom_nodes`, `user`, `output`,
+`input`, `temp`, `extra_model_paths.yaml`) совпадает с корнем бэкенда:
+
+```
+ComfyUI/            ← comfyRoot == comfyCore
+├── main.py
+├── models/  custom_nodes/  user/  output/  input/  temp/
+├── extra_model_paths.yaml
+└── python_embeded/ ← портативный Python
+```
+
+Старые установки (`ComfyUI-Easy-Install/ComfyUI/...` + `python_embeded` рядом)
+поддерживаются: корень определяет `resolveComfyRoot()`, каталог ядра —
+`resolveComfyCore()` (`src/lib/app-config.ts` и `scripts/sync_custom_nodes.js`,
+в bat — переменная `COMFY_CORE`). **Пути к моделям, входам/выходам и yaml
+обязательно брать от `comfyCore`**, иначе код сломается на одной из раскладок.
 
 ## Правила при изменениях
 
@@ -29,7 +50,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
    целиком. Если ноде нужны pip-зависимости — обнови `install/install.ps1`
    (иначе у новых пользователей `ModuleNotFoundError`).
 2. **Изменение патча ядра.** Меняй файл в `install/comfy-patches/...`, а не
-   только в dev-копии `ComfyUI-Easy-Install`. Если меняется сигнатура ноды
+   только в dev-копии `ComfyUI`. Если меняется сигнатура ноды
    (входы/выходы) — сразу правь воркфлоу-шаблоны в `src/lib/comfy/*-template.ts`,
    иначе ComfyUI вернёт `HTTP 400 ... IndexError`.
 3. **Не полагайся на установщик.** `install.ps1` раскладывает ноды только при

@@ -30,8 +30,14 @@
 //
 // Usage: node scripts\sync_custom_nodes.js [comfyRoot]
 //        (omitted -> resolved from config\config.ini [comfy] comfy_dir,
-//         then %COMFY_ROOT%, then 'ComfyUI-Easy-Install' - same rules as
+//         then %COMFY_ROOT%, then 'ComfyUI' ('ComfyUI-Easy-Install' for
+//         installs made before the rename) - same rules as
 //         electron/main.js (fix 567) and start.bat).
+//
+// (правка 905) Раскладка бэкенда: плоская (ядро 0.44+, ставит установщик) -
+// <comfyRoot>\main.py, <comfyRoot>\models, <comfyRoot>\custom_nodes,
+// <comfyRoot>\python_embeded; и старая - <comfyRoot>\ComfyUI\main.py.
+// Каталог ядра определяет resolveComfyCore(); все синхронизации пишут в него.
 
 'use strict'
 
@@ -58,8 +64,35 @@ function resolveComfyRoot(appRoot) {
       }
     }
   } catch { /* fall through to env/default */ }
-  const raw = configured || (process.env.COMFY_ROOT || '').trim() || 'ComfyUI-Easy-Install'
-  return path.resolve(appRoot, raw)
+  const raw = configured || (process.env.COMFY_ROOT || '').trim() || defaultComfyRootName(appRoot)
+  const primary = path.resolve(appRoot, raw)
+  // (правка 905) путь мог указать в несуществующую папку (переименование
+  // ComfyUI-Easy-Install -> ComfyUI): ищем установку под известными именами.
+  if (existsSync(primary)) return primary
+  for (const name of ['ComfyUI', 'ComfyUI-Easy-Install']) {
+    const p = path.join(appRoot, name)
+    if (existsSync(p)) return p
+  }
+  return primary
+}
+
+/** (правка 905) Имя папки бэкенда по умолчанию: новая ComfyUI; если её нет,
+ *  а старая ComfyUI-Easy-Install есть - работаем со старой. */
+function defaultComfyRootName(appRoot) {
+  const flat = path.join(appRoot, 'ComfyUI')
+  const legacy = path.join(appRoot, 'ComfyUI-Easy-Install')
+  if (!existsSync(flat) && existsSync(legacy)) return 'ComfyUI-Easy-Install'
+  return 'ComfyUI'
+}
+
+/** (правка 905) Каталог ядра ComfyUI внутри корня бэкенда: плоская
+ *  раскладка - сам корень, старая - <root>\ComfyUI. Если ядра ещё нет,
+ *  возвращаем плоский путь (его создаёт установщик 0.44). */
+function resolveComfyCore(comfyRoot) {
+  if (existsSync(path.join(comfyRoot, 'main.py'))) return comfyRoot
+  const legacy = path.join(comfyRoot, 'ComfyUI')
+  if (existsSync(path.join(legacy, 'main.py'))) return legacy
+  return comfyRoot
 }
 
 /** Recursive list of syncable file paths (relative to dir). */
@@ -74,7 +107,7 @@ function listFiles(dir, rel = '', out = []) {
 }
 
 /**
- * Merge "<appRoot>\custom nodes\*" into "<comfyRoot>\ComfyUI\custom_nodes":
+ * Merge "<appRoot>\custom nodes\*" into "<comfyCore>\custom_nodes":
  * overwrite changed/missing files from the bundle, keep everything else
  * (user-downloaded ckpts, configs, __pycache__). Never deletes dst files.
  * Returns the names of node packs that had files (re)installed.
@@ -83,7 +116,7 @@ function listFiles(dir, rel = '', out = []) {
 function syncStudioNodes(appRoot, comfyRoot) {
   const synced = []
   const srcRoot = path.join(appRoot, 'custom nodes')
-  const dstRoot = path.join(comfyRoot, 'ComfyUI', 'custom_nodes')
+  const dstRoot = path.join(resolveComfyCore(comfyRoot), 'custom_nodes')
   if (!existsSync(srcRoot) || !existsSync(dstRoot)) return synced
   for (const name of readdirSync(srcRoot)) {
     const src = path.join(srcRoot, name)
@@ -117,9 +150,10 @@ function syncStudioNodes(appRoot, comfyRoot) {
 // упасть на импорте. В этом случае честно предупреждаем: нужен установщик.
 const CORE_MIN_VERSION = '0.44.0'
 
-/** Версия ядра ComfyUI: comfyui_version.py, иначе pyproject.toml. '' - не знаем. */
-function readComfyVersion(comfyRoot) {
-  const app = path.join(comfyRoot, 'ComfyUI')
+/** Версия ядра ComfyUI: comfyui_version.py, иначе pyproject.toml. '' - не знаем.
+ *  Принимает КАТАЛОГ ЯДРА (resolveComfyCore), а не корень бэкенда. */
+function readComfyVersion(comfyCore) {
+  const app = comfyCore
   try {
     const txt = readFileSync(path.join(app, 'comfyui_version.py'), 'utf8')
     const m = /__version__\s*=\s*["']([^"']+)["']/.exec(txt)
@@ -155,11 +189,11 @@ function compareVersions(a, b) {
 function syncCorePatches(appRoot, comfyRoot) {
   const synced = []
   const srcRoot = path.join(appRoot, 'install', 'comfy-patches')
-  const dstRoot = path.join(comfyRoot, 'ComfyUI')
+  const dstRoot = resolveComfyCore(comfyRoot)
   if (!existsSync(srcRoot) || !existsSync(dstRoot)) return synced
   // (правка 904) Патчи предназначены для ядра 0.44+. На старом ядре они
   // ломают импорт - лучше не трогать и сказать, что делать.
-  const version = readComfyVersion(comfyRoot)
+  const version = readComfyVersion(dstRoot)
   if (version && compareVersions(version, CORE_MIN_VERSION) < 0) {
     console.error(`[comfy-patches] ядро ComfyUI ${version} старее ${CORE_MIN_VERSION}: ` +
       'патчи не применены. Запустите установщик студии, чтобы обновить ядро.')
@@ -182,7 +216,7 @@ function syncCorePatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot, readComfyVersion, compareVersions }
+module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

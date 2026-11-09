@@ -119,6 +119,54 @@ if (existsSync(nodePatch)) {
     'first_frame ресайзится через center (без растяжения, правка 154)')
 }
 
+// 7. (правка 905) Плоская раскладка бэкенда: папка ComfyUI, ядро = корень.
+expect(/function\s+resolveComfyCore\s*\(/.test(sync),
+  'sync_custom_nodes.js: есть resolveComfyCore() (каталог ядра)')
+expect(/resolveComfyCore\(comfyRoot\)/.test(sync),
+  'sync_custom_nodes.js: ноды и патчи пишутся в каталог ядра, а не в <root>\\ComfyUI')
+expect(/main\.py/.test(main) && /resolveComfyCore\(COMFY_ROOT\)/.test(main),
+  'electron/main.js: main.py ищется через resolveComfyCore')
+const appCfg = read('src/lib/app-config.ts')
+expect(/export function resolveComfyCore\s*\(/.test(appCfg),
+  'app-config.ts: есть resolveComfyCore()')
+expect(/comfyCore,\s*\n/.test(appCfg) && /join\(comfyCore, 'output'\)/.test(appCfg),
+  'app-config.ts: output/input строятся от comfyCore')
+// нигде в коде не должно остаться жёсткого <comfyRoot>\ComfyUI\...
+const srcFiles = ['src/lib', 'src/app', 'electron', 'scripts']
+let scanned = 0
+for (const dir of srcFiles) {
+  const abs = join(ROOT, dir)
+  if (!existsSync(abs)) continue
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(ts|tsx|js|mjs)$/.test(e.name)) {
+        scanned++
+        const txt = readFileSync(p, 'utf-8')
+        if (/(?:cfg|config)\.comfyRoot,\s*['"]ComfyUI['"]/.test(txt)) problems.push(`${dir}: путь зашит как cfg.comfyRoot + 'ComfyUI' — нужен cfg.comfyCore (${e.name})`)
+      }
+    }
+  }
+  walk(abs)
+}
+expect(scanned > 0, `путь к ядрам не зашит как comfyRoot/ComfyUI (просмотрено ${scanned} файлов)`)
+expect(/\$comfyRootNew = Join-Path \$Root 'ComfyUI'/.test(installPs1),
+  'install.ps1: новая папка бэкенда называется ComfyUI')
+expect(/ComfyUI-Easy-Install/.test(installPs1),
+  'install.ps1: старая папка ComfyUI-Easy-Install по-прежнему распознаётся')
+expect(/if \(\$flat\) \{ \$keep \+= 'python_embeded' \}/.test(installPs1),
+  'install.ps1: при смене ядра python_embeded сохраняется')
+expect(/coreRel = if \(\$flat\) \{ '\.\.' \}/.test(installPs1),
+  'install.ps1: python312._pth настраивается под раскладку (.. или ..\\ComfyUI)')
+expect(/set "COMFY_CORE=/.test(bat) && /"%COMFY_CORE%\\main\.py"/.test(bat),
+  'start.bat: ядро ищется через COMFY_CORE и запускается %COMFY_CORE%\\main.py')
+const startComfyBat = read('scripts/start_comfy.bat')
+expect(/"%COMFY_CORE%\\main\.py"/.test(startComfyBat),
+  'scripts/start_comfy.bat: запускает %COMFY_CORE%\\main.py')
+expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
+  '.env: COMFY_ROOT=./ComfyUI')
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

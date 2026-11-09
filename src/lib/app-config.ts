@@ -1,13 +1,22 @@
 /**
  * Central runtime app configuration, backed by config.ini next to the
- * project root. The backend folder (portable ComfyUI-Easy-Install root)
- * is user-configurable from the Settings dialog — all file routes read
- * it through getAppConfig() so a change applies without a restart.
+ * project root. The backend folder (portable ComfyUI root) is
+ * user-configurable from the Settings dialog — all file routes read it
+ * through getAppConfig() so a change applies without a restart.
  *
  * Precedence for the backend root:
  *   1. config.ini [comfy] comfy_dir
  *   2. env COMFY_ROOT
- *   3. ./ComfyUI-Easy-Install (default, next to the app)
+ *   3. ./ComfyUI (default, next to the app); ./ComfyUI-Easy-Install is
+ *      picked up automatically for installs made before the rename.
+ *
+ * (правка 905) Раскладка бэкенда бывает двух видов:
+ *   • плоская (0.44+, ставит установщик): <root>\main.py, <root>\models,
+ *     <root>\custom_nodes, <root>\python_embeded;
+ *   • старая (до 0.44): <root>\ComfyUI\main.py + <root>\python_embeded.
+ * Каталог самого ядра (main.py, models, custom_nodes, output, input,
+ * user, temp, extra_model_paths.yaml) — это comfyCore, а не comfyRoot.
+ * Код должен брать пути моделей/вывода от comfyCore.
  */
 import { readFileSync, writeFileSync, renameSync, rmSync, existsSync, statSync, mkdirSync } from 'fs'
 import { dirname, join, resolve } from 'path'
@@ -28,8 +37,14 @@ export interface AppConfig {
   llmContextSize: number
   /** Max output tokens per LLM response (clamped to fit inside the context window). */
   llmMaxOutputTokens: number
-  /** Root of the portable backend install (contains ComfyUI/ and python_embeded/). */
+  /** Root of the portable backend install (contains python_embeded/ and
+   *  either the ComfyUI core (flat layout) or a ComfyUI/ subfolder). */
   comfyRoot: string
+  /** (правка 905) Directory of the ComfyUI core itself (main.py, models,
+   *  custom_nodes, output, input, user, temp, extra_model_paths.yaml).
+   *  For the flat layout this equals comfyRoot (except when a legacy
+   *  ComfyUI/ subfolder is present). */
+  comfyCore: string
   /** ComfyUI output directory (gallery files). */
   outputDir: string
   /** ComfyUI input directory (reference uploads). */
@@ -163,6 +178,42 @@ function parseNum0(v: string | undefined, dflt: number): number {
 
 let cache: { mtimeMs: number; config: AppConfig } | null = null
 
+/** (правка 905) Каталог ядра ComfyUI внутри корня бэкенда.
+ *  Плоская раскладка (0.44+): ядро лежит прямо в корне. Старая:
+ *  <root>\ComfyUI. Если ядра ещё нет (первый запуск до установки),
+ *  возвращаем плоский путь — его и создаёт установщик. */
+export function resolveComfyCore(root: string): string {
+  if (existsSync(join(root, 'main.py'))) return root
+  const legacy = join(root, 'ComfyUI')
+  if (existsSync(join(legacy, 'main.py'))) return legacy
+  return root
+}
+
+/** (правка 905) Корень бэкенда по умолчанию: новая папка ComfyUI.
+ *  Если её нет, а старая ComfyUI-Easy-Install есть — работаем со старой
+ *  (установки, сделанные до переименования). */
+function defaultComfyRoot(): string {
+  const flat = join(process.cwd(), 'ComfyUI')
+  const legacy = join(process.cwd(), 'ComfyUI-Easy-Install')
+  if (!existsSync(flat) && existsSync(legacy)) return legacy
+  return flat
+}
+
+/** (правка 905) Путь из config.ini/env может указать в несуществующую папку
+ *  (например, в репозитории прописан ./ComfyUI, а у пользователя ещё
+ *  ComfyUI-Easy-Install, или папку переименовали). Тогда ищем установку под
+ *  известными именами рядом с проектом; если и там пусто — оставляем путь
+ *  как есть (его создаст установщик). */
+function pickComfyRoot(raw: string): string {
+  const primary = resolve(raw)
+  if (existsSync(primary)) return primary
+  for (const name of ['ComfyUI', 'ComfyUI-Easy-Install']) {
+    const p = join(process.cwd(), name)
+    if (existsSync(p)) return p
+  }
+  return primary
+}
+
 export function getAppConfig(): AppConfig {
   let mtimeMs = 0
   try {
@@ -182,8 +233,9 @@ export function getAppConfig(): AppConfig {
   const rawRoot =
     (ini['comfy.comfy_dir'] ?? '').trim() ||
     (process.env.COMFY_ROOT || '').trim() ||
-    join(process.cwd(), 'ComfyUI-Easy-Install')
-  const comfyRoot = resolve(rawRoot)
+    defaultComfyRoot()
+  const comfyRoot = pickComfyRoot(rawRoot)
+  const comfyCore = resolveComfyCore(comfyRoot)
 
   // (правка 314) Минимум контекста унифицирован с POST-валидацией: 4096
   // (раньше чтение клампило снизу до 8192, а POST принимал от 4096 —
@@ -213,8 +265,9 @@ export function getAppConfig(): AppConfig {
     // и max_output 16384 chat-роут получал заведомо невыполнимый бюджет.
     llmMaxOutputTokens: Math.max(256, Math.min(ctxSize, 16384, parseInt(ini['llm.max_output_tokens'] ?? '4096', 10) || 4096)),
     comfyRoot,
-    outputDir: join(comfyRoot, 'ComfyUI', 'output'),
-    inputDir: join(comfyRoot, 'ComfyUI', 'input'),
+    comfyCore,
+    outputDir: join(comfyCore, 'output'),
+    inputDir: join(comfyCore, 'input'),
     pythonExe: join(comfyRoot, 'python_embeded', 'python.exe'),
     diffusionModel: (ini['comfy.diffusion_model'] ?? '').trim(),
     llmModel: (ini['llm.model'] ?? '').trim(),
@@ -369,7 +422,7 @@ vram_headroom=1
 turbo_lora=
 ; Пусто = дефолтная diffusion-модель из кода
 diffusion_model=
-; comfy_dir не задан = ./ComfyUI-Easy-Install рядом с программой
+; comfy_dir не задан = ./ComfyUI рядом с программой (старая папка ComfyUI-Easy-Install подхватывается автоматически)
 
 [llm]
 custom_mmproj_path=

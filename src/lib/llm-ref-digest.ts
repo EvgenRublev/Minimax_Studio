@@ -281,7 +281,7 @@ async function prepareDigestMedia(
   kind: 'image' | 'video',
 ): Promise<PreparedDigestMedia | null> {
   const cfg = getAppConfig()
-  const tmpRoot = path.join(cfg.comfyRoot, 'ComfyUI', 'models', 'llm', '_tmp_vision')
+  const tmpRoot = path.join(cfg.comfyCore, 'models', 'llm', '_tmp_vision')
   const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const workDir = path.join(tmpRoot, `digest_${stamp}`)
   const cleanup = async () => {

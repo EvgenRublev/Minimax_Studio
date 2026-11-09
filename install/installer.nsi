@@ -11,7 +11,7 @@
 ;      • install\cache\ — офлайн-архивы зависимостей (node, electron, ComfyUI,
 ;        python-embed, uv, get-pip.py). В git их нет (>100 МБ на файл);
 ;      • upscale\bin\ — runtime DLSS (~1.1 ГБ, тоже вне git).
-;    Лишние локальные папки (node_modules, ComfyUI-Easy-Install, models, data,
+;    Лишние локальные папки (node_modules, ComfyUI, models, data,
 ;    .next-кэш сборки) в payload НЕ кладём — их ставит install.bat/install_gui.
 ;
 ; 2) NSIS 3.x: winget install --id NSIS.NSIS -e    (нужен только makensis.exe).

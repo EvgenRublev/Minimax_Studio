@@ -546,7 +546,7 @@ export async function POST(request: Request) {
     // внутри них ИЛИ быть их предком (иначе перенос ушёл бы по живым файлам
     // текущей установки).
     const cfg = getAppConfig()
-    const modelsTarget = join(cfg.comfyRoot, 'ComfyUI', 'models')
+    const modelsTarget = join(cfg.comfyCore, 'models')
     const inputTarget = cfg.inputDir
     const outputTarget = cfg.outputDir
     const dataTarget = dirname(currentChatsFile())
