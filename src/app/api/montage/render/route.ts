@@ -1015,7 +1015,7 @@ export async function POST(req: Request) {
         const k = Math.min(evW / info.width, evH / info.height)
         const fw = Math.max(2, Math.floor((info.width * k) / 2) * 2)
         const fh = Math.max(2, Math.floor((info.height * k) / 2) * 2)
-        parts.push(`[${i}:v]${trimV}${pts}${fxStr},split=2[bg${i}][fg${i}]`)
+        parts.push(`[${i}:v]${trimV}${pts}${fxStr},setsar=1,split=2[bg${i}][fg${i}]`)
         parts.push(`[bg${i}]scale=${evW}:${evH}:force_original_aspect_ratio=increase,crop=${evW}:${evH},gblur=sigma=20[bgz${i}]`)
         parts.push(`[fg${i}]scale=${fw}:${fh}[fgz${i}]`)
         parts.push(`[bgz${i}][fgz${i}]overlay=(W-w)/2:(H-h)/2,setsar=1,${tail}`)
@@ -1030,15 +1030,16 @@ export async function POST(req: Request) {
       if (info.hasAudio) {
         // (правка 882) вход уже обрезан -ss/-t — atrim не нужен, PTS звука с 0
         const at = ''
-        // (правка 720 v11) фейды звука клипа (после asetpts локальное время начинается с 0)
+        // (правка 848) скорость звука: atempo сохраняет высоту тона (применяем ДО afade,
+        // чтобы длительность потока и st=dur-fo совпадали со шкалой после ускорения/замедления)
+        const spd = it.speed !== 1 ? `${atempoChain(it.speed)},` : ''
+        // (правка 720 v11) фейды звука клипа (после asetpts и atempo локальное время 0..dur)
         const fi = Math.min(it.fi, Math.max(0, dur - 0.01))
         const fo = Math.min(it.fo, Math.max(0, dur - 0.01))
         const af = (fi > 0.01 ? `afade=t=in:st=0:d=${fi.toFixed(4)},` : '')
           + (fo > 0.01 ? `afade=t=out:st=${Math.max(0, dur - fo).toFixed(4)}:d=${fo.toFixed(4)},` : '')
         const av = it.vol !== 1 ? `volume=${it.vol.toFixed(4)},` : ''
-        // (правка 848) скорость звука: atempo сохраняет высоту тона
-        const spd = it.speed !== 1 ? `${atempoChain(it.speed)},` : ''
-        parts.push(`[${i}:a]${at}${af}${av}${spd}aresample=44100[a${i}]`)
+        parts.push(`[${i}:a]${at}${spd}${af}${av}aresample=44100[a${i}]`)
       } else {
         // нет звука — генерируем тишину той же длительности
         parts.push(`anullsrc=r=44100:cl=stereo,atrim=duration=${dur.toFixed(4)}[a${i}]`)
@@ -1112,7 +1113,7 @@ export async function POST(req: Request) {
         const k = Math.min(evW / info.width, evH / info.height)
         const fw = Math.max(2, Math.floor((info.width * k) / 2) * 2)
         const fh = Math.max(2, Math.floor((info.height * k) / 2) * 2)
-        parts.push(`[${inIdx}:v]${trimV}${pts}${fxStr},split=2[bgL${j}][fgL${j}]`)
+        parts.push(`[${inIdx}:v]${trimV}${pts}${fxStr},setsar=1,split=2[bgL${j}][fgL${j}]`)
         parts.push(`[bgL${j}]scale=${evW}:${evH}:force_original_aspect_ratio=increase,crop=${evW}:${evH},gblur=sigma=20[bgLz${j}]`)
         parts.push(`[fgL${j}]scale=${fw}:${fh}[fgLz${j}]`)
         parts.push(`[bgLz${j}][fgLz${j}]overlay=(W-w)/2:(H-h)/2[bl${j}]`)

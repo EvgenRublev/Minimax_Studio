@@ -39,8 +39,10 @@ import {
   EyeIcon,
   EyeOffIcon,
   FilmIcon,
+  FolderOpenIcon,
   FrameIcon,
   LinkIcon,
+  Loader2Icon,
   MagnetIcon,
   // (правка 874) кнопки «+ слой» и «+ аудио»
   LayersIcon,
@@ -54,7 +56,10 @@ import {
   Repeat1Icon,
   RepeatIcon,
   ScissorsIcon,
+  SearchIcon,
   SkipBackIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
   TrashIcon,
   Undo2Icon,
   Volume2Icon,
@@ -65,6 +70,9 @@ import {
   ZoomOutIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Slider } from '@/components/ui/slider'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useMontageTarget } from '@/lib/montage-target-store' // (правка 855)
 import { useMontageReturn } from '@/lib/montage-return-store' // (правка 857)
@@ -362,11 +370,12 @@ function getVideoDuration(url: string): Promise<number> {
 function effRange(s: MontageShot): { start: number; end: number } {
   const st = parseSec(s.trimStart)
   const en = parseSec(s.trimEnd)
-  const start = st && st > 0 ? st : 0
   const full = s.duration || 0
+  let start = st && st > 0 ? st : 0
+  if (full > 0 && start >= full - 0.1) start = Math.max(0, full - 0.1)
   let end = full || (en && en > start ? en : start + 2)
   if (en && en > 0) end = Math.min(end, en)
-  if (end <= start) end = start + 0.2
+  if (end <= start) end = full > 0 ? Math.min(full, start + 0.1) : start + 0.2
   return { start, end }
 }
 
@@ -1608,13 +1617,16 @@ export function MontageView() {
     }
   }, [])
 
-  /** (правка 720 v11) коэффициент фейда звука клипа на localT (сек исходника) */
+  /** (правка 720 v11) коэффициент фейда звука клипа на localT (сек исходника,
+   *  а длительности fadeIn/fadeOut заданы в секундах таймлайна с учётом скорости) */
   const fadeGain = useCallback((row: SeqRow, localT: number): number => {
     const fi = row.shot.fadeIn || 0
     const fo = row.shot.fadeOut || 0
+    if (fi <= 0.01 && fo <= 0.01) return 1
+    const sp = shotSpeed(row.shot)
     let g = 1
-    if (fi > 0.01) g = Math.min(g, clamp01((localT - row.r.start) / fi))
-    if (fo > 0.01) g = Math.min(g, clamp01((row.r.end - localT) / fo))
+    if (fi > 0.01) g = Math.min(g, clamp01((localT - row.r.start) / sp / fi))
+    if (fo > 0.01) g = Math.min(g, clamp01((row.r.end - localT) / sp / fo))
     return g
   }, [])
 
@@ -1935,8 +1947,16 @@ export function MontageView() {
         const nb = b === 0 ? 1 : 0
         const nv = bufEl(nb)
         const nrow = sq[neighborIdx]
-        if (nv && nrow && nv.getAttribute('src') !== nrow.shot.url) {
-          stageClip(nb, neighborIdx, neighborIdx > i ? nrow.r.start : Math.max(nrow.r.start, nrow.r.end - 0.05))
+        if (nv && nrow) {
+          const targetT = neighborIdx > i ? nrow.r.start : Math.max(nrow.r.start, nrow.r.end - 0.05)
+          if (
+            nv.getAttribute('src') !== nrow.shot.url ||
+            !stageSeekRef.current ||
+            stageSeekRef.current.idx !== neighborIdx ||
+            Math.abs(stageSeekRef.current.t - targetT) > 0.05
+          ) {
+            stageClip(nb, neighborIdx, targetT)
+          }
         }
       }
     }
@@ -3227,19 +3247,24 @@ export function MontageView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          inputs: shots.map((s) => ({
-            name: s.filename,
-            subfolder: s.subfolder || undefined,
-            trimStart: parseSec(s.trimStart) ?? undefined,
-            trimEnd: parseSec(s.trimEnd) ?? undefined,
-            vol: s.vol ?? 1,
-            fadeIn: s.fadeIn || undefined,
-            fadeOut: s.fadeOut || undefined,
-            // (правка 850, 859, 860) скорость, эффекты и пауза (gap) перед клипом
-            speed: s.speed && s.speed !== 1 ? shotSpeed(s) : undefined,
-            fx: hasFx(s.fx) ? s.fx : undefined,
-            gap: s.gap && s.gap >= 0.02 ? +s.gap.toFixed(3) : undefined,
-          })),
+          inputs: shots.map((s) => {
+            const r = effRange(s)
+            const hasStart = parseSec(s.trimStart) != null && r.start > 0.001
+            const hasEnd = parseSec(s.trimEnd) != null && (!s.duration || r.end < s.duration - 0.01)
+            return {
+              name: s.filename,
+              subfolder: s.subfolder || undefined,
+              trimStart: hasStart ? +r.start.toFixed(3) : undefined,
+              trimEnd: hasEnd ? +r.end.toFixed(3) : undefined,
+              vol: s.vol ?? 1,
+              fadeIn: s.fadeIn || undefined,
+              fadeOut: s.fadeOut || undefined,
+              // (правка 850, 859, 860) скорость, эффекты и пауза (gap) перед клипом
+              speed: s.speed && s.speed !== 1 ? shotSpeed(s) : undefined,
+              fx: hasFx(s.fx) ? s.fx : undefined,
+              gap: s.gap && s.gap >= 0.02 ? +s.gap.toFixed(3) : undefined,
+            }
+          }),
           masterVol,
           // (правка 874) видео-слои: трек от 0 (первый над базой), подрезка конца —
           // АБСОЛЮТНАЯ секунда конца исходника (бэкенд делает trim=start:end)
@@ -4007,6 +4032,7 @@ export function MontageView() {
     if (!hydrated.current || loading || files.length === 0 || !arrivals.length) return
     const keys = Object.keys(pendingReturn)
     if (!keys.length) return
+    const consumedArrivals = new Set<string>()
     for (const key of keys) {
       const p = pendingReturn[key]
       // (правка 878) чистовик может ждать как клип базы, так и клип слоя V2+
@@ -4055,7 +4081,7 @@ export function MontageView() {
         ),
       )
       useMontageReturn.getState().drop(key)
-      useMontageReturn.getState().dropArrival(a.filename)
+      consumedArrivals.add(a.filename)
       // реальная длительность чистовика (у Refine она может отличаться на доли
       // секунды от драфта) — блок перестроится по ней
       getVideoDuration(f.url).then((d) => {
@@ -4065,6 +4091,9 @@ export function MontageView() {
         }
       })
       showToast(`Клип заменён чистовиком Refine: ${f.filename}`, 'success')
+    }
+    for (const fn of consumedArrivals) {
+      useMontageReturn.getState().dropArrival(fn)
     }
   }, [arrivals, pendingReturn, files, loading, stopSeq, pushHistory])
 
@@ -4107,144 +4136,210 @@ export function MontageView() {
   const canRedo = histTick >= 0 && redoRef.current.length > 0
 
   return (
-    <div className="flex h-full w-full min-w-0" onPointerUp={dropMouseFocus}>
+    <div className="flex h-full w-full min-w-0 bg-background text-foreground" onPointerUp={dropMouseFocus}>
       {/* центр: шапка + превью + транспорт + таймлайн */}
       <section className="flex min-w-0 flex-1 flex-col">
         {/* шапка: заголовок + настройки секвенции + сборка (правка 861: настройки таймлайна перенесены вниз к таймлайну) */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-          <ScissorsIcon className="h-4 w-4 shrink-0 text-[#A78BFA]" />
-          <span className="text-sm font-medium">Монтаж</span>
-          <span className="text-xs text-zinc-500">
-            {shots.length} шот{shots.length === 1 ? '' : 'ов'} · ≈ {tlEnd.toFixed(1)} с
-          </span>
+        <div className="flex flex-wrap items-center gap-2.5 border-b border-border bg-[var(--surface-1)] px-4 py-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#A78BFA]/15 text-[#A78BFA] ring-1 ring-[#A78BFA]/25">
+            <ScissorsIcon className="h-3.5 w-3.5 shrink-0" />
+          </div>
+          <h2 className="text-sm font-semibold text-foreground">Монтаж</h2>
+          <Badge variant="secondary" className="font-mono text-[11px] font-normal tabular-nums text-muted-foreground">
+            {shots.length} шот{shots.length === 1 ? '' : shots.length >= 2 && shots.length <= 4 ? 'а' : 'ов'} · ≈ {tlEnd.toFixed(1)} с
+          </Badge>
           <div className="ml-auto flex items-center gap-2">
             {/* (правка 853) настройки секвенции — как проект/секвенция в Premiere */}
             <div className="relative">
               <button
                 className={cn(
-                  'rounded border border-border px-2 py-1 text-xs text-zinc-400 hover:bg-[var(--surface-2)]',
-                  seqOpen && 'border-[#A78BFA] text-[#A78BFA]',
+                  'inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors',
+                  seqOpen
+                    ? 'border-[#A78BFA]/60 bg-[#A78BFA]/15 text-foreground ring-1 ring-[#A78BFA]/30'
+                    : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
                 )}
                 onClick={() => setSeqOpen((v) => !v)}
                 title="Настройки секвенции: разрешение, частота кадров, вписывание, качество"
               >
-                <ClapperboardIcon className="mr-1 inline h-3.5 w-3.5" />
-                {seqSet.w && seqSet.h ? `${seqSet.w}×${seqSet.h}` : 'Авто'}
-                {seqSet.fps ? ` @${seqSet.fps}` : ''}
+                <ClapperboardIcon className="h-3.5 w-3.5 text-[#A78BFA]" />
+                <span>{seqSet.w && seqSet.h ? `${seqSet.w}×${seqSet.h}` : 'Авто'}</span>
+                <span className="text-muted-foreground">· {seqSet.fps ? `${seqSet.fps} fps` : '24 fps'}</span>
               </button>
               {seqOpen && (
                 <>
                   {/* клик мимо — закрыть поповер */}
                   <div className="fixed inset-0 z-30" onClick={() => setSeqOpen(false)} />
-                  <div className="absolute right-0 top-full z-40 mt-1 w-60 rounded-lg border border-border bg-[var(--surface-1)] p-2 text-xs shadow-xl">
-                    <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Размер кадра</div>
-                    {SEQ_SIZES.map((s) => (
-                      <button
-                        key={s.label}
-                        className={cn(
-                          'w-full rounded px-2 py-1 text-left hover:bg-[var(--surface-2)]',
-                          seqSet.w === s.w && seqSet.h === s.h && 'text-[#A78BFA]',
-                        )}
-                        onClick={() => setSeqSet((q) => ({ ...q, w: s.w, h: s.h }))}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                    <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-zinc-500">Частота кадров</div>
-                    <div className="flex gap-1">
-                      {[0, 24, 30, 60].map((f) => (
-                        <button
-                          key={f}
-                          className={cn(
-                            'flex-1 rounded border border-border px-1 py-1 hover:bg-[var(--surface-2)]',
-                            seqSet.fps === f && 'border-[#A78BFA] text-[#A78BFA]',
-                          )}
-                          onClick={() => setSeqSet((q) => ({ ...q, fps: f }))}
-                        >
-                          {f === 0 ? '24 (как раньше)' : `${f}`}
-                        </button>
-                      ))}
+                  <div className="absolute right-0 top-full z-40 mt-1.5 w-64 space-y-2.5 rounded-xl border border-border bg-popover p-3 text-xs text-popover-foreground shadow-2xl">
+                    <div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Размер кадра</div>
+                      <div className="space-y-0.5">
+                        {SEQ_SIZES.map((s) => {
+                          const active = seqSet.w === s.w && seqSet.h === s.h
+                          return (
+                            <button
+                              key={s.label}
+                              className={cn(
+                                'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors',
+                                active
+                                  ? 'bg-[#A78BFA]/15 font-medium text-[#A78BFA]'
+                                  : 'text-foreground/80 hover:bg-[var(--surface-2)] hover:text-foreground',
+                              )}
+                              onClick={() => setSeqSet((q) => ({ ...q, w: s.w, h: s.h }))}
+                            >
+                              <span>{s.label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-zinc-500">Вписывание клипов</div>
-                    {([
-                      ['stretch', 'Растянуть (как раньше)'],
-                      ['cover', 'Заполнить кадр (кроп)'],
-                      ['contain', 'Вписать с полями'],
-                      ['blur', 'Вписать, фон размытый'],
-                    ] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        className={cn(
-                          'w-full rounded px-2 py-1 text-left hover:bg-[var(--surface-2)]',
-                          seqSet.fit === k && 'text-[#A78BFA]',
-                        )}
-                        onClick={() => setSeqSet((q) => ({ ...q, fit: k }))}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-zinc-500">Качество</div>
-                    {([
-                      ['high', 'Высокое (медленно, crf 18)'],
-                      ['standard', 'Обычное (crf 20)'],
-                      ['fast', 'Черновик (быстро, crf 28)'],
-                    ] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        className={cn(
-                          'w-full rounded px-2 py-1 text-left hover:bg-[var(--surface-2)]',
-                          seqSet.quality === k && 'text-[#A78BFA]',
-                        )}
-                        onClick={() => setSeqSet((q) => ({ ...q, quality: k }))}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                    <div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Частота кадров</div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[0, 24, 30, 60].map((f) => {
+                          const active = seqSet.fps === f
+                          return (
+                            <button
+                              key={f}
+                              className={cn(
+                                'rounded-md border px-1.5 py-1 font-mono text-[11px] transition-colors',
+                                active
+                                  ? 'border-[#A78BFA]/60 bg-[#A78BFA]/15 font-medium text-[#A78BFA]'
+                                  : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                              )}
+                              onClick={() => setSeqSet((q) => ({ ...q, fps: f }))}
+                            >
+                              {f === 0 ? 'Авто (24)' : `${f}`}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Вписывание клипов</div>
+                      <div className="space-y-0.5">
+                        {([
+                          ['stretch', 'Растянуть по кадру'],
+                          ['cover', 'Заполнить кадр (кроп)'],
+                          ['contain', 'Вписать с полями'],
+                          ['blur', 'Вписать, фон размытый'],
+                        ] as const).map(([k, label]) => {
+                          const active = seqSet.fit === k
+                          return (
+                            <button
+                              key={k}
+                              className={cn(
+                                'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors',
+                                active
+                                  ? 'bg-[#A78BFA]/15 font-medium text-[#A78BFA]'
+                                  : 'text-foreground/80 hover:bg-[var(--surface-2)] hover:text-foreground',
+                              )}
+                              onClick={() => setSeqSet((q) => ({ ...q, fit: k }))}
+                            >
+                              <span>{label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Качество кодирования</div>
+                      <div className="space-y-0.5">
+                        {([
+                          ['high', 'Высокое (CRF 18)'],
+                          ['standard', 'Обычное (CRF 20)'],
+                          ['fast', 'Черновик (быстро, CRF 28)'],
+                        ] as const).map(([k, label]) => {
+                          const active = seqSet.quality === k
+                          return (
+                            <button
+                              key={k}
+                              className={cn(
+                                'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors',
+                                active
+                                  ? 'bg-[#A78BFA]/15 font-medium text-[#A78BFA]'
+                                  : 'text-foreground/80 hover:bg-[var(--surface-2)] hover:text-foreground',
+                              )}
+                              onClick={() => setSeqSet((q) => ({ ...q, quality: k }))}
+                            >
+                              <span>{label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                     {/* (правка 882) кодировщик результата: NVENC быстрее libx264 в разы,
                         но требует видеокарту NVIDIA; auto сам определит и откатится на CPU */}
-                    <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-zinc-500">Кодирование</div>
-                    {([
-                      ['auto', 'Авто (видеокарта, если есть)'],
-                      ['cpu', 'Процессор (x264)'],
-                      ['gpu', 'Видеокарта (NVENC)'],
-                    ] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        className={cn(
-                          'w-full rounded px-2 py-1 text-left hover:bg-[var(--surface-2)]',
-                          (seqSet.codec ?? 'auto') === k && 'text-[#A78BFA]',
-                        )}
-                        onClick={() => setSeqSet((q) => ({ ...q, codec: k }))}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                    <div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Кодирование</div>
+                      <div className="space-y-0.5">
+                        {([
+                          ['auto', 'Авто (видеокарта, если есть)'],
+                          ['cpu', 'Процессор (x264)'],
+                          ['gpu', 'Видеокарта (NVENC)'],
+                        ] as const).map(([k, label]) => {
+                          const active = (seqSet.codec ?? 'auto') === k
+                          return (
+                            <button
+                              key={k}
+                              className={cn(
+                                'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors',
+                                active
+                                  ? 'bg-[#A78BFA]/15 font-medium text-[#A78BFA]'
+                                  : 'text-foreground/80 hover:bg-[var(--surface-2)] hover:text-foreground',
+                              )}
+                              onClick={() => setSeqSet((q) => ({ ...q, codec: k }))}
+                            >
+                              <span>{label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
             </div>
             {result && (
-              <>
-                <a href={result.url} download={result.filename} className="text-xs text-[#A78BFA] hover:underline">
-                  <DownloadIcon className="mr-1 inline h-3.5 w-3.5" />
-                  {result.filename}
+              <div className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs">
+                <a
+                  href={result.url}
+                  download={result.filename}
+                  className="inline-flex items-center gap-1.5 font-medium text-emerald-400 hover:underline"
+                >
+                  <DownloadIcon className="h-3.5 w-3.5" />
+                  <span className="max-w-[160px] truncate">{result.filename}</span>
                 </a>
                 <button
-                  className="rounded border border-border p-1 text-zinc-400 hover:bg-[var(--surface-2)] hover:text-zinc-200"
+                  className="ml-1 rounded p-0.5 text-muted-foreground transition-colors hover:bg-[var(--surface-2)] hover:text-foreground"
                   onClick={copyResult}
                   title="Скопировать ссылку на готовый файл"
                 >
                   <LinkIcon className="h-3.5 w-3.5" />
                 </button>
-              </>
+              </div>
             )}
-            <button
-              className="rounded-md bg-[#7C3AED] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg bg-[#7C3AED] px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-[#6D28D9] disabled:opacity-40"
               disabled={!shots.length || rendering}
               onClick={runRender}
             >
-              {rendering ? `Сборка…${renderPct != null ? ` ${renderPct}%` : ''}` : `Собрать (${shots.length})`}
-            </button>
+              {rendering ? (
+                <>
+                  <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
+                  <span>Сборка…{renderPct != null ? ` ${renderPct}%` : ''}</span>
+                </>
+              ) : (
+                <>
+                  <FilmIcon className="h-3.5 w-3.5" />
+                  <span>Собрать ({shots.length})</span>
+                </>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -4374,15 +4469,40 @@ export function MontageView() {
                     }
                   }
                 }}
-                onEnded={() => {
+                onEnded={(e) => {
                   if (!playingRef.current || bufRef.current !== b) return
                   const i = idxRef.current
                   const sq = seqRef.current
+                  const row = i >= 0 ? sq[i] : undefined
+                  if (loopClipRef.current && row) {
+                    const v = e.currentTarget
+                    try { v.currentTime = row.r.start + 0.001 } catch { /* ignore */ }
+                    void v.play().catch(() => {})
+                    syncPlayheadDOM(row.offset)
+                    setPlayT(row.offset)
+                    return
+                  }
                   const baseEnd = sq.length ? sq[sq.length - 1].offset + sq[sq.length - 1].len : 0
-                  if (i >= 0 && i + 1 < sq.length) showClip(i + 1, sq[i + 1].r.start, true)
+                  if (i >= 0 && i + 1 < sq.length) {
+                    const ni = i + 1
+                    if (sq[ni].gap >= 0.02 && row) {
+                      startGapPlay(row.offset + row.len, sq[ni].offset, ni)
+                    } else {
+                      const sb = b === 0 ? 1 : 0
+                      const sel = bufEl(sb)
+                      const stg = stageSeekRef.current
+                      if (stg && stg.idx === ni && sel && sel.readyState >= 2) swapTo(sb)
+                      else showClip(ni, sq[ni].r.start, true)
+                    }
+                  }
                   // (правка 879) хвост композиции за концом V1 доигрываем по часам
                   else if (tlEndRef.current > baseEnd + 0.02) startGapPlay(baseEnd, tlEndRef.current, -1)
-                  else if (loop && sq.length) { syncPlayheadDOM(0); setPlayT(0); showClip(0, sq[0].r.start, true) }
+                  else if (loop && sq.length) {
+                    syncPlayheadDOM(0)
+                    setPlayT(0)
+                    if (sq[0].gap >= 0.02) startGapPlay(0, sq[0].offset, 0)
+                    else showClip(0, sq[0].r.start, true)
+                  }
                   else stopSeq(false)
                 }}
                 onTimeUpdate={(e) => {
@@ -4418,23 +4538,33 @@ export function MontageView() {
             />
           )}
           {!previewSrc && !layers.length && !audios.length && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-zinc-500">
-              <FilmIcon className="h-10 w-10 opacity-40" />
-              <div className="text-sm">
-                {shots.length
-                  ? 'Выберите клип на таймлайне или нажмите «Играть»'
-                  : 'Перетащите видео из галереи на любую дорожку'}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-[var(--surface-1)]/80 shadow-inner">
+                <FilmIcon className="h-6 w-6 text-[#A78BFA]/70" />
+              </div>
+              <div className="text-center">
+                <div className="text-xs font-medium text-foreground/80">
+                  {shots.length
+                    ? 'Выберите клип на таймлайне или нажмите «Играть»'
+                    : 'Таймлайн пуст'}
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {shots.length
+                    ? 'Пробел — старт/пауза · S — разрез · Колесо мыши — масштаб'
+                    : 'Перетащите видео из галереи справа на любую дорожку'}
+                </div>
               </div>
             </div>
           )}
           {result && (
-            <div className="absolute left-3 top-3 rounded bg-emerald-600/90 px-2 py-1 text-xs font-medium text-white">
+            <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/85 px-2.5 py-1 text-xs font-medium text-emerald-300 shadow-lg backdrop-blur-md">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               Готово: {result.filename}
             </div>
           )}
           {isFs && (
             <button
-              className="absolute right-2 top-2 z-10 rounded border border-border bg-black/60 p-1.5 text-zinc-300 hover:text-white"
+              className="absolute right-3 top-3 z-10 rounded-lg border border-white/15 bg-black/70 p-2 text-white/80 backdrop-blur-md transition-colors hover:bg-black/90 hover:text-white"
               onClick={() => setIsFs(false)}
               title="Выйти из полноэкранного режима (Esc)"
             >
@@ -4442,17 +4572,23 @@ export function MontageView() {
             </button>
           )}
           {/* масштаб превью */}
-          <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded border border-border bg-black/60 px-1.5 py-1 text-xs text-zinc-300">
+          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-0.5 rounded-lg border border-white/10 bg-black/65 px-1.5 py-1 text-xs text-white/80 shadow-md backdrop-blur-md">
             <button
-              className="rounded p-0.5 hover:bg-[var(--surface-2)]"
+              className="rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
               onClick={() => setVScale((s) => Math.max(0.2, +(s - 0.1).toFixed(2)))}
               title="Уменьшить превью"
             >
               <ZoomOutIcon className="h-3.5 w-3.5" />
             </button>
-            <span className="w-10 text-center font-mono">{Math.round(vScale * 100)}%</span>
             <button
-              className="rounded p-0.5 hover:bg-[var(--surface-2)]"
+              className="w-11 text-center font-mono text-[11px] tabular-nums hover:text-white"
+              onClick={() => setVScale(0.8)}
+              title="Клик — сбросить масштаб превью (80%)"
+            >
+              {Math.round(vScale * 100)}%
+            </button>
+            <button
+              className="rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
               onClick={() => setVScale((s) => Math.min(1, +(s + 0.1).toFixed(2)))}
               title="Увеличить превью"
             >
@@ -4463,113 +4599,123 @@ export function MontageView() {
 
         {/* граница между превью и таймлайном — тянем вверх/вниз */}
         <div
-          className="group flex h-2.5 shrink-0 cursor-ns-resize items-center justify-center border-t border-border bg-[var(--surface-1)] hover:bg-[#7C3AED]/20"
+          className="group flex h-2 shrink-0 cursor-ns-resize items-center justify-center border-t border-border bg-[var(--surface-1)] transition-colors hover:bg-[#A78BFA]/15"
           onPointerDown={startTlResize}
           title="Потяните вверх/вниз — высота таймлайна"
         >
-          <div className="h-0.5 w-10 rounded bg-zinc-600 group-hover:bg-[#A78BFA]" />
+          <div className="h-0.5 w-10 rounded-full bg-border transition-colors group-hover:bg-[#A78BFA]" />
         </div>
 
         {/* (правка 861) транспорт + настройки таймлайна: прямо над самим таймлайном */}
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-[var(--surface-1)] px-3 py-1.5">
           {/* слева: история, разрез, магнит, дорожки, очистка таймлайна */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)] disabled:opacity-40"
-              onClick={undo}
-              disabled={!canUndo}
-              title="Отменить (Ctrl+Z)"
-            >
-              <Undo2Icon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)] disabled:opacity-40"
-              onClick={redo}
-              disabled={!canRedo}
-              title="Повторить (Ctrl+Shift+Z или Ctrl+Y)"
-            >
-              <Redo2Icon className="h-3.5 w-3.5" />
-            </button>
-            <div className="mx-0.5 h-4 w-px bg-border" />
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={splitAtPlayhead}
-              disabled={tlEnd <= 0}
-              title="Разрезать клип на плейхеде (S): режет все дорожки под плейхедом"
-            >
-              <ScissorsIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className={cn(
-                'rounded border px-1.5 py-1 hover:bg-[var(--surface-2)]',
-                snap ? 'border-[#A78BFA] text-[#A78BFA]' : 'border-border text-zinc-400',
-              )}
-              onClick={() => setSnap((v) => !v)}
-              title="Магнит: прилипание к краям клипов и плейхеду"
-            >
-              <MagnetIcon className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                onClick={undo}
+                disabled={!canUndo}
+                title="Отменить (Ctrl+Z)"
+              >
+                <Undo2Icon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                onClick={redo}
+                disabled={!canRedo}
+                title="Повторить (Ctrl+Shift+Z или Ctrl+Y)"
+              >
+                <Redo2Icon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex items-center rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                onClick={splitAtPlayhead}
+                disabled={tlEnd <= 0}
+                title="Разрезать клип на плейхеде (S): режет все дорожки под плейхедом"
+              >
+                <ScissorsIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className={cn(
+                  'rounded-md p-1.5 transition-colors',
+                  snap
+                    ? 'bg-[#A78BFA]/20 text-[#A78BFA]'
+                    : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                )}
+                onClick={() => setSnap((v) => !v)}
+                title="Магнит: прилипание к краям клипов и плейхеду"
+              >
+                <MagnetIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
             {/* (правка 874, 883) создание и удаление видеодорожек (V+ / V−) и аудиодорожек (A+ / A−) */}
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
-              onClick={() => {
-                const rowsNow = Math.max(layerTracks, layers.reduce((m, l) => Math.max(m, l.track), 0))
-                if (rowsNow >= MAX_TRACKS) {
-                  showToast(`Не более ${MAX_TRACKS} видеодорожек`, 'error')
-                  return
-                }
-                pushHistory()
-                setLayerTracks(rowsNow + 1)
-                showToast(`Добавлена видеодорожка V${rowsNow + 2} — перетащите файл из галереи на неё`)
-              }}
-              title="Добавить видеодорожку (V2, V3…)"
-            >
-              <span className="font-mono text-[11px] font-semibold">V+</span>
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:border-red-500/50 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={layerRows.length === 0}
-              onClick={() => {
-                if (layerRows.length > 0) removeVideoTrack(layerRows[0])
-              }}
-              title={layerRows.length > 0 ? `Удалить верхнюю видеодорожку V${layerRows[0] + 1}` : 'Нет дополнительных видеодорожек для удаления'}
-            >
-              <span className="font-mono text-[11px] font-semibold">V−</span>
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
-              onClick={() => {
-                // (правка 880) новая аудиодорожка: A2, A3… — верхняя существующая + 1
-                const rowsNow = Math.max(audioTracks, audios.reduce((m, a) => Math.max(m, a.track), 0))
-                if (rowsNow >= MAX_TRACKS) {
-                  showToast(`Не более ${MAX_TRACKS} аудиодорожек`, 'error')
-                  return
-                }
-                pushHistory()
-                setAudioTracks(rowsNow + 1)
-                showToast(`Добавлена аудиодорожка A${rowsNow + 1} — перетащите аудиофайл на неё`)
-              }}
-              title="Добавить аудиодорожку (A1, A2…)"
-            >
-              <span className="font-mono text-[11px] font-semibold">A+</span>
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:border-red-500/50 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={audioRows.length === 0}
-              onClick={() => {
-                if (audioRows.length > 0) removeAudioTrack(audioRows[audioRows.length - 1])
-              }}
-              title={audioRows.length > 0 ? `Удалить аудиодорожку A${audioRows[audioRows.length - 1]}` : 'Нет аудиодорожек для удаления'}
-            >
-              <span className="font-mono text-[11px] font-semibold">A−</span>
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
-              onClick={() => audioFileInputRef.current?.click()}
-              title="Импорт аудиофайла с диска на аудиодорожку (встаёт по плейхеду)"
-            >
-              <MusicIcon className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+              <button
+                className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
+                onClick={() => {
+                  const rowsNow = Math.max(layerTracks, layers.reduce((m, l) => Math.max(m, l.track), 0))
+                  if (rowsNow >= MAX_TRACKS) {
+                    showToast(`Не более ${MAX_TRACKS} видеодорожек`, 'error')
+                    return
+                  }
+                  pushHistory()
+                  setLayerTracks(rowsNow + 1)
+                  showToast(`Добавлена видеодорожка V${rowsNow + 2} — перетащите файл из галереи на неё`)
+                }}
+                title="Добавить видеодорожку (V2, V3…)"
+              >
+                <span className="font-mono text-[11px] font-semibold">V+</span>
+              </button>
+              <button
+                className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:pointer-events-none disabled:opacity-35"
+                disabled={layerRows.length === 0}
+                onClick={() => {
+                  if (layerRows.length > 0) removeVideoTrack(layerRows[0])
+                }}
+                title={layerRows.length > 0 ? `Удалить верхнюю видеодорожку V${layerRows[0] + 1}` : 'Нет дополнительных видеодорожек для удаления'}
+              >
+                <span className="font-mono text-[11px] font-semibold">V−</span>
+              </button>
+              <div className="mx-0.5 h-3.5 w-px bg-border" />
+              <button
+                className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
+                onClick={() => {
+                  // (правка 880) новая аудиодорожка: A2, A3… — верхняя существующая + 1
+                  const rowsNow = Math.max(audioTracks, audios.reduce((m, a) => Math.max(m, a.track), 0))
+                  if (rowsNow >= MAX_TRACKS) {
+                    showToast(`Не более ${MAX_TRACKS} аудиодорожек`, 'error')
+                    return
+                  }
+                  pushHistory()
+                  setAudioTracks(rowsNow + 1)
+                  showToast(`Добавлена аудиодорожка A${rowsNow + 1} — перетащите аудиофайл на неё`)
+                }}
+                title="Добавить аудиодорожку (A1, A2…)"
+              >
+                <span className="font-mono text-[11px] font-semibold">A+</span>
+              </button>
+              <button
+                className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:pointer-events-none disabled:opacity-35"
+                disabled={audioRows.length === 0}
+                onClick={() => {
+                  if (audioRows.length > 0) removeAudioTrack(audioRows[audioRows.length - 1])
+                }}
+                title={audioRows.length > 0 ? `Удалить аудиодорожку A${audioRows[audioRows.length - 1]}` : 'Нет аудиодорожек для удаления'}
+              >
+                <span className="font-mono text-[11px] font-semibold">A−</span>
+              </button>
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-emerald-400"
+                onClick={() => audioFileInputRef.current?.click()}
+                title="Импорт аудиофайла с диска на аудиодорожку (встаёт по плейхеду)"
+              >
+                <MusicIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <input
               ref={audioFileInputRef}
               type="file"
@@ -4583,7 +4729,7 @@ export function MontageView() {
             />
             {(shots.length > 0 || layers.length > 0 || audios.length > 0 || layerRows.length > 0 || audioRows.length > 0) && (
               <button
-                className="rounded border border-border px-2 py-1 text-xs text-zinc-400 hover:border-red-500/50 hover:text-red-300"
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-[var(--surface-2)] px-2.5 text-xs text-muted-foreground transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
                 onClick={() => {
                   // (правка 880) очищаем все дорожки одинаково: видеоряды и аудиоряды
                   pushHistory()
@@ -4600,105 +4746,127 @@ export function MontageView() {
                 }}
                 title="Очистить все дорожки таймлайна"
               >
-                Очистить
+                <TrashIcon className="h-3 w-3" />
+                <span>Очистить</span>
               </button>
             )}
           </div>
 
           {/* по центру: транспорт воспроизведения и общая громкость */}
           <div className="flex items-center gap-2">
-            <button
-              className="rounded border border-border px-1.5 py-1 hover:bg-[var(--surface-2)] disabled:opacity-40"
-              onClick={() => seekTo(0)}
-              disabled={tlEnd <= 0}
-              title="В начало"
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                onClick={() => seekTo(0)}
+                disabled={tlEnd <= 0}
+                title="В начало"
+              >
+                <SkipBackIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="flex h-7 w-8 items-center justify-center rounded-md bg-[#7C3AED] text-white shadow-sm transition-colors hover:bg-[#6D28D9] disabled:pointer-events-none disabled:opacity-40"
+                onClick={togglePlay}
+                disabled={tlEnd <= 0}
+                title="Играть / пауза (пробел)"
+              >
+                {playing ? <PauseIcon className="h-3.5 w-3.5" /> : <PlayIcon className="h-3.5 w-3.5 fill-current" />}
+              </button>
+              <button
+                className={cn(
+                  'rounded-md p-1.5 transition-colors',
+                  loop
+                    ? 'bg-[#A78BFA]/20 text-[#A78BFA]'
+                    : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                )}
+                onClick={() => setLoop((v) => !v)}
+                title="Повтор всей последовательности (луп)"
+              >
+                <RepeatIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className={cn(
+                  'rounded-md p-1.5 transition-colors',
+                  loopClip
+                    ? 'bg-[#A78BFA]/20 text-[#A78BFA]'
+                    : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                )}
+                onClick={() => setLoopClip((v) => !v)}
+                title="Повторять текущий клип (не переходя дальше по таймлайну)"
+              >
+                <Repeat1Icon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex h-8 items-center gap-2 rounded-lg border border-border bg-[var(--surface-2)] px-2">
+              <button
+                className={cn(
+                  'rounded p-1 transition-colors hover:bg-[var(--surface-3)]',
+                  muted ? 'text-muted-foreground/50' : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => setMuted((v) => !v)}
+                title={muted ? 'Включить звук превью' : 'Выключить звук превью'}
+              >
+                {muted ? <VolumeXIcon className="h-3.5 w-3.5" /> : <Volume2Icon className="h-3.5 w-3.5" />}
+              </button>
+              <div
+                className="w-20"
+                title="Общая громкость таймлайна (вплавляется и в готовое видео)"
+              >
+                <Slider
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={[Math.round(masterVol * 100)]}
+                  onValueChange={([v]) => setMasterVol(v / 100)}
+                />
+              </div>
+              <span className="w-8 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+                {Math.round(masterVol * 100)}%
+              </span>
+            </div>
+
+            <span
+              ref={timecodeRef}
+              className="rounded-lg border border-border bg-[var(--surface-2)] px-2.5 py-1 font-mono text-xs tabular-nums text-foreground/90"
             >
-              <SkipBackIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="rounded-md bg-[#7C3AED] px-2.5 py-1.5 text-white hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={togglePlay}
-              disabled={tlEnd <= 0}
-              title="Играть / пауза (пробел)"
-            >
-              {playing ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
-            </button>
-            <button
-              className={cn(
-                'rounded border px-1.5 py-1 hover:bg-[var(--surface-2)]',
-                loop ? 'border-[#A78BFA] text-[#A78BFA]' : 'border-border text-zinc-400',
-              )}
-              onClick={() => setLoop((v) => !v)}
-              title="Повтор всей последовательности (луп)"
-            >
-              <RepeatIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className={cn(
-                'rounded border px-1.5 py-1 hover:bg-[var(--surface-2)]',
-                loopClip ? 'border-[#A78BFA] text-[#A78BFA]' : 'border-border text-zinc-400',
-              )}
-              onClick={() => setLoopClip((v) => !v)}
-              title="Повторять текущий клип (не переходя дальше по таймлайну)"
-            >
-              <Repeat1Icon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className={cn(
-                'rounded border px-1.5 py-1 hover:bg-[var(--surface-2)]',
-                muted ? 'border-border text-zinc-600' : 'border-border text-zinc-400',
-              )}
-              onClick={() => setMuted((v) => !v)}
-              title={muted ? 'Включить звук превью' : 'Выключить звук превью'}
-            >
-              {muted ? <VolumeXIcon className="h-3.5 w-3.5" /> : <Volume2Icon className="h-3.5 w-3.5" />}
-            </button>
-            <label
-              className="flex items-center gap-1.5"
-              title="Общая громкость таймлайна (вплавляется и в готовое видео)"
-            >
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(masterVol * 100)}
-                onChange={(e) => setMasterVol(Number(e.target.value) / 100)}
-                className="h-1 w-20 cursor-pointer accent-[#7C3AED]"
-              />
-              <span className="w-8 font-mono text-[10px] text-zinc-400">{Math.round(masterVol * 100)}%</span>
-            </label>
-            <span ref={timecodeRef} className="font-mono text-xs text-zinc-400">{fmtT(playT)} / {fmtT(tlEnd)}</span>
+              {fmtT(playT)} / {fmtT(tlEnd)}
+            </span>
           </div>
 
           {/* справа: масштаб таймлайна + полный экран */}
-          <div className="flex items-center gap-1 text-xs text-zinc-400">
+          <div className="flex items-center gap-1.5 text-xs">
+            <div className="flex items-center rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
+                onClick={() => setPps((p) => Math.max(8, Math.round(p / 1.5)))}
+                title="Уменьшить масштаб таймлайна"
+              >
+                <ZoomOutIcon className="h-3.5 w-3.5" />
+              </button>
+              <span
+                className="w-14 text-center font-mono text-[11px] tabular-nums text-muted-foreground"
+                title="Колесо мыши над таймлайном — тот же масштаб"
+              >
+                {pps} px/с
+              </span>
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
+                onClick={() => setPps((p) => Math.min(240, Math.round(p * 1.5)))}
+                title="Увеличить масштаб таймлайна"
+              >
+                <ZoomInIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                onClick={fitZoom}
+                disabled={!shots.length}
+                title="Вписать весь таймлайн в окно"
+              >
+                <FrameIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <button
-              className="rounded border border-border px-1.5 py-1 hover:bg-[var(--surface-2)]"
-              onClick={() => setPps((p) => Math.max(8, Math.round(p / 1.5)))}
-              title="Уменьшить масштаб таймлайна"
-            >
-              <ZoomOutIcon className="h-3.5 w-3.5" />
-            </button>
-            <span className="w-14 text-center font-mono" title="Колесо мыши над таймлайном — тот же масштаб">
-              {pps} px/с
-            </span>
-            <button
-              className="rounded border border-border px-1.5 py-1 hover:bg-[var(--surface-2)]"
-              onClick={() => setPps((p) => Math.min(240, Math.round(p * 1.5)))}
-              title="Увеличить масштаб таймлайна"
-            >
-              <ZoomInIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="rounded border border-border px-1.5 py-1 hover:bg-[var(--surface-2)] disabled:opacity-40"
-              onClick={fitZoom}
-              disabled={!shots.length}
-              title="Вписать весь таймлайн в окно"
-            >
-              <FrameIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="ml-1 rounded border border-border px-1.5 py-1 text-zinc-400 hover:bg-[var(--surface-2)]"
+              className="rounded-lg border border-border bg-[var(--surface-2)] p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
               onClick={toggleFullscreen}
               title={isFs ? 'Выйти из полноэкранного режима (F)' : 'Просмотр на весь экран (F)'}
             >
@@ -4713,7 +4881,7 @@ export function MontageView() {
             контейнер может сжиматься и листается по вертикали. */}
         <div
           ref={scrollerRef}
-          className="min-h-0 overflow-x-auto overflow-y-auto border-t border-border bg-[var(--surface-1)] px-2 py-2"
+          className="min-h-0 overflow-x-auto overflow-y-auto border-t border-border bg-[var(--surface-0)] px-3 py-2.5"
           onDragOver={(e) => {
             const el = e.target as HTMLElement | null
             const aRow = el?.closest('[data-audio-row]')
@@ -4747,7 +4915,7 @@ export function MontageView() {
           <div className="relative" style={{ width: `${Math.max(400, (tlEnd + 5) * pps)}px` }}>
             {/* линейка времени */}
             <div
-              className="relative h-6 cursor-pointer select-none"
+              className="relative mb-1 h-5 cursor-pointer select-none rounded-t border-b border-border/60"
               onPointerDown={startScrub}
               title="Клик или тяните — перемотка"
               style={tlEnd > 0 ? {
@@ -4757,10 +4925,10 @@ export function MontageView() {
               {rulerTicks.map((t) => (
                 <span
                   key={t}
-                  className="absolute top-0 font-mono text-[10px] leading-4 text-zinc-500"
+                  className="absolute top-0.5 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground"
                   style={{ left: `${t * pps + 3}px` }}
                 >
-                  {t.toFixed(rulerStep < 0.5 ? 2 : rulerStep < 1 ? 1 : 0)}
+                  {t.toFixed(rulerStep < 0.5 ? 2 : rulerStep < 1 ? 1 : 0)}с
                 </span>
               ))}
             </div>
@@ -4773,15 +4941,15 @@ export function MontageView() {
                 <div
                   key={`layer-${t}`}
                   data-layer-row={t}
-                  className="relative mb-1 overflow-hidden rounded border border-border/50 bg-black/30"
+                  className="relative mb-1 overflow-hidden rounded-lg border border-border bg-[var(--surface-1)] shadow-inner"
                   style={{ height: h }}
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
                   title={`Дорожка V${t + 1}: перетащите сюда файл из галереи`}
                 >
-                  <div className=" absolute left-1 top-0.5 z-20 flex items-center gap-0.5 rounded bg-black/50 px-1 py-0.5">
-                    <span className="pointer-events-none font-mono text-[9px] font-semibold text-zinc-400">
+                  <div className="absolute left-1.5 top-1 z-20 flex items-center gap-0.5 rounded-md border border-border/60 bg-[var(--surface-2)]/90 px-1.5 py-0.5 shadow-sm backdrop-blur-sm">
+                    <span className="pointer-events-none font-mono text-[9px] font-semibold text-muted-foreground">
                       V{t + 1}
                     </span>
                     <button
@@ -4792,7 +4960,7 @@ export function MontageView() {
                         e.stopPropagation()
                         removeVideoTrack(t)
                       }}
-                      className="rounded px-0.5 font-mono text-[10px] leading-none text-zinc-500 hover:bg-red-500/30 hover:text-red-300"
+                      className="rounded px-0.5 font-mono text-[10px] leading-none text-muted-foreground hover:bg-red-500/30 hover:text-red-300"
                       title={`Удалить дорожку V${t + 1}`}
                     >
                       ×
@@ -4805,15 +4973,16 @@ export function MontageView() {
                     const { w: sw, h: sh, r: sr } = layerStripReq(l)
                     const exactStrip = strips[stripKey(l.url, sr, sw, sh)]
                     const strip = exactStrip || lastStripByLayerRef.current[l.key]
+                    const isSel = isClipSelected('layer', l.key)
                     return (
                       <div
                         key={l.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
                         className={cn(
-                          'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
-                          isClipSelected('layer', l.key)
-                            ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40'
-                            : 'border-border hover:border-zinc-500',
+                          'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
+                          isSel
+                            ? 'z-10 border-[#A78BFA] ring-2 ring-[#A78BFA]/40 shadow-[0_0_14px_rgba(167,139,250,0.28)]'
+                            : 'border-border/80 hover:border-[#A78BFA]/50',
                           l.hidden && 'opacity-40',
                         )}
                         style={{
@@ -4839,7 +5008,7 @@ export function MontageView() {
                         {/* (правка 878) маркер: клип слоя ждёт чистовик из Refine */}
                         {pendingReturn[l.key] && (
                           <span
-                            className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/85 px-1 py-0.5 text-[9px] font-semibold text-white animate-pulse"
+                            className="absolute left-1.5 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow animate-pulse"
                             title="Отправлен в Refine — придёт и заменит этот клип"
                           >
                             <Wand2Icon className="h-2.5 w-2.5" />
@@ -4849,37 +5018,44 @@ export function MontageView() {
                         {/* (правка 876) маркер активных эффектов на слое */}
                         {!pendingReturn[l.key] && hasFx(l.fx) && (
                           <span
-                            className="pointer-events-none absolute left-1 top-1 rounded bg-[#7C3AED]/80 px-1 py-0.2 text-[9px] font-semibold text-white"
+                            className="pointer-events-none absolute left-1.5 top-1 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow"
                             title="На клипе применены эффекты"
                           >
                             FX
                           </span>
                         )}
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[10px] leading-4 text-white">
-                          {l.name} · {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}{l.muted ? ' · без звука' : ''}
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-1.5 pb-0.5 pt-2 text-[10px] leading-4 text-white">
+                          <span className="truncate font-medium">{l.name}</span>
+                          <span className="shrink-0 font-mono text-[9px] text-white/80 tabular-nums">
+                            {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}{l.muted ? ' · без звука' : ''}
+                          </span>
                         </div>
                         <div
                           data-trim-handle="start"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'start')}
-                          className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          className="absolute inset-y-0 left-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
                           title="Подрезать начало"
-                        />
+                        >
+                          <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
+                        </div>
                         <div
                           data-trim-handle="end"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'end')}
-                          className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                          className="absolute inset-y-0 right-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
                           title="Подрезать конец"
-                        />
+                        >
+                          <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
+                        </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); sendLayerToRefine(l) }}
-                          className="absolute right-5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-[#A78BFA] group-hover:block"
+                          className="absolute right-6 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
                           title="В Refine (исходник слоя целиком)"
                         >
                           <Wand2Icon className="h-2.5 w-2.5" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); removeLayerClip(l.key) }}
-                          className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
+                          className="absolute right-1 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white group-hover:block"
                           title="Убрать клип"
                         >
                           <XIcon className="h-2.5 w-2.5" />
@@ -4894,14 +5070,20 @@ export function MontageView() {
             <div
               ref={trackRef}
               data-base-row="1"
-              className="relative mb-1 overflow-hidden rounded border border-border/50 bg-black/30"
-              style={{ height: trackH }}
+              className="relative mb-1 overflow-hidden rounded-lg border border-border bg-[var(--surface-1)] shadow-inner"
+              style={{
+                height: trackH,
+                backgroundImage:
+                  seq.length > 0
+                    ? 'repeating-linear-gradient(-45deg, rgba(167,139,250,0.035) 0 6px, transparent 6px 12px)'
+                    : undefined,
+              }}
               onPointerDown={(e) => {
                 if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
               }}
             >
-              <div className="absolute left-1 top-0.5 z-20 flex items-center gap-0.5 rounded bg-black/50 px-1 py-0.5">
-                <span className="pointer-events-none font-mono text-[9px] font-semibold text-zinc-400">V1</span>
+              <div className="absolute left-1.5 top-1 z-20 flex items-center gap-0.5 rounded-md border border-border/60 bg-[var(--surface-2)]/90 px-1.5 py-0.5 shadow-sm backdrop-blur-sm">
+                <span className="pointer-events-none font-mono text-[9px] font-semibold text-muted-foreground">V1</span>
                 {(layerRows.length > 0 || shots.length > 0) && (
                   <button
                     type="button"
@@ -4911,7 +5093,7 @@ export function MontageView() {
                       e.stopPropagation()
                       removeVideoTrack(0)
                     }}
-                    className="rounded px-0.5 font-mono text-[10px] leading-none text-zinc-500 hover:bg-red-500/30 hover:text-red-300"
+                    className="rounded px-0.5 font-mono text-[10px] leading-none text-muted-foreground hover:bg-red-500/30 hover:text-red-300"
                     title={layerRows.length > 0 ? 'Удалить дорожку V1' : 'Очистить дорожку V1'}
                   >
                     ×
@@ -4925,14 +5107,17 @@ export function MontageView() {
                 // полоса ещё строится, показываем предыдущую полосу клипа с cover-кадрированием,
                 // а сама makeStrip рисует каждую ячейку с cover-кропом — кадры никогда не растягиваются
                 const strip = exactStrip || lastStripByShotRef.current[row.shot.key]
+                const isSel = isClipSelected('shot', row.shot.key)
                 return (
                   <div
                     key={row.shot.key}
                     data-clip={row.shot.key}
                     onPointerDown={(e) => startClipDrag(e, row)}
                     className={cn(
-                      'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-[2px] border bg-[var(--surface-2)] active:cursor-grabbing',
-                      isClipSelected('shot', row.shot.key) ? 'z-10 border-[#A78BFA] ring-1 ring-[#A78BFA]/40' : 'border-border hover:border-zinc-500',
+                      'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
+                      isSel
+                        ? 'z-10 border-[#A78BFA] ring-2 ring-[#A78BFA]/40 shadow-[0_0_14px_rgba(167,139,250,0.28)]'
+                        : 'border-border/80 hover:border-[#A78BFA]/50',
                     )}
                     style={{
                       left: `${row.offset * pps}px`,
@@ -4954,25 +5139,32 @@ export function MontageView() {
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                       />
                     )}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[10px] leading-4 text-white">
-                      {row.shot.name} · {row.len.toFixed(1)}с{row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-1.5 pb-0.5 pt-2 text-[10px] leading-4 text-white">
+                      <span className="truncate font-medium">{row.shot.name}</span>
+                      <span className="shrink-0 font-mono text-[9px] text-white/80 tabular-nums">
+                        {row.len.toFixed(1)}с{row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
+                      </span>
                     </div>
                     <div
                       data-trim-handle="start"
                       onPointerDown={(e) => startTrimDrag(e, row.shot, 'start')}
-                      className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                      className="absolute inset-y-0 left-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
                       title="Подрезать начало"
-                    />
+                    >
+                      <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
+                    </div>
                     <div
                       data-trim-handle="end"
                       onPointerDown={(e) => startTrimDrag(e, row.shot, 'end')}
-                      className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-[#7C3AED]/0 group-hover:bg-[#7C3AED]/60"
+                      className="absolute inset-y-0 right-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
                       title="Подрезать конец"
-                    />
+                    >
+                      <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
+                    </div>
                     {/* (правка 857) маркер: клип ждёт чистовик из Refine */}
                     {pendingReturn[row.shot.key] && (
                       <span
-                        className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/85 px-1 py-0.5 text-[9px] font-semibold text-white animate-pulse"
+                        className="absolute left-1.5 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow animate-pulse"
                         title="Отправлен в Refine — придёт и заменит этот клип"
                       >
                         <Wand2Icon className="h-2.5 w-2.5" />
@@ -4982,7 +5174,7 @@ export function MontageView() {
                     {/* (правка 859) маркер активных эффектов на клипе */}
                     {!pendingReturn[row.shot.key] && hasFx(row.shot.fx) && (
                       <span
-                        className="pointer-events-none absolute left-1 top-1 rounded bg-[#7C3AED]/80 px-1 py-0.2 text-[9px] font-semibold text-white"
+                        className="pointer-events-none absolute left-1.5 top-1 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow"
                         title="На клипе применены эффекты"
                       >
                         FX
@@ -4991,14 +5183,14 @@ export function MontageView() {
                     {/* (правка 856) отправить исходник клипа во вкладку «Refine» */}
                     <button
                       onClick={(e) => { e.stopPropagation(); sendShotToRefine(row.shot) }}
-                      className="absolute right-6 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-[#A78BFA] group-hover:block"
+                      className="absolute right-6 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
                       title="В Refine (исходник целиком, без подрезки)"
                     >
                       <Wand2Icon className="h-3 w-3" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); removeShot(row.shot.key) }}
-                      className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
+                      className="absolute right-1 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white group-hover:block"
                       title="Убрать шот"
                     >
                       <XIcon className="h-3 w-3" />
@@ -5009,7 +5201,7 @@ export function MontageView() {
               {/* маркер вставки */}
               {dropIdx != null && (
                 <div
-                  className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-[#A78BFA]"
+                  className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-[#A78BFA] shadow-[0_0_8px_#A78BFA]"
                   style={{
                     left: `${dropIdx < seq.length ? seq[dropIdx].offset * pps : tlEnd * pps}px`,
                   }}
@@ -5018,21 +5210,21 @@ export function MontageView() {
             </div>
             {/* (правка 874) аудиоряды A1+ под базой: клипы со звуком с диска */}
             {audioRows.map((t) => {
-              const h = Math.max(22, Math.round(trackH * 0.45))
+              const h = Math.max(24, Math.round(trackH * 0.45))
               const clips = audios.filter((a) => a.track === t)
               return (
                 <div
                   key={`audio-${t}`}
                   data-audio-row={t}
-                  className="relative mb-1 rounded border border-emerald-500/25 bg-emerald-500/5"
+                  className="relative mb-1 rounded-lg border border-emerald-500/25 bg-emerald-500/5 shadow-inner"
                   style={{ height: h }}
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
                   title={`Аудиодорожка A${t}: перетащите сюда аудиофайл из проводника`}
                 >
-                  <div className="absolute left-1 top-0.5 z-20 flex items-center gap-0.5 rounded bg-black/50 px-1 py-0.5">
-                    <span className="pointer-events-none font-mono text-[9px] font-semibold text-emerald-400/80">
+                  <div className="absolute left-1.5 top-1 z-20 flex items-center gap-0.5 rounded-md border border-emerald-500/30 bg-[var(--surface-2)]/90 px-1.5 py-0.5 shadow-sm backdrop-blur-sm">
+                    <span className="pointer-events-none font-mono text-[9px] font-semibold text-emerald-400">
                       A{t}
                     </span>
                     <button
@@ -5043,7 +5235,7 @@ export function MontageView() {
                         e.stopPropagation()
                         removeAudioTrack(t)
                       }}
-                      className="rounded px-0.5 font-mono text-[10px] leading-none text-emerald-400/60 hover:bg-red-500/30 hover:text-red-300"
+                      className="rounded px-0.5 font-mono text-[10px] leading-none text-emerald-400/70 hover:bg-red-500/30 hover:text-red-300"
                       title={`Удалить аудиодорожку A${t}`}
                     >
                       ×
@@ -5051,14 +5243,15 @@ export function MontageView() {
                   </div>
                   {clips.map((a) => {
                     const w = Math.max(12, audioLen(a) * pps)
+                    const isSel = isClipSelected('audio', a.key)
                     return (
                       <div
                         key={a.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'audio', a)}
                         className={cn(
-                          'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-[2px] border bg-emerald-600/25 active:cursor-grabbing',
-                          isClipSelected('audio', a.key)
-                            ? 'z-10 border-emerald-300 ring-1 ring-emerald-300/40'
+                          'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-md border bg-emerald-600/25 transition-shadow active:cursor-grabbing',
+                          isSel
+                            ? 'z-10 border-emerald-400 ring-2 ring-emerald-400/40 shadow-[0_0_12px_rgba(52,211,153,0.28)]'
                             : 'border-emerald-500/40 hover:border-emerald-400/70',
                           a.muted && 'opacity-40',
                         )}
@@ -5068,24 +5261,24 @@ export function MontageView() {
                         <div className="pointer-events-none absolute inset-0 flex items-center px-2 opacity-25">
                           <MusicIcon className="h-3 w-3 shrink-0 text-emerald-200" />
                         </div>
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 text-[9px] leading-3 text-white">
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 text-[9px] leading-3 text-white">
                           {a.name} · {audioLen(a).toFixed(1)}с · {Math.round(a.vol)}%{a.muted ? ' · нем' : ''}
                         </div>
                         <div
                           data-trim-handle="start"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'start')}
-                          className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-emerald-500/0 group-hover:bg-emerald-500/60"
+                          className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-emerald-500/0 transition-colors group-hover:bg-emerald-500/60"
                           title="Подрезать начало"
                         />
                         <div
                           data-trim-handle="end"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'end')}
-                          className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-emerald-500/0 group-hover:bg-emerald-500/60"
+                          className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-emerald-500/0 transition-colors group-hover:bg-emerald-500/60"
                           title="Подрезать конец"
                         />
                         <button
                           onClick={(e) => { e.stopPropagation(); removeAudioClip(a.key) }}
-                          className="absolute right-0.5 top-0.5 hidden rounded bg-black/60 p-0.5 text-zinc-300 hover:text-white group-hover:block"
+                          className="absolute right-0.5 top-0.5 hidden rounded bg-black/70 p-0.5 text-white/80 hover:bg-red-500 hover:text-white group-hover:block"
                           title="Убрать аудио"
                         >
                           <XIcon className="h-2.5 w-2.5" />
@@ -5096,13 +5289,13 @@ export function MontageView() {
                 </div>
               )
             })}
-            {/* плейхед: линия + ромб-головка (тяните — перемотка) */}
+            {/* плейхед: линия + головка-флажок (тяните — перемотка) */}
             {tlEnd > 0 && (
               <div ref={playheadRef} className="pointer-events-none absolute inset-y-0 z-20" style={{ left: `${playT * pps}px` }}>
-                <div className="absolute inset-y-0 w-px -translate-x-px bg-red-400" />
+                <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.7)]" />
                 <div
                   onPointerDown={startScrub}
-                  className="pointer-events-auto absolute -left-[5px] top-0 h-2.5 w-2.5 rotate-45 cursor-ew-resize bg-red-400"
+                  className="pointer-events-auto absolute -left-1.5 top-0 h-3 w-3 rotate-45 cursor-ew-resize rounded-[2px] border border-white/40 bg-rose-500 shadow"
                   title="Тяните — перемотка"
                 />
               </div>
@@ -5112,63 +5305,98 @@ export function MontageView() {
       </section>
 
       {/* (правка 859) правая панель: 3 вкладки — Галерея | Свойства | Эффекты */}
-      <aside className="flex w-[350px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)]">
+      <aside className="flex w-[350px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)] text-foreground">
         {/* переключатель вкладок */}
-        <div className="grid grid-cols-3 gap-1 border-b border-border p-2 text-xs">
-          {([
-            ['gallery', 'Галерея'],
-            ['props', 'Свойства'],
-            ['fx', 'Эффекты'],
-          ] as const).map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setRightTab(id)}
-              className={cn(
-                'relative rounded-md px-2 py-1.5 font-medium transition-colors',
-                rightTab === id
-                  ? 'bg-[#7C3AED] text-white'
-                  : 'bg-[var(--surface-2)] text-zinc-400 hover:text-zinc-200',
-              )}
-            >
-              {label}
-              {id === 'fx' && fxTarget && hasFx(fxTarget.fx) && (
-                <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 align-middle" />
-              )}
-            </button>
-          ))}
+        <div className="border-b border-border p-2">
+          <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-[var(--surface-2)] p-0.5">
+            {([
+              ['gallery', 'Галерея', FilmIcon],
+              ['props', 'Свойства', SlidersHorizontalIcon],
+              ['fx', 'Эффекты', SparklesIcon],
+            ] as const).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                onClick={() => setRightTab(id)}
+                className={cn(
+                  'relative inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors',
+                  rightTab === id
+                    ? 'bg-[#7C3AED] text-white shadow-sm'
+                    : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                {label}
+                {id === 'fx' && fxTarget && hasFx(fxTarget.fx) && (
+                  <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ВКЛАДКА 1: ГАЛЕРЕЯ */}
         {rightTab === 'gallery' && (
           <>
-            <div className="space-y-2 border-b border-border p-3">
-              <div className="flex gap-2">
-                <select
-                  className="min-w-0 flex-1 rounded-md border border-border bg-[var(--surface-2)] px-2 py-1.5 text-xs outline-none focus:border-[#A78BFA]"
-                  value={folderFilter}
-                  onChange={(e) => setFolderFilter(e.target.value)}
-                >
-                  <option value="__all__">Все видео</option>
-                  <option value="">Общая</option>
-                  {folders.map((f) => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
-                </select>
-                <input
-                  className="min-w-0 flex-1 rounded-md border border-border bg-[var(--surface-2)] px-2 py-1.5 text-xs outline-none placeholder:text-zinc-500 focus:border-[#A78BFA]"
-                  value={search}
-                  placeholder="Поиск…"
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+            <div className="space-y-2 border-b border-border p-2.5">
+              <div className="flex items-center gap-1.5">
+                <div className="relative min-w-0 flex-1">
+                  <FolderOpenIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <select
+                    className="h-8 w-full cursor-pointer appearance-none rounded-lg border border-border bg-[var(--surface-2)] pl-7 pr-6 text-xs text-foreground outline-none transition-colors focus:border-[#A78BFA]"
+                    value={folderFilter}
+                    onChange={(e) => setFolderFilter(e.target.value)}
+                    title="Папка галереи"
+                  >
+                    <option value="__all__">Все видео</option>
+                    <option value="">Общая</option>
+                    {folders.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground">▾</span>
+                </div>
+                <div className="relative min-w-0 flex-1">
+                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    className="h-8 w-full rounded-lg border border-border bg-[var(--surface-2)] pl-7 pr-7 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-[#A78BFA]"
+                    value={search}
+                    placeholder="Поиск…"
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                  {search && (
+                    <button
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+                      onClick={() => setSearch('')}
+                      title="Очистить поиск"
+                    >
+                      <XIcon className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="text-[11px] text-zinc-500">
-                Перетащите карточку на таймлайн; клик — добавить в конец, «+» — на плейхед
+              <div className="text-[10.5px] leading-snug text-muted-foreground">
+                Перетащите карточку на таймлайн; клик — добавить в конец, <span className="font-medium text-foreground/80">+</span> — на плейхед
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {loading && <div className="p-2 text-xs text-zinc-500">Загрузка…</div>}
+              {loading && (
+                <div className="grid grid-cols-2 gap-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="overflow-hidden rounded-lg border border-border bg-[var(--surface-2)]">
+                      <div className="aspect-video animate-pulse bg-[var(--surface-3)]" />
+                      <div className="mx-1.5 my-1.5 h-2.5 w-2/3 animate-pulse rounded bg-[var(--surface-3)]" />
+                    </div>
+                  ))}
+                </div>
+              )}
               {!loading && videoFiles.length === 0 && (
-                <div className="p-2 text-xs text-zinc-500">Видео не найдены</div>
+                <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-muted-foreground">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-[var(--surface-2)]">
+                    <FilmIcon className="h-5 w-5 opacity-60" />
+                  </div>
+                  <div className="text-xs">Видео не найдены</div>
+                  <div className="text-[11px] opacity-70">Измените папку или поисковый запрос</div>
+                </div>
               )}
               <div className="grid grid-cols-2 gap-2">
                 {videoFiles.map((f) => (
@@ -5181,27 +5409,28 @@ export function MontageView() {
                     }}
                     onDragEnd={() => { dragRef.current = null; setDropIdx(null) }}
                     onClick={() => addShot(f)}
-                    className="group cursor-grab overflow-hidden rounded-md border border-border bg-[var(--surface-2)] transition-colors hover:border-[#A78BFA]"
+                    className="group cursor-grab overflow-hidden rounded-lg border border-border bg-[var(--surface-2)] transition-all hover:-translate-y-0.5 hover:border-[#A78BFA]/70 hover:shadow-[0_4px_14px_rgba(0,0,0,0.25)] active:cursor-grabbing"
                     title={`${f.filename} — перетащите на таймлайн`}
                   >
-                    <div className="relative aspect-video bg-black">
+                    <div className="relative aspect-video overflow-hidden bg-black">
                       <img
                         src={`${f.url}${f.url.includes('?') ? '&' : '?'}width=600`}
                         alt=""
                         draggable={false}
                         loading="lazy"
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                       />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                       <button
                         onClick={(e) => { e.stopPropagation(); addShot(f, insertAtPlayheadIdx()) }}
-                        className="absolute right-1 top-1 hidden rounded bg-black/70 p-1 text-zinc-200 hover:text-white group-hover:block"
+                        className="absolute right-1.5 top-1.5 hidden rounded-md bg-black/75 p-1 text-white/90 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
                         title="Вставить в таймлайн на месте плейхеда"
                       >
                         <PlusIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                    <div className="truncate px-1.5 py-1 text-[11px]">
+                    <div className="truncate px-2 py-1.5 text-[11px] text-foreground/90" title={f.filename}>
                       {f.filename.replace(/\.[^.]+$/, '')}
                     </div>
                   </div>
@@ -5219,13 +5448,13 @@ export function MontageView() {
                 <div className="rounded-lg border border-[#7C3AED]/40 bg-[var(--surface-2)] p-2.5">
                   <div className="flex items-center gap-1.5">
                     <LayersIcon className="h-3.5 w-3.5 shrink-0 text-[#A78BFA]" />
-                    <span className="truncate font-medium text-zinc-100" title={selectedLayer.filename}>{selectedLayer.name}</span>
+                    <span className="truncate font-medium text-foreground" title={selectedLayer.filename}>{selectedLayer.name}</span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
-                    <span>В кадре: <strong className="text-zinc-200">{layerLen(selectedLayer).toFixed(2)} с</strong></span>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>В кадре: <strong className="text-foreground/90">{layerLen(selectedLayer).toFixed(2)} с</strong></span>
                     <span>Исходник: {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
                   </div>
-                  <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
+                  <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
                     Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук микшируется с базой.
                     Тяните клип по ряду или между рядами, за края — подрезка.
                   </div>
@@ -5246,7 +5475,7 @@ export function MontageView() {
                   )}
                 </div>
                 <div className="space-y-1.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Позиция на шкале, с</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Позиция на шкале, с</div>
                   <input
                     key={`at-${selectedLayer.key}-${selectedLayer.at}`}
                     type="text"
@@ -5258,11 +5487,11 @@ export function MontageView() {
                       if (v != null && Math.abs(v - selectedLayer.at) > 0.001) patchLayer(selectedLayer.key, { at: +v.toFixed(3) })
                     }}
                     onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                    className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-zinc-200 focus:border-[#A78BFA] focus:outline-none"
+                    className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-foreground/90 focus:border-[#A78BFA] focus:outline-none"
                   />
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Вписывание в кадр</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Вписывание в кадр</div>
                   <div className="grid grid-cols-4 gap-1">
                     {([
                       ['stretch', 'Растянуть'],
@@ -5277,7 +5506,7 @@ export function MontageView() {
                           'rounded border px-1 py-1.5 text-[10px] transition-colors',
                           selectedLayer.fit === f
                             ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
-                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                            : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                         )}
                       >
                         {lab}
@@ -5286,7 +5515,7 @@ export function MontageView() {
                   </div>
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Скорость воспроизведения</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Скорость воспроизведения</div>
                   <div className="grid grid-cols-6 gap-1">
                     {SPEED_STEPS.map((v) => (
                       <button
@@ -5296,7 +5525,7 @@ export function MontageView() {
                           'rounded border py-1 text-[11px] font-mono transition-colors',
                           Math.abs((selectedLayer.speed || 1) - v) < 0.01
                             ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
-                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                            : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                         )}
                       >
                         {v}×
@@ -5308,7 +5537,7 @@ export function MontageView() {
                 <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-zinc-300">Громкость слоя</span>
+                      <span className="text-[11px] font-medium text-foreground/80">Громкость слоя</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { vol: 1, muted: false }) }}
                         className="font-mono text-[11px] text-[#A78BFA] hover:underline"
@@ -5317,19 +5546,18 @@ export function MontageView() {
                         {Math.round((selectedLayer.vol ?? 1) * 100)}%
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={100}
-                      value={Math.round((selectedLayer.vol ?? 1) * 100)}
+                      step={1}
+                      value={[Math.round((selectedLayer.vol ?? 1) * 100)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchLayer(selectedLayer.key, { vol: Number(e.target.value) / 100 })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchLayer(selectedLayer.key, { vol: v / 100 })}
                     />
                   </div>
                   <div className="space-y-1 pt-0.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Плавный вход звука (↑)</span>
+                      <span className="text-muted-foreground">Плавный вход звука (↑)</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeIn: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
@@ -5338,20 +5566,18 @@ export function MontageView() {
                         {(selectedLayer.fadeIn || 0).toFixed(1)} с
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={Math.max(1, Math.min(10, +layerLen(selectedLayer).toFixed(1)))}
                       step={0.1}
-                      value={Math.min(10, selectedLayer.fadeIn || 0)}
+                      value={[Math.min(10, selectedLayer.fadeIn || 0)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchLayer(selectedLayer.key, { fadeIn: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchLayer(selectedLayer.key, { fadeIn: Math.max(0, Math.min(30, v || 0)) })}
                     />
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Затухание звука в конце (↓)</span>
+                      <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeOut: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
@@ -5360,21 +5586,19 @@ export function MontageView() {
                         {(selectedLayer.fadeOut || 0).toFixed(1)} с
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={Math.max(1, Math.min(10, +layerLen(selectedLayer).toFixed(1)))}
                       step={0.1}
-                      value={Math.min(10, selectedLayer.fadeOut || 0)}
+                      value={[Math.min(10, selectedLayer.fadeOut || 0)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchLayer(selectedLayer.key, { fadeOut: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchLayer(selectedLayer.key, { fadeOut: Math.max(0, Math.min(30, v || 0)) })}
                     />
                   </div>
                 </div>
                 {/* (правка 876) отражения слоя — как у клипа базовой дорожки */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Отражение кадра</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Отражение кадра</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {([
                       ['flipH', '↔ По горизонтали'],
@@ -5390,7 +5614,7 @@ export function MontageView() {
                           'rounded border px-2 py-1.5 text-[11px] transition-colors',
                           selectedLayer.fx?.[k]
                             ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
-                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                            : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                         )}
                       >
                         {label}
@@ -5403,7 +5627,7 @@ export function MontageView() {
                     onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { muted: !selectedLayer.muted }) }}
                     className={cn(
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
-                      selectedLayer.muted ? 'text-[#A78BFA]' : 'text-zinc-300',
+                      selectedLayer.muted ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
                     title="Выключить звук слоя в превью и сборке (картинка остаётся)"
                   >
@@ -5413,7 +5637,7 @@ export function MontageView() {
                     onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { hidden: !selectedLayer.hidden }) }}
                     className={cn(
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
-                      selectedLayer.hidden ? 'text-[#A78BFA]' : 'text-zinc-300',
+                      selectedLayer.hidden ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
                     title="Скрывать слой в превью и сборке"
                   >
@@ -5421,7 +5645,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => duplicateLayerClip(selectedLayer.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
                     title="Дублировать слой (D)"
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
@@ -5429,7 +5653,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => removeLayerClip(selectedLayer.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-red-500/60 hover:text-red-300"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
                     title="Удалить слой (Del)"
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
@@ -5442,19 +5666,19 @@ export function MontageView() {
                 <div className="rounded-lg border border-emerald-500/40 bg-[var(--surface-2)] p-2.5">
                   <div className="flex items-center gap-1.5">
                     <MusicIcon className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                    <span className="truncate font-medium text-zinc-100" title={selectedAudio.name}>{selectedAudio.name}</span>
+                    <span className="truncate font-medium text-foreground" title={selectedAudio.name}>{selectedAudio.name}</span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
-                    <span>В сборке: <strong className="text-zinc-200">{audioLen(selectedAudio).toFixed(2)} с</strong></span>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>В сборке: <strong className="text-foreground/90">{audioLen(selectedAudio).toFixed(2)} с</strong></span>
                     <span>Файл: {selectedAudio.duration ? `${selectedAudio.duration.toFixed(2)} с` : '…'}</span>
                   </div>
-                  <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
+                  <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
                     Звук дорожки A{selectedAudio.track} микшируется с базой без нормализации.
                   </div>
                 </div>
                 <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="space-y-1.5">
-                    <div className="text-[11px] font-medium text-zinc-300">Позиция на шкале, с</div>
+                    <div className="text-[11px] font-medium text-foreground/80">Позиция на шкале, с</div>
                     <input
                       key={`aat-${selectedAudio.key}-${selectedAudio.at}`}
                       type="text"
@@ -5466,12 +5690,12 @@ export function MontageView() {
                         if (v != null && Math.abs(v - selectedAudio.at) > 0.001) patchAudio(selectedAudio.key, { at: +v.toFixed(3) })
                       }}
                       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-zinc-200 focus:border-[#A78BFA] focus:outline-none"
+                      className="w-full rounded border border-border bg-[var(--surface-1)] px-2 py-1 font-mono text-xs text-foreground/90 focus:border-[#A78BFA] focus:outline-none"
                     />
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-zinc-300">Громкость клипа</span>
+                      <span className="text-[11px] font-medium text-foreground/80">Громкость клипа</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { vol: 100 }) }}
                         className="font-mono text-[11px] text-[#A78BFA] hover:underline"
@@ -5480,19 +5704,18 @@ export function MontageView() {
                         {Math.round(selectedAudio.vol)}%
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={200}
-                      value={Math.round(selectedAudio.vol)}
+                      step={1}
+                      value={[Math.round(selectedAudio.vol)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchAudio(selectedAudio.key, { vol: Number(e.target.value) })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchAudio(selectedAudio.key, { vol: v })}
                     />
                   </div>
                   <div className="space-y-1 pt-0.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Плавный вход звука (↑)</span>
+                      <span className="text-muted-foreground">Плавный вход звука (↑)</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeIn: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
@@ -5501,20 +5724,18 @@ export function MontageView() {
                         {(selectedAudio.fadeIn || 0).toFixed(1)} с
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={Math.max(1, Math.min(10, +audioLen(selectedAudio).toFixed(1)))}
                       step={0.1}
-                      value={Math.min(10, selectedAudio.fadeIn || 0)}
+                      value={[Math.min(10, selectedAudio.fadeIn || 0)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchAudio(selectedAudio.key, { fadeIn: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchAudio(selectedAudio.key, { fadeIn: Math.max(0, Math.min(30, v || 0)) })}
                     />
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-zinc-400">Затухание звука в конце (↓)</span>
+                      <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeOut: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
@@ -5523,15 +5744,13 @@ export function MontageView() {
                         {(selectedAudio.fadeOut || 0).toFixed(1)} с
                       </button>
                     </div>
-                    <input
-                      type="range"
+                    <Slider
                       min={0}
                       max={Math.max(1, Math.min(10, +audioLen(selectedAudio).toFixed(1)))}
                       step={0.1}
-                      value={Math.min(10, selectedAudio.fadeOut || 0)}
+                      value={[Math.min(10, selectedAudio.fadeOut || 0)]}
                       onPointerDown={pushHistory}
-                      onChange={(e) => patchAudio(selectedAudio.key, { fadeOut: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
-                      className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
+                      onValueChange={([v]) => patchAudio(selectedAudio.key, { fadeOut: Math.max(0, Math.min(30, v || 0)) })}
                     />
                   </div>
                 </div>
@@ -5540,7 +5759,7 @@ export function MontageView() {
                     onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { muted: !selectedAudio.muted }) }}
                     className={cn(
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
-                      selectedAudio.muted ? 'text-[#A78BFA]' : 'text-zinc-300',
+                      selectedAudio.muted ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
                     title="Выключить этот звук в превью и сборке"
                   >
@@ -5548,7 +5767,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => duplicateAudioClip(selectedAudio.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
                     title="Дублировать аудио (D)"
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
@@ -5556,7 +5775,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => removeAudioClip(selectedAudio.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-red-500/60 hover:text-red-300"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
                     title="Удалить аудио (Del)"
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
@@ -5565,12 +5784,12 @@ export function MontageView() {
                 </div>
               </div>
             ) : !selected ? (
-              <div className="rounded-lg border border-dashed border-border p-4 text-center text-zinc-500">
+              <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground">
                 <div>Кликните по клипу на таймлайне, чтобы настроить его свойства</div>
                 {shots.length > 0 && (
                   <button
                     onClick={() => selectClip('shot', shots[0].key)}
-                    className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-zinc-300 hover:border-[#A78BFA]"
+                    className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-foreground/80 hover:border-[#A78BFA]"
                   >
                     Выбрать 1-й клип
                   </button>
@@ -5579,35 +5798,54 @@ export function MontageView() {
             ) : (
               <>
                 {/* карточка клипа */}
-                <div className="rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="truncate font-medium text-zinc-100" title={selected.filename}>
-                    {selected.name}
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
-                    <span>
-                      На таймлайне:{' '}
-                      <strong className="text-zinc-200">
-                        {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} с
-                      </strong>
-                    </span>
-                    <span>Исходник: {selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
-                  </div>
-                  {(selected.gap ?? 0) >= 0.02 && (
-                    <div className="mt-1.5 flex items-center justify-between rounded bg-[#7C3AED]/15 px-2 py-1 text-[11px] text-[#A78BFA]">
-                      <span>Пауза перед клипом: {(selected.gap ?? 0).toFixed(2)} с</span>
-                      <button
-                        onClick={() => {
-                          pushHistory()
-                          setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, gap: undefined } : x)))
-                        }}
-                        className="rounded border border-[#A78BFA]/40 px-1.5 py-0.5 text-[10px] text-white hover:bg-[#7C3AED]/40"
-                      >
-                        Прижать встык
-                      </button>
+                <div className="overflow-hidden rounded-lg border border-border bg-[var(--surface-2)]">
+                  <div className="relative aspect-video bg-black">
+                    <img
+                      src={`${selected.url}${selected.url.includes('?') ? '&' : '?'}width=480`}
+                      alt=""
+                      draggable={false}
+                      className="h-full w-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    />
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2.5 pb-1.5 pt-6">
+                      <div className="truncate text-[11px] font-medium text-white" title={selected.filename}>
+                        {selected.name}
+                      </div>
+                      <div className="flex items-center justify-between font-mono text-[10px] text-white/70">
+                        <span>
+                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} с
+                        </span>
+                        <span>{selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="mt-1.5 rounded bg-black/30 px-2 py-1 text-[10px] text-zinc-400">
-                    Тяните сам клип по дорожке для свободного сдвига, за края — для подрезки; разрез на плейхеде — <kbd className="rounded border border-border px-1">S</kbd>
+                  </div>
+                  <div className="space-y-1.5 p-2.5">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>
+                        На таймлайне:{' '}
+                        <strong className="text-foreground/90">
+                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} с
+                        </strong>
+                      </span>
+                      <span>Исходник: {selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
+                    </div>
+                    {(selected.gap ?? 0) >= 0.02 && (
+                      <div className="flex items-center justify-between rounded bg-[#7C3AED]/15 px-2 py-1 text-[11px] text-[#A78BFA]">
+                        <span>Пауза перед клипом: {(selected.gap ?? 0).toFixed(2)} с</span>
+                        <button
+                          onClick={() => {
+                            pushHistory()
+                            setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, gap: undefined } : x)))
+                          }}
+                          className="rounded border border-[#A78BFA]/40 px-1.5 py-0.5 text-[10px] text-white hover:bg-[#7C3AED]/40"
+                        >
+                          Прижать встык
+                        </button>
+                      </div>
+                    )}
+                    <div className="rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] leading-snug text-muted-foreground">
+                      Тяните сам клип по дорожке для свободного сдвига, за края — для подрезки; разрез на плейхеде — <kbd className="rounded border border-border px-1">S</kbd>
+                    </div>
                   </div>
                 </div>
 
@@ -5619,7 +5857,7 @@ export function MontageView() {
                     <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-zinc-300">Громкость клипа</span>
+                          <span className="text-[11px] font-medium text-foreground/80">Громкость клипа</span>
                           <button
                             onClick={() => {
                               pushHistory()
@@ -5631,24 +5869,23 @@ export function MontageView() {
                             {Math.round((selected.vol ?? 1) * 100)}%
                           </button>
                         </div>
-                        <input
-                          type="range"
+                        <Slider
                           min={0}
                           max={100}
-                          value={Math.round((selected.vol ?? 1) * 100)}
+                          step={1}
+                          value={[Math.round((selected.vol ?? 1) * 100)]}
                           onPointerDown={pushHistory}
-                          onChange={(e) => {
-                            const vol = Number(e.target.value) / 100
+                          onValueChange={([v]) => {
+                            const vol = v / 100
                             setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, vol } : x)))
                           }}
-                          className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                         />
                       </div>
 
                       {/* (правка 860) Плавный вход аудио — ползунок */}
                       <div className="space-y-1 pt-0.5">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-zinc-400">Плавный вход звука (↑)</span>
+                          <span className="text-muted-foreground">Плавный вход звука (↑)</span>
                           <button
                             onClick={() => {
                               pushHistory()
@@ -5660,27 +5897,25 @@ export function MontageView() {
                             {(selected.fadeIn || 0).toFixed(1)} с
                           </button>
                         </div>
-                        <input
-                          type="range"
+                        <Slider
                           min={0}
                           max={maxFade}
                           step={0.1}
-                          value={Math.min(maxFade, selected.fadeIn || 0)}
+                          value={[Math.min(maxFade, selected.fadeIn || 0)]}
                           onPointerDown={pushHistory}
-                          onChange={(e) => {
-                            const fadeIn = Math.max(0, Math.min(30, Number(e.target.value) || 0))
+                          onValueChange={([v]) => {
+                            const fadeIn = Math.max(0, Math.min(30, v || 0))
                             setShots((prev) =>
                               prev.map((x) => (x.key === selected.key ? { ...x, fadeIn: fadeIn < 0.05 ? undefined : +fadeIn.toFixed(1) } : x)),
                             )
                           }}
-                          className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                         />
                       </div>
 
                       {/* (правка 860) Затухание аудио — ползунок */}
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-zinc-400">Затухание звука в конце (↓)</span>
+                          <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
                           <button
                             onClick={() => {
                               pushHistory()
@@ -5692,20 +5927,18 @@ export function MontageView() {
                             {(selected.fadeOut || 0).toFixed(1)} с
                           </button>
                         </div>
-                        <input
-                          type="range"
+                        <Slider
                           min={0}
                           max={maxFade}
                           step={0.1}
-                          value={Math.min(maxFade, selected.fadeOut || 0)}
+                          value={[Math.min(maxFade, selected.fadeOut || 0)]}
                           onPointerDown={pushHistory}
-                          onChange={(e) => {
-                            const fadeOut = Math.max(0, Math.min(30, Number(e.target.value) || 0))
+                          onValueChange={([v]) => {
+                            const fadeOut = Math.max(0, Math.min(30, v || 0))
                             setShots((prev) =>
                               prev.map((x) => (x.key === selected.key ? { ...x, fadeOut: fadeOut < 0.05 ? undefined : +fadeOut.toFixed(1) } : x)),
                             )
                           }}
-                          className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                         />
                       </div>
                     </div>
@@ -5714,7 +5947,7 @@ export function MontageView() {
 
                 {/* скорость */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Скорость воспроизведения</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Скорость воспроизведения</div>
                   <div className="grid grid-cols-6 gap-1">
                     {SPEED_STEPS.map((v) => {
                       const active = Math.abs(shotSpeed(selected) - v) < 0.01
@@ -5731,7 +5964,7 @@ export function MontageView() {
                             'rounded border py-1 text-[11px] font-mono transition-colors',
                             active
                               ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
-                              : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                              : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                           )}
                         >
                           {v}×
@@ -5743,7 +5976,7 @@ export function MontageView() {
 
                 {/* отражение */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-300">Отражение кадра</div>
+                  <div className="text-[11px] font-medium text-foreground/80">Отражение кадра</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {([
                       ['flipH', '↔ По горизонтали'],
@@ -5759,7 +5992,7 @@ export function MontageView() {
                           'rounded border px-2 py-1.5 text-[11px] transition-colors',
                           selected.fx?.[k]
                             ? 'border-[#A78BFA] bg-[#7C3AED]/30 text-white'
-                            : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                            : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                         )}
                       >
                         {label}
@@ -5772,7 +6005,7 @@ export function MontageView() {
                 <div className="grid grid-cols-3 gap-1.5 pt-1">
                   <button
                     onClick={() => sendShotToRefine(selected)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
                     title="Отправить исходник в Refine (результат вернётся и заменит этот клип)"
                   >
                     <Wand2Icon className="h-3.5 w-3.5" />
@@ -5780,7 +6013,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => duplicateShot(selected.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
                     title="Дублировать клип (D)"
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
@@ -5788,7 +6021,7 @@ export function MontageView() {
                   </button>
                   <button
                     onClick={() => removeShot(selected.key)}
-                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-zinc-300 hover:border-red-500/60 hover:text-red-300"
+                    className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
                     title="Удалить клип (Del)"
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
@@ -5804,12 +6037,12 @@ export function MontageView() {
         {rightTab === 'fx' && (
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
             {!fxTarget ? (
-              <div className="rounded-lg border border-dashed border-border p-4 text-center text-zinc-500">
+              <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground">
                 <div>Выберите клип на базовой дорожке или слой V2+, чтобы настроить его эффекты</div>
                 {shots.length > 0 && (
                   <button
                     onClick={() => selectClip('shot', shots[0].key)}
-                    className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-zinc-300 hover:border-[#A78BFA]"
+                    className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-foreground/80 hover:border-[#A78BFA]"
                   >
                     Выбрать 1-й клип
                   </button>
@@ -5845,8 +6078,8 @@ export function MontageView() {
                           isByp(k)
                             ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
                             : off
-                              ? 'border-border bg-[var(--surface-1)] text-zinc-500'
-                              : 'border-[#A78BFA]/40 bg-[#7C3AED]/20 text-zinc-200 hover:border-[#A78BFA]',
+                              ? 'border-border bg-[var(--surface-1)] text-muted-foreground'
+                              : 'border-[#A78BFA]/40 bg-[#7C3AED]/20 text-foreground/90 hover:border-[#A78BFA]',
                         )}
                         title={
                           isByp(k)
@@ -5863,14 +6096,14 @@ export function MontageView() {
                     <>
                       <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-[var(--surface-2)] px-2.5 py-2">
                         <div className="min-w-0">
-                          <div className="truncate font-medium text-zinc-100">
+                          <div className="truncate font-medium text-foreground">
                             {fxTarget.name}
                             {/* (правка 876) подпись дорожки: слой V2+ или базовая V1 */}
                             {'track' in fxTarget ? (
                               <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">слой V{fxTarget.track + 1}</span>
                             ) : null}
                           </div>
-                          <div className="text-[10px] text-zinc-400">
+                          <div className="text-[10px] text-muted-foreground">
                             {!hasFx(fxTarget.fx)
                               ? 'Без эффектов'
                               : isAllBypassed
@@ -5902,7 +6135,7 @@ export function MontageView() {
                           {hasFx(fxTarget.fx) && (
                             <button
                               onClick={resetSelectedFx}
-                              className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-zinc-300 hover:border-red-500/50 hover:text-red-300"
+                              className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-foreground/80 hover:border-red-500/50 hover:text-red-300"
                             >
                               Сбросить
                             </button>
@@ -5972,11 +6205,11 @@ export function MontageView() {
                             <div className="flex items-center justify-between gap-1">
                               <div className="flex items-center gap-1.5">
                                 {renderBypassBtn('curves', 'Кривые цвета')}
-                                <span className="text-[11px] font-medium text-zinc-200">Кривые цвета (5 точек)</span>
+                                <span className="text-[11px] font-medium text-foreground/90">Кривые цвета (5 точек)</span>
                               </div>
                               <button
                                 onClick={() => { pushHistory(); setChannelPts(undefined) }}
-                                className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                                className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
                                 title="Сбросить выбранный канал кривой"
                               >
                                 Сброс канала
@@ -5985,7 +6218,7 @@ export function MontageView() {
                             {/* переключатель канала RGB / R / G / B */}
                             <div className="grid grid-cols-4 gap-1">
                               {([
-                                ['master', 'RGB', 'text-zinc-200'],
+                                ['master', 'RGB', 'text-foreground/90'],
                                 ['r', 'R (Красн)', 'text-red-400'],
                                 ['g', 'G (Зел)', 'text-emerald-400'],
                                 ['b', 'B (Син)', 'text-blue-400'],
@@ -5997,7 +6230,7 @@ export function MontageView() {
                                     'rounded border py-1 text-[10px] font-medium transition-colors',
                                     curveCh === ch
                                       ? 'border-[#A78BFA] bg-[#7C3AED]/25 ' + col
-                                      : 'border-border bg-[var(--surface-1)] text-zinc-400 hover:text-zinc-200',
+                                      : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:text-foreground/90',
                                   )}
                                 >
                                   {label}
@@ -6074,7 +6307,7 @@ export function MontageView() {
                                   )
                                 })}
                               </svg>
-                              <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-zinc-500">
+                              <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-muted-foreground">
                                 <span>Чёрн {Math.round(activePts[0][1] * 100)}%</span>
                                 <span>Тени {Math.round(activePts[1][1] * 100)}%</span>
                                 <span>Сред {Math.round(activePts[2][1] * 100)}%</span>
@@ -6116,7 +6349,7 @@ export function MontageView() {
                                     pushHistory()
                                     updateSelectedFx((cur) => ({ ...cur, curves: preset }))
                                   }}
-                                  className="rounded border border-border bg-[var(--surface-1)] px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[#A78BFA] hover:text-white"
+                                  className="rounded border border-border bg-[var(--surface-1)] px-2 py-0.5 text-[10px] text-foreground/80 hover:border-[#A78BFA] hover:text-white"
                                 >
                                   {name}
                                 </button>
@@ -6129,7 +6362,7 @@ export function MontageView() {
                       {/* 2. ЦВЕТ И ТОН: ТЕМПЕРАТУРА, ОТТЕНОК (HUE), ЯРКОСТЬ, КОНТРАСТ, НАСЫЩЕННОСТЬ + ИНДИВИДУАЛЬНЫЙ БАЙПАС */}
                       <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-zinc-200">Цвет и тон</span>
+                          <span className="text-[11px] font-medium text-foreground/90">Цвет и тон</span>
                           <button
                             onClick={() => {
                               pushHistory()
@@ -6141,7 +6374,7 @@ export function MontageView() {
                                 sat: undefined,
                               })
                             }}
-                            className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                            className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
                             title="Сбросить температуру, оттенок, яркость, контраст и насыщенность"
                           >
                             Сброс
@@ -6152,7 +6385,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('temp', 'Температура')}
-                              <span className="text-zinc-300" title="Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)">
+                              <span className="text-foreground/80" title="Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)">
                                 Температура
                               </span>
                             </div>
@@ -6164,18 +6397,15 @@ export function MontageView() {
                               {Math.round(fxTarget.fx?.temp ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.temp ?? 0)}` : `${Math.round(fxTarget.fx?.temp ?? 0)}`}
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={-100}
                             max={100}
                             step={1}
-                            value={Math.round(fxTarget.fx?.temp ?? 0)}
+                            value={[Math.round(fxTarget.fx?.temp ?? 0)]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const v = Number(e.target.value)
+                            onValueChange={([v]) => {
                               updateSelectedFx({ temp: Math.abs(v) < 1 ? undefined : v })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                         {/* Оттенок / HUE (-180° .. +180°) */}
@@ -6183,7 +6413,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('hue', 'Оттенок (HUE)')}
-                              <span className="text-zinc-300" title="Сдвиг цветового тона по кругу (HUE)">
+                              <span className="text-foreground/80" title="Сдвиг цветового тона по кругу (HUE)">
                                 Оттенок (HUE)
                               </span>
                             </div>
@@ -6195,18 +6425,15 @@ export function MontageView() {
                               {Math.round(fxTarget.fx?.hue ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.hue ?? 0)}°` : `${Math.round(fxTarget.fx?.hue ?? 0)}°`}
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={-180}
                             max={180}
                             step={1}
-                            value={Math.round(fxTarget.fx?.hue ?? 0)}
+                            value={[Math.round(fxTarget.fx?.hue ?? 0)]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const v = Number(e.target.value)
+                            onValueChange={([v]) => {
                               updateSelectedFx({ hue: Math.abs(v) < 1 ? undefined : v })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                         {/* Яркость */}
@@ -6214,7 +6441,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('bright', 'Яркость')}
-                              <span className="text-zinc-300">Яркость</span>
+                              <span className="text-foreground/80">Яркость</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ bright: undefined }) }}
@@ -6224,17 +6451,16 @@ export function MontageView() {
                               {Math.round((fxTarget.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%`}
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={-50}
                             max={50}
-                            value={Math.round((fxTarget.fx?.bright ?? 0) * 100)}
+                            step={1}
+                            value={[Math.round((fxTarget.fx?.bright ?? 0) * 100)]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const v = Number(e.target.value) / 100
-                              updateSelectedFx({ bright: Math.abs(v) < 0.005 ? undefined : v })
+                            onValueChange={([v]) => {
+                              const val = v / 100
+                              updateSelectedFx({ bright: Math.abs(val) < 0.005 ? undefined : val })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                         {/* Контраст */}
@@ -6242,7 +6468,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('contrast', 'Контраст')}
-                              <span className="text-zinc-300">Контраст</span>
+                              <span className="text-foreground/80">Контраст</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ contrast: undefined }) }}
@@ -6252,17 +6478,16 @@ export function MontageView() {
                               {Math.round((fxTarget.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%`}
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={-50}
                             max={50}
-                            value={Math.round((fxTarget.fx?.contrast ?? 0) * 100)}
+                            step={1}
+                            value={[Math.round((fxTarget.fx?.contrast ?? 0) * 100)]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const v = Number(e.target.value) / 100
-                              updateSelectedFx({ contrast: Math.abs(v) < 0.005 ? undefined : v })
+                            onValueChange={([v]) => {
+                              const val = v / 100
+                              updateSelectedFx({ contrast: Math.abs(val) < 0.005 ? undefined : val })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                         {/* Насыщенность */}
@@ -6270,7 +6495,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('sat', 'Насыщенность')}
-                              <span className="text-zinc-300">Насыщенность</span>
+                              <span className="text-foreground/80">Насыщенность</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ sat: undefined }) }}
@@ -6280,17 +6505,16 @@ export function MontageView() {
                               {Math.round((fxTarget.fx?.sat ?? 1) * 100)}%
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={0}
                             max={200}
-                            value={Math.round((fxTarget.fx?.sat ?? 1) * 100)}
+                            step={1}
+                            value={[Math.round((fxTarget.fx?.sat ?? 1) * 100)]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const sat = Number(e.target.value) / 100
+                            onValueChange={([v]) => {
+                              const sat = v / 100
                               updateSelectedFx({ sat: Math.abs(sat - 1) < 0.005 ? undefined : sat })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                       </div>
@@ -6298,13 +6522,13 @@ export function MontageView() {
                       {/* 3. ОПТИКА И ПЛЁНКА: РАДИАЛЬНАЯ ДИСПЕРСИЯ + МАСКА ЦЕНТРА + КИНОШНЫЙ ШУМ */}
                       <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-zinc-200">Оптика и плёнка</span>
+                          <span className="text-[11px] font-medium text-foreground/90">Оптика и плёнка</span>
                           <button
                             onClick={() => {
                               pushHistory()
                               updateSelectedFx({ dispersion: undefined, dispersionMask: undefined, grain: undefined })
                             }}
-                            className="text-[10px] text-zinc-400 hover:text-[#A78BFA]"
+                            className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
                             title="Сбросить дисперсию, радиальную маску и киношный шум"
                           >
                             Сброс
@@ -6316,7 +6540,7 @@ export function MontageView() {
                             <div className="flex items-center justify-between text-[11px]">
                               <div className="flex items-center gap-1.5">
                                 {renderBypassBtn('dispersion', 'Дисперсия')}
-                                <span className="text-zinc-300" title="Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB">
+                                <span className="text-foreground/80" title="Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB">
                                   Дисперсия (к краям)
                                 </span>
                               </div>
@@ -6328,25 +6552,22 @@ export function MontageView() {
                                 {fxTarget.fx?.dispersion ?? 0} пикс
                               </button>
                             </div>
-                            <input
-                              type="range"
+                            <Slider
                               min={0}
                               max={20}
                               step={1}
-                              value={fxTarget.fx?.dispersion ?? 0}
+                              value={[fxTarget.fx?.dispersion ?? 0]}
                               onPointerDown={pushHistory}
-                              onChange={(e) => {
-                                const v = Number(e.target.value)
+                              onValueChange={([v]) => {
                                 updateSelectedFx({ dispersion: v <= 0 ? undefined : v })
                               }}
-                              className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                             />
                           </div>
                           {/* (правка 884) Радиальная маска центра для дисперсии (0..90%, по умолчанию 35%) */}
-                          <div className="space-y-1 rounded border border-border/60 bg-black/25 p-2">
+                          <div className="space-y-1 rounded border border-border/60 bg-[var(--surface-3)]/70 p-2">
                             <div className="flex items-center justify-between text-[11px]">
                               <span
-                                className="text-zinc-400"
+                                className="text-muted-foreground"
                                 title="Радиус чистой зоны в центре кадра: 0% — дисперсия максимальной силы по всему кадру, 90% — эффект сильно приглушён и остаётся у самых краёв. Считается одинаково в превью и в финальном рендере"
                               >
                                 Радиальная маска центра
@@ -6359,19 +6580,16 @@ export function MontageView() {
                                 {Math.round(fxTarget.fx?.dispersionMask ?? 35)}%
                               </button>
                             </div>
-                            <input
-                              type="range"
+                            <Slider
                               data-dispersion-mask="1"
                               min={0}
                               max={90}
                               step={1}
-                              value={Math.round(fxTarget.fx?.dispersionMask ?? 35)}
+                              value={[Math.round(fxTarget.fx?.dispersionMask ?? 35)]}
                               onPointerDown={pushHistory}
-                              onChange={(e) => {
-                                const v = Number(e.target.value)
+                              onValueChange={([v]) => {
                                 updateSelectedFx({ dispersionMask: Math.abs(v - 35) < 1 ? undefined : v })
                               }}
-                              className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                             />
                           </div>
                         </div>
@@ -6380,7 +6598,7 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('grain', 'Киношный шум')}
-                              <span className="text-zinc-300" title="Живое анимированное зерно 35mm плёнки (noise=allf=t+u)">
+                              <span className="text-foreground/80" title="Живое анимированное зерно 35mm плёнки (noise=allf=t+u)">
                                 Киношный анимированный шум
                               </span>
                             </div>
@@ -6392,18 +6610,15 @@ export function MontageView() {
                               {fxTarget.fx?.grain ?? 0}%
                             </button>
                           </div>
-                          <input
-                            type="range"
+                          <Slider
                             min={0}
                             max={100}
                             step={1}
-                            value={fxTarget.fx?.grain ?? 0}
+                            value={[fxTarget.fx?.grain ?? 0]}
                             onPointerDown={pushHistory}
-                            onChange={(e) => {
-                              const v = Number(e.target.value)
+                            onValueChange={([v]) => {
                               updateSelectedFx({ grain: v <= 0 ? undefined : v })
                             }}
-                            className="h-1.5 w-full cursor-pointer accent-[#7C3AED]"
                           />
                         </div>
                       </div>
@@ -6413,14 +6628,14 @@ export function MontageView() {
 
                 {/* 4. КОПИРОВАНИЕ ЭФФЕКТОВ НА ДРУГИЕ КЛИПЫ */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-zinc-200">Перенос эффектов на другие клипы</div>
+                  <div className="text-[11px] font-medium text-foreground/90">Перенос эффектов на другие клипы</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => {
                         setCopiedFx(cloneFx(fxTarget.fx))
                         showToast('Эффекты клипа скопированы в буфер')
                       }}
-                      className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-zinc-200 hover:border-[#A78BFA]"
+                      className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-foreground/90 hover:border-[#A78BFA]"
                     >
                       <CopyIcon className="h-3 w-3" />
                       Скопировать
@@ -6431,7 +6646,7 @@ export function MontageView() {
                         if (!copiedFx) return
                         applyFxToTargets(copiedFx, [fxTarget.key], `Эффекты вставлены в «${fxTarget.name}»`)
                       }}
-                      className="rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-zinc-200 hover:border-[#A78BFA] disabled:opacity-40"
+                      className="rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-foreground/90 hover:border-[#A78BFA] disabled:opacity-40"
                     >
                       Вставить сюда
                     </button>
