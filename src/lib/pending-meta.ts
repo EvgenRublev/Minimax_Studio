@@ -258,8 +258,8 @@ function savePending(map: Record<string, PendingEntry>) {
  *  (same shape the browser writes — see use-video-gen genParamsMap). */
 function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
   const fps = 24
-  // (правка 138) дефолт 5 → 2.5: минимум 2.5 с
-  const duration = body.duration ?? 2.5
+  // (правка 899) дефолт 1 с, если длительность не передана (порог — 1 с)
+  const duration = body.duration ?? 1
   // Actual frame count the server produces (node 46:19), for metadata (правка 55).
   const videoLengthFrames = framesForDuration(duration, fps)
   const finalResolution = body.finalResolution ?? 0.7

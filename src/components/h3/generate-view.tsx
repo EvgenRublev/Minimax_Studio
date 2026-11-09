@@ -246,7 +246,8 @@ export function GenerateView() {
   // frames_minimum back up — that's how a "2 s" request produced a 5 s clip.
   // (правка 131) фолбэк 124 → 42: минимум теперь ~2 с (42 кадра при 24 fps).
   // (правка 138) фолбэк 42 → 60: минимум 2.5 с (60 кадров), 1.75 с убрано.
-  const framesMin = (options?.frames_minimum as number) || 60
+  // (правка 899) фолбэк 60 → 24: минимум 1 с (24 кадра при 24 fps).
+  const framesMin = (options?.frames_minimum as number) || 24
   // (правка 59) max повышен до 30 с (719 кадров) — модель по факту генерит и длинные ролики
   const framesMax = (options?.frames_maximum as number) || 719
   const framesStep = (options?.frames_steps as number) || 17
@@ -267,7 +268,8 @@ export function GenerateView() {
      последние 5 кадров H3 — это хвостовой латент, он нужен только модели,
      чтобы довести движение до конца цикла, и в цикле дублирует начало. */
   const loopInfo = useMemo(() => {
-    const durationSec = Math.max(2.5, (video.videoLength ?? framesMin) / fps)
+    // (правка 899) минимум 1 с: 24 кадра при 24 fps (сетка 17n+5 поднимет до 39)
+    const durationSec = Math.max(1, (video.videoLength ?? framesMin) / fps)
     const snapped = framesForDuration(durationSec, fps)
     const frames = Math.max(17, snapped - 5)
     return {

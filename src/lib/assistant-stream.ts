@@ -95,9 +95,9 @@ async function buildSystemMessage(
   if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn)
   const v = useGenStore.getState().video
   const mode = v.mode // (правка 150) 'ref' | 't2v' | 'flf' | 'extend'
-  // (правка 138) дефолт 124 → 60: минимум 2.5 с (60 кадров при 24 fps)
+  // (правка 899) минимум 1 с (24 кадра при 24 fps): короче — не генерируем
   const frames = v.videoLength || 60
-  const seconds = Math.max(2.5, Math.round(frames / 24))
+  const seconds = Math.max(1, Math.round(frames / 24))
   // Бюджет шотов из выставленной длины: шоту нужно ≥ ~2 с, чтобы «прочитаться».
   // Без этого ограничения модель под запрос «эпичная сцена» выдавала план на
   // 15 шотов, который физически не влезает в 5–10-секундный клип.

@@ -134,8 +134,15 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
   /** допустимый диапазон ЦЕЛЫХ секунд: от первой валидной до последней */
   const secMin = Math.ceil(min / fps)
   const secMax = Math.max(secMin, Math.floor(max / fps))
-  /** текущее значение в целых секундах (ближайшая секунда к сохранённым кадрам) */
-  const curSec = Math.max(secMin, Math.min(secMax, Math.round(clamped / fps)))
+  /** текущее значение в целых секундах: сначала ищем секунду, которая даёт
+   *  ровно эти кадры (иначе 1 с → 39 кадров показывались бы как 2 с),
+   *  и только потом — ближайшую секунду к сохранённым кадрам. */
+  const curSec = React.useMemo(() => {
+    for (let sec = secMin; sec <= secMax; sec++) {
+      if (framesForSec(sec) === clamped) return sec
+    }
+    return Math.max(secMin, Math.min(secMax, Math.round(clamped / fps)))
+  }, [clamped, secMin, secMax, framesForSec, fps])
 
   // (правка 107) Ручной ввод. Длительность НЕ выходит за границы модели:
   // бэкенд тихо климпает вне диапазона, поэтому при коммите значение

@@ -246,7 +246,7 @@ export function PromptGuide() {
               <p className="text-xs font-semibold text-foreground mb-2">Выход</p>
               <ul className="space-y-1 text-xs text-muted-foreground">
                 <li>• Разрешение: <span className="text-foreground/80 font-mono">480p / 720p / 1080p</span></li>
-                <li>• Длительность: <span className="text-foreground/80 font-mono">~2.5–30 сек</span> (выравнивание 17n+5 кадров)</li>
+                <li>• Длительность: <span className="text-foreground/80 font-mono">~1–30 сек</span> (выравнивание 17n+5 кадров)</li>
                 <li>• Соотношение сторон: 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 + свободное разрешение</li>
               </ul>
             </div>
