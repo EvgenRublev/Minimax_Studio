@@ -90,6 +90,23 @@ InstallDirRegKey HKCU "Software\MiniMaxH3Studio" "InstallDir"
 !insertmacro MUI_LANGUAGE "Russian"
 !insertmacro MUI_LANGUAGE "English"
 
+; (правка 914) версия в свойствах exe: раньше FileVersion и ProductVersion были
+; пустыми — Explorer, «Программы и компоненты» и антивирусы видели файл без
+; версии. VIProductVersion даёт числовую версию (её читает Windows),
+; VIAddVersionKey — текстовые поля во вкладке «Подробно».
+; При выпуске новой версии менять APP_VERSION здесь и OutFile выше.
+!define APP_VERSION "7.1.19"
+!define APP_VERSION4 "7.1.19.0"
+VIProductVersion "${APP_VERSION4}"
+VIFileVersion "${APP_VERSION4}"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "ProductName" "MiniMax H3 Studio"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "FileDescription" "MiniMax H3 Studio — установщик"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "CompanyName" "MiniMax H3 Studio"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "LegalCopyright" "GNU GPL v3"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "FileVersion" "${APP_VERSION}"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "ProductVersion" "${APP_VERSION}"
+VIAddVersionKey /LANG=${LANG_RUSSIAN} "Comments" "ComfyUI 0.44.0, Python 3.12.10, Electron 44.9.0; офлайн-кэш зависимостей"
+
 ; (правка 833) Страховка от «задвоенного» пути, который юзер мог ввести сам
 ; (или оставить от старых версий): если путь кончается doubled-компонентом,
 ; лишний хвост отрезается. Вызывается NSIS при валидации пути (Browse/Далее).
@@ -150,6 +167,9 @@ Section -Post
   ; (правка 833) InstallLocation — его читает «Параметры → Приложения»
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MiniMaxH3Studio" \
     "InstallLocation" "$INSTDIR"
+  ; (правка 914) версия в списке «Программы и компоненты» (раньше её не было).
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MiniMaxH3Studio" \
+    "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MiniMaxH3Studio" \
     "UninstallString" "$INSTDIR\unins000.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MiniMaxH3Studio" \

@@ -239,6 +239,22 @@
   `assistant-check` 35, `assistant-refs-check` 21, `assistant-sse-check` 16,
   `s21-guard-check` 22 — все зелёные, `tsc --noEmit` чисто.
 
+### Установщик: версия в свойствах файла (правка 914)
+
+- **У `setup.exe` появились `FileVersion`/`ProductVersion`.** Раньше в
+  «Свойства → Подробно» эти поля были пустыми: Windows, антивирусы и
+  «Программы и компоненты» видели установщик без версии. Теперь в
+  `install/installer.nsi` заданы `VIProductVersion 7.1.19.0`, поля
+  `ProductName`, `FileDescription`, `CompanyName`, `LegalCopyright`,
+  `FileVersion`, `ProductVersion` и `Comments` (ядро 0.44.0, Python 3.12.10,
+  Electron 44.9.0, офлайн-кэш).
+- В список установленных программ добавлен `DisplayVersion 7.1.19` (раньше
+  строка показывалась без версии). При выпуске новой версии `APP_VERSION`
+  в `installer.nsi` меняется вместе с `OutFile` и `package.json`.
+- Сборка релиза кладётся вместе с офлайн-кэшем `install\cache\` (28 архивов:
+  ComfyUI 0.44.0, electron 44.9.0, node 22.20.0, python 3.12.10, uv 0.13.6,
+  get-pip и 22 ноды) — итоговый установщик 833,6 МБ, без кэша было бы ~450 МБ.
+
 ---
 
 ## [7.1.18] — 2026-11-08
