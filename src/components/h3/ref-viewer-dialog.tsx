@@ -205,10 +205,12 @@ function AudioTrimEditor({
               className="w-full accent-emerald-500"
             />
           </div>
-          {/* (правка 694) Громкость рефа: 0–100%, default 50%, персистится. */}
+          {/* (правка 694, правка 918) Громкость 0–100%, default 50%, персистится
+              на рефе — ВЛИЯЕТ ТОЛЬКО НА ПРОСЛУШИВАНИЕ: в генерацию дорожка всегда
+              идёт со 100% (иначе приглушённый звук плохо вёл липсинк). */}
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>Громкость</span>
+              <span>Громкость (прослушивание)</span>
               <span className="font-mono text-emerald-300">{Math.round(volume * 100)}%</span>
             </div>
             <input
@@ -223,7 +225,8 @@ function AudioTrimEditor({
           </div>
           <p className="text-[10px] text-muted-foreground/60">
             В референс пойдёт фрагмент {fmt(start)} → {fmt(end || duration)} ({fmt(Math.max(0, (end || duration) - start))}).
-            Обрезка виртуальная — копий файла не создаётся.
+            Обрезка виртуальная — копий файла не создаётся. Громкость со 100%:
+            ползунок нужен только слушать потише, на генерацию не влияет.
           </p>
         </div>
       )}

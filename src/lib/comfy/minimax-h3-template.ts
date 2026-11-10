@@ -268,8 +268,10 @@ export interface MiniMaxH3Params {
       между LoadAudio и потребителем вставляется MiniMaxStudioAudioTrim.
       Обрезка виртуальная (тензор), копии файлов не создаются. */
   refAudioTrims?: Array<{ start: number; end: number | null } | undefined>
-  /** (правка 694) Громкость аудио-рефов (0–1, default 0.5): между AudioTrim и
-      потребителем вставляется MiniMaxStudioAudioGain. Виртуальная, без копий файла. */
+  /** (правка 694, ОТМЕНЕНА правкой 918) Громкость аудио-рефов (0–1) для графа.
+       Ползунок в редакторе обрезки теперь только для прослушивания, поэтому в
+       генерацию дорожка всегда идёт со 100% уровнем. Поле оставлено: старые
+       сайдкары («Повторить») и очереди могут его присылать — оно игнорируется. */
   refAudioVolumes?: Array<number | undefined>
   /* ── Custom LoRAs (chained after turbo LoRA) ── */
   /** Custom LoRAs to apply after the built-in turbo LoRA. */
@@ -895,21 +897,14 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       }
       audioSrc = [trimId, 0]
     }
-    // (правка 694) Громкость аудио-рефа: AudioTrim/LoadAudio → AudioGain → потребитель.
-    const vol = p.refAudioVolumes?.[i]
-    if (vol != null && Math.abs(vol - 1.0) > 1e-6) {
-      const gainId = `${nodeId}_gain`
-      refAudioNodes[gainId] = {
-        inputs: { audio: audioSrc, gain: vol },
-        class_type: 'MiniMaxStudioAudioGain',
-        _meta: { title: `Audio Ref ${i + 1}: громкость ${Math.round(vol * 100)}%` },
-      }
-      audioSrc = [gainId, 0]
-    }
+    // (правка 918) Громкость из редактора обрезки (правка 694) больше НЕ влияет
+    // на подачу: ползунок нужен только чтобы слушать референс тихо/громко, а
+    // модель всегда получает исходный уровень (100%). Нода MiniMaxStudioAudioGain
+    // в граф не вставляется — приглушённая дорожка хуже вела липсинк в «Кадрах».
     if (mode === 'ref' && p.audioGuide !== true) {
       refAudioLinks[`ref_audios.ref_audio_${i}`] = audioSrc
     }
-    // t2v/flf: источник для MiniMaxH3AddGuide (ниже) — с учётом обрезки и громкости.
+    // t2v/flf: источник для MiniMaxH3AddGuide (ниже) — с учётом обрезки.
     refAudioSrcs[i] = audioSrc
   }
 

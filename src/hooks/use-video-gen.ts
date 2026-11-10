@@ -964,8 +964,8 @@ export function useVideoGen() {
         const refAudios: string[] = []
         // (правка 304) Параллельный массив обрезок аудио-рефов (AudioTrim).
         const refAudioTrims: Array<{ start: number; end: number | null } | undefined> = []
-        // (правка 694) Параллельный массив громкостей аудио-рефов (AudioGain).
-        const refAudioVolumes: Array<number | undefined> = []
+        // (правка 918) Громкость аудио-рефа (audioVolume) в граф не уходит:
+        // ползунок в редакторе обрезки нужен только для прослушивания.
         // (правка 161) extend: картинки-рефы идут через extendRefs, не refImages
         if (genMode === 'extend') {
           // extend-режим: рефы из params.extendRefs или из references
@@ -1003,10 +1003,6 @@ export function useVideoGen() {
               const s = ref.trimStart ?? 0
               const e = ref.trimEnd ?? null
               refAudioTrims.push(s > 0 || (e != null && e > 0) ? { start: s, end: e } : undefined)
-              // (правка 694) Громкость: задана и ≠ 1.0 → ноды AudioGain; иначе
-              // undefined (нода не вставляется). Default в UI = 0.5.
-              const v = ref.audioVolume
-              refAudioVolumes.push(v != null && Math.abs(v - 1.0) > 1e-6 ? v : undefined)
             }
           }
         }
@@ -1140,7 +1136,8 @@ export function useVideoGen() {
           refVideos: refVideos.length > 0 ? refVideos : undefined,
           refAudios: refAudios.length > 0 ? refAudios : undefined,
           refAudioTrims: refAudioTrims.some(Boolean) ? refAudioTrims : undefined, // (правка 304)
-          refAudioVolumes: refAudioVolumes.some((v) => v != null) ? refAudioVolumes : undefined, // (правка 694)
+          // (правка 918) refAudioVolumes сюда больше не кладём: громкость в
+          // редакторе обрезки — только для прослушивания, модель получает 100%.
           // ref + аудио-реф: Audio Guide вместо ref_audio + сохранение
           // оригинальной дорожки. В t2v/flf не нужно: там гайд уже штатный.
           audioGuide: genMode === 'ref' && params.audioGuide === true && refAudios.length > 0
