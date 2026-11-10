@@ -103,7 +103,7 @@ async function buildSystemMessage(
   if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn, refs)
   const v = useGenStore.getState().video
   const mode = v.mode // (правка 150) 'ref' | 't2v' | 'flf' | 'extend'
-  // (правка 899) минимум 1 с (24 кадра при 24 fps): короче — не генерируем
+  // (правка 912) минимум 1 с (24 кадра при 24 fps): короче — не генерируем
   const frames = v.videoLength || 60
   const seconds = Math.max(1, Math.round(frames / 24))
   // Бюджет шотов из выставленной длины: шоту нужно ≥ ~2 с, чтобы «прочитаться».

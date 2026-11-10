@@ -115,7 +115,7 @@ export interface VideoGenState {
   extendTwoPass: boolean
   /** Resolution label — ТОЧНЫЙ номинал (правка 124): "1280x720", "1920x1080", ... */
   resolution: string
-  /** Total output frames (H3: 17n+5 grid, default 60 ≈ 2.5 с; минимум 1 с — правка 899). */
+  /** Total output frames (H3: 17n+5 grid, default 60 ≈ 2.5 с; минимум 1 с — правка 912). */
   videoLength: number
   /** ref2va reference detail: 'match' | 'max'. (правка 286) — в режиме продления всегда 'match'. */
   referenceDetail: 'match' | 'max'
@@ -225,7 +225,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   extendSourceName: null, // (правка 385) имя файла-оригинала в output/ (null = с диска)
   extendTwoPass: true, // (правка 437) extend: два прохода — default ON (был OFF, правка 423)
   resolution: '854x480', // (правка 138) дефолт 480p 16:9 — быстрее и дешевле в VRAM
-  videoLength: 60, // (правка 899) дефолт 2.5 с; минимум в UI — 1 с (24 кадра, сетка 17n+5)
+  videoLength: 60, // (правка 912) дефолт 2.5 с; минимум в UI — 1 с (24 кадра, сетка 17n+5)
   referenceDetail: 'match', // (правка 286) по умолчанию — Match (быстро)
   startFrame: null,
   endFrame: null,

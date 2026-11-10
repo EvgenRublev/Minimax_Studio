@@ -1098,7 +1098,7 @@ export function useVideoGen() {
         // Keep duration as an exact float (NO integer rounding) so the server's
         // frames formula round-trips on the 17n+5 grid (правка 55).
         const fps = 24
-        // (правка 899) минимум 1 с (24 кадра при 24 fps); сетка 17n+5 поднимет
+        // (правка 912) минимум 1 с (24 кадра при 24 fps); сетка 17n+5 поднимет
         // значение до ближайшего валидного числа кадров
         const duration = Math.max(1, (params.videoLength ?? 60) / fps)
         // Actual frame count the server will produce (node 46:19) — for metadata.

@@ -26,9 +26,10 @@
 ;    «Internal compiler error #12345: error creating mmap»:
 ;      $env:TMP='D:\nsis-tmp'; $env:TEMP='D:\nsis-tmp'; makensis installer.nsi
 ;
-; Результат — Minimax_H3_Studio_7.1.19_setup.exe (~835 МБ). В git он не входит
-; (лимит GitHub — 100 МБ на файл), поэтому собирается локально и выкладывается
-; отдельно от репозитория.
+; Результат — Minimax_H3_Studio_7.1.19_setup.exe: ~450 МБ без офлайн-кэша
+; зависимостей (install\cache\ пуст) и ~835 МБ с заполненным кэшем. В git он не
+; входит (лимит GitHub — 100 МБ на файл), поэтому собирается локально и
+; выкладывается отдельно от репозитория.
 ;
 ; MiniMax H3 Studio - installer (NSIS 3, Unicode)
 ; Payload: GitHub source + upscale\bin (DLSS runtime). Dependencies
