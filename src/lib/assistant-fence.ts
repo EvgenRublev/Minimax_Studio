@@ -155,13 +155,48 @@ function stripDecorativeQuotes(t: string): string {
 
 /** (правка 828) Референсные метки FORMAT B: <Picture N>/<Video N>/<Subject N>
  *  (и закрывающие). В FORMAT A они запрещены спекой (h3-prompt-spec.ts);
- *  при генерации в режимах t2v/flf/extend generate-view вычищает их из
- *  промпта (правка 150) — молча. <Audio N> НЕ считаем: он легален и в A. */
+ *  при генерации в режимах t2v/flf generate-view вычищает их из промпта
+ *  (правка 150) — молча. <Audio N> НЕ считаем: он легален и в A.
+ *  (правка 919) extend — НЕ сюда: в продлении <Picture N> РАБОТАЮТ (рефы
+ *  уходят в ref_images каждого клипа), а теги не вычищаются. */
 const REF_TAG_RE = /<\/?(?:Picture|Video|Subject)\s*\d+\s*>/i
 
 /** Есть ли в вставляемом промпте метки референсов (≈ FORMAT B). */
 export function hasRefTags(prompt: string): boolean {
   return !!prompt && REF_TAG_RE.test(prompt)
+}
+
+/**
+ * (правка 919) Проверка меток ПРОДЛЕНИЯ — отдельно от hasRefTags.
+ * В extend-клипах <Picture N> поддерживаются: картинки-рефы вкладки идут
+ * в ref_images.ref_image_N КАЖДОГО клипа (minimax-h3-template.ts:2328-2337),
+ * и никакой код теги из промпта клипа не вырезает. Поэтому предупреждение
+ * «метки будут удалены» было ложным (правка 828 считала extend режимом A).
+ * Реально «мёртвые» в продлении теги:
+ *   • <Subject N> — FORMAT B, ни к чему не привязан;
+ *   • <Video N> при N >= 2 — ролик продления один, <Video 1> добавляется
+ *     автоматически (extend-view.tsx, правка 165).
+ * Возвращает true, если такие метки есть. <Picture N> не трогаем — они рабочие.
+ */
+const EXTEND_DEAD_TAG_RE = /<\/?Subject\s*\d+\s*>|<\/?Video\s+([2-9]|\d{2,})\s*>/i
+
+export function hasExtendDeadTags(prompt: string): boolean {
+  return !!prompt && EXTEND_DEAD_TAG_RE.test(prompt)
+}
+
+/**
+ * (правка 919) «Висячие» <Picture N> в промпте клипа: номер больше числа
+ * добавленных картинок-рефов. Такой тег ссылается в пустоту — предупреждаем.
+ */
+export function hasDanglingPictureTags(prompt: string, refCount: number): boolean {
+  if (!prompt) return false
+  const re = /<Picture\s+(\d+)\s*>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(prompt)) !== null) {
+    const n = parseInt(m[1], 10)
+    if (n >= 1 && n > refCount) return true
+  }
+  return false
 }
 
 /**

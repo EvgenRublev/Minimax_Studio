@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags } from '@/lib/assistant-fence'
+import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -826,10 +826,14 @@ export function AssistantView({
     }
     clips[idx] = { ...clips[idx], prompt: clean }
     st.patchVideo({ extendClips: clips })
-    // (правка 828) S21: продление — FORMAT A без меток референсов; при генерации
-    // они вычищаются (правка 150) — предупреждаем, не блокируя.
-    if (hasRefTags(clean)) {
-      toast.warning('В промпте клипа метки референсов (<Picture N>…) — в режиме продления они будут удалены при генерации.')
+    // (правка 828, исправлено правкой 919) S21: в продлении <Picture N>
+    // РАБОТАЮТ (рефы уходят в ref_images каждого клипа) — предупреждение
+    // «метки будут удалены» было ложным. Проверяем только реально мёртвые
+    // метки: <Subject N>/<Video 2+> и <Picture N> без такого номера в рефах.
+    if (hasExtendDeadTags(clean)) {
+      toast.warning('В промпте клипа метки <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически, других видео-рефов нет.')
+    } else if (hasDanglingPictureTags(clean, st.video.extendImageRefs.length)) {
+      toast.warning(`В промпте клипа есть <Picture N>, но картинок-рефов в «Продлении» ${st.video.extendImageRefs.length} — такой тег ссылается в пустоту.`)
     }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
@@ -844,24 +848,30 @@ export function AssistantView({
     const st = useGenStore.getState()
     const clips = [...st.video.extendClips]
     let applied = 0
-    let withRefTags = 0 // (правка 828) S21
+    // (правка 919) Считаем только реально нерабочие в продлении метки.
+    let withDeadTags = 0
+    let withDangling = 0
+    const refCount = st.video.extendImageRefs.length
     for (const { content, clip } of pairs) {
       const clean = stripClipMarker(content).trim()
       const idx = clip - 1
       if (!clean || idx < 0 || idx >= clips.length) continue
       clips[idx] = { ...clips[idx], prompt: clean }
       applied++
-      if (hasRefTags(clean)) withRefTags++ // (правка 828)
+      if (hasExtendDeadTags(clean)) withDeadTags++
+      else if (hasDanglingPictureTags(clean, refCount)) withDangling++
     }
     if (applied === 0) {
       toast.error('Нечего вставлять — клипы не найдены')
       return
     }
     st.patchVideo({ extendClips: clips })
-    // (правка 828) S21: предупреждаем про метки референсов (при генерации
-    // в продлении они вычищаются, правка 150), вставку не блокируем.
-    if (withRefTags > 0) {
-      toast.warning(`В ${withRefTags} вставленных промптах есть метки референсов (<Picture N>…) — в режиме продления они будут удалены при генерации.`)
+    // (правка 919) <Picture N> в продлении рабочие — про них молчим, если
+    // номер существует. Предупреждаем только о мёртвых метках.
+    if (withDeadTags > 0) {
+      toast.warning(`В ${withDeadTags} вставленных промптах есть <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически.`)
+    } else if (withDangling > 0) {
+      toast.warning(`В ${withDangling} вставленных промптах есть <Picture N> без такого номера среди картинок-рефов (их ${refCount}).`)
     }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
