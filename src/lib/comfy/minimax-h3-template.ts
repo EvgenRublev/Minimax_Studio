@@ -844,8 +844,18 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     // output[0] = IMAGE (frames) → ref_video_N
     refVideoLinks[`ref_videos.ref_video_${i}`] = [nodeId, 0]
     // If includeAudio, wire output[2] = AUDIO → ref_video_audio_N
+    // (правка 916) через MiniMaxH3AudioOrSilent: у видео без дорожки VHS
+    // бросает «failed to extract audio» при первом же обращении к waveform
+    // (нода Reference читает его в _encode_ref_audio) и задание падает.
+    // Нода отдаёт реальный звук как есть, а вместо отсутствующего — тишину.
     if (vid.includeAudio !== false) {
-      refVideoLinks[`ref_video_audios.ref_video_audio_${i}`] = [nodeId, 2]
+      const safeId = `${nodeId}_asafe`
+      refVideoNodes[safeId] = {
+        inputs: { audio: [nodeId, 2], fallback_seconds: 5.0 },
+        class_type: 'MiniMaxH3AudioOrSilent',
+        _meta: { title: `Звук видео-рефа ${i + 1} (или тишина)` },
+      }
+      refVideoLinks[`ref_video_audios.ref_video_audio_${i}`] = [safeId, 0]
     }
   }
 
@@ -2110,6 +2120,18 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         class_type: 'VHS_LoadVideo',
         _meta: { title: 'Загрузить видео (источник, 24 fps)' },
       },
+      // (правка 916) звук исходника может отсутствовать, а его читают сразу
+      // MiniMaxH3AudioSliceFrom и VAEEncodeAudio — оба падали на
+      // «VHS failed to extract audio». Guard подставляет тишину длиной
+      // с исходник (fallback — хвост клипа, если ffprobe не знает кадров).
+      'extv_asafe': {
+        inputs: {
+          audio: ['extv_load', 2],
+          fallback_seconds: Number((Math.max(5, p.extendSourceFrames ?? tailFrames) / 24).toFixed(2)),
+        },
+        class_type: 'MiniMaxH3AudioOrSilent',
+        _meta: { title: 'Звук исходника (или тишина)' },
+      },
       // Кол-во кадров исходника
       'extv_cnt': {
         inputs: { image: ['extv_load', 0] },
@@ -2203,7 +2225,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       },
       'extv_asl_seed': {
         inputs: {
-          audio: ['extv_load', 2],
+          audio: ['extv_asafe', 0],
           start_seconds: Number((-tailFrames / 24).toFixed(4)),
         },
         class_type: 'MiniMaxH3AudioSliceFrom',
@@ -2261,7 +2283,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         },
         'extv_aful': {
           inputs: {
-            audio: ['extv_load', 2],
+            audio: ['extv_asafe', 0],
             vae: ['46:4', 0],
           },
           class_type: 'VAEEncodeAudio',

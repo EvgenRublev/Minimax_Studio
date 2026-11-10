@@ -317,6 +317,14 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
           : `Контрольное видео → ${width}×${height}, ${frames} кадров`,
       },
     },
+    // (правка 916) у контрольного видео может не быть дорожки, а direct-режим
+    // подаёт его звук в ref_video_audio_0 → _encode_ref_audio падал с
+    // «VHS failed to extract audio». Guard отдаёт реальный звук или тишину.
+    'cn_asafe': {
+      inputs: { audio: ['cn_src', 2], fallback_seconds: Number((frames / 24).toFixed(2)) },
+      class_type: 'MiniMaxH3AudioOrSilent',
+      _meta: { title: 'Звук контрольного видео (или тишина)' },
+    },
   }
 
   // ─── depth/canny: цепочка препроцессинга + загрузка карты как видео ───
@@ -507,7 +515,7 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     // direct: аудио из исходного видео (VHS_LoadVideo output[2] = AUDIO),
     // как на вкладке «Генерация» для видео-рефов.
     if (isDirect) {
-      inputs['ref_video_audios.ref_video_audio_0'] = ['cn_src', 2]
+      inputs['ref_video_audios.ref_video_audio_0'] = ['cn_asafe', 0]
     }
   }
   // Нода '501' (VHS_LoadVideo для ref video) не создаётся при refVideos:[] —

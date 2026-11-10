@@ -82,6 +82,28 @@ def _resize(image, width, height, crop):
     return samples.movedim(1, -1)
 
 
+def _audio_has_samples(audio) -> bool:
+    """True when an AUDIO value really carries samples.
+
+    ``VHS_LoadVideo`` hands downstream nodes a lazy mapping that raises when
+    the source has no sound track; ``MiniMaxH3AudioOrSilent`` substitutes a
+    silent waveform in that case. Both must count as "no audio" here instead
+    of crashing the prompt or spending a token on an empty track.
+    """
+    if audio is None:
+        return False
+    try:
+        waveform = audio["waveform"]
+    except Exception:
+        return False
+    if waveform is None or waveform.numel() == 0:
+        return False
+    try:
+        return float(waveform.abs().max()) > 1e-6
+    except Exception:
+        return True
+
+
 def _encode_ref_audio(audio_vae, audio):
     waveform = audio["waveform"]  # [B, C, L]
     sr = audio["sample_rate"]
@@ -458,7 +480,14 @@ class MiniMaxH3ReferenceToVideo(io.ComfyNode):
             if video_frames is None:
                 continue
             # index-paired soundtrack: ref_video_audio_N belongs to ref_video_N
+            # (правка 916) у видео без звуковой дорожки VHS_LoadVideo отдаёт
+            # ленивый Mapping, который бросает «VHS failed to extract audio»
+            # при первом обращении; guard-нода может подставить тишину.
+            # И то и другое означает «звука нет»: не роняем задание и не
+            # тратим токен <Audio> на пустую дорожку.
             soundtrack = ref_video_audios.get("ref_video_audio_" + name.rsplit("_", 1)[-1])
+            if not _audio_has_samples(soundtrack):
+                soundtrack = None
             vh, vw = video_frames.shape[1], video_frames.shape[2]
             cw, ch = adapt_canvas(vw, vh)
             if vw * vh < cw * ch:

@@ -575,7 +575,13 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       // VHS_VideoCombine просто пропускал mux, теперь подставляем тишину)
       // → VAEEncodeAudio → в AV-латент ниже.
       'r_asafe': {
-        inputs: { audio: ['r_src', 2], fallback_seconds: 5.0 },
+        // (правка 916) тишина-заглушка должна быть длиной с исходник, а не
+        // 5 с: у беззвучного видео аудио-латент иначе не совпадает по
+        // времени с видео-латентом (A/V-геометрия AV-латента).
+        inputs: {
+          audio: ['r_src', 2],
+          fallback_seconds: Number((Math.max(1, p.sourceFrames ?? 120) / 24).toFixed(2)),
+        },
         class_type: 'MiniMaxH3AudioOrSilent',
         _meta: { title: 'Аудио исходника (или тишина)' },
       },
