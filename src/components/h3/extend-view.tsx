@@ -55,6 +55,8 @@ import { AssistantPanel } from './assistant/assistant-panel' // (правка 44
 import { PromptEditorDialog, PromptFixDialog, PromptFixButton, PromptClearButton, PromptFieldTools } from './prompt-editor-dialog' // (правка 443) редактор клипа + (правка 691) диалог «Исправить» + (правка 692) кнопки на поле
 // (правка 719) Превью с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from './ref-preview-thumb'
+// (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
+import { applyCropToRef, comfyInputUrl, cropOriginalSrc } from '@/lib/crop'
 
 function detectKind(name: string): VideoRefItem['kind'] | null {
   const ext = name.slice(name.lastIndexOf('.')).toLowerCase()
@@ -846,10 +848,22 @@ export function ExtendView() {
                       url={ref.previewUrl || undefined}
                       className="w-full block"
                       title="Открыть референс во весь экран"
+                      // (правка 908) Кроп референса — тот же, что на «Генерации»
+                      // (поля crop/originalPath у VideoRefItem уже были).
+                      crop={ref.crop}
+                      originalSrc={cropOriginalSrc(ref)}
+                      onCrop={(rect, blob) =>
+                        applyCropToRef(ref, rect, blob, (patch) => {
+                          const refs = useGenStore.getState().video.extendImageRefs
+                          patchVideo({
+                            extendImageRefs: refs.map((r) => (r.id === ref.id ? { ...r, ...patch } : r)),
+                          })
+                        })
+                      }
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={ref.previewUrl || (ref.path ? `/api/comfy/file?filename=${encodeURIComponent(ref.path)}&type=input&width=200` : undefined)}
+                        src={ref.previewUrl || comfyInputUrl(ref.path, 200)}
                         alt={ref.name}
                         className="w-full h-16 object-cover rounded-md border border-border cursor-zoom-in"
                         onError={(e) => {

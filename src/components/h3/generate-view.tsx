@@ -44,7 +44,7 @@ import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS, DEFA
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
 import { cn } from '@/lib/utils'
-import { useGenStore, type VideoRefItem } from '@/lib/gen-store'
+import { useGenStore, type VideoFrameSlot, type VideoRefItem } from '@/lib/gen-store'
 import {
   DurationSlider,
   SeedBlock,
@@ -67,6 +67,8 @@ import { GenerationStatus } from './generation-status'
 // (правка 719) Общий компонент превью с полноэкранным просмотром —
 // используется на всех вкладках (Генерация/Продление/Refine/ControlNet/…).
 import { RefPreviewThumb } from './ref-preview-thumb'
+// (правка 908) Общий кроп референсов: загрузка обрезанного PNG + поля оригинала.
+import { applyCropToRef, comfyInputUrl, cropOriginalSrc, isCropped, readImageDims } from '@/lib/crop'
 import { useVideoGallery } from './use-video-gallery'
 import { AssistantPanel } from './assistant/assistant-panel' // (правка 442) ассистент — правая панель вкладки
 
@@ -1011,38 +1013,17 @@ export function GenerateView() {
             // (правка 895) Кроп картинки-рефа: клиент режет в canvas, грузит
             // PNG в input/ и подменяет путь рефа. Оригинал запоминается для
             // повторного кропа; в генерацию уходит уже обрезанный файл.
+            // (правка 908) Логика общая для всех вкладок — src/lib/crop.ts.
             crop={ref.kind === 'image' ? ref.crop : undefined}
-            originalSrc={
-              ref.kind === 'image'
-                ? ref.originalPath
-                  ? `/api/comfy/file?filename=${encodeURIComponent(ref.originalPath)}&type=input`
-                  : ref.previewUrl || undefined
-                : undefined
-            }
+            originalSrc={ref.kind === 'image' ? cropOriginalSrc(ref) : undefined}
             onCrop={
               ref.kind === 'image'
-                ? async (rect, blob) => {
-                    try {
-                      const base = (ref.originalName || ref.name || 'ref').replace(/\.[^.]+$/, '')
-                      const file = new File([blob], `${base}-crop-${Date.now()}.png`, { type: 'image/png' })
-                      const { path } = await uploadInputFile(file)
-                      updateRef(ref.id, {
-                        originalPath: ref.originalPath ?? ref.path,
-                        originalName: ref.originalName ?? ref.name,
-                        crop: rect,
-                        path,
-                        previewUrl: '',
-                      })
-                      toast.success('Кроп применён')
-                    } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Не удалось применить кроп')
-                    }
-                  }
+                ? (rect, blob) => applyCropToRef(ref, rect, blob, (patch) => updateRef(ref.id, patch))
                 : undefined
             }
           >
             {ref.kind === 'image' && ref.path && (
-              <img src={`/api/comfy/file?filename=${encodeURIComponent(ref.path)}&type=input&width=200`} alt={ref.name} className="w-full h-full object-cover" />
+              <img src={comfyInputUrl(ref.path, 200)} alt={ref.name} className="w-full h-full object-cover" />
             )}
             {ref.kind === 'video' && ref.path && (
               <video src={`/api/comfy/file?filename=${encodeURIComponent(ref.path)}&type=input`} muted playsInline className="w-full h-full object-cover" preload="metadata" />
@@ -1061,7 +1042,18 @@ export function GenerateView() {
                 {meta.label} → &lt;{meta.tag} {typeNum}&gt;
               </span>
             </div>
-            <p className="text-xs text-foreground/80 truncate" title={ref.name}>{ref.name}</p>
+            <p className="text-xs text-foreground/80 truncate" title={ref.name}>
+              {ref.name}
+              {/* (правка 908) картинка уже обрезана — оригинал лежит в input/ */}
+              {ref.kind === 'image' && isCropped(ref) && (
+                <span
+                  className="ml-1 text-[9px] text-cyan-400/80"
+                  title="Изображение обрезано — оригинал сохранён в ComfyUI input/"
+                >
+                  кроп
+                </span>
+              )}
+            </p>
           </div>
           <button
             onClick={() => removeRefSynced(ref.id)}
@@ -1517,7 +1509,10 @@ export function GenerateView() {
                           {/* (правка 273) previewUrl пустой после перезапуска (localStorage
                               не хранит blob:) — фолбэк на серверный файл по path.
                               (правка 719) Клик по кадру — полноэкранный просмотр
-                              (общий компонент, как у рефов). */}
+                              (общий компонент, как у рефов).
+                              (правка 908) Кадры тоже кроятся: кроп первого/последнего
+                              кадра задаёт и пропорции ролика, поэтому после кропа
+                              пересчитываем width/height слота (правка 152). */}
                           <RefPreviewThumb
                             kind="image"
                             name={slot.name}
@@ -1526,15 +1521,35 @@ export function GenerateView() {
                             className="w-full block"
                             title="Открыть кадр во весь экран"
                             stopPropagation
+                            crop={slot.crop}
+                            originalSrc={cropOriginalSrc(slot)}
+                            onCrop={async (rect, blob) => {
+                              const dims = await readImageDims(blob)
+                              await applyCropToRef(slot, rect, blob, (patch) => {
+                                const next: VideoFrameSlot = {
+                                  ...slot,
+                                  ...patch,
+                                  ...(dims ? { width: dims.w, height: dims.h } : {}),
+                                }
+                                if (isStart) setVideoStartFrame(next)
+                                else setVideoEndFrame(next)
+                              })
+                            }}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={slot.previewUrl || (slot.path ? `/api/comfy/file?filename=${encodeURIComponent(slot.path)}&type=input` : undefined)}
+                              src={slot.previewUrl || comfyInputUrl(slot.path)}
                               alt={slot.name}
                               className="w-full h-16 object-cover rounded-md cursor-zoom-in"
                             />
                           </RefPreviewThumb>
-                          <p className="text-[10px] text-muted-foreground truncate mt-1">{slot.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate mt-1">
+                            {slot.name}
+                            {/* (правка 908) подпись: кадр уже обрезан */}
+                            {isCropped(slot) && (
+                              <span className="ml-1 text-[9px] text-cyan-400/80" title="Кадр обрезан — оригинал сохранён в ComfyUI input/">кроп</span>
+                            )}
+                          </p>
                           <button
                             type="button"
                             onClick={(e) => {

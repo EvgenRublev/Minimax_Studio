@@ -15,6 +15,7 @@
  * модуля и переживает размонтирования.
  */
 import { create } from 'zustand'
+import type { CropRect } from '@/lib/crop' // (правка 908)
 
 export interface RefineTarget {
   /** Имя файла в папке output ComfyUI. */
@@ -87,15 +88,23 @@ interface RefineTargetState {
   addUserRefs: (items: RefineUserRef[]) => void
   removeUserRef: (id: string) => void
   clearUserRefs: () => void
+  /** (правка 908) Обновить поля референса (кроп: новый path + оригинал). */
+  patchUserRef: (id: string, patch: Partial<Omit<RefineUserRef, 'id'>>) => void
 }
 
-/** (правка 509) Картинка-референс, загруженная пользователем для
+/** (правка 908) Картинка-референс, загруженная пользователем для
  *  источника с диска (залита в ComfyUI input/ через /api/comfy/upload). */
 export interface RefineUserRef {
   id: string
   path: string
   name: string
   previewUrl: string
+  /** Кроп: нормализованный прямоугольник 0..1 от оригинала. */
+  crop?: CropRect
+  /** Файл в input/ ДО кропа — повторный кроп начинается с него. */
+  originalPath?: string
+  /** Исходное имя файла (подпись при повторном кропе). */
+  originalName?: string
 }
 
 export const useRefineTarget = create<RefineTargetState>((set, get) => ({
@@ -136,4 +145,16 @@ export const useRefineTarget = create<RefineTargetState>((set, get) => ({
     }
     return { userRefs: [] }
   }),
+  // (правка 908) Кроп референса: path → обрезанная копия в input/. Старое
+  // blob-превью при подмене ревокаем — картинку берём из input/ по новому path.
+  patchUserRef: (id, patch) => set((s) => ({
+    userRefs: s.userRefs.map((r) => {
+      if (r.id !== id) return r
+      if (patch.previewUrl !== undefined && patch.previewUrl !== r.previewUrl &&
+          r.previewUrl?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(r.previewUrl) } catch { /* noop */ }
+      }
+      return { ...r, ...patch }
+    }),
+  })),
 }))

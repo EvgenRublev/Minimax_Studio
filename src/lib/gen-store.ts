@@ -9,6 +9,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { CropRect } from '@/lib/crop' // (правка 908)
 import { createMirrorStorage } from '@/lib/settings-storage' // (правка 804)
 import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
 
@@ -44,8 +45,9 @@ export interface VideoRefItem {
   audioVolume?: number
   /** (правка 895) Изображения: кроп применяется сразу — в `path` лежит уже
       обрезанный файл. Здесь хранится нормализованный прямоугольник 0..1 от
-      оригинала (для повторного кропа и показа рамки). */
-  crop?: { x: number; y: number; w: number; h: number }
+      оригинала (для повторного кропа и показа рамки). (правка 908) Тип вынесен
+      в src/lib/crop.ts — те же поля теперь у кадров, ControlNet и Refine. */
+  crop?: CropRect
   /** (правка 895) Изображения: ComfyUI input/ файл ДО кропа. Нужен, чтобы
       повторный кроп всегда начинался с оригинала. */
   originalPath?: string
@@ -64,6 +66,13 @@ export interface VideoFrameSlot {
   width?: number
   /** (правка 152) Высота изображения в пикселях. */
   height?: number
+  /** (правка 908) Картинки: нормализованный кроп 0..1 от оригинала. В `path`
+   *  лежит уже обрезанный файл — поля нужны для повторного кропа и подсказки. */
+  crop?: CropRect
+  /** (правка 908) Файл в input/ ДО кропа — повторный кроп начинается с него. */
+  originalPath?: string
+  /** (правка 908) Исходное имя файла (подпись при повторном кропе). */
+  originalName?: string
 }
 
 export interface VideoGenState {

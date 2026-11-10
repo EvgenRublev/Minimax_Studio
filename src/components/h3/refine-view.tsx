@@ -57,6 +57,8 @@ import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правк
 import { GenerationStatus } from '@/components/h3/generation-status'
 // (правка 719) Превью рефов с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
+// (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
+import { applyCropToRef, comfyInputUrl, cropOriginalSrc } from '@/lib/crop'
 import { SettingSlider } from '@/components/h3/setting-slider' // (правка 458)
 // (правка 723) Пресет Pass 2 и показ фактической лестницы сигм: маленький модуль
 // без импортов — шаблон воркфлоу (95 КБ) в клиентский бандл не тянем.
@@ -122,6 +124,8 @@ export function RefineView() {
   const [fixOpen, setFixOpen] = useState(false)
   // (правка 509) Пользовательские референсы для источника с диска.
   const userRefs = useRefineTarget((s) => s.userRefs)
+  // (правка 908) Обновление полей референса после кропа.
+  const patchUserRef = useRefineTarget((s) => s.patchUserRef)
   const [uploadingRefs, setUploadingRefs] = useState(false)
   const refsInputRef = useRef<HTMLInputElement>(null)
   const [refsDragOver, setRefsDragOver] = useState(false)
@@ -716,9 +720,17 @@ export function RefineView() {
                         url={r.previewUrl}
                         className="w-full h-full block"
                         title="Открыть референс во весь экран"
+                        // (правка 908) Кроп референса — как на «Генерации».
+                        crop={r.crop}
+                        originalSrc={cropOriginalSrc(r)}
+                        onCrop={(rect, blob) =>
+                          applyCropToRef(r, rect, blob, (p) =>
+                            patchUserRef(r.id, { ...p, previewUrl: comfyInputUrl(p.path, 200) }),
+                          )
+                        }
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={r.previewUrl} alt={r.name} className="w-full h-full object-cover" />
+                        <img src={r.previewUrl || comfyInputUrl(r.path, 200)} alt={r.name} className="w-full h-full object-cover" />
                       </RefPreviewThumb>
                       <span className="absolute left-0.5 bottom-0.5 text-[9px] font-mono px-1 rounded bg-black/70 text-cyan-300 pointer-events-none">
                         P{i + 1}

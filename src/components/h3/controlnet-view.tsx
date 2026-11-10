@@ -47,6 +47,8 @@ import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правк
 import { PromptQuality } from './prompt-quality'
 // (правка 719) Превью рефов с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from './ref-preview-thumb'
+// (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
+import { applyCropToRef, comfyInputUrl, cropOriginalSrc } from '@/lib/crop'
 import { VoiceInputButton } from './voice-input-button'
 import { EXAMPLES } from './learn/prompt-guide'
 import { usePromptHistory } from '@/lib/prompt-history-store'
@@ -152,6 +154,8 @@ export function ControlNetView() {
   // источника (рефы обычно живут дольше конкретного контрольного видео).
   // (правка 502) Массив — в сторе вкладки (см. выше).
   const refImages = useControlNetTarget((s) => s.refImages)
+  // (правка 908) Обновление полей референса после кропа.
+  const patchRefImage = useControlNetTarget((s) => s.patchRefImage)
   const [uploadingRefs, setUploadingRefs] = useState(false)
   const [refsDragOver, setRefsDragOver] = useState(false)
   const refsInputRef = useRef<HTMLInputElement>(null)
@@ -700,7 +704,8 @@ export function ControlNetView() {
                 {refImages.map((r, i) => (
                   <div key={r.id} className="relative group rounded-md overflow-hidden border border-border bg-black/40 aspect-square">
                     {/* (правка 719) Клик по превью — просмотр во весь экран
-                        (как на вкладке «Генерация»). */}
+                        (как на вкладке «Генерация»).
+                        (правка 908) + кроп референса. */}
                     <RefPreviewThumb
                       kind="image"
                       name={r.name}
@@ -708,9 +713,16 @@ export function ControlNetView() {
                       url={r.previewUrl}
                       className="w-full h-full block"
                       title="Открыть референс во весь экран"
+                      crop={r.crop}
+                      originalSrc={cropOriginalSrc(r)}
+                      onCrop={(rect, blob) =>
+                        applyCropToRef(r, rect, blob, (p) =>
+                          patchRefImage(r.id, { ...p, previewUrl: comfyInputUrl(p.path, 200) }),
+                        )
+                      }
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r.previewUrl} alt={r.name} className="w-full h-full object-cover" />
+                      <img src={r.previewUrl || comfyInputUrl(r.path, 200)} alt={r.name} className="w-full h-full object-cover" />
                     </RefPreviewThumb>
                     <span className="absolute left-0.5 bottom-0.5 text-[9px] font-mono px-1 rounded bg-black/70 text-orange-300 pointer-events-none">
                       &lt;Picture {i + 1}&gt;

@@ -14,6 +14,7 @@
  *  • Сжатие исходника до 480p — работает во всех режимах (правка 511).
  */
 import { create } from 'zustand'
+import type { CropRect } from '@/lib/crop' // (правка 908)
 import type { ControlNetType } from '@/lib/comfy/controlnet-template'
 
 export interface ControlNetTarget {
@@ -90,6 +91,12 @@ export interface ControlNetRefImage {
   path: string
   name: string
   previewUrl: string
+  /** (правка 908) Кроп: нормализованный прямоугольник 0..1 от оригинала. */
+  crop?: CropRect
+  /** (правка 908) Файл в input/ ДО кропа — повторный кроп начинается с него. */
+  originalPath?: string
+  /** (правка 908) Исходное имя файла (подпись при повторном кропе). */
+  originalName?: string
 }
 
 interface ControlNetState {
@@ -113,6 +120,8 @@ interface ControlNetState {
   refImages: ControlNetRefImage[]
   addRefImages: (items: ControlNetRefImage[]) => void
   removeRefImage: (id: string) => void
+  /** (правка 908) Обновить поля референса (кроп: новый path + оригинал). */
+  patchRefImage: (id: string, patch: Partial<Omit<ControlNetRefImage, 'id'>>) => void
 }
 
 export const useControlNetTarget = create<ControlNetState>((set, get) => ({
@@ -149,4 +158,16 @@ export const useControlNetTarget = create<ControlNetState>((set, get) => ({
     }
     return { refImages: s.refImages.filter((r) => r.id !== id) }
   }),
+  // (правка 908) Кроп референса: path → обрезанная копия в input/. Старое
+  // blob-превью при подмене ревокаем — картинку берём из input/ по новому path.
+  patchRefImage: (id, patch) => set((s) => ({
+    refImages: s.refImages.map((r) => {
+      if (r.id !== id) return r
+      if (patch.previewUrl !== undefined && patch.previewUrl !== r.previewUrl &&
+          r.previewUrl?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(r.previewUrl) } catch { /* noop */ }
+      }
+      return { ...r, ...patch }
+    }),
+  })),
 }))

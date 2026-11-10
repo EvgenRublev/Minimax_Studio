@@ -40,6 +40,8 @@ import { SettingSlider } from '@/components/h3/setting-slider'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from '@/components/h3/video-gallery-grid'
 import { GenerationStatus } from '@/components/h3/generation-status'
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
+// (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
+import { applyCropToRef, cropOriginalSrc, type CropableRef } from '@/lib/crop'
 import { FacePickDialog } from '@/components/h3/face-pick-dialog'
 import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import {
@@ -324,6 +326,19 @@ export function FaceRefineView() {
     ? `/api/comfy/file?filename=${encodeURIComponent(identityRef.name)}&subfolder=&type=input&width=96`
     : null
 
+  // (правка 908) FaceIdentityRef: имя файла и есть путь в input/ — приводим его
+  // к формату общего кроп-хелпера (src/lib/crop.ts), чтобы кроп работал так же,
+  // как на остальных вкладках.
+  const identityAsRef: CropableRef | null = identityRef
+    ? {
+        path: identityRef.name,
+        name: identityRef.originalName ?? identityRef.name,
+        previewUrl: identityRef.previewUrl,
+        crop: identityRef.crop,
+        originalPath: identityRef.originalName,
+      }
+    : null
+
   return (
     <div className="flex h-full w-full min-w-0">
       {/* ═══ Панель параметров ═══ */}
@@ -535,14 +550,50 @@ export function FaceRefineView() {
                     refDragOver ? 'border-yellow-400 ring-1 ring-yellow-400/50' : 'border-border',
                   )}>
                   {identityPreview && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={identityPreview}
-                      alt=""
-                      className="w-10 h-10 rounded object-cover border shrink-0"
-                    />
+                    // (правка 908) Фото человека получило тот же просмотрщик,
+                    // что и остальные референсы, + кроп: в воркфлоу уходит уже
+                    // обрезанное фото, оригинал остаётся в input/.
+                    <RefPreviewThumb
+                      kind="image"
+                      name={identityAsRef?.name ?? identityRef.name}
+                      path={identityRef.name}
+                      url={identityPreview}
+                      className="w-10 h-10 rounded object-cover border shrink-0 block overflow-hidden"
+                      title="Открыть фото во весь экран / обрезать"
+                      crop={identityRef.crop}
+                      originalSrc={identityAsRef ? cropOriginalSrc(identityAsRef) : undefined}
+                      onCrop={(rect, blob) => {
+                        if (!identityAsRef) return
+                        void applyCropToRef(identityAsRef, rect, blob, (p) =>
+                          setIdentityRef({
+                            name: p.path,
+                            previewUrl: '',
+                            crop: p.crop,
+                            originalName: p.originalName,
+                          }),
+                        )
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={identityPreview}
+                        alt=""
+                        className="w-10 h-10 rounded object-cover border"
+                      />
+                    </RefPreviewThumb>
                   )}
-                  <p className="text-xs font-medium text-foreground truncate flex-1">{identityRef.name}</p>
+                  <p className="text-xs font-medium text-foreground truncate flex-1">
+                    {identityRef.name}
+                    {/* (правка 908) подпись: фото уже обрезано */}
+                    {identityRef.originalName && (
+                      <span
+                        className="ml-1 text-[9px] text-yellow-400/80"
+                        title="Фото обрезано — оригинал сохранён в ComfyUI input/"
+                      >
+                        кроп
+                      </span>
+                    )}
+                  </p>
                   {!busy && (
                     <button
                       onClick={() => setIdentityRef(null)}

@@ -25,10 +25,11 @@ import { createPortal } from 'react-dom' // (правка 692) портал в b
 import { motion, AnimatePresence } from 'framer-motion'
 import { FilmIcon, ImageIcon, AudioLinesIcon, PlayIcon, PauseIcon, XIcon, CropIcon } from 'lucide-react'
 
-/** (правка 895) Нормализованный кроп-прямоугольник (0..1 от размера картинки). */
-export interface CropRect { x: number; y: number; w: number; h: number }
-
-export const FULL_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 }
+// (правка 908) Тип кропа вынесен в src/lib/crop.ts — он нужен и всем остальным
+// местам, где подключён кроп референсов. Ре-экспорт оставлен, чтобы существующие
+// импорты `from './ref-viewer-dialog'` продолжали работать.
+import { FULL_CROP, type CropRect } from '@/lib/crop'
+export type { CropRect } from '@/lib/crop'
 
 export interface RefViewerData {
   kind: 'image' | 'video' | 'audio'

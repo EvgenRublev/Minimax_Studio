@@ -7,6 +7,7 @@
  * событие 'h3:goto-face-refine'; FaceRefineView забирает цель.
  */
 import { create } from 'zustand'
+import type { CropRect } from '@/lib/crop' // (правка 908)
 import type {
   FaceIdentityModel,
   FacePasteRegion,
@@ -33,6 +34,12 @@ export interface FaceIdentityRef {
   name: string
   /** Превью в интерфейсе (data-URL или URL из input/). */
   previewUrl: string
+  /** (правка 908) Кроп: нормализованный прямоугольник 0..1 от оригинала.
+   *  `name` после кропа — уже обрезанная копия, поэтому оригинал держим
+   *  отдельно (это же имя файла в input/). */
+  crop?: CropRect
+  /** (правка 908) Имя файла в input/ ДО кропа — повторный кроп с него. */
+  originalName?: string
 }
 
 /**
