@@ -547,6 +547,84 @@ function Test-Host {
     } catch { return $false }
 }
 
+# (правка 920) Visual C++ 2015-2022 x64 (VC redist).
+# torch\lib\c10.dll грузит msvcp140.dll / vcruntime140*.dll из System32.
+# На ноутбуке со старым redist `import torch` падал с «WinError 1114: Сбой
+# инициализации DLL... c10.dll or one of its dependencies», и установка
+# завершалась тремя ошибками шага 9 (torch, библиотеки, ComfyUI не поднялся) -
+# хотя колёса качались верно. Обновление redist руками всё вылечило. Теперь
+# версия проверяется на шаге 1, а старый redist ставится попутно и тихо.
+$script:VcRedistMin = [version]'14.40.0.0'
+$script:VcRedistUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+
+function Get-VcRuntimeVersion {
+    # Версию берём у msvcp140.dll (её и не хватало): если файла нет или он
+    # старше VcRedistMin - redist нужно поставить/обновить. vcruntime140_1.dll
+    # на некоторых OEM-сборках отсутствует отдельно - это тоже повод обновить.
+    $need = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+    $min = $null
+    foreach ($n in $need) {
+        $p = Join-Path $env:SystemRoot ('System32\' + $n)
+        if (-not (Test-Path $p)) { return $null }
+        $v = $null
+        try { $v = (Get-Item $p).VersionInfo.FileVersionRaw } catch { }
+        if (-not $v) {
+            try { $v = [version]((Get-Item $p).VersionInfo.FileVersion) } catch { }
+        }
+        if (-not $v) { return $null }
+        if (-not $min -or $v -lt $min) { $min = $v }
+    }
+    return $min
+}
+
+function Ensure-VcRedist {
+    $cur = Get-VcRuntimeVersion
+    if ($cur -and $cur -ge $script:VcRedistMin) {
+        Ok ('Visual C++ 2015-2022 x64: ' + $cur)
+        return
+    }
+    $shown = if ($cur) { 'версия ' + $cur } else { 'не установлен' }
+    Info ('Visual C++ 2015-2022 x64: ' + $shown + ', нужен ' + $script:VcRedistMin + '+ - обновляю (без него torch не грузит c10.dll)')
+    $exe = Join-Path $Cache 'vc_redist.x64.exe'
+    if (-not ((Test-Path $exe) -and (Get-Item $exe).Length -gt 0)) {
+        try {
+            Get-Download $script:VcRedistUrl $exe
+        } catch {
+            Warn ('не удалось скачать VC++ redist: ' + $_.Exception.Message + '. Скачайте и поставьте вручную: ' + $script:VcRedistUrl)
+            return
+        }
+    }
+    if (-not ((Test-Path $exe) -and (Get-Item $exe).Length -gt 0)) {
+        Warn ('VC++ redist не скачался. Скачайте и поставьте вручную: ' + $script:VcRedistUrl)
+        return
+    }
+    Info 'установка Visual C++ redist (тихо, 1-2 минуты)...'
+    $code = $null
+    try {
+        $proc = Start-Process -FilePath $exe -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru
+        $code = $proc.ExitCode
+    } catch {
+        Warn ('не удалось запустить VC++ redist: ' + $_.Exception.Message + '. Запустите вручную: ' + $exe)
+        return
+    }
+    # 0 - успех; 1638 - уже стоит более новая; 3010 - успех, нужна перезагрузка.
+    if ($code -eq 3010) {
+        Warn 'VC++ redist обновлён, но Windows просит перезагрузку - до неё torch может не заработать'
+    } elseif ($code -ne 0 -and $code -ne 1638) {
+        # Частая причина - установка без прав администратора (1603/5).
+        Warn ('VC++ redist вернул код ' + $code + '. Скачайте и поставьте вручную (от администратора): ' + $script:VcRedistUrl)
+        return
+    }
+    $after = Get-VcRuntimeVersion
+    if ($after -and $after -ge $script:VcRedistMin) {
+        Ok ('Visual C++ 2015-2022 x64 обновлён: ' + $after)
+    } elseif ($code -eq 3010) {
+        # Версия обновится после перезагрузки - не пугаем повтором.
+    } else {
+        Warn ('Visual C++ redist установлен, но System32 всё ещё показывает ' + $(if ($after) { $after } else { 'старую версию' }) + '. Перезагрузите Windows и запустите install.bat снова; если не поможет - поставьте вручную: ' + $script:VcRedistUrl)
+    }
+}
+
 function Expand-ZipSafe {
     param([string]$Zip, [string]$Dest)
     if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
@@ -816,6 +894,14 @@ if (-not (Test-Host 'https://github.com')) {
     throw 'Нет доступа к github.com — без него не скачать ComfyUI, кастомные ноды и STT-рантайм. Проверьте VPN/прокси.'
 }
 Ok 'github.com доступен'
+
+# (правка 920) VC++ 2015-2022 x64 нужен torch: c10.dll грузит msvcp140.dll из
+# System32, и на старом redist import torch падает с WinError 1114 (три ошибки
+# шага 9 на ровном месте). Ставим/обновляем попутно - ошибка redist установку
+# не прерывает, только предупреждение с прямой ссылкой.
+if (-not $SkipComfy) {
+    try { Ensure-VcRedist } catch { Warn ('проверка VC++ redist не удалась: ' + $_.Exception.Message) }
+}
 
 if (-not (Test-Host 'https://download.pytorch.org/whl/cu130/')) {
     Warn 'download.pytorch.org недоступен — шаг установки torch может не пройти (VPN/прокси).'

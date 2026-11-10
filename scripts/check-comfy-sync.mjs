@@ -216,6 +216,23 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     'install/install.ps1: применяет install\\vhs-patches')
 }
 
+// 11. (правка 920) Старый Visual C++ redist — причина WinError 1114 у torch.
+//     Проверка обязана быть на шаге 1 и не прерывать установку при неудаче.
+{
+  const ps = read('install/install.ps1')
+  expect(/function\s+Ensure-VcRedist\s*\{/.test(ps), 'install/install.ps1: функция Ensure-VcRedist()')
+  expect(/function\s+Get-VcRuntimeVersion\s*\{/.test(ps),
+    'install/install.ps1: функция Get-VcRuntimeVersion()')
+  expect(/msvcp140\.dll/.test(ps) && /vcruntime140_1\.dll/.test(ps),
+    'install/install.ps1: VC-проверка смотрит msvcp140.dll и vcruntime140_1.dll')
+  expect(/aka\.ms\/vs\/17\/release\/vc_redist\.x64\.exe/.test(ps),
+    'install/install.ps1: качает официальный vc_redist.x64.exe')
+  expect(/Ensure-VcRedist/.test(ps) && /Start-Process[^\n]*vc_redist|ArgumentList\s+'\/install'/.test(ps),
+    'install/install.ps1: ставит redist тихо (/install /quiet /norestart)')
+  expect(/try\s*\{\s*Ensure-VcRedist\s*\}\s*catch/.test(ps),
+    'install/install.ps1: ошибка VC-проверки не прерывает установку')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)
