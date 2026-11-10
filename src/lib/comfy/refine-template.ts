@@ -1668,6 +1668,9 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
       let fullVideo: [string, number] = [`css_0`, 0]
       let fullAudio: [string, number] = [`css_0`, 1]
       let tTokTotal = winGeo[0].tTok
+      // (правка 921) Границы стыков окон в токенах полного латента —
+      // нужны планировщику сегментов декода (см. ниже).
+      const seamToks: number[] = []
       for (let k = 1; k < windows.length; k++) {
         const g = winGeo[k]
         const prevG = winGeo[k - 1]
@@ -1688,6 +1691,8 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           _meta: { title: `Полный латент после окна ${k + 1}` },
         }
         fullVideo = [`cfull_${k}`, 0]
+        // (правка 921) Стык окна — на ТЕКУЩЕЙ длине (голова окна k срезана).
+        seamToks.push(tTokTotal)
         tTokTotal += tTok - cutTok
         nodes[`caf_${k}`] = {
           inputs: { samples: [`css_${k}`, 1], dim: 'x', index: aCut, amount: aTotal - aCut },
@@ -1735,11 +1740,51 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
       // размазывается на 17 кадров (0,7 с) и становится незаметным.
       const OVL_TOK = 5
       const OVL_FRAMES = framesForTok(OVL_TOK) // 17
-      const segCount = Math.max(1, Math.ceil(tTokTotal / SEG_DECODE_TOK))
+      // (правка 921) Границы сегментов декода не должны попадать на стыки
+      // окон. Кроссфейд правки 820 смешивает два НЕЗАВИСИМЫХ декода на
+      // последних OVL_TOK токенах сегмента: если там же лежит стык окон
+      // (граница нового латента), смена содержимого размазывается на 17
+      // кадров и читается как видимый шов. Шаг стыков при «Частями» равен
+      // шагу окна: при 3 с это каждые 10 токенов, поэтому граница
+      // 25-токенного сегмента регулярно оказывается рядом со стыком
+      // (для ~6 с видео — ровно в середине ролика). Сдвигаем границу на
+      // ближайшую свободную, кратно 5 токенам (фаза FPT сохраняется,
+      // кадровая арифметика сегментов точная), предпочитая сдвиг назад.
+      const segEnds: number[] = []
+      {
+        let start = 0
+        while (start < tTokTotal) {
+          const nominal = Math.min(tTokTotal, start + SEG_DECODE_TOK)
+          let end = nominal
+          if (nominal < tTokTotal) {
+            const ok = (e: number) =>
+              e > start + OVL_TOK &&
+              tTokTotal - e > OVL_TOK &&
+              !seamToks.some((s) => s >= e - OVL_TOK && s < e)
+            for (const d of [0, 5, 10, 15, 20, 25, 30]) {
+              const hit = (d === 0 ? [nominal] : [nominal - d, nominal + d]).find(ok)
+              if (hit !== undefined) {
+                end = hit
+                break
+              }
+            }
+          }
+          segEnds.push(end)
+          start = end
+        }
+      }
+      // Хвост короче головы перекрытия — сливаем с предыдущим сегментом
+      // (кроссфейда после последнего нет, шов окна там безопасен).
+      while (segEnds.length > 1 && tTokTotal - segEnds[segEnds.length - 2] <= OVL_TOK) {
+        segEnds.pop()
+      }
+      const segCount = segEnds.length
       const segFrames: number[] = []
+      let segStart = 0
       for (let i = 0; i < segCount; i++) {
-        const index = i > 0 ? i * SEG_DECODE_TOK - OVL_TOK : 0
-        const amount = Math.min(SEG_DECODE_TOK + (i > 0 ? OVL_TOK : 0), tTokTotal - index)
+        const end = segEnds[i]
+        const index = i > 0 ? segStart - OVL_TOK : 0
+        const amount = end - segStart + (i > 0 ? OVL_TOK : 0)
         segFrames.push(framesForTok(amount))
         // (правка 395) index при ролике >~39 мин > MAX_RESOLUTION — дробим.
         const segRef = chainLatentCut(
@@ -1753,6 +1798,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           class_type: 'VAEDecode',
           _meta: { title: `Decode сегмента ${i + 1}/${segCount}` },
         }
+        segStart = end
       }
       // (правка 820) Сборка: тело сегмента без перекрытий + кроссфейд на
       // каждом стыке (tail сегмента i ↔ head сегмента i+1).
