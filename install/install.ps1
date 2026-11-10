@@ -1183,7 +1183,20 @@ if (-not $SkipComfy) {
         Expand-ZipSafe $zip $tmp
         $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
         if (-not $inner) { throw 'архив ComfyUI распаковался пустым' }
-        if (-not (Test-Path $comfyRoot)) { New-Item -ItemType Directory -Force -Path $comfyRoot | Out-Null }
+        # (правка 915) в архиве ядро лежит в подпапке ComfyUI-<версия>; без main.py
+        # дальше раскладывать нечего (битый или чужой архив).
+        if (-not (Test-Path (Join-Path $inner.FullName 'main.py'))) {
+            throw 'в архиве ComfyUI нет main.py'
+        }
+        # (правка 915) заранее НЕ создаём $comfyRoot: в плоской раскладке он совпадает
+        # с $comfyApp, и Move-Item клал ядро ВНУТРЬ уже готовой папки
+        # (ComfyUI\ComfyUI-0.44.0\main.py), а на повторной попытке падал
+        # «Невозможно создать файл, так как он уже существует». Создаём только
+        # родителя — в старой раскладке это ComfyUI-Easy-Install.
+        $comfyParent = Split-Path -Parent $comfyApp
+        if ($comfyParent -and -not (Test-Path $comfyParent)) {
+            New-Item -ItemType Directory -Force -Path $comfyParent | Out-Null
+        }
 
         # Данные пользователя, которые переносятся в новое ядро: модели, ноды,
         # настройки, готовые видео и подключённые внешние папки моделей.
@@ -1198,7 +1211,10 @@ if (-not $SkipComfy) {
         $backup = Join-Path $Root 'ComfyUI.old'
         $movedOld = $false
         try {
-            if ($hasCore) {
+            # (правка 915) уводим в backup ЛЮБУЮ существующую папку ядра, даже без
+            # main.py: остаток прерванной попытки (например ComfyUI\ComfyUI-0.44.0)
+            # иначе не даёт положить новое ядро — Move-Item падает «файл уже существует».
+            if (Test-Path $comfyApp) {
                 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
                 New-Item -ItemType Directory -Force -Path $stage | Out-Null
                 foreach ($k in $keep) {
@@ -1554,6 +1570,15 @@ if (-not $SkipApp) {
 
 if (-not $SkipComfy) {
     Step 9 9 'Проверка установки'
+
+    # (правка 915) быстрый контроль раскладки: main.py должен лежать прямо в
+    # $comfyApp — иначе трёхминутный smoke-тест ниже просто не поднимет сервер
+    # («ComfyUI не поднялся за 180 секунд») без внятной причины.
+    if (-not (Test-Path (Join-Path $comfyApp 'main.py'))) {
+        Fail ('ядро ComfyUI лежит не там, где ожидается: нет ' + (Join-Path $comfyApp 'main.py'))
+    } else {
+        Ok ('ядро ComfyUI на месте: ' + $comfyApp)
+    }
 
     Info 'проверяю импорт torch...'
     & $python -c "import torch, torchvision, torchaudio; print('      torch', torch.__version__, '| cuda:', torch.cuda.is_available())"
