@@ -1668,9 +1668,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
 /* ─── (правка 257) Свои папки моделей — коллекции вне папки студии ─── */
 
+/** (правка 922) Стабильный id строки списка. key строки НЕ должен зависеть от
+ *  её пути: поле пути редактируется вручную, и key=`путь|категория` заставлял
+ *  React пересоздавать <input> на каждом нажатии клавиши — фокус уходил в
+ *  контейнер диалога (Radix FocusScope возвращает его обратно), а последующие
+ *  нажатия в поле не работали, пока не кликнешь по нему заново. */
+let extraEntryUid = 0
+const nextExtraEntryUid = () => ++extraEntryUid
+
 function ExtraModelPathsPanel() {
   // (правка 262) exists — флаг наличия папки (сервер проверяет через statSync)
-  const [entries, setEntries] = useState<Array<{ path: string; category: string; exists?: boolean }>>([])
+  const [entries, setEntries] = useState<Array<{ path: string; category: string; exists?: boolean; uid: number }>>([])
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1680,7 +1688,11 @@ function ExtraModelPathsPanel() {
     fetch('/api/config')
       .then((r) => r.json())
       .then((d) => {
-        setEntries(Array.isArray(d.model_extra_paths) ? d.model_extra_paths : [])
+        setEntries(
+          (Array.isArray(d.model_extra_paths) ? d.model_extra_paths : []).map(
+            (e: { path: string; category: string; exists?: boolean }) => ({ ...e, uid: nextExtraEntryUid() }),
+          ),
+        )
       })
       .catch(() => setEntries([]))
   }, [])
@@ -1707,7 +1719,12 @@ function ExtraModelPathsPanel() {
       const found: Array<{ path: string; category: string }> = d.entries || []
       setEntries((prev) => {
         const seen = new Set(prev.map((e) => `${e.path}|${e.category}`))
-        return [...prev, ...found.filter((e) => !seen.has(`${e.path}|${e.category}`))]
+        return [
+          ...prev,
+          ...found
+            .filter((e) => !seen.has(`${e.path}|${e.category}`))
+            .map((e) => ({ ...e, uid: nextExtraEntryUid() })),
+        ]
       })
       setNewPath('')
       setDirty(true)
@@ -1771,7 +1788,7 @@ function ExtraModelPathsPanel() {
       {entries.length > 0 && (
         <div className="space-y-1.5">
           {entries.map((e, i) => (
-            <div key={`${e.path}|${e.category}`} className="flex items-center gap-1.5">
+            <div key={e.uid} className="flex items-center gap-1.5">
               {/* (правка 262) Индикатор: папка не существует на диске */}
               {e.exists === false && (
                 <span
