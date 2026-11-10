@@ -109,3 +109,5 @@ dlssg-worker.exe
 
 # релизная инструкция в корне — в git не идёт
 /КАК_ЗАПУСТИТЬ.txt
+# (правка 911) временная папка сборки setup.exe (payload + makensis)
+/.setup-build/

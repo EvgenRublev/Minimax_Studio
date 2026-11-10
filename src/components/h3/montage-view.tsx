@@ -79,6 +79,7 @@ import { useMontageReturn } from '@/lib/montage-return-store' // (правка 8
 import { useRefineTarget } from '@/lib/refine-target-store' // (правка 856)
 import { useFsFullscreen } from '@/lib/use-fs-fullscreen' // (правка 869)
 import { dispersionCoeffs, dispersionMaxShift } from '@/lib/montage-dispersion' // (правка 898)
+import { collectGrainOverlays } from '@/lib/montage-grain' // (правка 910)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
 
@@ -3030,43 +3031,50 @@ export function MontageView() {
     showToast(label)
   }, [pushHistory])
 
-  // (правка 859, 884) анимированный киношный шум в превью: 24 кадра/с сдвигает тайл зерна,
-  // учитывает общий/индивидуальный байпас и слои V2+
+  // (правка 859, 884, 910) анимированный киношный шум в превью: 24 кадра/с
+  // сдвигает тайл зерна; учитывает общий/поэффектный байпас и слои V2+.
   const activePreviewKey = !result ? (previewVolKeyRef.current ?? bufShotKeyRef.current[buf] ?? selectedKey) : null
   const activePreviewShot = activePreviewKey ? shots.find((s) => s.key === activePreviewKey) ?? selected : selected
-  const activeTopLayer = useMemo(() => {
-    if (result) return null
-    const vis = layers.filter((l) => !l.hidden && playT >= l.at && playT < l.at + layerLen(l))
-    if (!vis.length) return selectedLayer
-    return vis.reduce((top, cur) => (cur.track >= top.track ? cur : top), vis[0])
-  }, [result, layers, playT, layerLen, selectedLayer])
-  // (правка 886) источник киношного шума и порядок его отрисовки: в рендере шум
-  // применяется к каждому клипу отдельно, поэтому зерно слоя V2+ должно лежать НАД
-  // видео слоёв (z 5+track), а зерно базы — ПОД ними (иначе шум слоя не видно).
-  // Источник — самый верхний видимый слой, поэтому над ним рисовать нечего: z=999.
-  const grainSrc = useMemo(() => {
-    if (result) return null
-    const lg = effectiveFx(activeTopLayer?.fx)?.grain ?? 0
-    if (lg > 0 && activeTopLayer && !activeTopLayer.hidden &&
-        playT >= activeTopLayer.at && playT < activeTopLayer.at + layerLen(activeTopLayer)) {
-      return { grain: lg, zIndex: 999 }
-    }
-    const sg = effectiveFx(activePreviewShot?.fx)?.grain ?? 0
-    if (sg > 0) return { grain: sg, zIndex: 1 }
-    return null
-  }, [result, activeTopLayer, activePreviewShot, playT, layerLen])
-  const activeGrain = grainSrc?.grain ?? 0
+  // (правка 886, 910) источник киношного шума — ПО КАЖДОМУ видимому клипу.
+  //
+  // В рендере (ffmpeg) зерно применяется к каждому клипу отдельно, поэтому и в
+  // превью рисуем по оверлею на клип (правило — в src/lib/montage-grain.ts):
+  //   • раньше единственный оверлей был закрыт условием `!inGap`, а inGap
+  //     считается только по базовой дорожке — слой V2+ над пустым местом базы
+  //     играл без шума вообще;
+  //   • шум нижнего слоя терялся, если верхний слой без шума: источником
+  //     считался только САМЫЙ верхний видимый слой.
+  // Порядок отрисовки — как у видео: база z=1 (под слоями), слой — 5+track.
+  const grainOverlays = useMemo(() => {
+    if (result) return []
+    return collectGrainOverlays({
+      playT,
+      inGap,
+      baseGrain: effectiveFx(activePreviewShot?.fx)?.grain ?? 0,
+      layers: layers.map((l) => ({
+        key: l.key,
+        track: l.track,
+        at: l.at,
+        len: layerLen(l),
+        hidden: l.hidden,
+        grain: effectiveFx(l.fx)?.grain ?? 0,
+      })),
+    })
+  }, [result, activePreviewShot, inGap, layers, playT, layerLen])
   useEffect(() => {
-    if (!activeGrain || activeGrain <= 0) return
+    if (!grainOverlays.length) return
     const iv = setInterval(() => {
-      const el = grainOverlayRef.current
-      if (!el) return
+      const box = grainOverlayRef.current
+      if (!box) return
       const ox = Math.floor(Math.random() * 160)
       const oy = Math.floor(Math.random() * 160)
-      el.style.backgroundPosition = `${ox}px ${oy}px`
+      // Один сдвиг на кадр для всех оверлеев — зерно «одной плёнки», а не разное.
+      for (const el of Array.from(box.children)) {
+        ;(el as HTMLElement).style.backgroundPosition = `${ox}px ${oy}px`
+      }
     }, 42)
     return () => clearInterval(iv)
-  }, [activeGrain])
+  }, [grainOverlays.length])
 
   // пробел = play/pause, стрелки = шаг ±0.1 с, «,»/«.» = кадр назад/вперёд,
   // S = разрез, D = дубликат, F = полный экран (Esc — выход), Alt+стрелки =
@@ -4516,26 +4524,30 @@ export function MontageView() {
               />
             )
           })}
-          {/* (правка 859, 884) анимированный киношный шум (зерно 35mm, 24 к/с) поверх кадра превью */}
-          {(previewSrc || layers.length > 0) && !inGap && activeGrain > 0 && grainTile && (
-            <div
-              ref={grainOverlayRef}
-              className="pointer-events-none absolute"
-              style={{
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: `${Math.round(vScale * 100)}%`,
-                height: `${Math.round(vScale * 100)}%`,
-                backgroundImage: `url(${grainTile})`,
-                backgroundRepeat: 'repeat',
-                mixBlendMode: 'overlay',
-                opacity: Math.min(0.78, (activeGrain / 100) * 0.72),
-                // (правка 886) над видеобуферами базы и слоем-источником шума, под
-                // более высокими чистыми слоями (у слоёв zIndex = 5 + track)
-                zIndex: grainSrc?.zIndex ?? 1,
-              }}
-            />
+          {/* (правка 859, 884, 910) анимированный киношный шум (зерно 35mm, 24 к/с):
+              отдельный слой на КАЖДЫЙ видимый клип с эффектом — база и слои V2+ */}
+          {grainOverlays.length > 0 && grainTile && (
+            <div ref={grainOverlayRef} className="pointer-events-none absolute inset-0">
+              {grainOverlays.map((g) => (
+                <div
+                  key={g.key}
+                  className="pointer-events-none absolute"
+                  style={{
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: `${Math.round(vScale * 100)}%`,
+                    height: `${Math.round(vScale * 100)}%`,
+                    backgroundImage: `url(${grainTile})`,
+                    backgroundRepeat: 'repeat',
+                    mixBlendMode: 'overlay',
+                    opacity: Math.min(0.78, (g.grain / 100) * 0.72),
+                    // (правка 910) порядок как у видео: база 1, слой 5+track
+                    zIndex: g.z,
+                  }}
+                />
+              ))}
+            </div>
           )}
           {!previewSrc && !layers.length && !audios.length && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">

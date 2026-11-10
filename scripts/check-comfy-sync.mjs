@@ -167,6 +167,20 @@ expect(/"%COMFY_CORE%\\main\.py"/.test(startComfyBat),
 expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   '.env: COMFY_ROOT=./ComfyUI')
 
+// 9. (правка 911) Минимальная версия ядра — ОДНА на синхронизатор и на UI.
+//    Синхронизатор по ней решает, класть ли патчи, а баннер — предупреждать
+//    пользователя. Разъедутся — баннер будет молчать там, где патчи уже не
+//    кладутся (или наоборот). Ловим это на verify релиза.
+{
+  const coreTs = read('src/lib/comfy/core-version.ts')
+  const mTs = /CORE_MIN_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(coreTs)
+  const mJs = /CORE_MIN_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(sync)
+  expect(!!mTs, 'core-version.ts: объявлен CORE_MIN_VERSION')
+  expect(!!mJs, 'sync_custom_nodes.js: объявлен CORE_MIN_VERSION')
+  expect(!!mTs && !!mJs && mTs[1] === mJs[1],
+    `CORE_MIN_VERSION совпадает в core-version.ts и sync_custom_nodes.js (${mTs?.[1] ?? '?'} / ${mJs?.[1] ?? '?'})`)
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

@@ -164,7 +164,7 @@ Unicode). Он ставит папку приложения без прав ад
 3. Установите NSIS (`winget install --id NSIS.NSIS -e`) и выполните из папки
    сборки: `makensis installer.nsi`.
 
-Результат — `Minimax_H3_Studio_7.1_setup.exe` (~835 МБ). В git его не
+Результат — `Minimax_H3_Studio_7.1.19_setup.exe` (~835 МБ). В git его не
 публикуют (лимит GitHub — 100 МБ на файл).
 
 Два обязательных условия (иначе установка/сборка падает):

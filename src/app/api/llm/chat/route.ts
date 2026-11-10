@@ -246,7 +246,8 @@ export async function POST(req: NextRequest) {
             const resolved = await resolveRefPath(ref.path, ref.intent === 'control_source')
             if (!resolved) {
               // (правка 771) файл исчез с диска («чистка input», перезапись) —
-              // берём последнее созданное описание этого имени
+              // берём последнее созданное описание этого имени. Здесь сверять
+              // нечего: файла нет, и маршрут честно скажет об этом модели.
               const prior = await findPriorDigest(ref.path, digestModelKey)
               if (prior) {
                 priorDigestByTrigger.set(ref.trigger, prior)
@@ -269,12 +270,30 @@ export async function POST(req: NextRequest) {
               digestUsed = true
             } else {
               // (правка 771) генерация не удалась (нет зрения / таймаут / LLM
-              // недоступен / вышел бюджет) — фолбэк на прошлое описание
-              const prior = await findPriorDigest(ref.path, digestModelKey)
+              // недоступен / вышел бюджет) — фолбэк на прошлое описание.
+              //
+              // (правка 906) СРАВНИВАЕМ отпечаток файла: замена рефа с тем же
+              // именем (после «чистки input», смены папки бэкенда, перезалива)
+              // раньше подсовывала описание СТАРОГО файла, и модель рассказывала
+              // про прежнюю картинку, не видя новую (сырое медиа в этой ветке
+              // не прикреплялось). Теперь устаревшее описание отбрасывается —
+              // маршрут уходит в честный raw-media/«не вижу» путь ниже.
+              const expect = result.size !== undefined && result.contentTag
+                ? { size: result.size, contentTag: result.contentTag }
+                : null
+              const prior = await findPriorDigest(ref.path, digestModelKey, expect)
               if (prior) {
                 priorDigestByTrigger.set(ref.trigger, prior)
                 digestUsed = true
-              } else {
+              } else if (expect) {
+                const stale = await findPriorDigest(ref.path, digestModelKey)
+                if (stale) {
+                  console.warn(
+                    `[llm] ref digest: описание ${ref.trigger} относится к другому содержимому файла — отбрасываю устаревшее (${result.error ?? 'unknown error'})`,
+                  )
+                }
+              }
+              if (!prior) {
                 console.warn(`[llm] ref digest unavailable for ${ref.trigger}: ${result.error ?? 'unknown error'} — falling back to raw media`)
               }
             }

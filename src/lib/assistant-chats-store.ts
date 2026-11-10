@@ -44,6 +44,11 @@ export interface AssistantChat {
    *  ниже подставляет 'generate'. */
   mode: AssistantChatMode
   messages: AssistantChatMessage[]
+  /** (правка 906) Отпечаток набора референсов, который модель видела в прошлом
+   *  успешном ходе (JSON: trigger/path/name). Нужен, чтобы предупредить модель
+   *  «референсы изменились» — иначе <Picture N> молча меняет смысл после
+   *  замены файла. У старых чатов поля нет — первый ход даёт '' (без блока). */
+  refSnapshot?: string
 }
 
 const MAX_CHATS = 20
@@ -86,6 +91,9 @@ interface AssistantChatsState {
   setActiveChat: (id: string) => void
   /** Append a message; auto-titles the chat from the first user message. */
   appendMessage: (id: string, msg: AssistantChatMessage) => void
+  /** (правка 906) Запомнить набор референсов, который модель увидела в успешном
+   *  ходе (для блока «референсы изменились»). no-op для удалённого чата. */
+  setChatRefSnapshot: (id: string, snapshot: string) => void
   clearAll: () => void
   /** Queue an auto-run for the next AssistantView mount. */
   queueImprove: (content: string, chatId: string) => void
@@ -169,6 +177,14 @@ export const useAssistantChats = create<AssistantChatsState>()(
       setActiveChat: (id) =>
         set((s) => (s.chats.some((c) => c.id === id) ? { activeChatId: id } : s)),
 
+      // (правка 906) Отпечаток референсов, реально показанных модели.
+      // updatedAt НЕ трогаем: это служебное поле, чат не должен всплывать
+      // наверх списка/менять порядок из-за него.
+      setChatRefSnapshot: (id, snapshot) =>
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === id ? { ...c, refSnapshot: snapshot } : c)),
+        })),
+
       appendMessage: (id, msg) =>
         set((s) => ({
           chats: capChats(
@@ -241,6 +257,9 @@ export const useAssistantChats = create<AssistantChatsState>()(
           // (правка 831) Whitelist из трёх режимов (как в assistant-chats-sync):
           // иначе чужое строковое значение прятало чат во всех фильтрах.
           mode: (c.mode === 'extend' || c.mode === 'controlnet' ? c.mode : 'generate') as AssistantChatMode,
+          // (правка 906) Отпечаток рефов — только строка, иначе undefined
+          // (старые персисты/испорченное значение → просто нет блока).
+          refSnapshot: typeof c.refSnapshot === 'string' ? c.refSnapshot : undefined,
           messages: c.messages.map((m) => ({ ...m, content: capContent(m.content) })),
         }))
         const activeChatId =

@@ -33,6 +33,14 @@ const MAX_DIGEST_CHARS = 2200
 const DIGEST_MAX_TOKENS = 420
 const DIGEST_TIMEOUT_MS = 90_000
 const QUICK_HASH_LIMIT = 16 * 1024 * 1024
+/** (правка 906) Пробы для больших файлов: 4 куска по 512 КБ (начало, 1/3,
+ *  2/3, конец). Раньше хэшировались только начало и конец — два разных
+ *  ролика одного размера с совпадающими краями давали ОДИН ключ кэша, и
+ *  модель получала описание чужого видео. Стоимость — 2 МБ чтения вместо 2. */
+const SAMPLE_CHUNK = 512 * 1024
+/** (правка 906) Потолок индекса «путь → дайджест»: без него файл рос
+ *  бесконечно (по записи на каждый когда-либо описанный реф). */
+const MAX_PATH_INDEX_ENTRIES = 400
 
 export interface RefDigestRef {
   path: string
@@ -59,6 +67,11 @@ export interface RefDigestResult {
   digest?: string
   cached?: boolean
   error?: string
+  /** (правка 906) Отпечаток файла, для которого считался дайджест. Возвращается
+   *  И НА ОШИБКАХ (после того как хэш уже посчитан): маршрут сравнивает его с
+   *  индексом путей и не подставляет описание, если файл с тех пор изменился. */
+  size?: number
+  contentTag?: string
 }
 
 interface DigestCacheFile {
@@ -87,10 +100,16 @@ function refKind(ref: RefDigestRef): 'image' | 'video' | 'audio' {
 
 /**
  * A cheap but stable content fingerprint. Small files are hashed completely;
- * large videos use the first/last 1 MB plus size (reading a 200 MB video on
- * every chat turn would be wasteful). The size and mtime are also part of the
- * cache key, so a same-name replacement is still detected when it changes the
- * file metadata.
+ * large videos use four spread-out samples plus size (reading a 200 MB video on
+ * every chat turn would be wasteful). The size is also part of the cache key,
+ * so a same-name replacement is still detected when it changes the file
+ * metadata.
+ *
+ * (правка 906) Было: начало + конец. Двух кусков мало — перекодированный или
+ * перемонтированный ролик того же размера с теми же первым/последним мегабайтом
+ * (типовой случай «заменил видео на версию получше, та же сцена») давал тот же
+ * отпечаток, и ассистент продолжал описывать старый файл. Теперь 4 пробы по
+ * диагонали файла — смещение входит в хэш, так что порядок и позиции важны.
  */
 async function contentTag(filePath: string, size: number): Promise<string> {
   const h = createHash('sha256')
@@ -100,16 +119,24 @@ async function contentTag(filePath: string, size: number): Promise<string> {
     return h.digest('hex')
   }
 
-  const chunkSize = 1024 * 1024
-  const head = Buffer.alloc(chunkSize)
-  const tail = Buffer.alloc(chunkSize)
+  const chunk = SAMPLE_CHUNK
+  const lastStart = Math.max(0, size - chunk)
+  // Начало, 1/3, 2/3, конец — без дублей на маленьких «больших» файлах.
+  const starts = [...new Set([
+    0,
+    Math.floor(size / 3),
+    Math.floor((2 * size) / 3),
+    lastStart,
+  ].map((v) => Math.max(0, Math.min(v, lastStart))))]
+
+  const buf = Buffer.alloc(chunk)
   const fh = await fs.open(filePath, 'r')
   try {
-    const headRead = (await fh.read(head, 0, chunkSize, 0)).bytesRead
-    const tailStart = Math.max(0, size - chunkSize)
-    const tailRead = (await fh.read(tail, 0, chunkSize, tailStart)).bytesRead
-    h.update(head.subarray(0, headRead))
-    h.update(tail.subarray(0, tailRead))
+    for (const start of starts) {
+      const read = (await fh.read(buf, 0, chunk, start)).bytesRead
+      h.update(`chunk:${start}\0`)
+      h.update(buf.subarray(0, read))
+    }
   } finally {
     await fh.close()
   }
@@ -184,6 +211,11 @@ interface PathIndexEntry {
   modelId: string
   refPath: string
   updatedAt: string
+  /** (правка 906) Отпечаток содержимого, к которому относится дайджест.
+   *  У записей, созданных до правки, полей нет — такую запись нельзя
+   *  доказать, поэтому в strict-режиме она не используется. */
+  size?: number
+  contentTag?: string
 }
 
 function normalizeRefPath(refPath: string): string {
@@ -205,6 +237,15 @@ async function recordDigestForPath(
       if (parsed && typeof parsed === 'object') index = parsed
     } catch { /* первый раз или поврежденный индекс — начинаем заново */ }
     index[norm] = { ...entry, refPath, updatedAt: new Date().toISOString() }
+    // (правка 906) Потолок: выкидываем самые старые записи, иначе индекс
+    // растёт без границ (по записи на каждое когда-либо описанное имя файла).
+    const keys = Object.keys(index)
+    if (keys.length > MAX_PATH_INDEX_ENTRIES) {
+      keys
+        .sort((a, b) => String(index[a]?.updatedAt ?? '').localeCompare(String(index[b]?.updatedAt ?? '')))
+        .slice(0, keys.length - MAX_PATH_INDEX_ENTRIES)
+        .forEach((k) => { delete index[k] })
+    }
     const tmp = `${PATH_INDEX_FILE}.${process.pid}.${Date.now()}.tmp`
     await fs.writeFile(tmp, JSON.stringify(index, null, 1), 'utf8')
     try {
@@ -217,17 +258,37 @@ async function recordDigestForPath(
   }
 }
 
+/** (правка 906) Доказательство «файл тот же»: размер + отпечаток содержимого. */
+export interface PriorDigestExpect {
+  size: number
+  contentTag: string
+}
+
 /**
  * Последний созданный дайджест для имени референса (когда файл недоступен или
  * дайджест не сгенерировать: нет зрения, LLM недоступен, вышел бюджет).
  * null — индекс пуст, модель другая или записи нет.
+ *
+ * (правка 906) `expect` включает СТРОГИЙ режим: запись принимается только если
+ * она относится к тому же содержимому файла. Без этого замена рефа с тем же
+ * именем (после «чистки input», смены папки бэкенда, перезалива) возвращала
+ * описание СТАРОГО файла — модель рассказывала про прежнюю картинку, а сырое
+ * изображение при этом не прикреплялось вовсе (см. route.ts, ветка priorDigest).
+ * Запись без отпечатка (создана до правки) в строгом режиме не принимается.
  */
-export async function findPriorDigest(refPath: string, modelId: string): Promise<string | null> {
+export async function findPriorDigest(
+  refPath: string,
+  modelId: string,
+  expect?: PriorDigestExpect | null,
+): Promise<string | null> {
   try {
     const raw = await fs.readFile(PATH_INDEX_FILE, 'utf8')
     const index = JSON.parse(raw) as Record<string, PathIndexEntry>
     const entry = index?.[normalizeRefPath(refPath)]
     if (!entry || entry.modelId !== modelId) return null
+    if (expect) {
+      if (entry.size !== expect.size || entry.contentTag !== expect.contentTag) return null
+    }
     if (typeof entry.digest !== 'string' || !entry.digest.trim()) return null
     return entry.digest.trim()
   } catch {
@@ -479,8 +540,12 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
   if (cached) {
     console.log(`[llm-ref-digest] cache hit: ${input.ref.trigger}`)
     // (правка 771) обновляем индекс путей — описание переживёт удаление файла
-    await recordDigestForPath(input.ref.path, { key, digest: cached, modelId: input.modelId })
-    return { ok: true, digest: cached, cached: true }
+    // (правка 906) вместе с отпечатком содержимого, чтобы маршрут мог доказать,
+    // что описание относится к ТЕКУЩЕМУ файлу
+    await recordDigestForPath(input.ref.path, {
+      key, digest: cached, modelId: input.modelId, size: stat.size, contentTag: tag,
+    })
+    return { ok: true, digest: cached, cached: true, size: stat.size, contentTag: tag }
   }
 
   // (правка 771) Без mmproj модель НЕ видит медиа: llama-server принимает
@@ -488,18 +553,23 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
   // вовсе — маршрут использует findPriorDigest или честную пометку.
   if (!llmVisionAvailable()) {
     console.warn(`[llm-ref-digest] vision unavailable (mmproj missing) — skip digest: ${input.ref.trigger}`)
-    return { ok: false, error: 'vision unavailable (mmproj file missing)' }
+    return { ok: false, error: 'vision unavailable (mmproj file missing)', size: stat.size, contentTag: tag }
   }
 
   let prepared: PreparedDigestMedia | null = null
   try {
     prepared = await prepareDigestMedia(filePath, kind)
   } catch (e) {
-    return { ok: false, error: `media preparation failed: ${e instanceof Error ? e.message : String(e)}` }
+    return {
+      ok: false,
+      error: `media preparation failed: ${e instanceof Error ? e.message : String(e)}`,
+      size: stat.size,
+      contentTag: tag,
+    }
   }
   if (!prepared) {
     console.warn(`[llm-ref-digest] media prep failed: ${input.ref.trigger}`)
-    return { ok: false, error: 'media preparation failed' }
+    return { ok: false, error: 'media preparation failed', size: stat.size, contentTag: tag }
   }
 
   try {
@@ -523,7 +593,7 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
     const digest = normalizeDigest(raw)
     if (!digest) {
       console.warn(`[llm-ref-digest] empty digest: ${input.ref.trigger}`)
-      return { ok: false, error: 'empty digest' }
+      return { ok: false, error: 'empty digest', size: stat.size, contentTag: tag }
     }
 
     await writeCachedDigest({
@@ -541,13 +611,15 @@ export async function getReferenceDigest(input: RefDigestRequest): Promise<RefDi
     })
     // (правка 771) индекс путей — тег останется с описанием, даже если файл
     // потом удалят из input/ («чистка input», перезапись, снятие staged-копий)
-    await recordDigestForPath(input.ref.path, { key, digest, modelId: input.modelId })
+    await recordDigestForPath(input.ref.path, {
+      key, digest, modelId: input.modelId, size: stat.size, contentTag: tag,
+    })
     console.log(`[llm-ref-digest] generated: ${input.ref.trigger} (${digest.length} chars, ${prepared.note})`)
-    return { ok: true, digest }
+    return { ok: true, digest, size: stat.size, contentTag: tag }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     console.warn(`[llm-ref-digest] failed: ${input.ref.trigger}: ${error}`)
-    return { ok: false, error }
+    return { ok: false, error, size: stat.size, contentTag: tag }
   } finally {
     await prepared.cleanup()
   }

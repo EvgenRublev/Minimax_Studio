@@ -21,6 +21,9 @@ import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
 // (правка 112) Всплывающее окно с краткой инструкцией при первом запуске
 import { WelcomeDialog } from '@/components/h3/welcome-dialog'
 import { ModelsWarningBanner } from '@/components/h3/models-warning-banner'
+// (правка 911) Ядро ComfyUI не обновляется вместе со студией — предупреждаем,
+// если оно старее нужного (иначе пользователь узнаёт об этом только из консоли).
+import { CoreWarningBanner } from '@/components/h3/core-warning-banner'
 import { initAssistantChatsSync } from '@/lib/assistant-chats-sync'
 // (правка 718) Сверка «идёт ли генерация» с живым ComfyUI при старте:
 // персистентный стор восстанавливает фазу «running» из localStorage, и без
@@ -223,6 +226,8 @@ export default function Home() {
       <main className="flex-1 min-w-0 relative flex flex-col">
         {/* Models not downloaded warning */}
         <ModelsWarningBanner onOpenSettings={() => setSettingsOpen(true)} />
+        {/* (правка 911) Ядро ComfyUI старее нужного — установщик не запускался */}
+        <CoreWarningBanner />
 
         <div className="flex-1 min-h-0 relative">
         <AnimatePresence mode="wait">

@@ -28,6 +28,8 @@ import { useControlNetTarget } from './controlnet-target-store' // (правка
 import { H3_SPEC_A, H3_SPEC_B, H3_SPEC_EXTEND } from './h3-prompt-spec'
 import {
   buildReferenceSet,
+  describeRefsChange,
+  serializeRefSnapshot,
   type AssistantRefEntry,
   type AssistantRefInput,
 } from './assistant-refs'
@@ -87,12 +89,18 @@ async function buildSystemMessage(
   videoVisionOn: boolean,
   chatMode: AssistantChatMode = 'generate',
   signal?: AbortSignal,
+  // (правка 906) Снимок референсов передаётся СНАРУЖИ: тот же массив уходит на
+  // провод в `references`. Раньше системный промпт собирал список сам, уже
+  // ПОСЛЕ `await fetch('/api/config')` (до 5 с) — если пользователь в это окно
+  // менял рефы, промпт перечислял новый набор, а файлы прикреплялись старые
+  // (ровно тот класс бага, что закрывала правка 823).
+  refs: AssistantRefEntry[] = [],
 ): Promise<string> {
   // (правка 427) extend-чат — свой контекст (клипы, extend-рефы, мета исходника).
-  if (chatMode === 'extend') return buildExtendSystemMessage(signal)
+  if (chatMode === 'extend') return buildExtendSystemMessage(signal, refs)
   // (правка 502) controlnet-чат — свой контекст (контрольное видео,
   // refImages вкладки «ControlNet», параметры контроля).
-  if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn)
+  if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn, refs)
   const v = useGenStore.getState().video
   const mode = v.mode // (правка 150) 'ref' | 't2v' | 'flf' | 'extend'
   // (правка 899) минимум 1 с (24 кадра при 24 fps): короче — не генерируем
@@ -117,9 +125,11 @@ async function buildSystemMessage(
   // (правка 823) Системный промпт перечисляет РОВНО те референсы, что уйдут
   // на провод: единый сборщик с REF_LIMITS (раньше здесь были ВСЕ v.refs без
   // лимита — при >9 картинок модель писала <Picture 10..12>, которых нет).
+  // (правка 906) Список — переданный снимок (`refs`), а не повторный
+  // getReferences(): system и payload гарантированно из одного состояния.
   // Кадры flf идут с триггерами «Первый кадр»/«Последний кадр» — это НЕ
   // <Picture N>, поэтому в списки меток они не попадают (описаны отдельно).
-  const entries = getReferences('generate')
+  const entries = refs
   const images = entries.filter((e) => e.kind === 'image' && e.trigger.startsWith('Picture'))
   const videos = entries.filter((e) => e.kind === 'video')
   const audios = entries.filter((e) => e.kind === 'audio')
@@ -343,7 +353,10 @@ ${guide3dBlock}
  * ЗАПРЕЩЕНЫ — они добавляются автоматически при сабмите (extend-view.tsx,
  * правки 165/197), дублирование портит conditioning.
  */
-async function buildExtendSystemMessage(signal?: AbortSignal): Promise<string> {
+async function buildExtendSystemMessage(
+  signal?: AbortSignal,
+  refs: AssistantRefEntry[] = [],
+): Promise<string> {
   const v = useGenStore.getState().video
   const clips = v.extendClips
 
@@ -372,7 +385,8 @@ async function buildExtendSystemMessage(signal?: AbortSignal): Promise<string> {
   // ── Референсы продления (extendImageRefs — своя нумерация <Picture N>) ──
   // (правка 823) Через единый сборщик: потолок картинок 9 — РОВНО то, что
   // уйдёт на провод (раньше система перечисляла все, сервер молча резал).
-  const refEntries = getReferences('extend')
+  // (правка 906) — переданный снимок, тот же, что в payload.
+  const refEntries = refs
   lines.push('')
   if (refEntries.length) {
     lines.push('РЕФЕРЕНСЫ ПРОДЛЕНИЯ (картинки; ты получаешь их визуальное описание/видишь приложенный файл):')
@@ -471,7 +485,7 @@ ${honestyBlock}
  * Движение НЕ описывай словами — его задаёт контроль; промпт описывает
  * ТОЛЬКО внешний вид: сцену, персонажей, стиль, свет, звук.
  */
-function buildControlNetSystemMessage(videoVisionOn: boolean): string {
+function buildControlNetSystemMessage(videoVisionOn: boolean, refs: AssistantRefEntry[] = []): string {
   const st = useControlNetTarget.getState()
   const direct = st.params.controlType === 'direct'
 
@@ -486,24 +500,40 @@ function buildControlNetSystemMessage(videoVisionOn: boolean): string {
   lines.push('')
   lines.push('=== ПРИКРЕПЛЁННЫЕ РЕФЕРЕНСЫ (available references) ===')
   lines.push('⚠️ ТЕКУЩИЙ РЕЖИМ ГЕНЕРАЦИИ: «ControlNet» (Ref2VA).')
+  // (правка 907) Контрольное видео теперь приходит ассистенту во ВСЕХ режимах
+  // (direct | depth | canny | pose) — и в списке референсов, и дайджестом.
+  // Раньше в depth/canny/pose (дефолт — depth) ассистент сообщал «кадров не
+  // вижу» и писал промпт по одному тексту запроса, не зная ни действия, ни
+  // плана, ни числа людей в контрольном ролике.
+  const mapName = st.params.controlType === 'canny' ? 'canny' : st.params.controlType === 'pose' ? 'pose' : 'depth'
   if (st.source) {
-    if (direct) {
-      lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЕНО как контрольное видео и источник анимации (ref_video_0): тайминг, движения тела, жесты, мимика, камера и монтажный ритм.`)
-      if (videoVisionOn) {
-        lines.push('Ты получаешь digest/кадры этого видео (сцена, персонажи, движение, камера). Используй их, чтобы понять перенос анимации, но НЕ пересказывай движение в промпте.')
-      } else {
-        lines.push('Кадры/digest не приложены: видение видео ассистентом выключено. Не угадывай содержимое; в промпте только сошлись на <Video 1> как на источник движения.')
-      }
+    lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЕНО как контрольное видео (ref_video_0).`)
+    lines.push(
+      direct
+        ? 'Роль <Video 1>: источник анимации — движения тела, жесты, мимика, тайминг, камера и монтажный ритм. Новый вид создаётся по запросу и <Picture N>.'
+        : `Роль <Video 1>: источник движения и геометрии — движение в генерации задаёт ${mapName}-карта, построенная из этого ролика.`,
+    )
+    if (videoVisionOn) {
+      lines.push(
+        'Ты получаешь визуальное описание (digest) содержимого этого ролика по кадрам: сцена, персонажи, действие, движение, камера.',
+      )
+      lines.push(
+        'ЧТО ДЕЛАТЬ С СОДЕРЖИМЫМ (учитывай, но не пересказывай):\n' +
+        '  • согласуй действие и позу: что именно делают персонажи, сколько их в кадре, как они расположены — промпт не должен противоречить контролю («сидит», если в ролике бег; «один человек», если их двое);\n' +
+        '  • согласуй масштаб и геометрию сцены: тип пространства (улица/комната/лес), заполненность кадра, дистанция и ракурс камеры (общий/средний/крупный план);\n' +
+        '  • НЕ копируй внешность, лицо, одежду и конкретную локацию из <Video 1> по умолчанию — новый вид создаётся по запросу и <Picture N>; исключение — явная просьба «как в видео»;\n' +
+        '  • НЕ пересказывай движение и камеру по кадрам — их задаёт контроль.',
+      )
     } else {
-      lines.push(`<Video 1> = ${st.source.filename} — ПРИКРЕПЛЕНО как контрольное видео. Это официальный видео-референс: ОН ЕСТЬ в референсах.`)
-      lines.push('Ты не видишь КАДРЫ этого видео (оно видео, не картинка) — но оно ПРИКРЕПЛЕНО и УЧИТываетСЯ при генерации. Движение/камера НЕ описываются словами (их задаёт контроль), но <Video 1> ОБЯЗАНО быть упомянуто в detailed_description.')
+      lines.push('Видение видео ассистентом выключено — digest/кадры этого ролика НЕ приложены. Ты знаешь только то, что ролик существует: не угадывай и не выдумывай его содержимое. Если оно важно для промпта — попроси включить «Видение видео ассистентом» (Настройки → LLM). В промпте сошлись на <Video 1> как на источник движения.')
     }
   } else {
     lines.push('Контрольное видео пока НЕ выбрано — без него генерация не запустится; подскажи выбрать на вкладке «ControlNet».')
   }
   // (правка 823) Через единый сборщик: потолок картинок 9 и нумерация ровно
   // по прикреплённым (раньше система перечисляла все refImages подряд).
-  const cnImages = getReferences('controlnet').filter((e) => e.kind === 'image')
+  // (правка 906) — переданный снимок, тот же, что уходит на провод.
+  const cnImages = refs.filter((e) => e.kind === 'image')
   if (cnImages.length) {
     lines.push('Изображения-референсы (ты получаешь их визуальное описание/видишь приложенный файл):')
     cnImages.forEach((r, i) => {
@@ -529,6 +559,12 @@ function buildControlNetSystemMessage(videoVisionOn: boolean): string {
   }
   lines.push('')
   lines.push(`Тип контроля: ${st.params.controlType}. Длительность: ~${st.params.duration} с.`)
+  // (правка 907) В генерацию попадает НАЧАЛО ролика (VHS_LoadVideo,
+  // skip_first_frames=0, frame_load_cap = duration×24) — иначе ассистент,
+  // увидев весь ролик, описывал бы события из его конца, которых в кадре не будет.
+  if (st.source) {
+    lines.push(`Генерация берёт НАЧАЛО контрольного ролика (~${st.params.duration} с с начала; если ролик короче — сколько есть). Содержимое дальше этого отрезка в кадр не попадёт — не опирайся на него и не описывай его.`)
+  }
 
   // ── Жёсткие правила режима ──
   // (правка 717) Сжато: 7 пунктов → 5, блок «ЧЕСТНОСТЬ» и «НЕЗАВИСИМОСТЬ
@@ -537,18 +573,18 @@ function buildControlNetSystemMessage(videoVisionOn: boolean): string {
   const rulesBlock = direct
     ? '\n=== ПРАВИЛА РЕЖИМА CONTROLNET (DIRECT: ПЕРЕНОС АНИМАЦИИ) ===\n' +
       '1) ⚠️ <Video 1> — источник анимации: движения тела, жестов, мимики, тайминга, камеры и монтажного ритма. В detailed_description ОБЯЗАТЕЛЬНО одной фразой укажи: «The motion, timing, gestures and camera movement follow <Video 1>». Другие метки <Video N> ЗАПРЕЩЕНЫ.\n' +
-      '2) digest/кадры <Video 1> используй только чтобы понять перенос. НЕ расписывай движение и камеру по кадрам — контроль уже задаёт анимацию (это важнее общего требования базовой спеки описывать камеру). Если digest нет — не выдумывай содержимое видео.\n' +
+      '2) digest/кадры <Video 1> используй, чтобы понять перенос И согласовать с ним действие, число персонажей и план кадра (см. «ЧТО ДЕЛАТЬ С СОДЕРЖИМЫМ»). НЕ расписывай движение и камеру по кадрам — контроль уже задаёт анимацию (это важнее общего требования базовой спеки описывать камеру). Если digest нет — не выдумывай содержимое видео.\n' +
       '3) Новый вид создавай по запросу и <Picture N>: по умолчанию НЕ копируй из <Video 1> лицо, внешность, одежду и локацию. Сохранять их можно только по ЯВНОЙ просьбе. Каждое изображение — своей меткой <Picture N> (создай <Subject N>).\n' +
       `4) Одна НЕПРЕРЫВНАЯ сцена (~${st.params.duration} с), английский, ОДИН fence (FORMAT B), БЕЗ clip: N.\n` +
       '5) ЗВУК: аудио-реф здесь один — дорожка <Video 1> (ref_video_audio_0). <Audio 1> уместен, когда пользователь говорит о голосе/звуке; если звук в запросе не обсуждается — <Audio N> не нужен, звук идёт заново. Если речь/диалог/озвучка НЕ запрошены — overall_soundscape: ambient/тишина, non_diegetic_music: N/A. Голос, реплики, закадровый текст и музыку по умолчанию НЕ добавляй.\n' +
       '6) ЧЕСТНОСТЬ/ГРАНИЦЫ: список референсов выше — единственный источник правды; digest <Video 1> — только если приложен; деталей не выдумывай. Вложения чата — не референсы (никаких <Picture N>); другие чаты ты не видишь.'
     : '\n=== ПРАВИЛА РЕЖИМА CONTROLNET ===\n' +
       '1) ⚠️ ОБЯЗАТЕЛЬНО: <Video 1> — это контрольное видео, официальный видео-референс. УПОМЯНИ его в detailed_description («The camera and subject motion follow <Video 1>»). Другие метки <Video N> ЗАПРЕЩЕНЫ.\n' +
-      '2) Движение/камеру/позы НЕ описывай словами — их задаёт контроль. Текст о движении МЕШАЕТ контролю.\n' +
+      '2) Движение/камеру/позы НЕ описывай словами — их задаёт контроль. Текст о движении МЕШАЕТ контролю. При этом содержимое digest <Video 1> (если он приложен) ИСПОЛЬЗУЙ: согласуй действие, число персонажей, план и геометрию сцены (см. «ЧТО ДЕЛАТЬ С СОДЕРЖИМЫМ») — промпт не должен противоречить тому, что происходит в ролике.\n' +
       '3) Промпт описывает ТОЛЬКО: сцена/локация, внешность, одежда, стиль, свет, атмосфера, звук. Каждое прикреплённое изображение — со своей меткой <Picture N> (создай <Subject N>, привяжи к <Picture N>).\n' +
       `4) Одна НЕПРЕРЫВНАЯ сцена (~${st.params.duration} с), промпт на английском, ОДНИМ fence (FORMAT B). БЕЗ clip: N.\n` +
       '5) ЗВУК: аудио-рефов здесь НЕТ — метки <Audio N> не указывай, звук и реплики синтезируются заново по тексту промпта. Исключение одно: пользователь САМ явно просит сослаться на аудио-реф — только тогда <Audio 1> допустим. Если речь/диалог/озвучка НЕ запрошены — overall_soundscape: ambient/тишина, non_diegetic_music: N/A. Голос, реплики, закадровый текст и музыку по умолчанию НЕ добавляй.\n' +
-      '6) ЧЕСТНОСТЬ: текущий список референсов выше — единственный источник правды. Кадров <Video 1> ты НЕ видишь (это видео, не картинка) — не угадывай и не описывай его содержимое, но в промпте он ОБЯЗАТЕЛЬНО упоминается. Деталей, которых не видишь на картинках, не выдумывай — скажи «не вижу».\n' +
+      '6) ЧЕСТНОСТЬ: текущий список референсов выше — единственный источник правды. Содержимое <Video 1> известно тебе ТОЛЬКО из digest (если видение видео включено и digest приложен); без него не угадывай и не описывай ролик, но в промпте <Video 1> ОБЯЗАТЕЛЬНО упоминается. Деталей, которых нет в digest и на картинках, не выдумывай — скажи «не вижу».\n' +
       '7) Этот чат независим: сообщений других чатов ты не видишь. Источник, параметры и референсы выше — ТЕКУЩЕЕ состояние вкладки «ControlNet». Вложения из чата — только для описания, это НЕ референсы: НИКОГДА не помечай их <Picture N>.'
 
   return `${H3_SPEC_B}
@@ -798,7 +834,16 @@ export function runAssistantCompletion(
       // (правка 168) Рефы для прикрепления — из ЖИВОГО gen-store: модель видит
       // контекст генерации автоматически, включая рефы, добавленные посреди
       // диалога. Никаких ручных привязок.
+      // (правка 906) ЭТОТ ЖЕ массив уходит в системный промпт (ниже) и в
+      // `references` — один снимок состояния на запрос.
       const refs = getReferences(chatMode)
+      // (правка 906) Что модель видела в прошлый раз: если набор изменился
+      // (реф заменили/добавили/убрали), в системный промпт попадёт блок
+      // «РЕФЕРЕНСЫ ИЗМЕНИЛИСЬ» — иначе <Picture 2> молча меняет смысл.
+      const refSnapshot = serializeRefSnapshot(refs)
+      const prevRefSnapshot =
+        useAssistantChats.getState().chats.find((c) => c.id === chatId)?.refSnapshot ?? null
+      const refsChangeNote = describeRefsChange(prevRefSnapshot, refs)
       // (правка 108) Вложения чата — ОТДЕЛЬНО от рефов генерации: они существуют
       // ТОЛЬКО в чате и нужны ТОЛЬКО для LLM-описания/анализа. В references
       // (<Picture N>/<Video N>) они НЕ попадают — сервер получает их отдельным
@@ -864,6 +909,11 @@ export function runAssistantCompletion(
           }
         }
       }
+      // (правка 906) Системный промпт строится из ТОГО ЖЕ снимка рефов, что
+      // уходит в payload (`refs`), и в него добавляется блок «референсы
+      // изменились», если набор разошёлся с прошлым ходом этого чата.
+      const systemContent = await buildSystemMessage(videoVisionOn, chatMode, ac.signal, refs)
+      const systemWithRefs = refsChangeNote ? `${systemContent}\n\n${refsChangeNote}` : systemContent
       const res = await fetch('/api/llm/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -880,7 +930,8 @@ export function runAssistantCompletion(
             // (кнопка «Улучшить мой промпт» делает это автоматически).
             // (правка 427) Для extend-чата — системный промпт продления
             // (клипы, extend-рефы, мета исходника); await: дочитывает мету.
-            { role: 'system', content: await buildSystemMessage(videoVisionOn, chatMode, ac.signal) },
+            // (правка 906) Тот же снимок рефов, что уходит в payload ниже.
+            { role: 'system', content: systemWithRefs },
             // Replay the (capped) chat history so the model "remembers"
             ...apiHistory,
           ],
@@ -910,6 +961,11 @@ export function runAssistantCompletion(
         throw new Error(msg)
       }
       streamStarted = true
+      // (правка 906) Модель получила запрос — запоминаем набор референсов,
+      // который она реально видела. Со следующего хода сравнение с ним даёт
+      // блок «референсы изменились». Пишем только здесь (а не до fetch):
+      // при ошибке до старта стрима модель ничего не видела.
+      useAssistantChats.getState().setChatRefSnapshot(chatId, refSnapshot)
       // (клиентский idle-watchdog) Half-open соединение (сон/гибернация ПК,
       // сдохший прокси) не разрешает reader.read() никогда — стрим висел
       // вечно, чат блокировался до перезагрузки страницы. Зеркалим серверный

@@ -30,6 +30,9 @@ import { FilmIcon, ImageIcon, AudioLinesIcon, PlayIcon, PauseIcon, XIcon, CropIc
 // импорты `from './ref-viewer-dialog'` продолжали работать.
 import { FULL_CROP, type CropRect } from '@/lib/crop'
 export type { CropRect } from '@/lib/crop'
+// (правка 909) Полноразмерный адрес: вкладки ControlNet/Refine передают сюда
+// миниатюру (`...&width=200`) — во весь экран открывалась она же, крошечная.
+import { fullSizeRefUrl } from '@/lib/ref-url'
 
 export interface RefViewerData {
   kind: 'image' | 'video' | 'audio'
@@ -419,9 +422,15 @@ export function RefViewerDialog({
    *  нет, кнопка «Обрезать» не показывается (просмотр только). */
   onCropChange?: (rect: CropRect, blob: Blob) => void
 }) {
+  // (правка 909) Просмотр всегда полноразмерный: адрес миниатюры
+  // (`/api/comfy/file?...&width=200`) приходит сюда с ControlNet и Refine —
+  // снимаем `width`, иначе во весь экран открывалась картинка 200 px.
   const src = data
-    ? data.url || `/api/comfy/file?filename=${encodeURIComponent(data.path)}&type=input`
+    ? fullSizeRefUrl(data.url) || `/api/comfy/file?filename=${encodeURIComponent(data.path)}&type=input`
     : ''
+  // (правка 909) Рамка кропа тоже работает по оригиналу: fallback
+  // `originalSrc` у этих вкладок — та же миниатюра.
+  const cropSrc = fullSizeRefUrl(data?.originalSrc) || src
 
   // (правка 895) Кроп картинки: режим рамки + локальный предпросмотр кропа
   // до того, как родитель обновит путь рефа после загрузки.
@@ -524,7 +533,7 @@ export function RefViewerDialog({
             {data.kind === 'image' && (
               cropMode && onCropChange ? (
                 <CropOverlay
-                  src={data.originalSrc || src}
+                  src={cropSrc}
                   initial={cropRect}
                   onApply={(rect, blob) => {
                     setCropRect(rect)
