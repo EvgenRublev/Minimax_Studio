@@ -26,7 +26,7 @@ const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
 // (правка 866) само-восстановление студийных custom_nodes (см. scripts/sync_custom_nodes.js)
-const { syncStudioNodes, syncCorePatches, resolveComfyCore } = require('../scripts/sync_custom_nodes')
+const { syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyCore } = require('../scripts/sync_custom_nodes')
 
 const APP_ROOT = path.resolve(__dirname, '..')
 const PORT = 3000
@@ -409,6 +409,16 @@ function startComfy() {
     }
   } catch (err) {
     console.log(`[desktop] синхронизация патчей ядра не удалась: ${err && err.message ? err.message : err}`)
+  }
+  // (правка 917) Патч VideoHelperSuite: беззвучное видео в 0.44 роняло задание на
+  // ноде-загрузчике (ядро обходит выходы через PromptModelTracker, ленивое аудио
+  // VHS бросает «VHS failed to extract audio»). Доезжает до юзера без переустановки.
+  try {
+    for (const rel of syncVhsPatches(APP_ROOT, COMFY_ROOT)) {
+      appendConsole(`[desktop] патч VideoHelperSuite обновлён: ${rel}\n`)
+    }
+  } catch (err) {
+    console.log(`[desktop] синхронизация патча VHS не удалась: ${err && err.message ? err.message : err}`)
   }
   const args = [
     '-I', path.join(resolveComfyCore(COMFY_ROOT), 'main.py'),

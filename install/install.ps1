@@ -1450,6 +1450,30 @@ if (-not $SkipComfy) {
     } else {
         Warn 'папка "custom nodes" не найдена - собственные ноды студии не установлены'
     }
+
+    # (правка 917) Патч VideoHelperSuite: видео без аудиодорожки не должно ронять
+    # задание. В 0.44 ядро обходит все выходы ноды через PromptModelTracker.add(),
+    # тот зовёт .values() на любом Mapping - и ленивое аудио VHS (LazyAudioMap)
+    # бросает «VHS failed to extract audio» прямо на ноде-загрузчике, ещё до того
+    # как его успеет прочитать наш guard. Патч меняет исключение на «звука нет».
+    # Кладётся ПОСЛЕ распаковки нод: иначе архив ноды затрёт пропатченный файл.
+    $vhsPatchDir = Join-Path $InstallDir 'vhs-patches'
+    $vhsDir = Join-Path $nodesDir 'comfyui-videohelpersuite'
+    if (-not (Test-Path $vhsDir)) { $vhsDir = Join-Path $nodesDir 'ComfyUI-VideoHelperSuite' }
+    if ((Test-Path $vhsPatchDir) -and (Test-Path $vhsDir)) {
+        $vPatched = 0
+        Get-ChildItem $vhsPatchDir -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($vhsPatchDir.Length).TrimStart('\')
+            $dest = Join-Path $vhsDir $rel
+            $destDir = Split-Path $dest -Parent
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+            Copy-Item $_.FullName $dest -Force
+            $vPatched++
+        }
+        Ok ('патч VideoHelperSuite применён: ' + $vPatched + ' файл(а)')
+    } elseif (Test-Path $vhsPatchDir) {
+        Warn 'custom_nodes\comfyui-videohelpersuite нет - патч VHS (правка 917) не применён'
+    }
 } else {
     Info 'пропущено (-SkipComfy)'
 }

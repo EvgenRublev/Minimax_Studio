@@ -216,7 +216,68 @@ function syncCorePatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, syncCorePatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions }
+// (правка 917) Патч VideoHelperSuite: видео без аудиодорожки не должно ронять
+// задание. В 0.44 ядро обходит все подключённые выходы ноды через
+// comfy.model_patcher.PromptModelTracker.add(), который зовёт .values() на любом
+// Mapping, - и ленивое аудио VHS (LazyAudioMap) бросает «VHS failed to extract
+// audio» прямо на ноде-загрузчике, до того как его успеет прочитать наш guard.
+// Как и comfy-patches, патч доезжает до юзера сам: install.ps1 кладёт его на
+// шаге установки нод, а эта функция - при каждом запуске ComfyUI (после
+// внутрипрограммного обновления переустановка не нужна).
+// Чужой VHS не затираем: файл подменяется, только если это либо целевая версия
+// из nodes.json (sha256 в install\vhs-patches\manifest.json), либо уже наш
+// пропатченный файл.
+const VHS_PATCH_MARKER = '[H3-STUDIO PATCH 917]'
+
+function sha256(buf) {
+  return require('node:crypto').createHash('sha256').update(buf).digest('hex')
+}
+
+function syncVhsPatches(appRoot, comfyRoot) {
+  const synced = []
+  const srcRoot = path.join(appRoot, 'install', 'vhs-patches')
+  if (!existsSync(srcRoot)) return synced
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(path.join(srcRoot, 'manifest.json'), 'utf8'))
+  } catch (err) {
+    console.error(`[vhs-patch] manifest.json: ${err && err.message ? err.message : err}`)
+    return synced
+  }
+  const nodeDir = path.join(resolveComfyCore(comfyRoot), 'custom_nodes',
+    manifest.node_dir || 'comfyui-videohelpersuite')
+  // Ноды ещё нет (первая установка) - пропатчит install.ps1 после распаковки.
+  if (!existsSync(nodeDir)) return synced
+  const upstream = manifest.upstream || {}
+  for (const rel of listFiles(srcRoot)) {
+    if (rel === 'manifest.json') continue
+    const key = rel.replace(/\\/g, '/')
+    const sp = path.join(srcRoot, rel)
+    const dp = path.join(nodeDir, rel)
+    try {
+      const want = readFileSync(sp)
+      if (existsSync(dp)) {
+        const have = readFileSync(dp)
+        if (have.equals(want)) continue
+        const alreadyPatched = have.includes(Buffer.from(VHS_PATCH_MARKER, 'utf8'))
+        const isUpstream = Boolean(upstream[key]) && sha256(have) === String(upstream[key]).toLowerCase()
+        if (!alreadyPatched && !isUpstream) {
+          console.error(`[vhs-patch] ${key}: файл не совпадает с версией VHS из nodes.json - ` +
+            'не трогаем (патч 917 не применён).')
+          continue
+        }
+      }
+      mkdirSync(path.dirname(dp), { recursive: true })
+      copyFileSync(sp, dp)
+      synced.push(key)
+    } catch (err) {
+      console.error(`[vhs-patch] ${key}: ${err && err.message ? err.message : err}`)
+    }
+  }
+  return synced
+}
+
+module.exports = { syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')
@@ -225,4 +286,6 @@ if (require.main === module) {
   if (synced.length) console.log('[custom-nodes] installed: ' + synced.join(', '))
   const patched = syncCorePatches(appRoot, comfyRoot)
   if (patched.length) console.log('[comfy-patches] updated: ' + patched.join(', '))
+  const vhs = syncVhsPatches(appRoot, comfyRoot)
+  if (vhs.length) console.log('[vhs-patch] updated: ' + vhs.join(', '))
 }

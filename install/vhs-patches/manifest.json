@@ -1,0 +1,7 @@
+{
+  "node_dir": "comfyui-videohelpersuite",
+  "_comment": "Патч накладывается только если файл в установке - это либо целевая версия из nodes.json (upstream sha256), либо уже наш пропатченный файл. Чужой/обновлённый вручную VHS не затирается.",
+  "upstream": {
+    "videohelpersuite/utils.py": "ea3d02e0f41dc6b59685fcf6de9217d4b7729766e05e44200433c74e75466a6a"
+  }
+}

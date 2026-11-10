@@ -181,6 +181,41 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     `CORE_MIN_VERSION совпадает в core-version.ts и sync_custom_nodes.js (${mTs?.[1] ?? '?'} / ${mJs?.[1] ?? '?'})`)
 }
 
+// 10. (правка 917) Патч VideoHelperSuite: доезжает и через установщик, и через
+//     запуск ComfyUI. manifest знает эталонную версию файла, чтобы не затирать
+//     чужой VHS.
+{
+  expect(/function\s+syncVhsPatches\s*\(/.test(sync), 'sync_custom_nodes.js: функция syncVhsPatches()')
+  expect(/module\.exports\s*=\s*\{[^}]*syncVhsPatches/.test(sync),
+    'sync_custom_nodes.js: syncVhsPatches экспортируется')
+  expect(/const vhs = syncVhsPatches\(appRoot, comfyRoot\)/.test(sync),
+    'sync_custom_nodes.js: CLI-вызов syncVhsPatches')
+  expect(/require\(['"]\.\.\/scripts\/sync_custom_nodes['"]\)/.test(main) &&
+    /syncVhsPatches[,}]/.test(main), 'electron/main.js: импортирует syncVhsPatches')
+  if (/function startComfy\s*\(/.test(main)) {
+    const body = main.slice(main.indexOf('function startComfy('), main.indexOf('function startComfy(') + 8000)
+    expect(body.includes('syncVhsPatches(APP_ROOT, COMFY_ROOT)'),
+      'electron/main.js: syncVhsPatches вызывается внутри startComfy')
+  }
+  const vhsManifest = read('install/vhs-patches/manifest.json')
+  let vhsMan = null
+  try { vhsMan = JSON.parse(vhsManifest) } catch { /* ниже сообщим */ }
+  expect(!!vhsMan, 'install/vhs-patches/manifest.json читается')
+  expect(!!vhsMan && typeof vhsMan.node_dir === 'string',
+    'install/vhs-patches/manifest.json: задан node_dir')
+  const utilsKey = vhsMan && vhsMan.upstream ? vhsMan.upstream['videohelpersuite/utils.py'] : null
+  expect(!!utilsKey && /^[0-9a-f]{64}$/.test(utilsKey),
+    'install/vhs-patches/manifest.json: эталонный sha256 для videohelpersuite/utils.py')
+  const vhsUtils = read('install/vhs-patches/videohelpersuite/utils.py')
+  expect(vhsUtils.includes('[H3-STUDIO PATCH 917]'),
+    'install/vhs-patches: utils.py содержит маркер патча 917')
+  expect(/def\s+_load\(self\)\s*:/.test(vhsUtils) && /except Exception/.test(vhsUtils) &&
+    /self\._dict = \{\}/.test(vhsUtils),
+    'install/vhs-patches: LazyAudioMap не бросает исключение, а кэширует пусто')
+  expect(/vhs-patches/.test(read('install/install.ps1')),
+    'install/install.ps1: применяет install\\vhs-patches')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)
