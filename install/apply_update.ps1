@@ -7,7 +7,8 @@
 # only touches the children list, which does not include this updater.
 # Sequence:
 #   1. wait for app PIDs to exit (up to 90 s), then force-kill leftovers;
-#   2. verify .update\staging (package.json version, .next\BUILD_ID);
+#   2. verify .update\staging (package.json version, .next\BUILD_ID, and since
+#      fix 924 the aggregate 'sha256-lines-v1' manifest recorded in armed.json);
 #   3. back up every file we are about to replace into .update\backup;
 #   4. copy staging files (everything except .next) over the app root;
 #   5. swap .next by rename (same volume, atomic-ish): old -> .update\next_old,
@@ -103,6 +104,51 @@ function Is-Protected($relPath) {
     return $false
 }
 
+# (fix 925) Aggregate hash of the staging tree. Must match stagingAggregateHash()
+# in src/lib/app-update.ts exactly: for every file a line "relpath:sha256hex"
+# (relpath with forward slashes, hash lowercase), lines sorted ordinal (UTF-16
+# code units), each terminated by LF, whole text UTF-8 without BOM, then sha256.
+function Get-StagingAggregateHash($base) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    $prefix = $base.Length + 1
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($f in (Get-ChildItem -LiteralPath $base -Recurse -File)) {
+        $rel = $f.FullName.Substring($prefix).Replace('\', '/')
+        $fs = [System.IO.File]::OpenRead($f.FullName)
+        try { $fh = $sha.ComputeHash($fs) } finally { $fs.Dispose() }
+        $hex = -join ($fh | ForEach-Object { $_.ToString('x2') })
+        $lines.Add($rel + ':' + $hex)
+    }
+    $lines.Sort([System.StringComparer]::Ordinal)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($l in $lines) { [void]$sb.Append($l).Append("`n") }
+    $agg = $sha.ComputeHash($enc.GetBytes($sb.ToString()))
+    return (-join ($agg | ForEach-Object { $_.ToString('x2') }))
+}
+
+# (fix 925) Compare the manifest saved by the app when the update was armed
+# with the staging tree as it exists now. Tampering between arming and the
+# restart-for-apply is detected here, BEFORE any file is copied. An armed.json
+# without a manifest (armed by an older version) skips the check.
+function Test-StagingManifest {
+    $armedPath = Join-Path $upd 'armed.json'
+    if (-not (Test-Path -LiteralPath $armedPath)) { Log 'armed.json missing - skip integrity check'; return $true }
+    $armedObj = $null
+    try { $armedObj = Get-Content -LiteralPath $armedPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { Log 'armed.json unreadable - skip integrity check'; return $true }
+    if (-not ($armedObj.manifest -and $armedObj.manifest.algo -eq 'sha256-lines-v1' -and $armedObj.manifest.hash)) {
+        Log 'armed.json has no manifest (older version armed it) - skip integrity check'
+        return $true
+    }
+    $actual = Get-StagingAggregateHash $staging
+    if ($actual -ne $armedObj.manifest.hash) {
+        Log ('STAGING TAMPERED: expected ' + $armedObj.manifest.hash + ' got ' + $actual)
+        return $false
+    }
+    Log 'staging integrity check ok'
+    return $true
+}
+
 Log ('=== apply_update start: version=' + $Version + ' depsChanged=' + $DepsChanged + ' waitPids=' + $WaitPids + ' ===')
 
 # ------------------------------------------- 1. wait for the app to stop ---
@@ -138,6 +184,9 @@ if (-not (Test-Path -LiteralPath $stagedPkg)) {
         Log "staging version $pkgVer != requested $Version - abort"
     } elseif (-not (Test-Path -LiteralPath (Join-Path $staging '.next\BUILD_ID'))) {
         Log 'staging/.next/BUILD_ID missing - abort'
+    } elseif (-not (Test-StagingManifest)) {
+        # (fix 925) abort before ANY change: nothing has been copied yet at this point
+        Log 'staging integrity check failed - abort'
     } else {
         $ok = $true
     }

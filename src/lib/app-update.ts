@@ -28,6 +28,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -78,6 +79,13 @@ export interface ArmedUpdate {
   version: string
   ts: string
   depsChanged: boolean
+  /**
+   * (правка 925) Агрегированный хэш дерева staging (алгоритм 'sha256-lines-v1',
+   * см. stagingAggregateHash). apply_update.ps1 пересчитывает его перед копированием:
+   * если файлы staging подменили между «взведением» и перезапуском — обновление
+   * не применяется. Поля нет у armed.json старых версий — ps1 тогда пропускает сверку.
+   */
+  manifest?: { algo: 'sha256-lines-v1'; hash: string }
 }
 
 interface ZipMeta {
@@ -144,8 +152,10 @@ let feedCache: FeedCache | null = null
 const FEED_TTL_MS = 10 * 60_000
 
 function feedUrl(): string {
+  // (правка 925) Только https://: прежняя проверка startsWith('http') допускала
+  // плоский текстовый фид по http, и MITM получал контроль над url+digest+версией.
   const custom = process.env.UPDATE_FEED_URL?.trim()
-  return custom && custom.startsWith('http') ? custom : FEED_URL_DEFAULT
+  return custom && custom.startsWith('https://') ? custom : FEED_URL_DEFAULT
 }
 
 interface GhAsset {
@@ -179,14 +189,25 @@ async function fetchFeed(): Promise<FeedCache> {
       const asset = (rel.assets ?? []).find((a) => a.name === ASSET_NAME)
       if (!rel.tag_name || !asset?.browser_download_url) {
         cache.error = `В релизе нет файла ${ASSET_NAME}`
+      } else if (!asset.browser_download_url.startsWith('https://')) {
+        // (правка 925) адрес ассета обязан быть https — фид доверенный, но
+        // защита дешёвая и снимает класс атак «редирект на http-зеркало».
+        cache.error = 'Ссылка на файл обновления не https — обновление пропущено'
       } else {
+        const sha256 = (asset.digest ?? '').replace(/^sha256[:-]?/i, '')
+        if (!/^[0-9a-f]{64}$/i.test(sha256)) {
+          // (правка 925) Раньше при пустом digest проверка молча деградировала
+          // до размера. Теперь фид без sha256 = обновление недоступно.
+          cache.error = `В релизе нет контрольной суммы sha256 для ${ASSET_NAME} — обновление недоступно`
+        } else {
         cache.info = {
           version: String(rel.tag_name).replace(/^v/i, ''),
           url: asset.browser_download_url,
           sizeBytes: Number(asset.size ?? 0),
-          sha256: (asset.digest ?? '').replace(/^sha256:/i, ''),
+          sha256,
           htmlUrl: rel.html_url ?? '',
           notes: typeof rel.body === 'string' ? rel.body : '',
+        }
         }
       }
     }
@@ -470,6 +491,42 @@ function extractZip(zip: string, dest: string): Promise<void> {
  * Сама замена файлов — дело install\apply_update.ps1 (его запускает Electron).
  */
 export async function prepareApply(): Promise<{ ok: boolean; error?: string; armed?: ArmedUpdate; depsChanged?: boolean }> {
+  // (правка 925) Мьютекс: автоподготовка после скачивания (:405) и ручная кнопка
+  // «Установить» могли параллельно делать clearDir(STAGING)+extractZip в один каталог.
+  let p = prepareInFlight
+  if (!p) {
+    p = doPrepareApply().finally(() => {
+      if (prepareInFlight === p) prepareInFlight = null
+    })
+    prepareInFlight = p
+  }
+  return p
+}
+let prepareInFlight: Promise<{ ok: boolean; error?: string; armed?: ArmedUpdate; depsChanged?: boolean }> | null = null
+
+/*
+ * (правка 925) Агрегированный хэш дерева staging ('sha256-lines-v1'):
+ * для каждого файла — строка "<relpath>:<sha256-файла-в-lowercase-hex>", relpath
+ * через '/', сортировка лексикографическая по кодовым единицам UTF-16, каждая
+ * строка оканчивается '\n', всё кодируется UTF-8 без BOM, итого sha256 от текста.
+ * Тот же алгоритм повторяет Get-StagingAggregateHash в apply_update.ps1.
+ */
+function stagingAggregateHash(base: string): string {
+  const lines: string[] = []
+  const walk = (dir: string, relPrefix: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name
+      const full = join(dir, e.name)
+      if (e.isDirectory()) walk(full, rel)
+      else if (e.isFile()) lines.push(`${rel}:${createHash('sha256').update(readFileSync(full)).digest('hex')}`)
+    }
+  }
+  walk(base, '')
+  lines.sort()
+  return createHash('sha256').update(lines.map((l) => l + '\n').join(''), 'utf8').digest('hex')
+}
+
+async function doPrepareApply(): Promise<{ ok: boolean; error?: string; armed?: ArmedUpdate; depsChanged?: boolean }> {
   // (правка 791) Идемпотентность: автоподготовка после скачивания уже раскладывала
   // staging и записала armed.json, а zip с мета удалила (экономия места). Повторный
   // вызов кнопки «Перезапустить и установить» не должен требовать zip — иначе
@@ -496,8 +553,12 @@ export async function prepareApply(): Promise<{ ok: boolean; error?: string; arm
   // иначе — хэш, зафиксированный при скачивании.
   const feed = await fetchFeed()
   const expected = feed.info?.sha256 || meta.sha256
+  if (!expected) {
+    // (правка 925) Раньше при пустом expected хэш-контроль молча пропускался.
+    return { ok: false, error: 'Нет зафиксированной контрольной суммы обновления — скачайте его заново' }
+  }
   const actual = await sha256File(ZIP_PATH)
-  if (expected && actual !== expected) {
+  if (actual !== expected) {
     try { unlinkSync(ZIP_PATH) } catch { /* ignore */ }
     try { unlinkSync(ZIP_META) } catch { /* ignore */ }
     return { ok: false, error: 'Контрольная сумма скачанного файла не совпала — удалите обновление и скачайте заново' }
@@ -529,10 +590,21 @@ export async function prepareApply(): Promise<{ ok: boolean; error?: string; arm
     depsChanged = a !== b
   } catch { depsChanged = true }
 
+  // (правка 925) Фиксируем агрегированный хэш staging — apply_update.ps1
+  // сверит его перед копированием (защита от подмены staging между взведением
+  // и установкой).
+  let manifest: ArmedUpdate['manifest']
+  try {
+    manifest = { algo: 'sha256-lines-v1', hash: stagingAggregateHash(STAGING) }
+  } catch {
+    clearDir(STAGING)
+    return { ok: false, error: 'Не удалось посчитать контрольные суммы файлов обновления — скачайте его заново' }
+  }
   const armed: ArmedUpdate = {
     version: meta.version,
     ts: new Date().toISOString(),
     depsChanged,
+    manifest,
   }
   writeJson(ARMED, armed)
   // zip больше не нужен (staging уже разложен), экономим место.
