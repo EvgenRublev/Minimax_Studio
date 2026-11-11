@@ -91,6 +91,11 @@ const AUTO_REMOVE_ERROR_MS = 30000
 /** Rehydrated items older than this are dropped (stale across sessions). */
 const MAX_AGE_MS = 24 * 60 * 60 * 1000
 
+/** (правка 932) «Отправка» без prompt_id и без clientToken — это карточка,
+ *  чей submit-контекст умер (перезагрузка/старый баг шлюза). В ComfyUI такой
+ *  задачи нет: держать её в очереди вечно смысла нет. */
+const SUBMIT_GHOST_MS = 2 * 60 * 1000
+
 /** Drop finished + stale items when rehydrating from localStorage. */
 function rehydrateItems(persisted: unknown): QueueItem[] {
   const items = (persisted as { items?: QueueItem[] } | null)?.items
@@ -102,7 +107,13 @@ function rehydrateItems(persisted: unknown): QueueItem[] {
       now - i.createdAt < MAX_AGE_MS &&
       i.status !== 'done' &&
       i.status !== 'error' &&
-      i.status !== 'cancelled',
+      i.status !== 'cancelled' &&
+      !(
+        (i.status === 'submitting' || i.status === 'queued') &&
+        !i.promptId &&
+        !i.clientToken &&
+        now - i.createdAt > SUBMIT_GHOST_MS
+      ),
   )
 }
 

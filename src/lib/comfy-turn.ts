@@ -26,6 +26,10 @@ import {
 
 /** Режимы, которые исполняет ComfyUI и которые обязаны идти строго по одному. */
 export const COMFY_GATED_TYPES: ReadonlySet<QueueItemType> = new Set<QueueItemType>([
+  // (правка 932) 'image' — вкладка «Изображение» исполняется тем же ComfyUI.
+  // Без него acquireComfyTurn() сразу возвращал false, submit() молча
+  // выходил, а карточка навсегда зависала в «Отправка…» (promptId: null).
+  'image',
   'video',
   'refine',
   'controlnet',

@@ -86,7 +86,19 @@ export const useImageJob = create<ImageJobState>()(
         pendingLabel = { prompt: body.prompt, seed: body.seed }
 
         const granted = await acquireComfyTurn(qid)
-        if (!granted || !isComfyTurnActive(qid)) return
+        if (!granted) {
+          // (правка 932) Раньше здесь был просто `return`: если ход не выдан не
+          // из-за отмены (например, тип не входил в COMFY_GATED_TYPES), карточка
+          // навсегда оставалась в «Отправка…» и пользователь не видел ни ошибки,
+          // ни запуска. Отменённый/удалённый элемент молча игнорируем, живой —
+          // помечаем ошибкой, чтобы он не висел зомби.
+          const cur = useGenQueue.getState().items.find((i) => i.id === qid)
+          if (cur && (cur.status === 'submitting' || cur.status === 'queued')) {
+            useGenQueue.getState().setStatus(qid, 'error', 'Не удалось получить очередь ComfyUI')
+          }
+          return
+        }
+        if (!isComfyTurnActive(qid)) return
 
         const myEpoch = cancelEpoch
         cancelRequestedFor = null
