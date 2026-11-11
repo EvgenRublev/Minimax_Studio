@@ -12,6 +12,21 @@ function isExistingDir(p: string): boolean {
 }
 
 /**
+ * (правка 928) comfy_dir исполняется как ядро: старт ComfyUI и stt-runner
+ * спавнят `<comfy_dir>\python_embeded\python.exe`, а галереи пишут/удаляют в
+ * `<comfy_dir>\output|input`. Раньше валидировалось только «существующая
+ * папка», поэтому POST {"comfy_dir":"C:\\Users\\PC\\SomeApp"} перенаправлял
+ * спавн питона и roots галерей на чужой каталог. Треваем структуру ComfyUI:
+ * main.py в корне (плоская раскладка, правка 905) или в ComfyUI\ (старая).
+ */
+function looksLikeComfyRoot(p: string): boolean {
+  const has = (sub: string) => {
+    try { return statSync(join(p, sub)).isFile() } catch { return false }
+  }
+  return has('main.py') || has(join('ComfyUI', 'main.py'))
+}
+
+/**
  * (правка 308) Резолвинг «своя LLM»: значением может быть ФАЙЛ .gguf
  * (возвращаем как есть) или ПАПКА — тогда берём первый подходящий файл
  * внутри неё (дальше по коду всегда ожидается файл: llm_server.py открывает
@@ -187,6 +202,15 @@ export async function POST(request: Request) {
       if (v && !isExistingDir(v)) {
         return NextResponse.json(
           { error: `Папка ComfyUI не найдена: ${v}` },
+          { status: 400 },
+        )
+      }
+      // (правка 928) дополнительно: это должен быть корень ComfyUI (main.py в
+      // корне или в ComfyUI\), а не произвольная папка — из comfy_dir строится
+      // путь к python.exe для спавна и roots галерей.
+      if (v && !looksLikeComfyRoot(v)) {
+        return NextResponse.json(
+          { error: `В указанной папке нет ядра ComfyUI (нет main.py): ${v}. Укажите корень ComfyUI или оставьте пустым для папки рядом с программой.` },
           { status: 400 },
         )
       }

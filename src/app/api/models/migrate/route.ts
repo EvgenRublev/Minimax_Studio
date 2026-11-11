@@ -30,7 +30,7 @@
  */
 import { NextResponse } from 'next/server'
 import { existsSync, statSync, readdirSync, renameSync, copyFileSync, unlinkSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { join, relative, dirname, resolve } from 'path'
+import { join, relative, dirname, resolve, sep } from 'path'
 import { getAppConfig } from '@/lib/app-config'
 
 export const dynamic = 'force-dynamic'
@@ -570,6 +570,39 @@ export async function POST(request: Request) {
           { status: 400 }
         )
       }
+    }
+
+    // (правка 928) sourceDir обязан выглядеть как папка старой версии программы,
+    // а не как «любое место на диске»: инструмент ищет подпапки models/input/
+    // output/data до 3 уровней вглубь и ПЕРЕНОСИТ их с удалением оригиналов.
+    // Указание, например, %LOCALAPPDATA% вырезало бы чужие программные данные.
+    // Запрещены: корень диска, профиль целиком и его системные папки, Windows,
+    // Program Files, ProgramData. Конкретная папка программы внутри профиля —
+    // разрешена (дефолтная установка — %USERPROFILE%\Minimax Studio).
+    const deniedExact = [
+      process.env.USERPROFILE,
+      process.env.HOME,
+      process.env.APPDATA,
+      process.env.LOCALAPPDATA,
+      process.env.ProgramData,
+      process.env.SystemRoot,
+      process.env.windir,
+      process.env.ProgramFiles,
+      process.env['ProgramFiles(x86)'],
+      process.env.CommonProgramFiles,
+      process.env['CommonProgramFiles(x86)'],
+      process.env.HOMEDRIVE ? join(process.env.HOMEDRIVE, sep) : '',
+    ].filter(Boolean).map((p) => norm(resolve(p as string)).replace(/\/+$/, ''))
+    const srcBare = norm(resolve(sourceDir)).replace(/\/+$/, '')
+    if (/^[a-z]:$/.test(srcBare) || deniedExact.includes(srcBare)) {
+      return NextResponse.json(
+        {
+          error:
+            'Нельзя переносить данные из системной папки или корня диска. ' +
+            'Укажите папку со СТАРОЙ версией программы (например D:\\Minimax_Studio_V6).',
+        },
+        { status: 400 }
+      )
     }
 
     // Категории включены по умолчанию — старый клиент, шлющий только

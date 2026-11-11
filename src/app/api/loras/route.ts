@@ -193,7 +193,9 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
     const { name, strength, enabled, trigger } = body as { name: string; strength?: number; enabled?: boolean; trigger?: string }
-    if (!name) {
+    // (правка 928) Имя LoRA — только плоское имя файла: раньше «../../…/Local State»
+    // сохранялся в loras.json и getFileSize отдавал размер файла вне папки loras.
+    if (!name || typeof name !== 'string' || path.basename(name) !== name) {
       return NextResponse.json({ error: 'Invalid LoRA name' }, { status: 400 })
     }
 
@@ -304,7 +306,8 @@ export async function DELETE(req: NextRequest) {
 function getFileSize(name: string): number {
   try {
     const dir = lorasDir()
-    const st = fs.statSync(path.join(dir, name))
+    // (правка 928) basename() — второй слой: стат только внутри папки loras.
+    const st = fs.statSync(path.join(dir, path.basename(name)))
     return st.size
   } catch {
     return 0
