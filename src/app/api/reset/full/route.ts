@@ -116,7 +116,18 @@ async function removeFile(file: string): Promise<number> {
   }
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  // (правка 926) Вторая линия защиты от «drive-by» сброса (первая — CSRF-guard
+  // в src/proxy.ts): сервер требует явный токен подтверждения в теле.
+  let body: { confirm?: unknown } = {}
+  try {
+    body = (await req.json()) as { confirm?: unknown }
+  } catch {
+    /* не JSON — провалим проверку ниже */
+  }
+  if (body.confirm !== 'RESET') {
+    return NextResponse.json({ error: 'Требуется подтверждение: body confirm="RESET"' }, { status: 400 })
+  }
   const cwd = process.cwd()
   // Конфиг читаем ДО сброса: пути input/output берутся из текущего backend,
   // а не из заводского (у пользователя может быть своя папка ComfyUI).

@@ -414,8 +414,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         //    не писали в уже очищенные папки.
         await fetch('/api/comfy/purge-queue', { method: 'POST' }).catch(() => {})
 
-        // 2) Серверный полный сброс.
-        const res = await fetch('/api/reset/full', { method: 'POST' })
+        // 2) Серверный полный сброс. (правка 926) Сервер требует токен
+        //    подтверждения в теле — случайный/вредоносный POST без него отклоняется.
+        const res = await fetch('/api/reset/full', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ confirm: 'RESET' }),
+        })
         const data = await res.json().catch(() => null)
         const failed = !res.ok || !data?.ok
         const reason = Array.isArray(data?.errors) && data.errors.length
