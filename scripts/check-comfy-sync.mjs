@@ -67,6 +67,26 @@ if (existsSync(cnDir)) {
   }
 }
 
+// 4b. (правка 924) Frame-Interpolation не импортируется без config.yaml:
+//    ComfyUI отвечает HTTP 400 missing_node_type, и вкладка «FPS» мертва.
+//    Файл обязан быть в бандле, а синхронизатор - восстанавливать его, не
+//    затирая пользовательскую копию.
+{
+  const fiDir = join(cnDir, 'ComfyUI-Frame-Interpolation')
+  const fiConfig = join(fiDir, 'config.yaml')
+  expect(existsSync(fiConfig), 'нода ComfyUI-Frame-Interpolation: config.yaml есть в бандле')
+  if (existsSync(fiConfig)) {
+    const yml = readFileSync(fiConfig, 'utf-8')
+    expect(/^ckpts_path:/m.test(yml), 'Frame-Interpolation config.yaml: задан ckpts_path')
+    expect(/^ops_backend:/m.test(yml), 'Frame-Interpolation config.yaml: задан ops_backend')
+  }
+  expect(/SEED_ONLY/.test(sync) && /ComfyUI-Frame-Interpolation\/config\.yaml/.test(sync),
+    'sync_custom_nodes.js: config.yaml кладётся только если его нет (SEED_ONLY)')
+  const vfiUtils = read('custom nodes/ComfyUI-Frame-Interpolation/vfi_utils.py')
+  expect(/DEFAULT_CONFIG\s*=/.test(vfiUtils) && !/raise Exception\(["']config\.yaml/.test(vfiUtils),
+    'vfi_utils.py: без config.yaml не падает, а создаёт файл с дефолтами')
+}
+
 // 5. Патчи ядра на месте (файл с MiniMaxH3AddGuide — ключевой для аудио-гайда).
 const patchDir = join(ROOT, 'install', 'comfy-patches')
 expect(existsSync(patchDir), 'есть папка install/comfy-patches')

@@ -50,10 +50,32 @@ CKPT_FALLBACK_URLS = {
 }
 
 config_path = os.path.join(os.path.dirname(__file__), "./config.yaml")
+# (правка 924) config.yaml - обязательный файл ноды, но в бандле студии его не
+# было. У обновившихся с 7.1.13 он оказался снесён старой самопроверкой папки
+# (правка 870), и импорт падал с «config.yaml file is neccessary» - ComfyUI
+# терял ВСЕ VFI-ноды и отвечал HTTP 400 missing_node_type 'RIFE VFI'. Теперь
+# файл едет в бандле и восстанавливается синхронизацией при запуске, а здесь
+# остаётся страховка на случай запуска ComfyUI в обход студии: вместо падения
+# создаём файл с дефолтами (или работаем с ними в памяти, если папка read-only).
+DEFAULT_CONFIG = {"ckpts_path": "./ckpts", "ops_backend": "cupy"}
 if os.path.exists(config_path):
-    config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
+    with open(config_path, "r") as config_file:
+        config = yaml.load(config_file, Loader=yaml.FullLoader)
 else:
-    raise Exception("config.yaml file is neccessary, plz recreate the config file by downloading it from https://github.com/Fannovel16/ComfyUI-Frame-Interpolation")
+    config = dict(DEFAULT_CONFIG)
+    try:
+        with open(config_path, "w") as config_file:
+            config_file.write(
+                "#Plz don't delete this file, just edit it when neccessary.\n"
+                'ckpts_path: "./ckpts"\n'
+                'ops_backend: "cupy" #Either "taichi" or "cupy"\n'
+            )
+    except OSError:
+        pass
+if not isinstance(config, dict):
+    config = dict(DEFAULT_CONFIG)
+for _config_key, _config_default in DEFAULT_CONFIG.items():
+    config.setdefault(_config_key, _config_default)
 DEVICE = get_torch_device()
 
 class InterpolationStateList():

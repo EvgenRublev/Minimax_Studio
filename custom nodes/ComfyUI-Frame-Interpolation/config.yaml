@@ -1,0 +1,7 @@
+#Plz don't delete this file, just edit it when neccessary.
+# (fix 924) MiniMax Studio ships this file in the bundle: without it the node
+# raises "config.yaml file is neccessary" at import and every VFI node
+# disappears from ComfyUI (HTTP 400 missing_node_type 'RIFE VFI').
+# ops_backend "cupy" matches requirements.lock.txt.
+ckpts_path: "./ckpts"
+ops_backend: "cupy" #Either "taichi" or "cupy"
