@@ -37,6 +37,11 @@ export interface ImageParams {
   vae: string
   lowVramAttention: boolean
   chunkFeedForward: boolean
+  /**
+   * (правка 934) Апсемплер промпта: имя файла p-h3-image_prompt_upsampler_*;
+   * '' — выключен (запрос уходит модели как есть).
+   */
+  upsampler: string
 }
 
 export const DEFAULT_IMAGE_PARAMS: ImageParams = {
@@ -52,6 +57,7 @@ export const DEFAULT_IMAGE_PARAMS: ImageParams = {
   vae: '',
   lowVramAttention: true,
   chunkFeedForward: true,
+  upsampler: '',
 }
 
 export interface ImageReference {

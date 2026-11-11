@@ -30,6 +30,43 @@ export const DEFAULT_IMAGE_LORA = 'p-h3-image_lora_bf16.safetensors'
 export const DEFAULT_IMAGE_TEXT_ENCODER = 'p-h3-image_text_encoder_w4a8.safetensors'
 export const DEFAULT_IMAGE_VAE = 'p-h3-image_vae_int8_convrot.safetensors'
 
+/**
+ * (правка 934) Prompt upsampler. В официальных воркфлоу PrunaAI он есть во
+ * всех четырёх графах, а в карточке модели прямо сказано: «P-H3-Image чувствительна
+ * к промптам, короткие запросы без апсемплера дают слабые результаты». Это тот же
+ * Qwen3.5-9B, что и в нашем ассистенте, но дообученный под задачу, и исполняется он
+ * внутри ComfyUI (CLIPLoader + TextGenerate) — ядро само выгружает его из VRAM перед
+ * P-H3-Image. Наш LLM-ассистент для этого не годится: /api/llm/chat перед стартом
+ * вызывает evictComfyVerified(), то есть высаживает ComfyUI.
+ */
+export const DEFAULT_IMAGE_PROMPT_UPSAMPLER = 'p-h3-image_prompt_upsampler_w4a8.safetensors'
+export const IMAGE_PROMPT_UPSAMPLER_CANDIDATES = [
+  'p-h3-image_prompt_upsampler_w4a8.safetensors',
+  'p-h3-image_prompt_upsampler_int8_convrot.safetensors',
+  'p-h3-image_prompt_upsampler_bf16.safetensors',
+] as const
+export const isImagePromptUpsampler = (name: string): boolean =>
+  /prompt_upsampler|prompt-upsampler/i.test(name)
+
+/**
+ * (правка 934) Официальная база для image-LoRA — трансформер FL2VA (в карточке:
+ * «Load minimax_h3_fl2va_bf16 … the pruned and quantized FL2VA files work too»).
+ * Community-мержи видео-модели (у нас стоит Singularity_x_10Eros-Max_PRISM) тоже
+ * технически работают с LoRA, но это чужие веса после видеодобычи — от них лицо и
+ * «плывёт». Поэтому при невыбранной модели предпочитает FL2VA.
+ */
+export const isFl2vaImageBase = (name: string): boolean => /fl2va/i.test(name)
+export function pickImageBaseModel(available: string[]): string {
+  const fl2va = available.filter(isFl2vaImageBase)
+  if (fl2va.length > 0) return fl2va.sort((a, b) => a.localeCompare(b))[0]
+  return ''
+}
+
+/** Формат входа апсемплера — дословно как в эталонном StringFormat. */
+export function imageUpsamplerInput(aspect: string, request: string): string {
+  return `Aspect ratio: ${aspect}\nRequest: ${request}`
+}
+
 /** Максимум картинок в PH3ImageConditioning: image_1 (что правим) + 7 референсов. */
 export const IMAGE_MAX_REFERENCES = 8
 
@@ -201,7 +238,17 @@ export interface ImageGenParams {
   chunkFFChunks?: number
   chunkFFThreshold?: number
   filenamePrefix?: string
+  /**
+   * (правка 934) Апсемплер промпта: имя CLIP-файла p-h3-image_prompt_upsampler_*;
+   * '' или null — выключен (запрос уходит модели как есть).
+   */
+  promptUpsampler?: string | null
+  /** Соотношение сторон для формата входа апсемплера ('1:1', '16:9', …). */
+  aspect?: string
 }
+
+/** id ноды апсемплера — по нему из history можно прочитать расширенный промпт. */
+export const IMAGE_UPSAMPLER_NODE_ID = '7:16'
 
 /** id ноды-сэмплера — на него вешается прогресс (progress-tracker). */
 export const IMAGE_SAMPLER_NODE_ID = '7:12'
@@ -278,6 +325,36 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
     prompt: p.prompt,
     width,
     height,
+  }
+
+  // (правка 934) Апсемплер промпта — как в эталоне: CLIPLoader(type minimax) +
+  // TextGenerate (greedy: sampling_mode 'off', thinking on) с входом
+  // «Aspect ratio: X\nRequest: …», а уже его текст уходит в conditioning.
+  // Только для генерации по тексту: в эталонном edit-графе апсемплер получает
+  // ещё и картинки блоками <Picture N> — это отдельная работа.
+  const upsampler = (p.promptUpsampler ?? '').trim()
+  const useUpsampler = Boolean(upsampler) && refs.length === 0
+  if (useUpsampler) {
+    modelChain['7:17'] = {
+      inputs: { clip_name: upsampler, type: 'minimax', device: 'default' },
+      class_type: 'CLIPLoader',
+      _meta: { title: 'Prompt upsampler (CLIP)' },
+    }
+    modelChain[IMAGE_UPSAMPLER_NODE_ID] = {
+      inputs: {
+        clip: ['7:17', 0],
+        prompt: imageUpsamplerInput(p.aspect || '1:1', p.prompt.trim()),
+        max_length: 2048,
+        sampling_mode: 'off',
+        thinking: true,
+        use_default_template: true,
+        mtp: 'auto',
+        seed: p.seed ?? 0,
+      },
+      class_type: 'TextGenerate',
+      _meta: { title: 'Апсемплер промпта' },
+    }
+    condInputs.prompt = [IMAGE_UPSAMPLER_NODE_ID, 0]
   }
   if (refs.length > 0) {
     // ВAE нужен ноде и для кодирования референсов, и для латента результата

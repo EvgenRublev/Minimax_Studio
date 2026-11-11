@@ -49,6 +49,7 @@ import {
   IMAGE_MP_HINT,
   IMAGE_SIGMA_SCHEDULES,
   IMAGE_SCHEDULE_LABELS,
+  DEFAULT_IMAGE_PROMPT_UPSAMPLER,
   imageQualityLabel,
 } from '@/lib/comfy/image-template'
 
@@ -61,7 +62,11 @@ interface ImageAssets {
   vaes?: string[]
   imageModels?: string[]
   diffusionModels?: string[]
-  defaults?: { imageLora: string; textEncoder: string; vae: string }
+  /** (правка 934) файлы апсемплера промпта и официальные базы FL2VA. */
+  promptUpsamplers?: string[]
+  imageBases?: string[]
+  upsamplerMissing?: boolean
+  defaults?: { imageLora: string; textEncoder: string; vae: string; promptUpsampler?: string; diffusionModel?: string }
   error?: string
 }
 
@@ -208,6 +213,7 @@ export function ImageView() {
       prompt: params.prompt.trim(),
       width: size[0],
       height: size[1],
+      aspect: params.aspect,
       schedule: params.schedule,
       seed,
       diffusionModel: params.model || undefined,
@@ -215,6 +221,8 @@ export function ImageView() {
       loraStrength: params.loraStrength,
       textEncoder: params.textEncoder || undefined,
       vae: params.vae || undefined,
+      // '' = авто (сервер сам берёт первый апсемплер с диска), null = выключен.
+      promptUpsampler: params.upsampler === '__off__' ? null : params.upsampler || undefined,
       references: references.map((r) => ({ name: r.name })),
       lowVramAttention: params.lowVramAttention,
       chunkFeedForward: params.chunkFeedForward,
@@ -459,12 +467,34 @@ export function ImageView() {
                   <Select value={params.model || '__default__'} onValueChange={(v) => setParams({ model: v === '__default__' ? '' : v })}>
                     <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__default__">Основная модель (из Настроек)</SelectItem>
+                      <SelectItem value="__default__">
+                        {assets?.defaults?.diffusionModel && assets.imageBases?.length
+                          ? `Авто — официальная база FL2VA (${assets.defaults.diffusionModel})`
+                          : 'Основная модель (из Настроек)'}
+                      </SelectItem>
                       {(assets?.diffusionModels ?? []).map((m) => (
                         <SelectItem key={m} value={m}>{m}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {/* (правка 934) Официальная база для image-LoRA — FL2VA. Видео-мерж
+                      технически работает, но это чужие веса после видеобьютизации:
+                      от них чаще «плывут» лица и глаза. */}
+                  {(assets?.imageBases?.length ?? 0) > 0 &&
+                    params.model !== '' &&
+                    !/fl2va/i.test(params.model) && (
+                      <div className="text-[10px] text-amber-300">
+                        Выбран не FL2VA. Карточка P-H3-Image требует базу FL2VA
+                        ({assets?.imageBases?.[0]}) под image-LoRA; на видео-мерже детали лица
+                        заметно хуже.
+                      </div>
+                    )}
+                  {(assets?.imageBases?.length ?? 0) === 0 && (
+                    <div className="text-[10px] text-muted-foreground">
+                      На диске нет официальной базы FL2VA (minimax_h3_fl2va_pruned_w6a8, ~16 ГБ) —
+                      сейчас картинка идёт поверх видео-модели.
+                    </div>
+                  )}
                   <div className="text-[10px] text-muted-foreground">
                     Видео-модель + LoRA = картинка без отдельного image-DiT.
                   </div>
@@ -529,6 +559,43 @@ export function ImageView() {
                 <div className="text-[10px] text-muted-foreground">
                   Энкодер и VAE обязаны быть image-ными: видео-энкодер (qwen3vl_32b_minimax_h3_*)
                   с картинкой несовместим.
+                </div>
+
+                {/* ─── Апсемплер промпта (правка 934) ─── */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Апсемплер промпта</Label>
+                  <Select
+                    value={params.upsampler || '__auto__'}
+                    onValueChange={(v) => setParams({ upsampler: v === '__auto__' ? '' : v })}
+                    disabled={busy}
+                  >
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__auto__">
+                        Авто ({assets?.defaults?.promptUpsampler ?? 'первый с диска'})
+                      </SelectItem>
+                      <SelectItem value="__off__">Выключен (запрос уходит как есть)</SelectItem>
+                      {(assets?.promptUpsamplers ?? []).map((u) => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-[10px] text-muted-foreground">
+                    Карточка P-H3-Image: модель чувствительна к формулировкам, короткий запрос без
+                    апсемплера даёт слабые детали (лица, глаза). Работает только при генерации по
+                    тексту — при правках по референсу промпт уходит как есть.
+                  </div>
+                  {(assets?.promptUpsamplers?.length ?? 0) === 0 && (
+                    <div className="text-[10px] text-amber-300">
+                      Файла апсемплера на диске нет ({DEFAULT_IMAGE_PROMPT_UPSAMPLER}) — скачайте его в
+                      «Настройки → Модели», иначе качество коротких промптов остаётся низким.
+                    </div>
+                  )}
+                  {references.length > 0 && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Сейчас включены референсы: апсемплер в этом режиме не участвует.
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">

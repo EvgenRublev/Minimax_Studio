@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
-import path from 'path'
+import path, { join } from 'path'
 import { submitWorkflowJson } from '@/lib/comfy/minimax-h3-client'
 import { setActivePrompt } from '@/lib/comfy/progress-tracker'
 import { getAppConfig } from '@/lib/app-config'
@@ -14,7 +14,10 @@ import {
   DEFAULT_IMAGE_LORA,
   DEFAULT_IMAGE_TEXT_ENCODER,
   DEFAULT_IMAGE_VAE,
+  IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
+  pickImageBaseModel,
 } from '@/lib/comfy/image-template'
+import { listModelFiles } from '@/lib/comfy/model-scan'
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
 
 /**
@@ -64,6 +67,10 @@ export async function POST(req: NextRequest) {
       references?: RefInput[]
       lowVramAttention?: boolean
       chunkFeedForward?: boolean
+      /** (правка 934) '' = выключен; undefined — первый доступный с диска. */
+      promptUpsampler?: string | null
+      /** Соотношение сторон для формата входа апсемплера. */
+      aspect?: string
     }
 
     const prompt = (body.prompt || '').trim()
@@ -138,16 +145,26 @@ export async function POST(req: NextRequest) {
     }
 
     const imageLora = body.imageLora === undefined ? DEFAULT_IMAGE_LORA : body.imageLora
-    // Пустой выбор = та же модель, что выбрана в Настройках → Общие для видео
-    // (паттерн /api/comfy/generate: cfg.diffusionModel подставляется, если фронт
-    // его не прислал).
-    const diffusionModel = (body.diffusionModel || cfg.diffusionModel || '').trim()
+    // (правка 934) База по умолчанию: официальная карточка требует FL2VA под
+    // image-LoRA. Если фронт модель не прислал — берём FL2VA с диска, и только
+    // если его нет — видео-модель из Настроек (как раньше).
+    const diffusionModels = listModelFiles(join(cfg.comfyCore, 'models'), 'diffusion_models')
+    const diffusionModel =
+      (body.diffusionModel || '').trim() || pickImageBaseModel(diffusionModels) || cfg.diffusionModel || ''
     if (!diffusionModel) {
       return NextResponse.json(
         { error: 'Не выбрана модель диффузии — укажите DiT во вкладке или основную модель в Настройках' },
         { status: 400 },
       )
     }
+
+    // (правка 934) Апсемплер промпта: undefined — взять первый доступный с диска
+    // (в порядке w4a8 → int8 → bf16), '' или null — выключить.
+    const upsamplerFiles = listModelFiles(join(cfg.comfyCore, 'models'), 'text_encoders')
+    const promptUpsampler =
+      body.promptUpsampler === undefined
+        ? IMAGE_PROMPT_UPSAMPLER_CANDIDATES.find((c) => upsamplerFiles.includes(c)) ?? ''
+        : (body.promptUpsampler || '').trim()
 
     const run = await runGeneration(() =>
       submitWorkflowJson(
@@ -165,6 +182,8 @@ export async function POST(req: NextRequest) {
           references,
           lowVramAttention: body.lowVramAttention,
           chunkFeedForward: body.chunkFeedForward,
+          promptUpsampler: promptUpsampler || null,
+          aspect: body.aspect,
         }),
         imageSamplerStages(),
       ),
@@ -192,6 +211,10 @@ export async function POST(req: NextRequest) {
         image_lora_strength: body.loraStrength ?? 1,
         image_text_encoder: body.textEncoder || DEFAULT_IMAGE_TEXT_ENCODER,
         image_vae: body.vae || DEFAULT_IMAGE_VAE,
+        // (правка 934) чем поднимали промпт и в какой пропорции — чтобы сайдкар
+        // позволял повторить чужой результат дословно.
+        image_upsampler: promptUpsampler || null,
+        image_aspect: body.aspect || '',
         seed: body.seed ?? null,
         ...(references.length > 0 && {
           references: references.map((r) => ({ type: 'image', path: r })),
