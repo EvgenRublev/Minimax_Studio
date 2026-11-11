@@ -1055,7 +1055,18 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   // первого кадра удерживают контент без текстового гида.
   // (правка 483) Триггеры LoRA (pSuffix) — на ВСЕХ окнах, иначе окна 1+
   // рефинились бы без стиля активной LoRA.
-  const promptRest = captions + pSuffix
+  // (правка 923) Для ОДНОПЛАНОВого текста это правило вредит: замеры
+  // refine_00005 (3 с, 5 окон) показали, что отличие результата от
+  // исходника шагообразно растёт ровно на швах окон (кадр 107: 5.77 → 6.38
+  // MAE; у соседних кадров шаги 0.2), а сразу после шва картинка «дышит»
+  // (межкадровая разница 2.96 там, где у исходника 0.87) — окно без
+  // текстового гида даёт другой рисунок деталей, чем окно 0. Поэтому
+  // промпт теперь уходит ВСЕМ окнам, если текст описывает один план.
+  // Многосценные промпты («[Shot 1] … [Shot 2] …», блоки «—») прежние:
+  // там описание чужих планов окно путает.
+  const multiScenePrompt =
+    (basePrompt.match(/\[\s*(?:shot|scene|сцена|кадр)\s*\d+/gi) || []).length >= 2
+  const promptRest = multiScenePrompt ? captions + pSuffix : promptFirst
   const windows = planChunkWindows(p.sourceFrames, p.chunkSeconds ?? 5)
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
 
@@ -1586,8 +1597,9 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // используется — только conditioning.
         nodes[`ccond_${k}`] = {
           inputs: {
-            // Окно 0 — сюжетный промпт (первый промпт цепочки, от роута);
-            // окна 1+ — только якорные подписи референсов (см. выше).
+            // (правка 923) Сюжетный промпт уходит всем окнам, если текст
+            // описывает один план; для многосценных промптов — как раньше,
+            // только окно 0 (см. multiScenePrompt выше).
             prompt: k === 0 ? promptFirst : promptRest,
             width: final.genW,
             height: final.genH,
