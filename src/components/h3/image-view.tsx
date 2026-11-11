@@ -45,8 +45,11 @@ import {
   IMAGE_ASPECTS,
   IMAGE_SIZES,
   IMAGE_MAX_REFERENCES,
+  IMAGE_MEGAPIXELS,
+  IMAGE_MP_HINT,
   IMAGE_SIGMA_SCHEDULES,
   IMAGE_SCHEDULE_LABELS,
+  imageQualityLabel,
 } from '@/lib/comfy/image-template'
 
 interface ImageAssets {
@@ -284,21 +287,23 @@ export function ImageView() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Качество</Label>
+              <Label className="text-xs">Качество (МП)</Label>
               <Select
                 value={params.quality}
                 onValueChange={(v) => setParams({ quality: v as ImageQuality })}
               >
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="4">4 МП</SelectItem>
-                  <SelectItem value="8">8 МП</SelectItem>
+                  {IMAGE_MEGAPIXELS.map((mp) => (
+                    <SelectItem key={mp} value={mp}>{imageQualityLabel(mp, params.aspect)}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="text-[11px] text-muted-foreground -mt-2">
-            {size[0]}×{size[1]} пикселей
+            {size[0]}×{size[1]} пикселей ({(size[0] * size[1] / 1e6).toFixed(2)} МП)
+            {IMAGE_MP_HINT[params.quality] ? ` · ${IMAGE_MP_HINT[params.quality]}` : ''}
           </div>
 
           {/* ─── Сетка шагов + seed ─── */}

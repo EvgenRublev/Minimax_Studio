@@ -51,9 +51,20 @@ export const IMAGE_SCHEDULE_LABELS: Record<string, string> = {
 /**
  * Пресеты размеров. Кратность 32 обязательна (CANVAS_MULTIPLE в image-ноде),
  * поэтому значения взяты из официальной таблицы разрешений, а не «круглые».
+ *
+ * (правка 933) Диапазон расширен до 0.5…8 МП для подбора качества. Строки
+ * 4 и 8 МП — дословно официальная таблица PrunaAI (её и надо сравнивать с
+ * остальными), остальные считаются: сторона кратна 32, пропорция — минимальное
+ * отклонение, затем — площадь к цели. Официальная рекомендация: текст в 8 МП,
+ * правки в 4 или 8 МП; ниже 2 МП лицо начинает «плыть» уже по разрешению.
  */
 export const IMAGE_ASPECTS = ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'] as const
-export const IMAGE_SIZES: Record<'4' | '8', Record<string, [number, number]>> = {
+
+/** Мегапиксельные ступени (ключи — строки, они же в сторе и в UI). */
+export const IMAGE_MEGAPIXELS = ['0.5', '1', '1.5', '2', '2.5', '3', '4', '5', '6', '7', '8'] as const
+
+/** Официальные строки таблицы PrunaAI — их не пересчитываем. */
+const IMAGE_SIZES_OFFICIAL: Record<string, Record<string, [number, number]>> = {
   // 4 МП — рекомендуемый режим для правок по референсам
   '4': {
     '1:1': [2048, 2048],
@@ -75,6 +86,95 @@ export const IMAGE_SIZES: Record<'4' | '8', Record<string, [number, number]>> = 
     '9:16': [2176, 3872],
   },
 }
+
+const MULTIPLE = 32
+
+/** Сторона обязана остаться в том же диапазоне, что проверяет API-роут. */
+const SIDE_MIN = 256
+const SIDE_MAX = 4096
+
+function aspectParts(aspect: string): [number, number] {
+  const [w, h] = aspect.split(':').map((n) => Number(n))
+  if (!w || !h) return [1, 1]
+  return [w, h]
+}
+
+/**
+ * Подбор пары (w, h), кратной 32, для цели mp*1e6 при данной пропорции.
+ * Перебор соседей вокруг теоретического размера: сначала минимизируем ошибку
+ * пропорции, при равенстве — ошибку площади.
+ */
+function sizeForMegapixels(mp: number, aspect: string): [number, number] {
+  const [aw, ah] = aspectParts(aspect)
+  const ratio = aw / ah
+  const targetPx = mp * 1_000_000
+  const hIdeal = Math.sqrt(targetPx / ratio)
+  const wIdeal = hIdeal * ratio
+  const snap = (v: number) => Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(v / MULTIPLE) * MULTIPLE))
+  const w0 = snap(wIdeal)
+  const h0 = snap(hIdeal)
+  let best: [number, number] = [w0, h0]
+  let bestErr = Number.POSITIVE_INFINITY
+  for (let dh = -1; dh <= 1; dh++) {
+    for (let dw = -1; dw <= 1; dw++) {
+      const w = Math.max(SIDE_MIN, Math.min(SIDE_MAX, w0 + dw * MULTIPLE))
+      const h = Math.max(SIDE_MIN, Math.min(SIDE_MAX, h0 + dh * MULTIPLE))
+      if (h === 0 || w === 0) continue
+      const ratioErr = Math.abs(w / h - ratio) / ratio
+      const pxErr = Math.abs(w * h - targetPx) / targetPx
+      const err = ratioErr * 1000 + pxErr
+      if (err < bestErr) {
+        bestErr = err
+        best = [w, h]
+      }
+    }
+  }
+  return best
+}
+
+function buildImageSizes(): Record<string, Record<string, [number, number]>> {
+  const out: Record<string, Record<string, [number, number]>> = {}
+  for (const mp of IMAGE_MEGAPIXELS) {
+    const official = IMAGE_SIZES_OFFICIAL[mp]
+    if (official) {
+      out[mp] = { ...official }
+      continue
+    }
+    const row: Record<string, [number, number]> = {}
+    for (const a of IMAGE_ASPECTS) row[a] = sizeForMegapixels(Number(mp), a)
+    out[mp] = row
+  }
+  return out
+}
+
+export const IMAGE_SIZES: Record<string, Record<string, [number, number]>> = buildImageSizes()
+
+/** Подпись ступени в селекторе: «2 МП — 2016×1008». */
+export function imageQualityLabel(mp: string, aspect: string): string {
+  const [w, h] = IMAGE_SIZES[mp]?.[aspect] ?? [0, 0]
+  return `${mp} МП — ${w}×${h}`
+}
+
+/** Ключ ступени разрешения: '0.5' | '1' | … | '8'. */
+export type ImageQualityKey = (typeof IMAGE_MEGAPIXELS)[number]
+
+/** Действующая ступень: сохранённое значение могло быть удалено из списка. */
+export function normalizeImageQuality(q: string | undefined): ImageQualityKey {
+  return q && IMAGE_SIZES[q] ? (q as ImageQualityKey) : '4'
+}
+
+export const IMAGE_MP_HINT: Record<string, string> = {
+  '0.5': 'тест пропорций/композиции, очень быстро',
+  '1': 'эскиз',
+  '2': 'низкое: лицо начинает «плыть»',
+  '3': 'низкое-среднее',
+  '4': 'официальный режим правок (4 МП)',
+  '5': 'средне-высокое',
+  '6': 'высокое',
+  '7': 'высокое',
+  '8': 'официальный режим текста (8 МП), лучшее качество',
+}
+
 
 export interface ImageGenParams {
   prompt: string
@@ -106,11 +206,9 @@ export interface ImageGenParams {
 /** id ноды-сэмплера — на него вешается прогресс (progress-tracker). */
 export const IMAGE_SAMPLER_NODE_ID = '7:12'
 
-const MULTIPLE = 32
-
 function snap(v: number): number {
   const n = Math.round(v / MULTIPLE) * MULTIPLE
-  return Math.max(MULTIPLE, n)
+  return Math.max(SIDE_MIN, Math.min(SIDE_MAX, n))
 }
 
 export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {

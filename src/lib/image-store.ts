@@ -10,9 +10,10 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { IMAGE_ASPECTS } from '@/lib/comfy/image-template'
+import { IMAGE_ASPECTS, normalizeImageQuality, type ImageQualityKey } from '@/lib/comfy/image-template'
 
-export type ImageQuality = '4' | '8'
+/** Ступени разрешения (0.5…8 МП), см. IMAGE_MEGAPIXELS. */
+export type ImageQuality = ImageQualityKey
 export type ImageSchedule = 'image8' | 'fast4'
 
 export interface ImageParams {
@@ -112,6 +113,18 @@ export const useImageStore = create<ImageStoreState>()(
     {
       name: 'image-studio',
       partialize: (s) => ({ params: s.params, advancedOpen: s.advancedOpen }) as ImageStoreState,
+      // (правка 933) Ступени разрешения расширялись; старое значение из
+      // localStorage могло оказаться вне списка — нормализуем при загрузке.
+      merge: (persisted, current) => {
+        const p = (persisted as { params?: Partial<ImageParams> } | null)?.params
+        if (!p) return current
+        const aspect = IMAGE_ASPECT_SET.has(p.aspect || '') ? p.aspect! : DEFAULT_IMAGE_PARAMS.aspect
+        return {
+          ...current,
+          ...(persisted as ImageStoreState),
+          params: { ...DEFAULT_IMAGE_PARAMS, ...p, aspect, quality: normalizeImageQuality(p.quality) },
+        }
+      },
     },
   ),
 )
