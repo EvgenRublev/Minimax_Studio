@@ -23,6 +23,7 @@ import {
   ScanFaceIcon,
 } from 'lucide-react'
 import { useGenQueue, TYPE_ACCENT, TYPE_LABEL, type QueueItemType } from '@/lib/gen-queue-store'
+import { useGenProgress } from '@/lib/gen-progress-store' // (правка 931) чистый сброс карточки при отмене
 import { useAssistantPanel } from '@/lib/assistant-panel-store' // (правка 442) отступ от панели ассистента
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { cn } from '@/lib/utils'
@@ -310,6 +311,14 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
   // Mark cancelled FIRST so the status pollers stop tracking this prompt
   // (they watch for 'cancelled' / removed items) before we hit the API.
   setStatus(item.id, 'cancelled')
+  // (правка 931) Видео-карточка «Генерации» следит за promptId напрямую. Если
+  // её не сбросить, поллер галереи через 2–3 тика увидит ComfyUI-ответ
+  // «error» (execution_interrupted) и нарисует красную «Ошибку» — хотя
+  // пользователь просто отменил задачу. Сбрасываем карточку сразу.
+  const card = useGenProgress.getState().video
+  if (item.type === 'video' && item.promptId && card.promptId === item.promptId) {
+    useGenProgress.getState().resetVideoGen()
+  }
   try {
     await fetch('/api/comfy/cancel', {
       method: 'POST',

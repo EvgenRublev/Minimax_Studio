@@ -1475,58 +1475,66 @@ export function useVideoGen() {
     [queue, pollUntilDone]
   )
 
+  /**
+   * (правка 931) «Остановить» под превью отменяет ТОЛЬКО текущую задачу —
+   * ту, за которой следит карточка (или которая реально выполняется).
+   * Остальные элементы очереди остаются: шлюз comfy-turn освобождает ход и
+   * следующая задача стартует автоматически. Раньше здесь отменялись ВСЕ
+   * видео-элементы (submitting/queued/running) — один клик убивал всю очередь.
+   */
   const interrupt = useCallback(async () => {
-    // (fix H2) Ломаем эпоху: если сейчас в полёте POST /generate, его
-    // продолжение увидит смену и отменит уже принятую задачу.
+    const card = useGenProgress.getState().video
+    const activeVideo = useGenQueue
+      .getState()
+      .items.filter((i) => i.type === 'video' && ['submitting', 'queued', 'running'].includes(i.status))
+    // Текущая: карточка → promptId; иначе выполняющаяся; иначе отправляемая
+    // (POST в полёте, promptId ещё нет). Только queued — не трогаем: при
+    // активной генерации «текущая» найдётся раньше, а кнопка Stop видна лишь
+    // на активной карточке.
+    const current =
+      (card.promptId ? activeVideo.find((i) => i.promptId === card.promptId) : undefined) ??
+      activeVideo.find((i) => i.status === 'running') ??
+      activeVideo.find((i) => i.status === 'submitting')
+    if (!current) return
+
+    // (fix H2) Ломаем эпоху: если у ТЕКУЩЕЙ задачи POST /generate ещё в
+    // полёте, её продолжение увидит смену и отменит уже принятую задачу.
+    // Эпоха захватывается после acquireComfyTurn, поэтому на ожидающие
+    // следующие задачи инкремент не влияет.
     interruptEpoch++
-    const activeJobIds = useGenQueue
-      .getState()
-      .items
-      .filter((i) => i.type === 'video' && ['submitting', 'queued', 'running'].includes(i.status))
-      .map((i) => i.promptId)
-      .filter((pid): pid is string => Boolean(pid))
 
-    // Set abort flags FIRST — prevents in-flight poll responses from
+    // Set abort flag FIRST — prevents the in-flight poll response from
     // overwriting the clean state with a spurious 'error'.
-    for (const pid of timersRef.current.keys()) {
-      abortFlagsRef.current.set(pid, true)
+    if (current.promptId) {
+      abortFlagsRef.current.set(current.promptId, true)
     }
-    // Also mark active queue items as cancelled immediately.
-    useGenQueue
-      .getState()
-      .items
-      .filter((i) => i.type === 'video' && ['submitting', 'queued', 'running'].includes(i.status))
-      .forEach((i) => useGenQueue.getState().setStatus(i.id, 'cancelled'))
+    useGenQueue.getState().setStatus(current.id, 'cancelled')
 
-    // (правка 141) Send cancel requests in PARALLEL (not sequential) to
-    // reduce total cancel time. Also add a small delay between sends to
-    // avoid overwhelming ComfyUI with concurrent /interrupt + /queue POSTs.
-    const cancelPromises = activeJobIds.map(async (promptId) => {
-      try {
+    try {
+      if (current.promptId) {
         await fetch('/api/comfy/cancel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt_id: promptId }),
+          body: JSON.stringify({ prompt_id: current.promptId }),
         })
-      } catch { /* ignore */ }
-      // (правка 336) extclip-мусор при cancel — до удаления params из Map.
-      await cleanupExtendClips(promptId)
-      genParamsMap.delete(promptId)
-    })
-    await Promise.allSettled(cancelPromises)
-    persistGenParams()
+        // (правка 336) extclip-мусор при cancel — до удаления params из Map.
+        await cleanupExtendClips(current.promptId)
+        genParamsMap.delete(current.promptId)
+        persistGenParams()
+        clearTimer(current.promptId)
+      }
+    } catch { /* ignore */ }
 
-    clearAllTimers()
-    useGenProgress.getState().resetVideoGen()
-    // Remove cancelled items from queue
-    useGenQueue
-      .getState()
-      .items
-      .filter((i) => i.type === 'video' && i.status === 'cancelled')
-      .forEach((i) => useGenQueue.getState().remove(i.id))
+    // Сбрасываем карточку, только если она следила за отменённой задачей —
+    // иначе следующая генерация «подхватит» карточку как обычно.
+    if (card.promptId === current.promptId || (!current.promptId && card.phase === 'submitting')) {
+      useGenProgress.getState().resetVideoGen()
+    }
+    // Remove cancelled item from queue
+    useGenQueue.getState().remove(current.id)
 
     toast.info('Генерация отменена')
-  }, [clearAllTimers, cleanupExtendClips])
+  }, [cleanupExtendClips, clearTimer])
 
   const reset = useCallback(() => {
     clearAllTimers()
