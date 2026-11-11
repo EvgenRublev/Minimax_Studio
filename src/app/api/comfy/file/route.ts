@@ -84,7 +84,8 @@ export async function GET(req: NextRequest) {
         return new Response(new Uint8Array(buf), {
           headers: {
             'Content-Type': 'image/jpeg',
-            'Access-Control-Allow-Origin': '*',
+            // (правка 927) ACAO:* убран: UI same-origin, кросс-доменное чтение
+            // галереи чужими страницами не нужно (приватность контента).
             'Cache-Control': 'public, max-age=86400, immutable',
             // HTTP headers are ByteStrings — encode non-ASCII filenames
             // (user references are often Cyrillic) or Response() throws.
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest) {
         return new Response(new Uint8Array(placeholder), {
           headers: {
             'Content-Type': 'image/jpeg',
-            'Access-Control-Allow-Origin': '*',
+            // (правка 927) см. выше: ACAO:* снят
             'Cache-Control': 'public, max-age=60',
           },
         })
@@ -154,7 +155,7 @@ export async function GET(req: NextRequest) {
 
     const headersOut: Record<string, string> = {
       'Content-Type': res.headers.get('content-type') || 'application/octet-stream',
-      'Access-Control-Allow-Origin': '*',
+      // (правка 927) см. выше: ACAO:* снят
       'Cache-Control': 'public, max-age=86400',
       'Accept-Ranges': 'bytes',
     }

@@ -865,8 +865,10 @@ function isLocalAppUrl(url) {
   if (!url) return false
   try {
     const u = new URL(url)
-    if (u.protocol !== 'http:' && u.protocol !== 'file:') return false
-    if (u.protocol === 'file:') return true
+    // (правка 927) file: убран из «локальных»: окно живёт только на
+    // http://127.0.0.1:3000, а пропуск ЛЮБОГО file: означал, что при XSS
+    // в рендерере можно открыть локальный файл с подключённым preload-мостом.
+    if (u.protocol !== 'http:') return false
     return u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '::1'
   } catch {
     return false
