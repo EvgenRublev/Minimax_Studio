@@ -11,7 +11,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
 import { playNotificationSound } from '@/lib/sound'
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, selectResolution, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
+import { finalDimsFromMegapixels, framesForDuration, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas, resolveGenerationFinalDims, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
 
 /** (правка 158) flf: вычисляем номинал из пресета + размеров кадра —
  *  ТОЖЕ формула, что и на сервере (body.targetDimensions в route.ts).
@@ -1259,41 +1259,20 @@ export function useVideoGen() {
           }
         }
 
-        // (правки 121, 124) ACTUAL финальные размеры — ТО же, что шаблон:
-        // пресет → номинал (computeFinalDimensions), свободное → finalDimsFromMegapixels
-        // (правка 153) В режиме flf — single-pass: lowRes = targetDimensions (ceil32)
-        // или selectResolution(aspect, finalRes).
-        // (правка 155) В flf с пресетом targetDimensions = номинал (480p/720p/1080p).
-        // (правка 156) В flf final = lowRes (ceil32) — апскейлер early-return.
-        const finalDims = genMode === 'flf'
-          ? (() => {
-              const lowRes = targetDimensions
-                ? {
-                    w: Math.max(32, Math.ceil(targetDimensions.width / 32) * 32),
-                    h: Math.max(32, Math.ceil(targetDimensions.height / 32) * 32),
-                  }
-                : selectResolution(aspectRatio, finalResolution)
-              return computeFinalDimensions(lowRes.w, lowRes.h)
-            })()
-          : targetDimensions
-            ? computeFinalDimensions(targetDimensions.width, targetDimensions.height)
-            : finalDimsFromMegapixels(aspectRatio, finalResolution)
-        const { outW, outH } = finalDims
-
-        // Пайплайн «Драфт»: канва = ОСНОВНОЕ разрешение (как во flf):
-        // пресет → ceil32(targetDimensions), свободное → finalRes MP.
-        // Метаданные честно пишут фактический размер черновика + label.
+        // (правки 121, 124 → 930) ACTUAL финальные размеры — ТОТ ЖЕ расчёт, что
+        // в шаблоне: единая resolveGenerationFinalDims. Прежние копии для flf и
+        // «Драфта» округляли канвас до 32 ДО расчёта итога, поэтому бейдж и
+        // сайдкар писали округлённый размер (1920×1088, 864×480) вместо
+        // выбранного пресета (1920×1080, 854×480).
         const draft = genMode !== 'extend' && params.pipeline === 'draft'
-        const draftDims = draft && genMode !== 'flf'
-          ? (targetDimensions
-              ? {
-                  w: Math.max(32, Math.ceil(targetDimensions.width / 32) * 32),
-                  h: Math.max(32, Math.ceil(targetDimensions.height / 32) * 32),
-                }
-              : selectResolution(aspectRatio, finalResolution))
-          : { w: outW, h: outH }
-        const metaOutW = draft ? draftDims.w : outW
-        const metaOutH = draft ? draftDims.h : outH
+        const finalDims = resolveGenerationFinalDims({
+          targetDimensions,
+          aspect: aspectRatio,
+          finalResMP: finalResolution,
+          singleCanvas: genMode === 'flf' || draft,
+        })
+        const metaOutW = finalDims.outW
+        const metaOutH = finalDims.outH
 
         // Store params for metadata saving.
         // Reference paths go through staged_transfers so the sidecar records

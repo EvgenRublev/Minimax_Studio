@@ -125,25 +125,40 @@ export interface ControlNetGenParams {
   turboLoraEnabled?: boolean
 }
 
-/** Снап к кратному 32. */
+/** Снап к кратному 32 (вверх — канва никогда не меньше номинала). */
 function snap32(n: number): number {
-  return Math.max(32, Math.round(n / 32) * 32)
+  return Math.max(32, Math.ceil(n / 32) * 32)
+}
+
+/** Чётное округление — нужно для yuv420p в итоговом файле. */
+function roundEven(n: number): number {
+  const r = Math.round(n)
+  return r % 2 === 0 ? r : r + 1
 }
 
 /**
- * Размеры генерации: короткая сторона = targetShortSide, длинная — по
- * пропорции контрольного видео; обе оси снапятся к 32.
+ * Размеры вкладки «ControlNet» (правка 930): короткая сторона =
+ * targetShortSide, длинная — по пропорции контрольного видео.
+ *
+ *   width/height — НОМИНАЛ (то, что должен получить пользователь на выходе);
+ *   genW/genH    — канва генерации, кратная 32 (сетка латента H3).
+ *
+ * Номинал уходит в targetDimensions стандартного билдера, и тот сам ставит
+ * финальный ImageCrop: «ControlNet 720p» даёт ровно 1280×720, а не 1280×736,
+ * как раньше (раньше обе оси округляли до 32 ещё до расчёта итога).
  */
 export function controlNetSize(
   sourceWidth: number,
   sourceHeight: number,
   targetShortSide: number,
-): { width: number; height: number } {
+): { width: number; height: number; genW: number; genH: number } {
   const shortSrc = Math.min(sourceWidth, sourceHeight)
   const scale = targetShortSide / shortSrc
   return {
-    width: snap32(sourceWidth * scale),
-    height: snap32(sourceHeight * scale),
+    width: roundEven(sourceWidth * scale),
+    height: roundEven(sourceHeight * scale),
+    genW: snap32(sourceWidth * scale),
+    genH: snap32(sourceHeight * scale),
   }
 }
 
@@ -273,7 +288,7 @@ export function buildControlNetPreprocessWorkflow(p: {
  * значит препроцессинг выполняется ПЕРЕД генерацией.
  */
 export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, unknown> {
-  const { width, height } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 720)
+  const { width, height, genW, genH } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 720)
   const frames = controlNetFrames(p.duration ?? 5, p.sourceFrames)
   const controlType: ControlNetType = p.controlType === 'canny' ? 'canny' : (p.controlType === 'direct' ? 'direct' : (p.controlType === 'pose' ? 'pose' : 'depth')) // (правка 512)
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
@@ -300,8 +315,11 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     : {
         video: p.sourceVideo,
         force_rate: 24,
-        custom_width: width,
-        custom_height: height,
+        // (правка 930) контрольная цепочка живёт на канве, кратной 32 (genW/genH),
+        // а НОМИНАЛ (width/height) уходит в targetDimensions — финальный файл
+        // возвращается к номиналу кропом в стандартном билдере.
+        custom_width: genW,
+        custom_height: genH,
         frame_load_cap: frames,
         skip_first_frames: 0,
         select_every_nth: 1,
@@ -314,7 +332,7 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
       _meta: {
         title: isDirect
           ? 'Контрольное видео (прямой)'
-          : `Контрольное видео → ${width}×${height}, ${frames} кадров`,
+          : `Контрольное видео → ${genW}×${genH}, ${frames} кадров`,
       },
     },
     // (правка 916) у контрольного видео может не быть дорожки, а direct-режим
@@ -371,12 +389,15 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
       inputs: {
         image: ['cn_pre', 0],
         upscale_method: 'bilinear',
-        width,
-        height,
+        // (правка 930) карта печатается на канве, кратной 32 — ровно того же
+        // размера, что канва генерации; итоговый файл возвращает номинал
+        // кропом стандартного билдера (targetDimensions).
+        width: genW,
+        height: genH,
         crop: 'disabled',
       },
       class_type: 'ImageScale',
-      _meta: { title: `Контроль → точный размер ${width}×${height}` },
+      _meta: { title: `Контроль → канва ${genW}×${genH}` },
     }
     extraNodes['cn_preout'] = {
       inputs: {

@@ -107,9 +107,17 @@ function snap17(n: number): number {
 
 /**
  * Snap a pixel value to a multiple of 32 (H3 latent patch grid).
+ * (правка 930) Вверх: канва никогда не меньше номинала, иначе кроп
+ * «вернёт» размер, больший канвы.
  */
 function snap32(n: number): number {
-  return Math.max(32, Math.round(n / 32) * 32)
+  return Math.max(32, Math.ceil(n / 32) * 32)
+}
+
+/** Чётное округление — стороны итогового файла для yuv420p. */
+function roundEven(n: number): number {
+  const r = Math.round(n)
+  return r % 2 === 0 ? r : r + 1
 }
 
 /** (правка 489) Лимит стороны цели у MMH3LatentUpscaleWithModelParams
@@ -117,29 +125,34 @@ function snap32(n: number): number {
 const TILE_TARGET_MAX = 4096
 
 /**
- * (правка 265/489) Целевые размеры: короткая сторона = targetResolution,
+ * (правка 265/489 → 930) Целевые размеры: короткая сторона = targetResolution,
  * длинная — по пропорции исходника, но НЕ выше TILE_TARGET_MAX: у широких
  * роликов (21:9 и т.п.) 2160p по короткой стороне давал ширину >4096 и
  * ComfyUI отклонял воркфлоу (value_bigger_than_max). В этом случае вся
  * цель сжимается с сохранением пропорции, пока длинная сторона не влезет
  * в лимит ноды.
+ *
+ * (правка 930) targetW/targetH — КАНОВА диффузии (кратная 32, ceil от
+ * номинала); outW/outH — ТОЧНЫЙ итог файла (чётный, без округления к 32):
+ * раньше файл выходил на канве (1080p → 1920×1088), теперь после декода
+ * ставится ImageCrop обратно к номиналу (1920×1080).
  */
-function computeTileTarget(srcW: number, srcH: number, target: number): { targetW: number; targetH: number } {
+function computeTileTarget(srcW: number, srcH: number, target: number): { targetW: number; targetH: number; outW: number; outH: number } {
   const shortSide = Math.min(srcW, srcH)
-  const scale = target / shortSide
-  let targetW = snap32(srcW * scale)
-  let targetH = snap32(srcH * scale)
-  const longSide = Math.max(targetW, targetH)
-  if (longSide > TILE_TARGET_MAX) {
-    const shrink = TILE_TARGET_MAX / longSide
-    targetW = snap32(srcW * scale * shrink)
-    targetH = snap32(srcH * scale * shrink)
-    // snap32 округляет до ближайшего кратного 32 — страховка от выхода
-    // за лимит при округлении вверх.
-    targetW = Math.min(targetW, TILE_TARGET_MAX)
-    targetH = Math.min(targetH, TILE_TARGET_MAX)
+  let scale = target / shortSide
+  // (правка 489) кламп длинной стороны к лимиту ноды считается по номиналу
+  let outW = roundEven(srcW * scale)
+  let outH = roundEven(srcH * scale)
+  const longOut = Math.max(outW, outH)
+  if (longOut > TILE_TARGET_MAX) {
+    scale *= TILE_TARGET_MAX / longOut
+    outW = roundEven(srcW * scale)
+    outH = roundEven(srcH * scale)
   }
-  return { targetW, targetH }
+  // канва = ceil32(номинал); ceil32 от ≤4096 никогда не превысит лимит
+  const targetW = snap32(outW)
+  const targetH = snap32(outH)
+  return { targetW, targetH, outW, outH }
 }
 
 /** (правка 479) Геометрия тайлов/чанков для прогресс-трекера. */
@@ -216,11 +229,13 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   const framesGrid = Math.max(5, srcFrames - ((srcFrames - 5) % 17))
 
   // Target dimensions: короткая сторона = targetResolution (правка 265),
-  // длинная клампится к лимиту ноды 4096 (правка 489)
+  // длинная клампится к лимиту ноды 4096 (правка 489).
+  // (правка 930) targetW/H — канва диффузии (/32), outW/H — точный итог.
   const srcW = p.sourceWidth
   const srcH = p.sourceHeight
   const target = p.targetResolution ?? 1080
-  const { targetW, targetH } = computeTileTarget(srcW, srcH, target)
+  const { targetW, targetH, outW, outH } = computeTileTarget(srcW, srcH, target)
+  const needsCrop = outW !== targetW || outH !== targetH
 
   // Temporal params (must be multiples of 17)
   const chunkLen = snap17(p.chunkFrames ?? 136)
@@ -553,6 +568,22 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
       class_type: 'VAEDecode',
       _meta: { title: 'VAE Decode' },
     },
+    // (правка 930) Возврат к точному номиналу: диффузия рисуется на канве,
+    // кратной 32 (1920×1088), а пользователь ждёт ровно выбранное разрешение
+    // (1920×1080). Нода ставится только когда канва ≠ номинал.
+    ...(needsCrop ? {
+      'tu_crop': {
+        inputs: {
+          image: ['tu_decode', 0],
+          width: outW,
+          height: outH,
+          x: Math.trunc((targetW - outW) / 2),
+          y: Math.trunc((targetH - outH) / 2),
+        },
+        class_type: 'ImageCrop',
+        _meta: { title: `Кроп → ${outW}×${outH}` },
+      },
+    } : {}),
     'tu_out': {
       inputs: {
         frame_rate: 24,
@@ -567,7 +598,8 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
         // (false → VHS допедит аудио apad до длины видео, -shortest = видео).
         pingpong: false,
         save_output: true,
-        images: ['tu_decode', 0],
+        // (правка 930) при расхождении канвы и номинала кадры идут через кроп
+        images: needsCrop ? ['tu_crop', 0] : ['tu_decode', 0],
         // (правка 488) latent-ветка: дорожка целиком из VHS_LoadAudio;
         // обычная — аудио-выход VHS_LoadVideo (pin 2, не режется — там
         // frame_load_cap=0).

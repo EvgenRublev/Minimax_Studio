@@ -471,6 +471,37 @@ export function flfNominalFromMegapixels(
   return { w: roundToEven(w), h: roundToEven(w / ratio) }
 }
 
+/**
+ * (правка 930) Единая точка расчёта «канва генерации → итоговый файл» для
+ * вкладки «Генерация» (и для single-pass режимов тоже). Раньше здесь было
+ * три независимых копии (шаблон, use-video-gen, pending-meta), и в
+ * однопроходных режимах («Кадры», «Драфт») расчёт начинался с УЖЕ округлённого
+ * до 32 канваса → gen == out → кроп отключался, и вместо пресета 1080p
+ * выходило 1920×1088 (в «Кадрах» 864×480 вместо 854×480).
+ *
+ * Правила:
+ *  • пресет качества (targetDimensions = номинал, напр. 1920×1080) →
+ *    генерация ceil32 (1920×1088), итог — ровно номинал через кроп;
+ *  • свободное разрешение (MP-ползунок) → прежний путь finalDimsFromMegapixels
+ *    (вписанный прямоугольник точного соотношения); в однопроходном режиме без
+ *    пресета — как раньше, без кропа (округлённый MP-канвас и есть итог).
+ */
+export function resolveGenerationFinalDims(opts: {
+  targetDimensions?: { width: number; height: number }
+  aspect: string
+  finalResMP: number
+  singleCanvas: boolean
+}): FinalDimensions {
+  if (opts.targetDimensions) {
+    return computeFinalDimensions(opts.targetDimensions.width, opts.targetDimensions.height)
+  }
+  if (opts.singleCanvas) {
+    const r = selectResolution(opts.aspect, opts.finalResMP)
+    return computeFinalDimensions(r.w, r.h)
+  }
+  return finalDimsFromMegapixels(opts.aspect, opts.finalResMP)
+}
+
 export interface FinalDimensions {
   /** Размеры, которые реально выдаст апскейлер (кратные 32, ≥ номинала). */
   genW: number
@@ -994,21 +1025,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // (правка 156) Одиночная канва (flf/draft): final = computeFinalDimensions
   // (ceil32) — апскейлер делает early-return / не нужен, кропа нет.
   // В других режимах — targetDimensions (номинал) или finalRes MP.
-  const final = singleCanvas
-    ? (p.targetDimensions
-      ? computeFinalDimensions(
-          Math.max(32, Math.ceil(p.targetDimensions.width / 32) * 32),
-          Math.max(32, Math.ceil(p.targetDimensions.height / 32) * 32),
-        )
-      : computeFinalDimensions(
-          ...(() => {
-              const r = selectResolution(aspect, finalRes)
-              return [r.w, r.h] as [number, number]
-            })(),
-        ))
-    : p.targetDimensions
-      ? computeFinalDimensions(p.targetDimensions.width, p.targetDimensions.height)
-      : finalDimsFromMegapixels(aspect, finalRes)
+  const final = resolveGenerationFinalDims({
+    targetDimensions: p.targetDimensions,
+    aspect,
+    finalResMP: finalRes,
+    singleCanvas,
+  })
   // (правка 525 REVISED) Канва pass 1: подбираем lowResMP так, чтобы
   // selectResolution(aspect, lowResMP) имел ту же пропорцию, что и final
   // (или как можно ближе). Тогда апскейл lowRes → final будет равномерным
@@ -1600,8 +1622,10 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     // (правка 124) Кроп gen-разрешения (кратное 32, чуть больше номинала)
     // до ТОЧНОГО номинала (например 16:9 1080p: 1920×1088 → 1920×1080).
     // Нода ставится только когда gen ≠ номинал — иначе цепочка без изменений.
-    // ('draft' не кропается: канва selectResolution уже /32 = точный итог.)
-    ...(needsCrop && !draft && {
+    // (правка 930) В «Драфте» и «Кадрах» кроп тоже нужен: раньше он тут
+    // выключался условием `!draft`, и однопроходные режимы отдавали
+    // округлённый канвас (1920×1088) вместо выбранного пресета.
+    ...(needsCrop && {
       '46:48': {
         inputs: {
           image: decodeImageSrc,
@@ -1642,7 +1666,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         pingpong: false,
         save_output: true,
         // (правка 121) через кроп-ноду, если соотношению нужен точный кроп
-        images: needsCrop && !draft ? ['46:48', 0] : decodeImageSrc,
+        // (правка 930) — во всех пайплайнах, включая «Драфт» и «Кадры»
+        images: needsCrop ? ['46:48', 0] : decodeImageSrc,
         audio: decodeAudioSrc,
       },
       class_type: 'VHS_VideoCombine',
@@ -1746,11 +1771,11 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // («Expected size 46 but got size 45»). При /32 латент всегда чётный.
   // Без targetDimensions (продление без исходника) — MP-путь.
   const final = p.targetDimensions
-    ? (() => {
-        const w = Math.max(32, Math.ceil(p.targetDimensions!.width / 32) * 32)
-        const h = Math.max(32, Math.ceil(p.targetDimensions!.height / 32) * 32)
-        return { genW: w, genH: h, outW: w, outH: h, cropX: 0, cropY: 0 }
-      })()
+    // (правка 930) Номинал = размеры исходника; gen = ceil32 (сетка латента,
+    // правка 431); итог — ровно размер исходника через кроп (ext_crop_i ниже).
+    // Раньше сюда подавался УЖЕ округлённый до 32 размер → gen == out → кроп
+    // выключался, и продление меняло разрешение файла (1920×1080 → 1920×1088).
+    ? computeFinalDimensions(p.targetDimensions.width, p.targetDimensions.height)
     : finalDimsFromMegapixels(p.aspectRatio || '16:9 (Widescreen)', finalRes)
   const needsCrop = final.genW !== final.outW || final.genH !== final.outH
 

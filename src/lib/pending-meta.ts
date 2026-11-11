@@ -21,23 +21,27 @@ import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe' // (правка 410)
-import { computeFinalDimensions, finalDimsFromMegapixels, framesForDuration, clampLowResMP, selectResolution, computePass1Canvas, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { resolveGenerationFinalDims, framesForDuration, clampLowResMP, computePass1Canvas, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { replaceVideoAudio, resolveOriginalAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
 
 /* ──────────────────── shared helpers ──────────────────── */
 
-/** (правки 121, 124) Итоговые размеры видео ПОСЛЕ точного кропа — ТО же
- *  формула, что в шаблоне (buildMiniMaxH3Workflow): пресет → номинал
- *  (computeFinalDimensions), свободное разрешение → finalDimsFromMegapixels.
- *  lowResMP на итог больше не влияет: апскейлер — «target dimensions». */
+/** (правки 121, 124 → 930) Итоговые размеры видео ПОСЛЕ точного кропа —
+ *  вызов ТОЙ ЖЕ resolveGenerationFinalDims, что в шаблоне: пресет → номинал,
+ *  свободное разрешение → MP-путь (full) / selectResolution (однопроходные
+ *  flf/«Драфт»). lowResMP на итог не влияет: апскейлер — «target dimensions». */
 export function computeOutputDimensions(
   aspectRatio: string,
   megapixels: number,
   targetDimensions?: { width: number; height: number },
+  singleCanvas = false,
 ): { w: number; h: number } {
-  const d = targetDimensions
-    ? computeFinalDimensions(targetDimensions.width, targetDimensions.height)
-    : finalDimsFromMegapixels(aspectRatio, megapixels)
+  const d = resolveGenerationFinalDims({
+    targetDimensions,
+    aspect: aspectRatio,
+    finalResMP: megapixels,
+    singleCanvas,
+  })
   return { w: d.outW, h: d.outH }
 }
 
@@ -263,11 +267,19 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
   // Actual frame count the server produces (node 46:19), for metadata (правка 55).
   const videoLengthFrames = framesForDuration(duration, fps)
   const finalResolution = body.finalResolution ?? 0.7
-  // (правки 121, 124) ТОЧНЫЕ финальные размеры: пресет → body.targetDimensions,
-  // свободное разрешение → MP-путь (та же формула, что в шаблоне)
-  const { w, h } = computeOutputDimensions(body.aspectRatio || '16:9', finalResolution, body.targetDimensions)
   const genMode0: 'ref' | 't2v' | 'flf' | 'extend' = body.mode === 't2v' || body.mode === 'flf' || body.mode === 'extend' ? body.mode : 'ref'
   const draft0 = genMode0 !== 'extend' && body.pipeline === 'draft'
+  // (правки 121, 124) ТОЧНЫЕ финальные размеры: пресет → body.targetDimensions,
+  // свободное разрешение → MP-путь (та же формула, что в шаблоне)
+  // (правка 930) Однопроходные режимы (flf / «Драфт») со свободным MP выходят
+  // на selectResolution-канве, а не на MP-прямоугольнике — режим должен быть
+  // известен и сайдкару.
+  const { w, h } = computeOutputDimensions(
+    body.aspectRatio || '16:9',
+    finalResolution,
+    body.targetDimensions,
+    genMode0 === 'flf' || draft0,
+  )
   // (правка 829) «Зациклено»: в mp4 попадает ровно один цикл — на 5 кадров
   // меньше запроса (5 хвостовых кадров нужны только модели). В сайдкар пишем
   // ФАКТИЧЕСКУЮ длину файла: «Повторить» подаст это же число, а узел 46:19
@@ -275,18 +287,12 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
   const loopFrames = genMode0 !== 'extend' && body.loop === true
     ? Math.max(17, videoLengthFrames - 5)
     : videoLengthFrames
-  // Драфт: фактический выход = ОСНОВНОЕ разрешение (как flf):
-  // пресет → ceil32(targetDimensions), свободное → finalRes MP
-  const draftCanvas = draft0 && genMode0 !== 'flf'
-    ? (body.targetDimensions
-        ? {
-            w: Math.max(32, Math.ceil(body.targetDimensions.width / 32) * 32),
-            h: Math.max(32, Math.ceil(body.targetDimensions.height / 32) * 32),
-          }
-        : selectResolution(body.aspectRatio || '16:9', finalResolution))
-    : null
-  const resW = draftCanvas ? draftCanvas.w : w
-  const resH = draftCanvas ? draftCanvas.h : h
+  // (правка 930) Отдельной «черновой» канвы больше нет: «Драфт» теперь тоже
+  // доезжает до номинала пресета кропом (как flf и полный пайплайн), поэтому
+  // фактический выход = computeOutputDimensions выше. Раньше здесь повторно
+  // округляли до 32 и писали в сайдкар 1920×1088 вместо выбранных 1920×1080.
+  const resW = w
+  const resH = h
   // (правка 2) Аудио-рефы: сохраняем обрезку (trim_start/trim_end) —
   // восстановление из меты вернёт её в UI.
   const references: Array<{ type: string; path: string; role: string; trim_start?: number; trim_end?: number | null; /** (правка 493) видео-реф сжимался до 480p */ compress?: boolean; /** (правка 785) видео-реф: «использовать звук» */ include_audio?: boolean }> = [
@@ -362,9 +368,12 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
           ? Math.min(clamped, (body.targetDimensions.width * body.targetDimensions.height) / (1024 * 1024))
           : clamped
       }
-      const finalDims = body.targetDimensions
-        ? computeFinalDimensions(body.targetDimensions.width, body.targetDimensions.height)
-        : finalDimsFromMegapixels(body.aspectRatio || '16:9', finalResolution)
+      const finalDims = resolveGenerationFinalDims({
+        targetDimensions: body.targetDimensions,
+        aspect: body.aspectRatio || '16:9',
+        finalResMP: finalResolution,
+        singleCanvas: genMode0 === 'flf' || draft0,
+      })
       const aspectKey = body.targetDimensions
         ? `${body.targetDimensions.width}:${body.targetDimensions.height}`
         : (body.aspectRatio || '16:9')
