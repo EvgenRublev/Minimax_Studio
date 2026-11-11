@@ -233,6 +233,7 @@ function useGlobalQueuePoller() {
                 if (
                   item.type === 'controlnet' ||
                   item.type === 'fps' ||
+                  item.type === 'image' || // (правка 929)
                   item.type === 'tile-upscale' ||
                   item.type === 'face-refine'
                 ) {
@@ -288,6 +289,10 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
   if (item.type === 'fps' && item.promptId) {
     const { markFpsCancelRequested } = await import('@/lib/fps-job-store')
     markFpsCancelRequested(item.promptId)
+  }
+  if (item.type === 'image' && item.promptId) {
+    const { markImageCancelRequested } = await import('@/lib/image-job-store')
+    markImageCancelRequested(item.promptId)
   }
   if (item.type === 'tile-upscale' && item.promptId) {
     const { markTileUpscaleCancelRequested } = await import('@/lib/tile-upscale-job-store')

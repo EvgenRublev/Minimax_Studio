@@ -97,6 +97,40 @@ export const MODELS: ModelDef[] = [
     // аудио), поэтому «Скачать все» тянет её вместе с базовыми моделями,
     // и жёлтый баннер «модели не скачаны» требует её наравне с ними.
   },
+  // (правка 929) Режим «Изображение» (p-h3-image). LoRA кладётся поверх уже
+  // скачанной видео-модели — отдельный image-DiT не обязателен. Файлы
+  // OPTIONAL: «Скачать все» их не тянет (это ~8.7 ГБ, нужны не всем), но
+  // панель «Модели» их показывает, а вкладка — подсказывает, чего не хватает.
+  {
+    id: 'image_lora',
+    label: 'Image LoRA (p-h3-image, для вкладки «Изображение»)',
+    relPath: 'loras/p-h3-image_lora_bf16.safetensors',
+    url: 'https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/loras/p-h3-image_lora_bf16.safetensors?download=true',
+    sizeBytes: 1956195360,
+    sizeLabel: '~1.96 GB',
+    category: 'lora',
+    optional: true,
+  },
+  {
+    id: 'image_text_encoder',
+    label: 'Image Text Encoder (p-h3-image W4A8)',
+    relPath: 'text_encoders/p-h3-image_text_encoder_w4a8.safetensors',
+    url: 'https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_text_encoder_w4a8.safetensors?download=true',
+    sizeBytes: 3575536021,
+    sizeLabel: '~3.58 GB',
+    category: 'text_encoder',
+    optional: true,
+  },
+  {
+    id: 'image_vae',
+    label: 'Image VAE (p-h3-image INT8 ConvRot)',
+    relPath: 'vae/p-h3-image_vae_int8_convrot.safetensors',
+    url: 'https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/vae/p-h3-image_vae_int8_convrot.safetensors?download=true',
+    sizeBytes: 3146996440,
+    sizeLabel: '~3.15 GB',
+    category: 'vae',
+    optional: true,
+  },
   {
     id: 'upscaler',
     label: 'Latent Upscaler 3D (FP16)',
