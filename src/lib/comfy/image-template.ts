@@ -23,6 +23,15 @@
  *    либо НАШУ видео-модель + LoRA `p-h3-image_lora_bf16` (2 ГБ) — структуры
  *    совпадают (50 блоков, те же 208 целевых модулей), поэтому LoRA ложится
  *    поверх без отдельной 21-гигабайтной модели.
+ *
+ * (правка 935) Опционально граф достраивается вторым проходом:
+ *
+ *   …VAEDecode(pass 1) → [ImageScale → итог] → H3InjectVideoLatent(нулевой AV-латент
+ *   нужного размера из PH3ImageConditioning) → BasicGuider + BasicScheduler(simple,
+ *   steps/denoise второго прохода) → SamplerCustomAdvanced → VAEDecode → SaveImage
+ *
+ * Размер из `width`/`height` при этом трактуется как ИТОГОВЫЙ: база считается из
+ * `baseScale`, поэтому двухпроходный режим не ломает точность разрешений (правка 930).
  */
 
 /** Дефолтные файлы image-обвязки (PrunaAI/P-H3-Image-Comfy). */
@@ -245,7 +254,85 @@ export interface ImageGenParams {
   promptUpsampler?: string | null
   /** Соотношение сторон для формата входа апсемплера ('1:1', '16:9', …). */
   aspect?: string
+  /**
+   * (правка 935) 'off' | 'detail' | 'upscale' — см. IMAGE_TWO_PASS_MODES.
+   * width/height при этом означают ИТОГОВЫЙ размер; база считается из baseScale.
+   */
+  twoPass?: ImageTwoPassMode
+  /** Сколько раз стороны базового прохода меньше итоговых (1 = тот же размер). */
+  baseScale?: number
+  /** Сила второго прохода (0…1): 0.2 — почти только зерно, 0.6 — переписывает лицо. */
+  denoise2?: number
+  /** Шагов второго прохода. */
+  steps2?: number
+  /**
+   * Дополнительная формулировка для второго прохода: к запросу добавляется
+   * вторая строка, апсемплер при этом не перезапускается. '' — второй проход
+   * использует тот же текст, что и первый.
+   */
+  prompt2?: string
 }
+
+/**
+ * (правка 935) Нормализация параметров двухпроходного режима: всё, что присылает
+ * фронт и что попадает в воркфлоу, проходит через эту функцию.
+ */
+export function imageTwoPassParams(p: {
+  twoPass?: unknown
+  denoise2?: unknown
+  steps2?: unknown
+  baseScale?: unknown
+}): { mode: ImageTwoPassMode; denoise2: number; steps2: number; baseScale: number } {
+  const mode = (IMAGE_TWO_PASS_MODES as readonly string[]).includes(String(p.twoPass))
+    ? (p.twoPass as ImageTwoPassMode)
+    : 'off'
+  if (mode === 'off') return { mode, denoise2: 1, steps2: 0, baseScale: 1 }
+  const { min: dmin, max: dmax } = IMAGE_DENOISE2_RANGE
+  const { min: smin, max: smax } = IMAGE_STEPS2_RANGE
+  const rawDenoise = Number(p.denoise2 ?? DEFAULT_IMAGE_TWO_PASS.denoise)
+  const denoise2 = Number.isFinite(rawDenoise) ? Math.min(dmax, Math.max(dmin, rawDenoise)) : DEFAULT_IMAGE_TWO_PASS.denoise
+  const rawSteps = Math.round(Number(p.steps2 ?? DEFAULT_IMAGE_TWO_PASS.steps))
+  const steps2 = Number.isFinite(rawSteps) ? Math.min(smax, Math.max(smin, rawSteps)) : DEFAULT_IMAGE_TWO_PASS.steps
+  const rawScale = Number(p.baseScale ?? DEFAULT_IMAGE_TWO_PASS.baseScale)
+  const baseScale = Number.isFinite(rawScale) ? Math.max(1, Math.min(4, rawScale)) : DEFAULT_IMAGE_TWO_PASS.baseScale
+  return { mode, denoise2, steps2, baseScale }
+}
+
+/**
+ * (правка 935) Два прохода. H3 всегда строит нулевой латент, поэтому «второй
+ * проход» собирается так же, как в видео-режимах: результат первого прохода
+ * декодируется, при необходимости растягивается до целевого размера, кодируется
+ * image-VAE и внедряется в видео-поток AV-латента (`H3InjectVideoLatent` из
+ * пака ComfyUI-H3-FaceRefine, он же в install/nodes.json), а сэмплер доходит
+ * его снизу сетки сигм — то есть есть обычный img2img.
+ *
+ *  • 'detail' — обе проходки в одном разрешении: композиция зафиксирована,
+ *    второй проход только дорисовывает детали (глаза, текстуры, руки).
+ *  • 'upscale' — первый проход в уменьшенном базовом разрешении (там модель
+ *    устойчивее и быстрее), второй — в выбранном целевом.
+ *
+ * Сила второго прохода — `denoise` + число шагов через `BasicScheduler`
+ * ('simple'), как в tile-upscale и Face Refine: он берёт нижний хвост полной
+ * сетки, поэтому шаги и сила независимы (в отличие от обрезки ManualSigmas —
+ * см. docstring H3InjectVideoLatent).
+ */
+export const IMAGE_TWO_PASS_MODES = ['off', 'detail', 'upscale'] as const
+export type ImageTwoPassMode = (typeof IMAGE_TWO_PASS_MODES)[number]
+export const IMAGE_TWO_PASS_LABELS: Record<string, string> = {
+  off: 'Один проход',
+  detail: 'Два прохода — детали поверх основы',
+  upscale: 'Два прохода — база меньше, итог крупнее',
+}
+/** Во сколько раз стороны второго прохода больше базовых (площадь — в квадрат). */
+export const IMAGE_BASE_SCALES = [1.5, 2, 3] as const
+export const DEFAULT_IMAGE_TWO_PASS = {
+  denoise: 0.35,
+  steps: 4,
+  baseScale: 2,
+} as const
+/** Диапазоны, которые принимает и UI, и роут. */
+export const IMAGE_DENOISE2_RANGE = { min: 0.05, max: 0.8 }
+export const IMAGE_STEPS2_RANGE = { min: 1, max: 12 }
 
 /** id ноды апсемплера — по нему из history можно прочитать расширенный промпт. */
 export const IMAGE_UPSAMPLER_NODE_ID = '7:16'
@@ -253,16 +340,53 @@ export const IMAGE_UPSAMPLER_NODE_ID = '7:16'
 /** id ноды-сэмплера — на него вешается прогресс (progress-tracker). */
 export const IMAGE_SAMPLER_NODE_ID = '7:12'
 
+/** id нод второго прохода (правки 935); sampler2 — вторая стадия прогресса. */
+export const IMAGE_COND2_NODE_ID = '7:8b'
+export const IMAGE_PASS2_SCALE_NODE_ID = '7:18'
+export const IMAGE_PASS2_INJECT_NODE_ID = '7:19'
+export const IMAGE_PASS2_SIGMAS_NODE_ID = '7:20'
+export const IMAGE_PASS2_GUIDER_NODE_ID = '7:21'
+export const IMAGE_PASS2_DECODE_NODE_ID = '7:26'
+export const IMAGE_SAMPLER2_NODE_ID = '7:24'
+
 function snap(v: number): number {
   const n = Math.round(v / MULTIPLE) * MULTIPLE
   return Math.max(SIDE_MIN, Math.min(SIDE_MAX, n))
 }
 
+/** Размер базового прохода: округляем вниз, чтобы база не вышла за итог. */
+function snapDown(v: number): number {
+  const n = Math.floor(v / MULTIPLE) * MULTIPLE
+  return Math.max(SIDE_MIN, Math.min(SIDE_MAX, n))
+}
+
+/**
+ * (правка 935) Размер первого прохода для данных итоговых размеров. Нужен и
+ * билдеру, и вкладке (подпись «база 1456×1456 → итог 2912×2912»), поэтому
+ * считается в одном месте.
+ */
+export function imageBaseDims(
+  finalW: number,
+  finalH: number,
+  mode: ImageTwoPassMode,
+  baseScale: number,
+): [number, number] {
+  const w = snap(finalW)
+  const h = snap(finalH)
+  if (mode !== 'upscale') return [w, h]
+  return [snapDown(w / baseScale), snapDown(h / baseScale)]
+}
+
 export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
   if (!p.prompt || !p.prompt.trim()) throw new Error('Пустой промпт')
 
-  const width = snap(p.width)
-  const height = snap(p.height)
+  // (правка 935) width/height — ИТОГОВЫЙ размер: он и уходит в SaveImage, чтобы
+  // вкладка отдавала ровно номинал пресета. При 'upscale' базовый проход
+  // считается из baseScale и округляется вниз.
+  const finalW = snap(p.width)
+  const finalH = snap(p.height)
+  const { mode, denoise2, steps2, baseScale } = imageTwoPassParams(p)
+  const [width, height] = imageBaseDims(finalW, finalH, mode, baseScale)
   const sigmas = p.sigmas?.trim() || IMAGE_SIGMA_SCHEDULES[p.schedule || 'image8'] || IMAGE_SIGMA_SCHEDULES.image8
   const refs = (p.references || []).filter(Boolean).slice(0, IMAGE_MAX_REFERENCES)
   if ((p.references || []).length > IMAGE_MAX_REFERENCES) {
@@ -320,13 +444,6 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
     _meta: { title: 'Sigma Shift 1.0/1.0' },
   }
 
-  const condInputs: Record<string, unknown> = {
-    clip: ['7:6', 0],
-    prompt: p.prompt,
-    width,
-    height,
-  }
-
   // (правка 934) Апсемплер промпта — как в эталоне: CLIPLoader(type minimax) +
   // TextGenerate (greedy: sampling_mode 'off', thinking on) с входом
   // «Aspect ratio: X\nRequest: …», а уже его текст уходит в conditioning.
@@ -354,11 +471,11 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
       class_type: 'TextGenerate',
       _meta: { title: 'Апсемплер промпта' },
     }
-    condInputs.prompt = [IMAGE_UPSAMPLER_NODE_ID, 0]
   }
+  const pass1Prompt: unknown = useUpsampler ? [IMAGE_UPSAMPLER_NODE_ID, 0] : p.prompt
+
+  const refLinks: [string, number][] = []
   if (refs.length > 0) {
-    // ВAE нужен ноде и для кодирования референсов, и для латента результата
-    condInputs.vae = ['7:7', 0]
     refs.forEach((name, i) => {
       const loadId = `7:r${i + 1}`
       modelChain[loadId] = {
@@ -366,10 +483,101 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
         class_type: 'LoadImage',
         _meta: { title: i === 0 ? 'Что правим (image_1)' : `Референс ${i}` },
       }
-      // autogrow-вход images (names image_1…image_9) в API-формате —
-      // «images.image_N», тот же паттерн, что ref_images.ref_image_0 в H3.
-      condInputs[`images.image_${i + 1}`] = [loadId, 0]
+      refLinks.push([loadId, 0])
     })
+  }
+
+  // autogrow-вход images (names image_1…image_9) в API-формате — «images.image_N»,
+  // тот же паттерн, что ref_images.ref_image_0 в H3. VAE ноде нужен и для
+  // кодирования референсов, и для латента результата.
+  const condInputs = (promptSrc: unknown, w: number, h: number): Record<string, unknown> => {
+    const inputs: Record<string, unknown> = { clip: ['7:6', 0], prompt: promptSrc, width: w, height: h }
+    if (refLinks.length > 0) {
+      inputs.vae = ['7:7', 0]
+      refLinks.forEach((link, i) => {
+        inputs[`images.image_${i + 1}`] = link
+      })
+    }
+    return inputs
+  }
+
+  // ─── (правка 935) второй проход ───
+  // Вторая conditioning-нода нужна, когда итоговое разрешение отличается от
+  // базового ('upscale') или когда для второго прохода задана своя формулировка:
+  // её выход — и текст, и нулевой AV-латент нужного размера (1 кадр + 2 аудио).
+  const suffix = (p.prompt2 || '').trim()
+  const needCond2 = mode !== 'off' && (width !== finalW || height !== finalH || suffix !== '')
+  const cond2Id = needCond2 ? IMAGE_COND2_NODE_ID : '7:8'
+  const pass2Prompt: unknown =
+    suffix && needCond2 ? `${p.prompt.trim()}\n${suffix}` : pass1Prompt
+
+  // Масштабирование базы нужно только при различии размеров; метод lanczos —
+  // как в cn_prescale: он не добавляет ringing, который второй проход усилил бы.
+  const needScale = mode !== 'off' && (width !== finalW || height !== finalH)
+  const pass2Nodes: Record<string, unknown> = {}
+  if (mode !== 'off') {
+    if (needCond2) {
+      pass2Nodes[IMAGE_COND2_NODE_ID] = {
+        inputs: condInputs(pass2Prompt, finalW, finalH),
+        class_type: 'PH3ImageConditioning',
+        _meta: { title: 'p-h3-image Conditioning (проход 2)' },
+      }
+    }
+    let baseImages: [string, number] = ['7:14', 0]
+    if (needScale) {
+      pass2Nodes[IMAGE_PASS2_SCALE_NODE_ID] = {
+        inputs: { image: ['7:14', 0], upscale_method: 'lanczos', width: finalW, height: finalH, crop: 'disabled' },
+        class_type: 'ImageScale',
+        _meta: { title: `База → ${finalW}×${finalH}` },
+      }
+      baseImages = [IMAGE_PASS2_SCALE_NODE_ID, 0]
+    }
+    pass2Nodes[IMAGE_PASS2_INJECT_NODE_ID] = {
+      inputs: { av_latent: [cond2Id, 1], images: baseImages, vae: ['7:7', 0] },
+      class_type: 'H3InjectVideoLatent',
+      _meta: { title: 'База в AV-латент (img2img)' },
+    }
+    pass2Nodes[IMAGE_PASS2_SIGMAS_NODE_ID] = {
+      inputs: { model: ['7:5', 0], scheduler: 'simple', steps: steps2, denoise: denoise2 },
+      class_type: 'BasicScheduler',
+      _meta: { title: `Сигмы прохода 2 (${steps2} шаг(ов), denoise ${denoise2})` },
+    }
+    pass2Nodes[IMAGE_PASS2_GUIDER_NODE_ID] = {
+      inputs: { model: ['7:5', 0], conditioning: [cond2Id, 0] },
+      class_type: 'BasicGuider',
+      _meta: { title: 'Guider (проход 2)' },
+    }
+    pass2Nodes['7:22'] = {
+      inputs: { sampler_name: 'euler' },
+      class_type: 'KSamplerSelect',
+      _meta: { title: 'Sampler: euler (проход 2)' },
+    }
+    pass2Nodes['7:23'] = {
+      inputs: { noise_seed: p.seed ?? 0 },
+      class_type: 'RandomNoise',
+      _meta: { title: 'Шум прохода 2' },
+    }
+    pass2Nodes[IMAGE_SAMPLER2_NODE_ID] = {
+      inputs: {
+        noise: ['7:23', 0],
+        guider: [IMAGE_PASS2_GUIDER_NODE_ID, 0],
+        sampler: ['7:22', 0],
+        sigmas: [IMAGE_PASS2_SIGMAS_NODE_ID, 0],
+        latent_image: [IMAGE_PASS2_INJECT_NODE_ID, 0],
+      },
+      class_type: 'SamplerCustomAdvanced',
+      _meta: { title: 'Сэмплер (проход 2)' },
+    }
+    pass2Nodes['7:25'] = {
+      inputs: { av_latent: [IMAGE_SAMPLER2_NODE_ID, 0] },
+      class_type: 'LTXVSeparateAVLatent',
+      _meta: { title: 'Separate AV Latent (проход 2)' },
+    }
+    pass2Nodes[IMAGE_PASS2_DECODE_NODE_ID] = {
+      inputs: { samples: ['7:25', 0], vae: ['7:7', 0] },
+      class_type: 'VAEDecode',
+      _meta: { title: 'Decode (проход 2)' },
+    }
   }
 
   const workflow: Record<string, unknown> = {
@@ -385,7 +593,7 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
       _meta: { title: 'VAE (image)' },
     },
     '7:8': {
-      inputs: condInputs,
+      inputs: condInputs(pass1Prompt, width, height),
       class_type: 'PH3ImageConditioning',
       _meta: { title: 'p-h3-image Conditioning' },
     },
@@ -432,18 +640,25 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
     },
     '7:15': {
       inputs: {
-        images: ['7:14', 0],
+        // (правка 935) в двухпроходном режиме сохраняется результат второго
+        // прохода — он ровно в итоговом размере, отдельный кроп не нужен.
+        images: mode !== 'off' ? [IMAGE_PASS2_DECODE_NODE_ID, 0] : ['7:14', 0],
         filename_prefix: p.filenamePrefix || 'Minimax_Studio_image',
       },
       class_type: 'SaveImage',
       _meta: { title: 'Сохранить изображение' },
     },
+    ...pass2Nodes,
   }
 
   return workflow
 }
 
-/** Стадии для progress-tracker: один проход сэмплирования. */
-export function imageSamplerStages(): string[][] {
-  return [[IMAGE_SAMPLER_NODE_ID]]
+/**
+ * Стадии для progress-tracker. (правка 935) Во втором проходе своя нода-сэмплер,
+ * поэтому стадий две — как в видео-режимах с pass-2: прогресс не «откатывается».
+ */
+export function imageSamplerStages(twoPass?: unknown): string[][] {
+  const { mode } = imageTwoPassParams({ twoPass })
+  return mode === 'off' ? [[IMAGE_SAMPLER_NODE_ID]] : [[IMAGE_SAMPLER_NODE_ID], [IMAGE_SAMPLER2_NODE_ID]]
 }

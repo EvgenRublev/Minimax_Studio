@@ -49,8 +49,16 @@ import {
   IMAGE_MP_HINT,
   IMAGE_SIGMA_SCHEDULES,
   IMAGE_SCHEDULE_LABELS,
+  IMAGE_BASE_SCALES,
+  IMAGE_DENOISE2_RANGE,
+  IMAGE_STEPS2_RANGE,
+  IMAGE_TWO_PASS_LABELS,
+  IMAGE_TWO_PASS_MODES,
   DEFAULT_IMAGE_PROMPT_UPSAMPLER,
+  imageBaseDims,
   imageQualityLabel,
+  imageTwoPassParams,
+  type ImageTwoPassMode,
 } from '@/lib/comfy/image-template'
 
 interface ImageAssets {
@@ -133,6 +141,17 @@ export function ImageView() {
   const steps = useMemo(
     () => (IMAGE_SIGMA_SCHEDULES[params.schedule] ?? IMAGE_SIGMA_SCHEDULES.image8).split(',').length - 1,
     [params.schedule],
+  )
+
+  // (правка 935) параметры второго прохода и размер базы — те же функции, что и
+  // на сервере, чтобы подпись «база → итог» не расходилась с реальным графом.
+  const tp = useMemo(
+    () => imageTwoPassParams(params),
+    [params.twoPass, params.denoise2, params.steps2, params.baseScale],
+  )
+  const baseDims = useMemo(
+    () => imageBaseDims(size[0], size[1], tp.mode, tp.baseScale),
+    [size, tp.mode, tp.baseScale],
   )
 
   /* ─── Референсы: drag&drop / выбор файлов ─── */
@@ -226,6 +245,12 @@ export function ImageView() {
       references: references.map((r) => ({ name: r.name })),
       lowVramAttention: params.lowVramAttention,
       chunkFeedForward: params.chunkFeedForward,
+      // (правка 935) size[0]/size[1] — итоговый размер; базу считает сервер.
+      twoPass: params.twoPass,
+      baseScale: params.baseScale,
+      denoise2: params.denoise2,
+      steps2: params.steps2,
+      prompt2: params.prompt2.trim(),
     })
   }, [canRun, params, size, references, submitJob])
 
@@ -343,6 +368,109 @@ export function ImageView() {
           </div>
           <div className="text-[11px] text-muted-foreground -mt-2">
             {steps} {steps === 1 ? 'шаг' : 'шагов'} · euler · без CFG
+          </div>
+
+          {/* ─── Два прохода (правка 935) ─── */}
+          <div className="space-y-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Проходы</Label>
+              <Select
+                value={params.twoPass}
+                onValueChange={(v) => setParams({ twoPass: v as ImageTwoPassMode })}
+              >
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {IMAGE_TWO_PASS_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>{IMAGE_TWO_PASS_LABELS[m]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {tp.mode !== 'off' && (
+              <>
+                {tp.mode === 'upscale' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">База меньше итога</Label>
+                    <Select
+                      value={String(tp.baseScale)}
+                      onValueChange={(v) => setParams({ baseScale: Number(v) })}
+                    >
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {IMAGE_BASE_SCALES.map((s) => (
+                          <SelectItem key={s} value={String(s)}>
+                            в {s}× по стороне ({Math.round(100 / (s * s))}% площади)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Сила 2-го прохода</Label>
+                    <input
+                      type="number"
+                      min={IMAGE_DENOISE2_RANGE.min}
+                      max={IMAGE_DENOISE2_RANGE.max}
+                      step={0.05}
+                      value={tp.denoise2}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        if (!Number.isFinite(v)) return
+                        setParams({ denoise2: Math.min(IMAGE_DENOISE2_RANGE.max, Math.max(IMAGE_DENOISE2_RANGE.min, v)) })
+                      }}
+                      className="w-full h-8 rounded-md border border-border bg-[var(--surface-2)] px-2 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Шаги 2-го прохода</Label>
+                    <input
+                      type="number"
+                      min={IMAGE_STEPS2_RANGE.min}
+                      max={IMAGE_STEPS2_RANGE.max}
+                      step={1}
+                      value={tp.steps2}
+                      onChange={(e) => {
+                        const v = Math.round(Number(e.target.value))
+                        if (!Number.isFinite(v)) return
+                        setParams({ steps2: Math.min(IMAGE_STEPS2_RANGE.max, Math.max(IMAGE_STEPS2_RANGE.min, v)) })
+                      }}
+                      className="w-full h-8 rounded-md border border-border bg-[var(--surface-2)] px-2 text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Уточнение для 2-го прохода</Label>
+                  <Textarea
+                    value={params.prompt2}
+                    onChange={(e) => setParams({ prompt2: e.target.value })}
+                    placeholder="Напр.: резкие глаза, чёткая текстура кожи, мелкие детали украшений, читаемый текст…"
+                    rows={2}
+                    className="text-sm resize-y"
+                  />
+                  <div className="text-[10px] text-muted-foreground">
+                    Идёт второй строкой к запросу, апсемплер при этом не перезапускается.
+                    Пусто — второй проход использует тот же текст, что и первый.
+                  </div>
+                </div>
+              </>
+            )}
+            <div className="text-[11px] text-muted-foreground">
+              {tp.mode === 'off'
+                ? 'Один проход: детальность растёт только за счёт разрешения и шагов.'
+                : tp.mode === 'upscale'
+                  ? `База ${baseDims[0]}×${baseDims[1]} (${steps} шаг(ов)) → итог ${size[0]}×${size[1]}, ${tp.steps2} шаг(ов) с силой ${tp.denoise2}.`
+                  : `Сначала ${steps} шаг(ов) в ${size[0]}×${size[1]}, затем ${tp.steps2} шаг(ов) с силой ${tp.denoise2} поверх результата.`}
+            </div>
+            {tp.mode !== 'off' && (
+              <div className="text-[10px] text-muted-foreground">
+                Сила — это denoise второго прохода: 0.15–0.25 добавляет зерно и текстуры,
+                0.3–0.4 дорисовывает глаза и мелочи, выше 0.5 уже переписывает лицо.
+                Второй проход стоит дополнительных шагов и VAE-кодирования итогового размера.
+              </div>
+            )}
           </div>
 
           {/* ─── Референсы ─── */}

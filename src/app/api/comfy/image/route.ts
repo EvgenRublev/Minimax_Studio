@@ -15,6 +15,7 @@ import {
   DEFAULT_IMAGE_TEXT_ENCODER,
   DEFAULT_IMAGE_VAE,
   IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
+  imageTwoPassParams,
   pickImageBaseModel,
 } from '@/lib/comfy/image-template'
 import { listModelFiles } from '@/lib/comfy/model-scan'
@@ -71,6 +72,13 @@ export async function POST(req: NextRequest) {
       promptUpsampler?: string | null
       /** Соотношение сторон для формата входа апсемплера. */
       aspect?: string
+      /** (правка 935) 'off' | 'detail' | 'upscale'; width/height = итоговый размер. */
+      twoPass?: string
+      baseScale?: number
+      denoise2?: number
+      steps2?: number
+      /** (правка 935) добавка к промпту для второго прохода. */
+      prompt2?: string
     }
 
     const prompt = (body.prompt || '').trim()
@@ -166,6 +174,11 @@ export async function POST(req: NextRequest) {
         ? IMAGE_PROMPT_UPSAMPLER_CANDIDATES.find((c) => upsamplerFiles.includes(c)) ?? ''
         : (body.promptUpsampler || '').trim()
 
+    // (правка 935) Два прохода: диапазоны нормализует билдер, здесь те же
+    // значения нужны для стадий прогресса и сайдкара. width/height — итог,
+    // базовый размер билдер считает из baseScale.
+    const tp = imageTwoPassParams(body)
+
     const run = await runGeneration(() =>
       submitWorkflowJson(
         buildImageWorkflow({
@@ -184,8 +197,13 @@ export async function POST(req: NextRequest) {
           chunkFeedForward: body.chunkFeedForward,
           promptUpsampler: promptUpsampler || null,
           aspect: body.aspect,
+          twoPass: tp.mode,
+          baseScale: tp.baseScale,
+          denoise2: tp.denoise2,
+          steps2: tp.steps2,
+          prompt2: (body.prompt2 || '').trim(),
         }),
-        imageSamplerStages(),
+        imageSamplerStages(tp.mode),
       ),
     )
 
@@ -215,6 +233,14 @@ export async function POST(req: NextRequest) {
         // позволял повторить чужой результат дословно.
         image_upsampler: promptUpsampler || null,
         image_aspect: body.aspect || '',
+        // (правка 935) режим проходов и сила второго — то же для повтора.
+        image_two_pass: tp.mode,
+        ...(tp.mode !== 'off' && {
+          image_denoise2: tp.denoise2,
+          image_steps2: tp.steps2,
+          image_base_scale: tp.baseScale,
+          ...(body.prompt2 ? { image_prompt2: String(body.prompt2).trim() } : {}),
+        }),
         seed: body.seed ?? null,
         ...(references.length > 0 && {
           references: references.map((r) => ({ type: 'image', path: r })),

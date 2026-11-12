@@ -10,7 +10,13 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { IMAGE_ASPECTS, normalizeImageQuality, type ImageQualityKey } from '@/lib/comfy/image-template'
+import {
+  DEFAULT_IMAGE_TWO_PASS,
+  IMAGE_ASPECTS,
+  normalizeImageQuality,
+  type ImageQualityKey,
+  type ImageTwoPassMode,
+} from '@/lib/comfy/image-template'
 
 /** Ступени разрешения (0.5…8 МП), см. IMAGE_MEGAPIXELS. */
 export type ImageQuality = ImageQualityKey
@@ -42,6 +48,19 @@ export interface ImageParams {
    * '' — выключен (запрос уходит модели как есть).
    */
   upsampler: string
+  /**
+   * (правка 935) 'off' | 'detail' | 'upscale'. В 'upscale' качество (МП) — это
+   * ИТОГ: базовый проход берётся меньше в baseScale раз по стороне.
+   */
+  twoPass: ImageTwoPassMode
+  /** Во сколько раз стороны второго прохода больше базовых. */
+  baseScale: number
+  /** Сила второго прохода: 0.15 — только зерно/текстура, 0.5 — меняет лицо. */
+  denoise2: number
+  /** Шаги второго прохода. */
+  steps2: number
+  /** Добавка к промпту на втором проходе ('' — тот же текст). */
+  prompt2: string
 }
 
 export const DEFAULT_IMAGE_PARAMS: ImageParams = {
@@ -58,6 +77,11 @@ export const DEFAULT_IMAGE_PARAMS: ImageParams = {
   lowVramAttention: true,
   chunkFeedForward: true,
   upsampler: '',
+  twoPass: 'off',
+  baseScale: DEFAULT_IMAGE_TWO_PASS.baseScale,
+  denoise2: DEFAULT_IMAGE_TWO_PASS.denoise,
+  steps2: DEFAULT_IMAGE_TWO_PASS.steps,
+  prompt2: '',
 }
 
 export interface ImageReference {
