@@ -38,6 +38,11 @@ interface SetupStatus {
   step?: number
   total?: number
   title?: string
+  /* (правка 941) hint — что делать пользователю, log — путь к install.log;
+     detail — пояснение шага («прошло N мин», «загружено X из Y»). */
+  hint?: string
+  log?: string
+  detail?: string
 }
 
 /** 8 видео-кадров (public/splash-videos). 9:16, зациклены, без звука. */
@@ -247,13 +252,20 @@ export default function SplashPage() {
         ) : setup?.state === 'error' ? (
           /* (правка 748) Установка упала — честно говорим и не ждём вечно. */
           <div className="flex flex-col items-center gap-1.5">
-            <p className="text-sm font-medium text-red-400">
+            <p className="max-w-2xl text-center text-sm font-medium text-red-400">
               {setup.title || 'Установка завершилась с ошибкой'}
             </p>
-            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              Подробности — в файле install.log в папке программы. Можно закрыть
-              программу и запустить снова — установка продолжится с того места, где оборвалась.
+            {/* (правка 941) причину не обрезаем: install.ps1 пишет hint целиком,
+                а сообщение про битый архив содержит длинный путь. */}
+            <p className="max-w-2xl text-center text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              {setup.hint || 'Подробности — в файле install.log в папке программы.'}
+              {' '}Можно закрыть программу и запустить снова — установка продолжится с того места, где оборвалась.
             </p>
+            {setup.log && (
+              <p className="max-w-2xl break-all text-center text-[10px] opacity-60" style={{ color: 'var(--muted-foreground)' }}>
+                {setup.log}
+              </p>
+            )}
           </div>
         ) : setup?.state === 'running' ? (
           /* (правка 748) Установка зависимостей идёт — детерминированный
@@ -279,6 +291,14 @@ export default function SplashPage() {
                 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
               </span>
             </p>
+            {/* (правка 941) что происходит на шаге и сколько он уже идёт —
+                окно установки можно свернуть, а заставка объясняет сама. */}
+            {(setup.hint || setup.detail) && (
+              <p className="max-w-2xl text-center text-[11px] opacity-70" style={{ color: 'var(--muted-foreground)' }}>
+                {setup.detail && <span>{setup.detail} · </span>}
+                {setup.hint}
+              </p>
+            )}
           </>
         ) : (
           <>

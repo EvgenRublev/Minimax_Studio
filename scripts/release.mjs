@@ -90,6 +90,21 @@ if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.m
 // этой проверки не выпускаем. Суммы: `node scripts/make-installer-cache.mjs`.
 if (!run('installer integrity check', process.execPath, ['scripts/check-installer.mjs'])) process.exit(1);
 
+// (правка 941) Поведенческие тесты установщика на реальном коде install.ps1:
+// распаковка битых архивов (обрезанный zip, HTML вместо архива, осколки докачки)
+// и heartbeat статуса (заставка не должна считать долгий шаг мёртвым). Сеть,
+// ГПУ и администратор не нужны; heartbeat-тест идёт ~30 с.
+const powershell = process.env.SystemRoot
+  ? join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  : 'powershell.exe';
+for (const t of ['scripts/installer-integrity-test.ps1', 'scripts/installer-heartbeat-test.ps1']) {
+  if (!existsSync(join(ROOT, t))) {
+    console.error(`[release] нет ${t} — нечего проверять`);
+    process.exit(1);
+  }
+  if (!run(`installer behavior test: ${t}`, powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', t])) process.exit(1);
+}
+
 const checks = [];
 const check = (ok, label, hint) => checks.push({ ok, label, hint });
 

@@ -101,6 +101,14 @@ ComfyUI/            ← comfyRoot == comfyCore
 5. **Осторожно с регистром имён в PowerShell:** параметр `$Kind` и локальная
    `$kind` — одна переменная (реальный баг правки 939: проверка типа архива
    always-pass). Локальные переменные не должны совпадать с параметрами.
+6. **Самодиагностика (правка 941):** `install\install.ps1 -SelfCheck [-Deep]`
+   (точка входа для пользователя — `diagnostics.bat`) — read-only проверка уже поставленной
+   студии: Node, node_modules, `.next`, раскладка ComfyUI, `python_embeded` +
+   импорт torch, кастом-ноды по `install/nodes.json` и `custom nodes/*`, патчи
+   ядра, папки моделей; `-Deep` сверяет sha256 бандла и кэша. Новое поле статуса
+   — `hint`/`log`; долгий шаг держит живым heartbeat (`Start-StatusHeartbeat`),
+   иначе заставка считает установщика мёртвым по `ts` старше 12 минут.
+   Регресс-тест: `scripts/installer-heartbeat-test.ps1`.
 
 Историческая справка: юзер с `I:\Minimax_Studio-main` (архив исходников вместо
 setup.exe, офлайн-бандла нет) падал на 0% именно из-за неизвлекаемого мусора в кэше.

@@ -171,6 +171,70 @@ if (existsSync(appUpPath)) {
   fails.push('src/lib/app-update.ts не найден — проверка апдейтера пропущена')
 }
 
+// (правка 941) самодиагностика, подсказки и «живой» статус. Без этого долгий
+// шаг выглядит как зависшая установка, а причина отказа обрезается в окне.
+const guiPath = join(ROOT, 'install', 'install_gui.ps1')
+const gui = existsSync(guiPath) ? readFileSync(guiPath, 'utf8') : ''
+ok(inst.includes('[switch]$SelfCheck'), 'install.ps1: нет режима -SelfCheck')
+ok(inst.includes('[switch]$Deep'), 'install.ps1: нет режима -Deep (сверка sha256)')
+ok(/function Invoke-SelfCheck/.test(inst), 'install.ps1: нет функции самодиагностики')
+ok(inst.includes('if ($SelfCheck -or $Deep)'), 'install.ps1: самодиагностика не вызывается')
+ok(/nodes\.json/.test(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? ''),
+  'самодиагностика не сверяет кастомные ноды с install/nodes.json')
+ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('PH3ImageConditioning'),
+  'самодиагностика не проверяет патч ядра (PH3ImageConditioning)')
+ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('import torch'),
+  'самодиагностика не проверяет импорт torch')
+ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('comfy-patches'),
+  'самодиагностика не сверяет патчи ядра с установщиком')
+ok(/SelfCheckMode/.test(inst), 'install.ps1: режим самодиагностики не отключает запись (посев бандла)')
+// статус: hint+log наружу, heartbeat держит ts живым, финал пишется без heartbeat
+ok(inst.includes('StatusHint'), 'install.ps1: статус не отдаёт hint')
+ok(/log\s*=\s*\$LogFile/.test(inst), 'install.ps1: статус не отдаёт путь к логу')
+ok(/function Step \{[\s\S]*?\[string\]\$Hint/.test(inst), 'install.ps1: Step не принимает -Hint')
+ok(inst.includes('function Start-StatusHeartbeat') && inst.includes('function Stop-StatusHeartbeat'),
+  'install.ps1: нет heartbeat статуса (заставка считает долгий шаг мёртвым)')
+ok(/Step 1 9/.test(inst) && /Start-StatusHeartbeat/.test(inst), 'install.ps1: heartbeat не запускается после шага 1')
+const trapBlk = inst.match(/trap \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(trapBlk.includes('Stop-StatusHeartbeat'), 'install.ps1: trap не глушит heartbeat (перезатрёт state=error)')
+ok(trapBlk.includes('Write-SetupStatus') && /\$hint/.test(trapBlk), 'install.ps1: trap не пишет hint в статус ошибки')
+const tailBlk = inst.slice(inst.lastIndexOf("# финальный статус"))
+ok(tailBlk.includes('Stop-StatusHeartbeat'), 'install.ps1: heartbeat не остановлен перед финальной записью статуса')
+ok(inst.includes('function Write-StatusJsonAtomic'), 'install.ps1: статус пишется неатомарно (читатель ловит полJSON)')
+// окно установки: причину не обрезаем, подсказку и лог показываем
+ok(/'\['  \+ \$step/.test(gui) || gui.includes('$st.hint'), 'install_gui.ps1: окно установки не показывает hint из статуса')
+ok(gui.includes('$st.log'), 'install_gui.ps1: окно установки не показывает путь к логу')
+ok(/error[\s\S]{0,400}AutoEllipsis = \$false/.test(gui), 'install_gui.ps1: в ветке error причину по-прежнему обрезает AutoEllipsis')
+ok(/function Write-StatusError\(\[string\]\$Title, \[string\]\$Hint/.test(gui), 'install_gui.ps1: Write-StatusError не пишет hint')
+// заставка и Electron: hint/log доезжают до интерфейса
+const splashPath = join(ROOT, 'src', 'app', 'splash', 'page.tsx')
+const splash = existsSync(splashPath) ? readFileSync(splashPath, 'utf8') : ''
+ok(splash.includes('hint?: string'), 'splash: интерфейс статуса не знает про hint')
+ok(splash.includes('setup.hint') && splash.includes('setup.log'), 'splash: hint/log установки не выводятся')
+const mainJsPath = join(ROOT, 'electron', 'main.js')
+const mainJs = existsSync(mainJsPath) ? readFileSync(mainJsPath, 'utf8') : ''
+ok(mainJs.includes('function writeSetupStatus(state, step, total, title, hint)'), 'electron/main.js: writeSetupStatus не принимает hint')
+ok(mainJs.includes('prev.hint'), 'electron/main.js: финальный статус теряет hint установщика')
+ok(mainJs.includes("log: path.join(APP_ROOT, 'install.log')"), 'electron/main.js: финальный статус не указывает путь к логу')
+// (правка 941) точка входа для юзера: двойной клик = самодиагностика
+const diagPath = join(ROOT, 'diagnostics.bat')
+if (existsSync(diagPath)) {
+  const db = readFileSync(diagPath)
+  ok(db.includes('-SelfCheck') && db.includes('-Deep'), 'diagnostics.bat: должен запускать -SelfCheck -Deep')
+  const nonAscii = Array.from(db).filter((x) => x > 127).length
+  ok(nonAscii === 0, `diagnostics.bat: ${nonAscii} не-ASCII байт — cmd.exe портит UTF-8 в .bat`)
+  let crlf = 0
+  let loneLF = 0
+  for (let i = 0; i < db.length; i++) {
+    if (db[i] !== 0x0a) continue
+    if (i > 0 && db[i - 1] === 0x0d) crlf++
+    else loneLF++
+  }
+  ok(crlf > 0 && loneLF === 0, `diagnostics.bat: должны быть CRLF (CRLF=${crlf}, LF=${loneLF})`)
+} else {
+  fails.push('diagnostics.bat не найден — у пользователя нет точки входа для самодиагностики')
+}
+
 // ─── 5) кодировки ──────────────────────────────────────────────────────────
 function readBytes(p) {
   return existsSync(p) ? readFileSync(p) : null

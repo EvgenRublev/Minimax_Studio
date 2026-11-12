@@ -208,12 +208,18 @@ function Get-Status {
     } catch { return $null }
 }
 
-function Write-StatusError([string]$Title) {
+function Write-StatusError([string]$Title, [string]$Hint = '') {
     try {
         New-Item -ItemType Directory -Force -Path $Cache | Out-Null
         $o = [ordered]@{
             state = 'error'; step = 0; total = 9
             title = $Title; pid = 0
+            # (правка 941) hint/log - то же, что пишет install.ps1: заставка и окно
+            # установки показывают причину и путь к логу, а не только «ошибка».
+            hint  = $Hint
+            log   = (Join-Path $Root 'install.log')
+            speed = 0
+            detail = ''
             ts    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
         $json = ($o | ConvertTo-Json -Compress)
@@ -782,6 +788,13 @@ function Start-Install {
     if (-not (Test-Path $InstallPs)) {
         $status.Text = 'Не найден файл install\install.ps1'
         $status.ForeColor = $C_ERR
+        # (правка 941) сразу объясняем: файл исчезает, если папку программы
+        # перемещали или студию достали из архива исходников без установщика.
+        $hint.AutoSize = $false
+        $hint.Font = New-Object System.Drawing.Font('Segoe UI', 7.5)
+        $hint.Size = New-Object System.Drawing.Size(616, 30)
+        $hint.Location = New-Object System.Drawing.Point(26, 366)
+        $hint.Text = ('Файл установки потерян из папки программы (' + $InstallPs + '). Обновите студию или переустановите её.')
         $script:state = 'error'
         return
     }
@@ -845,6 +858,16 @@ function Update-Ui {
             } else {
                 $speedText.Text = ''
             }
+
+            # (правка 941) нижняя подсказка теперь из install.ps1: шаг сам
+            # объясняет, что происходит и сколько это обычно занимает. Фиксируем
+            # ширину, чтобы текст переносился, а не уползал за край окна.
+            if ($st.hint) {
+                $hint.AutoSize = $false
+                $hint.Size = New-Object System.Drawing.Size(616, 30)
+                $hint.Location = New-Object System.Drawing.Point(26, 366)
+                $hint.Text = ([string]$st.hint)
+            }
         }
         'done' {
             $script:pct = 100
@@ -861,10 +884,24 @@ function Update-Ui {
         }
         'error' {
             $script:state = 'error'
+            # (правка 941) причину не обрезаем: у сообщений про повреждённый архив
+            # путь длинный, и в одну строку влезала только его начало («I:\Mini…» -
+            # ровно то, что юзер и присылал в скриншоте). Строку делаем двухстрочной
+            # (выше полосы прогресса она не залезает), текст - переносимым.
+            $status.AutoEllipsis = $false
+            $status.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+            $status.Size = New-Object System.Drawing.Size(616, 32)
             $status.Text = ('Ошибка: ' + $st.title)
             $status.ForeColor = $C_ERR
-            # (правка 789) та же подсказка, что и при тихом обрыве
-            $hint.Text = 'Попробуйте запустить программу снова: скачанное не потеряется. Если мешает VPN или прокси — отключите его.'
+            $speedText.Text = ''
+            $hintText = 'Попробуйте запустить программу снова: скачанное не потеряется. Если мешает VPN или прокси — отключите его.'
+            if ($st.hint) { $hintText = ([string]$st.hint) }
+            if ($st.log) { $hintText = ($hintText + ' Лог: ' + [string]$st.log) }
+            $hint.AutoSize = $false
+            $hint.Font = New-Object System.Drawing.Font('Segoe UI', 7.5)
+            $hint.Size = New-Object System.Drawing.Size(616, 30)
+            $hint.Location = New-Object System.Drawing.Point(26, 366)
+            $hint.Text = $hintText
         }
     }
 }

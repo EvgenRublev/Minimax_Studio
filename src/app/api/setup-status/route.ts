@@ -15,6 +15,10 @@ export const dynamic = 'force-dynamic'
  *
  * «running» со устаревшим ts (> 12 мин — установщик упал) наружу не
  * отдаётся: показываем null, приложение поднимет установку заново.
+ *
+ * (правка 941) install.ps1 держит ts живым сам — heartbeat раз в 10 с, — а
+ * кроме шага отдаёт `hint` (что делать пользователю) и `log` (путь к
+ * install.log), чтобы заставка и окно установки показывали причину целиком.
  */
 const STATUS_FILE = path.resolve(process.cwd(), '.install-cache', 'setup_status.json')
 const LIVE_MS = 12 * 60_000
@@ -24,6 +28,10 @@ interface SetupStatus {
   step?: number
   total?: number
   title?: string
+  hint?: string
+  log?: string
+  speed?: number
+  detail?: string
   pid?: number
   ts?: string
 }

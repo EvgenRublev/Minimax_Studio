@@ -454,11 +454,20 @@ function readSetupStatus() {
   }
 }
 
-function writeSetupStatus(state, step, total, title) {
+function writeSetupStatus(state, step, total, title, hint) {
   try {
     mkdirSync(path.dirname(SETUP_STATUS), { recursive: true })
+    const prev = readSetupStatus() || {}
     writeFileSync(SETUP_STATUS, JSON.stringify({
-      state, step, total, title, pid: process.pid,
+      state, step, total, title,
+      /* (правка 941) hint — что делать пользователю, log — где подробности.
+         install.ps1 пишет их сам; Electron дописывает финальный статус и терять
+         их не должен, иначе на заставке остаётся только «код N». */
+      hint: hint || prev.hint || '',
+      log: path.join(APP_ROOT, 'install.log'),
+      speed: 0,
+      detail: '',
+      pid: process.pid,
       ts: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
     }), 'utf8')
   } catch (err) {
@@ -483,23 +492,31 @@ async function runSetupIfNeeded() {
     return await waitForExternalSetup()
   }
   if (!existsSync(ps1)) {
-    writeSetupStatus('error', 0, 9, 'Не найден install\\install.ps1')
+    writeSetupStatus('error', 0, 9, 'Не найден install\\install.ps1',
+      'Файл установки потерян из папки программы: обновите студию или переустановите её.')
     return false
   }
 
   appendConsole('[desktop] зависимости не установлены — запускаю установку (скрыто)\n')
-  writeSetupStatus('running', 0, 9, 'Запуск установки зависимостей…')
+  writeSetupStatus('running', 0, 9, 'Запуск установки зависимостей…',
+    'Дальше установщик сам покажет шаги 1-9; это один раз, окно можно свернуть.')
   const inst = spawnChild(POWERSHELL, [
     '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass',
     '-File', ps1, '-Root', APP_ROOT, '-NoPause',
   ])
   const code = await new Promise((resolve) => inst.on('exit', (c) => resolve(c)))
   if (quitting) return false
+  /* (правка 941) install.ps1 сам записал финальный статус с настоящей причиной,
+     подсказкой и путём к логу — не затираем его своим «код N». */
+  const fin = readSetupStatus()
   if (code === 0 && existsSync(COMFY_PY)) {
-    writeSetupStatus('done', 9, 9, 'Установка завершена')
+    if (!fin || fin.state !== 'done') writeSetupStatus('done', 9, 9, 'Установка завершена')
     return true
   }
-  writeSetupStatus('error', 0, 9, `Установка завершилась с ошибкой (код ${code})`)
+  if (!fin || fin.state !== 'error') {
+    writeSetupStatus('error', 0, 9, `Установка завершилась с ошибкой (код ${code})`,
+      'Открой install.log и найди строку [ERROR] — там причина. Повторный запуск продолжает установку с того же места.')
+  }
   return false
 }
 

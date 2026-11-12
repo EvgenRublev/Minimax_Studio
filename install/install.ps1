@@ -33,6 +33,15 @@
 
 .PARAMETER NoPause
     Не ждать нажатия клавиши в конце.
+
+.PARAMETER SelfCheck
+    Только проверка уже установленной студии: Node, node_modules, сборка,
+    ядро ComfyUI, Python+torch, кастом-ноды, патчи ядра, пути моделей. Ничего
+    не устанавливает и не скачивает - нужно, когда «вчера работало, сегодня нет».
+
+.PARAMETER Deep
+    В связке с -SelfCheck: дополнительно сверить sha256 архивов в .install-cache
+    и офлайн-бандла install\\cache (медленнее, зато видно битые файлы).
 #>
 [CmdletBinding()]
 param(
@@ -41,7 +50,9 @@ param(
     [switch]$SkipApp,
     [switch]$SkipComfy,
     [switch]$KeepCache,
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$SelfCheck,
+    [switch]$Deep
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,6 +66,7 @@ $Cache = Join-Path $Root '.install-cache'
 $LogFile = Join-Path $Root 'install.log'
 $StatusFile = Join-Path $Cache 'setup_status.json'
 
+$script:SelfCheckMode = [bool]($SelfCheck -or $Deep)
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:Python = $null
@@ -107,7 +119,6 @@ function Write-Log {
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch { }
 }
 
-function Step { param([int]$N, [int]$Total, [string]$Text) $script:SpeedMBs = 0; $script:SpeedDetail = ''; Write-SetupStatus 'running' $N $Total $Text; Write-Log '' ; Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step' }
 function Info { param([string]$M) Write-Log ("  " + $M) }
 function Ok   { param([string]$M) Write-Log ("  [OK] " + $M) 'ok' }
 function Warn { param([string]$M) $script:Warnings.Add($M); Write-Log ("  [WARN] " + $M) 'warn' }
@@ -120,24 +131,57 @@ function Fail { param([string]$M) $script:Failures.Add($M); Write-Log ("  [ERROR
 $script:StatusStep = 0
 $script:StatusTitle = ''
 $script:StatusState = 'idle'
+$script:StatusHint = ''
 $script:SpeedMBs = 0
 $script:SpeedDetail = ''
+# (правка 941) Статус читают чужие процессы (Electron, заставка, окно
+# установки), поэтому пишем атомарно: временный файл + Replace. Иначе читатель
+# может поймать половину JSON посреди записи - в том числе когда рядом пишет
+# heartbeat.
+function Write-StatusJsonAtomic {
+    param([string]$Json)
+    $d = Split-Path -Parent $StatusFile
+    if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+    $tmp = $StatusFile + '.tmp'
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($tmp, $Json, $enc)
+    try {
+        if (Test-Path -LiteralPath $StatusFile) { [IO.File]::Replace($tmp, $StatusFile) }
+        else { [IO.File]::Move($tmp, $StatusFile) }
+    } catch {
+        try { [IO.File]::Copy($tmp, $StatusFile, $true); [IO.File]::Delete($tmp) } catch { }
+    }
+}
 function Write-SetupStatus {
-    param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '')
+    param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '', [string]$Hint = $null)
     if ($StepN -gt 0) { $script:StatusStep = $StepN }
     $script:StatusState = $State
     if ($Title) { $script:StatusTitle = $Title }
+    # (правка 941) hint - что делать пользователю, log - где смотреть подробности.
+    # Раньше причина влезала в одну строку окна установки и обрезалась, а путь к
+    # логу юзер искал сам.
+    if ($null -ne $Hint) { $script:StatusHint = $Hint }
     $obj = [ordered]@{
         state  = $State
         step   = $StepN
         total  = $TotalN
         title  = $script:StatusTitle
+        hint   = $script:StatusHint
+        log    = $LogFile
         speed  = $script:SpeedMBs
         detail = $script:SpeedDetail
         pid    = $PID
         ts     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
-    try { Write-TextFileNoBom $StatusFile (ConvertTo-Json $obj -Compress) } catch { }
+    try { Write-StatusJsonAtomic (ConvertTo-Json $obj -Compress) } catch { }
+}
+
+function Step {
+    param([int]$N, [int]$Total, [string]$Text, [string]$Hint = '')
+    $script:SpeedMBs = 0; $script:SpeedDetail = ''
+    Write-SetupStatus 'running' $N $Total $Text $Hint
+    Write-Log ''
+    Write-Log ("[{0}/{1}] {2}" -f $N, $Total, $Text) 'step'
 }
 
 # (правка 762) текущая скорость загрузки (МБ/с) + пояснение «загружено X из Y»
@@ -148,6 +192,53 @@ function Set-Speed {
     $script:SpeedMBs = [Math]::Round($MBps, 1)
     if ($Detail) { $script:SpeedDetail = $Detail }
     Write-SetupStatus $script:StatusState
+}
+
+# (правка 941) Heartbeat статуса. Долгие шаги (пакеты Python ~15 ГБ, сборка,
+# smoke-запуск ComfyUI) раньше молчали десятками минут: заставка считает статус
+# неживым, если ts старше 12 минут, и показывала «установка не идёт». Раз в 10 с
+# освежаем ts и добавляем в detail «прошло N мин». Пишется из отдельного
+# runspace'а, основного потока не блокирует.
+$script:StatusStartedAt = Get-Date
+$script:Heartbeat = $null
+function Start-StatusHeartbeat {
+    if ($script:Heartbeat) { return }
+    try {
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+        $rs.Open()
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $rs
+        [void]$ps.AddScript({
+            param([string]$file, [string]$startedIso, [int]$everySec)
+            while ($true) {
+                Start-Sleep -Seconds $everySec
+                try {
+                    $j = (Get-Content -LiteralPath $file -Raw -ErrorAction Stop) | ConvertFrom-Json
+                    if ($j.state -ne 'running') { break }
+                    $started = [DateTime]::Parse($startedIso)
+                    $min = [int][Math]::Floor(((Get-Date) - $started).TotalMinutes)
+                    $base = [string]$j.detail
+                    if ($base -match 'прошло \d+ мин') { $base = ($base -replace '^прошло \d+ мин · ', '') }
+                    $j.detail = ('прошло ' + $min + ' мин') + $(if ($base) { ' · ' + $base } else { '' })
+                    $j.ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    # атомарно (правка 941): читатель не должен поймать полJSON
+                    $tmp = $file + '.tmp'
+                    [System.IO.File]::WriteAllText($tmp, ($j | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
+                    try { [System.IO.File]::Replace($tmp, $file) } catch { [System.IO.File]::Copy($tmp, $file, $true); [System.IO.File]::Delete($tmp) }
+                } catch { }
+            }
+        }).AddArgument($StatusFile).AddArgument($script:StatusStartedAt.ToString('o')).AddArgument(10)
+        $script:Heartbeat = [pscustomobject]@{ PS = $ps; Rs = $rs; Async = $ps.BeginInvoke() }
+    } catch {
+        $script:Heartbeat = $null
+    }
+}
+function Stop-StatusHeartbeat {
+    if (-not $script:Heartbeat) { return }
+    try { $script:Heartbeat.PS.Stop() } catch { }
+    try { $script:Heartbeat.PS.Dispose() } catch { }
+    try { $script:Heartbeat.Rs.Dispose() } catch { }
+    $script:Heartbeat = $null
 }
 
 # (правка 789) Глобальная страховка: ErrorActionPreference='Stop', и любая
@@ -161,13 +252,19 @@ trap {
         $where = ' (' + ($_.InvocationInfo.PositionMessage -replace '\s+', ' ') + ')'
     }
     try { Write-Log ('НЕПРЕДВЗЯТАЯ ОШИБКА: ' + $_.Exception.Message + $where) 'err' } catch { }
+    # (правка 941) heartbeat пишет статус из своего потока - глушим его до записи
+    # итогового state=error, иначе он перезатрёт ошибку.
+    try { if (Get-Command Stop-StatusHeartbeat -ErrorAction SilentlyContinue) { Stop-StatusHeartbeat } } catch { }
     # (правка 939) Испортилось что-то одно - не тащим это через все повторные
     # запуски: выкидываем из кэша файлы, которые не являются ожидаемыми архивами.
     # Функция объявлена ниже по файлу, поэтому проверяем, что она уже существует.
     try {
         if (Get-Command Clear-CorruptCache -ErrorAction SilentlyContinue) { Clear-CorruptCache }
     } catch { }
-    try { Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) } catch { }
+    try {
+        $hint = 'Подробности - в файле install.log (путь в этой строке). Повторный запуск продолжает установку с того же места; битые архивы из кэша удалены автоматически.'
+        Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) $hint
+    } catch { }
     exit 1
 }
 
@@ -350,7 +447,9 @@ function Clear-CorruptCache {
 # ComfyUI, кастомные ноды, бинарник Electron) приложены прямо к установщику в
 # install\cache - раскладываем их в .install-cache и не качаем с сети вовсе.
 $bundle = Join-Path $InstallDir 'cache'
-if (Test-Path $bundle) {
+# (правка 941) в режиме самодиагностики ничего не раскладываем и не чиним -
+# только читаем. Битые архивы бандла и кэша покажет -Deep.
+if ((Test-Path $bundle) -and -not $script:SelfCheckMode) {
     $seeded = 0
     Get-ChildItem $bundle -Recurse -File | ForEach-Object {
         $src = $_.FullName
@@ -1101,11 +1200,237 @@ Write-Log ('  Лог:           ' + $LogFile)
 if ($Force)     { Write-Log '  Режим:         полная переустановка (-Force)' }
 if ($SkipApp)   { Write-Log '  Режим:         без Node.js и сборки (-SkipApp)' }
 if ($SkipComfy) { Write-Log '  Режим:         без ComfyUI (-SkipComfy)' }
+if ($script:SelfCheckMode) { Write-Log '  Режим:         самодиагностика (-SelfCheck): ничего не скачивается и не меняется' }
 Write-Log ''
+
+# ------------------------------------------ самодиагностика (правка 941) ---
+
+# -SelfCheck (и -Deep): студию НЕ трогаем, только читаем. Это ответ на
+# «вчера работало, сегодня нет»: по одному запуску видно, какой именно кусок
+# отвалился - Node, зависимости, сборка, ядро ComfyUI, Python+torch, кастомные
+# ноды, патчи ядра, пути моделей - и что с этим делать. Ничего не скачивается,
+# не собирается и не грузится на ГПУ (torch только импортируется).
+function Get-SelfCheckComfyPaths {
+    param([string]$Base)
+    # та же раскладка, что в шаге 4: новая плоская (ComfyUI\main.py) и старая
+    # (ComfyUI-Easy-Install\ComfyUI + python_embeded рядом)
+    $new = Join-Path $Base 'ComfyUI'
+    $old = Join-Path $Base 'ComfyUI-Easy-Install'
+    if (Test-Path -LiteralPath (Join-Path $new 'main.py')) {
+        return [pscustomobject]@{ Root = $new; Core = $new }
+    }
+    if (Test-Path -LiteralPath (Join-Path $old 'ComfyUI\main.py')) {
+        return [pscustomobject]@{ Root = $old; Core = (Join-Path $old 'ComfyUI') }
+    }
+    if (Test-Path -LiteralPath (Join-Path $old 'main.py')) {
+        return [pscustomobject]@{ Root = $old; Core = $old }
+    }
+    return [pscustomobject]@{ Root = $new; Core = $new }
+}
+
+function Invoke-SelfCheck {
+    param([switch]$DeepCheck)
+    Write-Log '   САМОДИАГНОСТИКА: установка не запускается, файлы не меняются' 'step'
+    Write-Log ''
+
+    # ---- приложение: portable Node, node_modules, production-сборка ----
+    Write-Log '  Приложение:' 'step'
+    $nodeExe = Join-Path $Root 'runtime\node.exe'
+    if (Test-Path -LiteralPath $nodeExe) {
+        $nv = ''
+        try { $nv = ((& $nodeExe -v 2>&1) | Out-String).Trim() } catch { }
+        if ($nv) { Ok ('portable Node.js: ' + $nv) }
+        else { Fail 'runtime\node.exe есть, но не запускается - позови скрипт: install.bat (шаг 2)' }
+    } else {
+        Fail 'нет runtime\node.exe - студия не запустится. Починка: install.bat (шаг 2)'
+    }
+
+    foreach ($d in @('next', 'react', 'react-dom', 'zustand')) {
+        if (Test-Path -LiteralPath (Join-Path $Root ('node_modules\' + $d))) { Ok ('зависимость: ' + $d) }
+        else { Fail ('нет node_modules\' + $d + '. Починка: install.bat (шаг 3)') }
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root 'node_modules\electron\electron.exe')) {
+        Ok 'электрон (окно студии) на месте'
+    } else {
+        Warn 'нет node_modules\electron - окно студии не запустится (лечится install.bat, шаг 3)'
+    }
+    $buildId = Join-Path $Root '.next\BUILD_ID'
+    if (Test-Path -LiteralPath $buildId) {
+        Ok ('production-сборка есть (BUILD_ID ' + ((Get-Content -LiteralPath $buildId -Raw).Trim()) + ')')
+    } else {
+        Fail 'нет .next\BUILD_ID - интерфейс не собран. Починка: install.bat (шаг 3)'
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root 'electron\main.js')) { Ok 'electron\main.js на месте' }
+    else { Fail 'нет electron\main.js - файл программы потерян (обнови студию или переустанови)' }
+
+    # ---- бэкенд ComfyUI: раскладка, ядро, python_embeded, torch ----
+    Write-Log ''
+    Write-Log '  ComfyUI:' 'step'
+    $cp = Get-SelfCheckComfyPaths $Root
+    if (Test-Path -LiteralPath (Join-Path $cp.Core 'main.py')) {
+        Ok ('ядро ComfyUI: ' + $cp.Core)
+        $ver = ''
+        $vf = Join-Path $cp.Core 'comfyui_version.py'
+        $pf = Join-Path $cp.Core 'pyproject.toml'
+        if (Test-Path -LiteralPath $vf) {
+            $t = Get-Content -LiteralPath $vf -Raw
+            if ($t -match "version\s*=\s*['""]([^'""]+)['""]") { $ver = $Matches[1] }
+        }
+        if (-not $ver -and (Test-Path -LiteralPath $pf)) {
+            $t = Get-Content -LiteralPath $pf -Raw
+            if ($t -match '(?m)^\s*version\s*=\s*["'']([^"'']+)["'']') { $ver = $Matches[1] }
+        }
+        if ($ver) { Ok ('версия ядра: ' + $ver) } else { Warn 'версия ядра не читается (comfyui_version.py / pyproject.toml)' }
+    } else {
+        Fail ('нет папки ядра ComfyUI (main.py) рядом с ' + $Root + '. Починка: install.bat (шаг 4)')
+    }
+
+    $py = Join-Path $cp.Root 'python_embeded\python.exe'
+    if (Test-Path -LiteralPath $py) {
+        Ok ('портативный Python: ' + $py)
+        # torch проверяем импортом без CUDA - саму модель не запускаем
+        $tout = ''
+        try { $tout = ((& $py -c 'import torch; print(torch.__version__)' 2>&1) | Out-String).Trim() } catch { $tout = $_.Exception.Message }
+        if ($LASTEXITCODE -eq 0 -and $tout) { Ok ('torch импортируется: ' + ($tout -split "`n")[0]) }
+        else {
+            $msg = if ($tout) { ($tout -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 2) -join ' | ' } else { 'без вывода' }
+            if ($msg -match '1114|DLL load failed|c10') {
+                Fail ('torch не грузится (' + $msg + ') - нужен Visual C++ 2015-2022 x64: ' + $script:VcRedistUrl + ', затем install.bat от администратора')
+            } else {
+                Fail ('torch не импортируется (' + $msg + '). Починка: install.bat (шаг 5)')
+            }
+        }
+    } else {
+        Fail ('нет ' + $py + ' - Python-окружение не установлено. Починка: install.bat (шаг 5)')
+    }
+
+    # ---- кастомные ноды: внешние из install\nodes.json + наши из custom nodes\ ----
+    Write-Log ''
+    Write-Log '  Кастомные ноды:' 'step'
+    $cnDir = Join-Path $cp.Core 'custom_nodes'
+    if (-not (Test-Path -LiteralPath $cnDir)) {
+        Fail ('нет папки custom_nodes в ядре (' + $cnDir + '). Починка: install.bat (шаг 6)')
+    } else {
+        $nodesFile = Join-Path $InstallDir 'nodes.json'
+        $missing = @()
+        if (Test-Path -LiteralPath $nodesFile) {
+            try {
+                foreach ($n in (Get-Content -LiteralPath $nodesFile -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+                    if (-not (Test-Path -LiteralPath (Join-Path $cnDir ([string]$n.name)))) { $missing += [string]$n.name }
+                }
+            } catch { Warn ('nodes.json не читается: ' + $_.Exception.Message) }
+        } else {
+            Warn 'нет install\nodes.json - список внешних нод не проверен'
+        }
+        if ($missing.Count -eq 0) { Ok ('внешние ноды на месте (' + (Get-ChildItem -LiteralPath $cnDir -Directory -EA SilentlyContinue).Count + ' папок)') }
+        else { Warn ('нет ' + $missing.Count + ' внешней(ых) нод(ы): ' + (($missing | Select-Object -First 6) -join ', ') + '. Лечится install.bat (шаг 6) или запуском студии (синк нод при старте)') }
+
+        # наши собственные ноды - их отсутствие ломает воркфлоу с missing_node_type
+        $ours = @()
+        $oursSrc = Join-Path $Root 'custom nodes'
+        if (Test-Path -LiteralPath $oursSrc) {
+            foreach ($d in (Get-ChildItem -LiteralPath $oursSrc -Directory)) {
+                $t = Join-Path $cnDir $d.Name
+                if (-not (Test-Path -LiteralPath $t)) { $ours += ($d.Name + ' (нет папки)') }
+                elseif (-not (Test-Path -LiteralPath (Join-Path $t '__init__.py'))) { $ours += ($d.Name + ' (нет __init__.py)') }
+            }
+        } else {
+            Warn 'нет папки custom nodes в самой студии - наши ноды неоткуда брать (виноват апдейт-зип)'
+        }
+        if ($ours.Count -eq 0) { Ok 'наши ноды студии на месте' }
+        else { Fail ('нет наших нод: ' + ($ours -join '; ') + '. Перезапусти студию - синк нод чинит это при старте (AGENTS.md, инвариант ComfyUI)') }
+    }
+
+    # ---- патчи ядра: файлы из install\comfy-patches должны лежать в ядре ----
+    Write-Log ''
+    Write-Log '  Патчи ядра:' 'step'
+    $patchSrc = Join-Path $InstallDir 'comfy-patches'
+    if (-not (Test-Path -LiteralPath $patchSrc)) {
+        Warn 'нет install\comfy-patches - проверить патчи ядра нечем'
+    } else {
+        $bad = @()
+        Get-ChildItem -LiteralPath $patchSrc -Recurse -File | Where-Object { $_.FullName -notmatch '__pycache__' } | ForEach-Object {
+            $rel = $_.FullName.Substring($patchSrc.Length).TrimStart('\', '/')
+            $dst = Join-Path $cp.Core ($rel -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $dst)) { $bad += ($rel + ' (файла нет в ядре)') }
+            else {
+                try {
+                    $a = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                    $b = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash
+                    if ($a -ne $b) { $bad += ($rel + ' (версия устарела)') }
+                } catch { $bad += ($rel + ' (не читается)') }
+            }
+        }
+        if ($bad.Count -eq 0) { Ok 'патчи ядра совпадают с установщиком' }
+        else { Warn ('патчи ядра расходятся: ' + ($bad -join '; ') + '. Перезапусти студию - патчи накатываются при старте') }
+        $mh3 = Join-Path $cp.Core 'comfy_extras\nodes_minimax_h3.py'
+        if (Test-Path -LiteralPath $mh3) {
+            $t = Get-Content -LiteralPath $mh3 -Raw -EA SilentlyContinue
+            if ($t -and $t.Contains('PH3ImageConditioning')) { Ok 'нода PH3ImageConditioning в ядре есть' }
+            else { Fail 'в ядре нет PH3ImageConditioning - вкладка «Изображение» не работает. Перезапусти студию (патчи накатываются при старте)' }
+        }
+    }
+
+    # ---- конфигурация путей к моделям ----
+    Write-Log ''
+    Write-Log '  Модели и пути:' 'step'
+    if (Test-Path -LiteralPath (Join-Path $cp.Core 'extra_model_paths.yaml')) { Ok 'extra_model_paths.yaml есть' }
+    else { Warn 'нет extra_model_paths.yaml - часть моделей не найдётся. Починка: install.bat (шаг 7)' }
+    foreach ($d in @('models\diffusion_models', 'models\text_encoders', 'models\vae', 'input', 'output')) {
+        if (Test-Path -LiteralPath (Join-Path $cp.Core $d)) { Ok ('папка: ' + $d) }
+        else { Warn ('нет папки ' + $d + '. Починка: install.bat (шаг 7)') }
+    }
+
+    # ---- -Deep: sha256 офлайн-бандла и кэша прошлых запусков ----
+    if ($DeepCheck) {
+        Write-Log ''
+        Write-Log '  Контрольные суммы (-Deep):' 'step'
+        if ($script:Pins.Count -eq 0) { Warn 'install\checksums.json пуст или отсутствует - сверять нечем' }
+        foreach ($base in @((Join-Path $InstallDir 'cache'), $Cache)) {
+            if (-not (Test-Path -LiteralPath $base)) { continue }
+            $n = 0
+            $badDeep = @()
+            Get-ChildItem -LiteralPath $base -Recurse -File -Force -EA SilentlyContinue | ForEach-Object {
+                $rel = Get-CacheRel $_.FullName
+                if (-not $rel) {
+                    $rel = $_.FullName.Substring($base.Length).TrimStart('\', '/')
+                }
+                if (-not (Get-PinFor $_.FullName -Rel $rel) -and -not (Get-ExpectedKind $_.Name)) { return }
+                $okArc = Test-ArchiveFile $_.FullName -Rel $rel -CheckPin -BundleSha
+                if ($okArc) { $n++ } else { $badDeep += ($rel + ' (' + $script:IntegrityError + ')') }
+            }
+            Write-Log ('   проверено целых: ' + $n + ' - ' + $base)
+            foreach ($b in $badDeep) { Warn ('битый файл: ' + $b + ' (' + $base + ') - удали его или запусти install.bat: битые файлы кэша сносятся сами') }
+        }
+    }
+
+    Write-Log ''
+    Write-Log '  ============================================================'
+    if ($script:Failures.Count -eq 0) {
+        Write-Log '   САМОДИАГНОСТИКА: критичных проблем не найдено' $(if ($script:Warnings.Count) { 'warn' } else { 'ok' })
+    } else {
+        Write-Log ('   САМОДИАГНОСТИКА: проблем - ' + $script:Failures.Count) 'err'
+        foreach ($f in $script:Failures) { Write-Log ('   - ' + $f) 'err' }
+    }
+    if ($script:Warnings.Count -gt 0) {
+        Write-Log ('   Предупреждений: ' + $script:Warnings.Count) 'warn'
+        foreach ($w in $script:Warnings) { Write-Log ('   - ' + $w) 'warn' }
+    }
+    Write-Log ('  Полный лог: ' + $LogFile)
+    Write-Log '  ============================================================'
+    return $(if ($script:Failures.Count -gt 0) { 1 } else { 0 })
+}
+
+if ($SelfCheck -or $Deep) {
+    exit (Invoke-SelfCheck -DeepCheck:$Deep)
+}
 
 # ------------------------------------------------------- 1. проверки системы ---
 
-Step 1 9 'Проверка системы'
+Step 1 9 'Проверка системы' 'Проверяем Windows, диск, путь установки и доступ в сеть'
+# (правка 941) дальше статус обновляет heartbeat: даже если шаг молчит 20 минут,
+# заставка видит, что установка жива.
+Start-StatusHeartbeat
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw 'Нужна 64-битная Windows (x64). 32-битные системы не поддерживаются.'
@@ -1274,7 +1599,7 @@ if ($nvidiaExe) {
 # ------------------------------------------------------------- 2. Node.js ---
 
 if (-not $SkipApp) {
-    Step 2 9 'Node.js'
+    Step 2 9 'Node.js' 'Portable-Node (~30 МБ): обычно меньше минуты'
 
     # (правка 822) Установщик ВСЕГДА использует собственный портативный Node.js
     # в runtime\ и больше не ищет Node в системе. Прежняя логика верила любому
@@ -1326,7 +1651,7 @@ if (-not $SkipApp) {
 # ------------------------------------------- 3. node_modules и сборка .next ---
 
 if (-not $SkipApp) {
-    Step 3 9 'Node-зависимости и production-сборка'
+    Step 3 9 'Node-зависимости и production-сборка' 'npm-зависимости и сборка интерфейса: 3-20 минут в зависимости от диска и сети'
 
     Push-Location $Root
     try {
@@ -1548,7 +1873,7 @@ function Get-ComfyCoreVersion {
 }
 
 if (-not $SkipComfy) {
-    Step 4 9 ('ComfyUI ' + $ComfyVersion)
+    Step 4 9 ('ComfyUI ' + $ComfyVersion) 'Ядро ComfyUI (~200 МБ с GitHub): 1-5 минут; при скачивании показываем скорость'
 
     if ($Force -and (Test-Path $comfyApp)) {
         Info 'удаляю ComfyUI (-Force)'
@@ -1725,7 +2050,7 @@ if (-not $SkipComfy) {
     }
 
     # --- 5. библиотеки ---
-    Step 5 9 'Библиотеки Python (~7 ГБ, самый долгий шаг)'
+    Step 5 9 'Библиотеки Python (~7 ГБ, самый долгий шаг)' 'torch и библиотеки: 10-40 минут на быстром канале; окно можно свернуть, не закрывайте его'
 
     # (правка 740) setuptools фиксируем на версии из requirements.lock.txt:
     # `--upgrade setuptools` без версии ставит новейшую (84.2.1+), а ComfyUI
@@ -1776,7 +2101,7 @@ if (-not $SkipComfy) {
     }
 
     # --- 6. кастомные ноды ---
-    Step 6 9 'Кастомные ноды (22 из GitHub + 5 локальных)'
+    Step 6 9 'Кастомные ноды (22 из GitHub + 5 локальных)' '22 архива с GitHub: 2-10 минут. Если отдельная нода не импортируется - студия всё равно работает, список ошибок будет в конце'
 
     $nodesDir = Join-Path $comfyApp 'custom_nodes'
     if (-not (Test-Path $nodesDir)) { New-Item -ItemType Directory -Force -Path $nodesDir | Out-Null }
@@ -1875,7 +2200,7 @@ if (-not $SkipComfy) {
 # --------------------------------------- 7. конфигурация и папки моделей ---
 
 if (-not $SkipComfy) {
-    Step 7 9 'Конфигурация и папки моделей'
+    Step 7 9 'Конфигурация и папки моделей' 'Создаём папки моделей и пути к ним: несколько секунд'
 
     $flag = Join-Path $comfyRoot '.no-auto-update'
     if (-not (Test-Path $flag)) { New-Item -ItemType Directory -Force -Path $flag | Out-Null }
@@ -1924,7 +2249,7 @@ if (-not $SkipComfy) {
 # ------------------------------------------ 8. STT-рантайм (голосовой ввод) ---
 
 if (-not $SkipApp) {
-    Step 8 9 'Голосовой ввод (STT-рантайм transcribe.cpp)'
+    Step 8 9 'Голосовой ввод (STT-рантайм transcribe.cpp)' 'STT (~200 МБ, необязательно): без него недоступен только голосовой ввод'
 
     $sttDir = Join-Path $Root 'stt'
     $sttDll = Join-Path $sttDir 'transcribe.dll'
@@ -1987,7 +2312,7 @@ if (-not $SkipApp) {
 # -------------------------------------------------------- 9. проверка ---
 
 if (-not $SkipComfy) {
-    Step 9 9 'Проверка установки'
+    Step 9 9 'Проверка установки' 'Запускаем ComfyUI и проверяем импорты: до 3 минут'
 
     # (правка 915) быстрый контроль раскладки: main.py должен лежать прямо в
     # $comfyApp — иначе трёхминутный smoke-тест ниже просто не поднимет сервер
@@ -2106,10 +2431,13 @@ if ($script:Failures.Count -gt 0) { $exitCode = 1 }
 
 # финальный статус — ПОСЛЕ очистки кэша (Write-TextFileNoBom сам создаёт
 # папку): Electron дожидается done/error и только затем поднимает ComfyUI.
+# (правка 941) heartbeat останавливаем до записи: он пишет тот же файл и
+# мог бы перезатереть done/error своим running.
+Stop-StatusHeartbeat
 if ($exitCode -eq 0) {
-    Write-SetupStatus 'done' 9 9 'Установка завершена'
+    Write-SetupStatus 'done' 9 9 'Установка завершена' 'Запусти start.bat и скачай модели в Настройках -> Модели'
 } else {
-    Write-SetupStatus 'error' $script:StatusStep 9 ('Установка завершилась с ошибками (шаг ' + $script:StatusStep + ')')
+    Write-SetupStatus 'error' $script:StatusStep 9 ('Установка завершилась с ошибками (шаг ' + $script:StatusStep + ')') ('Открой install.log и найди строку [ERROR]: там причина. Повторный запуск продолжает установку с того же места.')
 }
 
 if (-not $NoPause) {
