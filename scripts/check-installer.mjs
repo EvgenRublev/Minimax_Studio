@@ -1,0 +1,186 @@
+#!/usr/bin/env node
+/**
+ * (правка 939) Статическая проверка надёжности установки. ГПУ/сеть не трогаем,
+ * ставим только локальные файлы. Проверяем:
+ *
+ *   1) install/checksums.json покрывает ВЕСЬ офлайн-бандл install/cache, и
+ *      sha256/размер в нём совпадают с реальными файлами (битый архив внутри
+ *      setup.exe — это тот же класс отказа, что и битый кэш у юзера);
+ *   2) флаги pinned расходятся с правилами (сеть сверяется только для
+ *      неизменяемых артефактов);
+ *   3) версии в install.ps1 / package.json совпадают с именами файлов бандла
+ *      (перевели electron на 45.0 и забыли пересобрать бандл — ловится здесь);
+ *   4) в install.ps1 на месте вся механика целостности: проверка магических
+ *      байтов, контрольsha для загрузки, чистка битого кэша в trap, второй
+ *      движок распаковки (Expand-Archive) и Remove-StaleCacheFile;
+ *   5) кодировки: install.ps1 и install_gui.ps1 — UTF-8 с BOM (PowerShell 5.1
+ *      без BOM читает UTF-8 как ANSI и русские сообщения превращает в кракозябры),
+ *      apply_update.ps1 — только ASCII (его гоняет апдейтер из любого места);
+ *   6) во всех .ps1 нет одиночных LF (git/Windows-смешание переносов).
+ *
+ * Запуск: node scripts/check-installer.mjs
+ */
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { basename, join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const CACHE_DIR = join(ROOT, 'install', 'cache')
+const SUMS = join(ROOT, 'install', 'checksums.json')
+
+const PINNED = [
+  /^node-v\d+\.\d+\.\d+-win-x64\.zip$/,
+  /^python-\d+\.\d+\.\d+-embed-amd64\.zip$/,
+  /^electron-v\d+\.\d+\.\d+-win32-x64\.zip$/,
+  /^uv-[a-z0-9_.-]+\.zip$/,
+]
+const isPinned = (rel) => PINNED.some((re) => re.test(basename(rel)))
+
+let pass = 0
+const fails = []
+const ok = (cond, msg) => {
+  if (cond) pass++
+  else fails.push(msg)
+}
+
+function walk(dir, prefix = '') {
+  const out = []
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name
+    const full = join(dir, e.name)
+    if (e.isDirectory()) out.push(...walk(full, rel))
+    else if (e.isFile()) out.push({ rel, full })
+  }
+  return out
+}
+
+const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
+
+// ─── 1..2) бандл и суммы ────────────────────────────────────────────────────
+if (!existsSync(SUMS)) {
+  fails.push('нет install/checksums.json — сгенерируй: node scripts/make-installer-cache.mjs')
+} else if (!existsSync(CACHE_DIR)) {
+  fails.push('нет папки install/cache (офлайн-бандл установщика)')
+} else {
+  const sums = JSON.parse(readFileSync(SUMS, 'utf8'))
+  const files = walk(CACHE_DIR)
+  ok(files.length > 0, 'install/cache пуст')
+  for (const f of files) {
+    const entry = sums.files?.[f.rel]
+    if (!entry) {
+      fails.push(`в checksums.json нет записи для ${f.rel} (пересобрать суммы)`)
+      continue
+    }
+    const size = statSync(f.full).size
+    ok(entry.size === size, `${f.rel}: размер в checksums.json ${entry.size}, на диске ${size}`)
+    const got = sha256(f.full)
+    ok(entry.sha256 === got, `${f.rel}: sha256 не совпал — бандл повреждён (${got})`)
+    ok(typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256), `${f.rel}: sha256 в checksums.json не похож на sha256`)
+    ok(typeof entry.kind === 'string' && ['', 'zip', 'gzip', 'exe'].includes(entry.kind), `${f.rel}: kind должен быть zip/gzip/exe или '' (не архив)`)
+    ok(entry.pinned === isPinned(f.rel), `${f.rel}: pinned=${entry.pinned} против правил (ожидался ${isPinned(f.rel)})`)
+  }
+  const extra = Object.keys(sums.files || {}).filter((k) => !files.some((f) => f.rel === k))
+  ok(extra.length === 0, `в checksums.json есть лишние записи: ${extra.join(', ')}`)
+  // без сверки по сети нельзя оставаться «вечным» кэшем
+  const core = ['node', 'python', 'electron', 'uv']
+  for (const name of core) {
+    const has = Object.entries(sums.files || {}).some(([rel, v]) => v.pinned && rel.startsWith(name))
+    ok(has, `в бандле нет pinned-архива для ${name} — нечего сверять при загрузке из сети`)
+  }
+}
+
+// ─── 3) версии: install.ps1 / package.json ↔ имена файлов бандла ────────────
+const instPath = join(ROOT, 'install', 'install.ps1')
+const inst = existsSync(instPath) ? readFileSync(instPath, 'utf8') : ''
+ok(inst.length > 0, 'не читается install/install.ps1')
+
+function bundleHas(rel) {
+  return existsSync(join(CACHE_DIR, rel))
+}
+const nodeVer = (inst.match(/\$nodeVersion\s*=\s*'([\d.]+)'/) || [])[1]
+ok(!!nodeVer, 'install.ps1: не нашёл $nodeVersion')
+if (nodeVer) ok(bundleHas(`node-v${nodeVer}-win-x64.zip`), `в бандле нет node-v${nodeVer}-win-x64.zip (версия из install.ps1)`)
+
+const comfyVer = (inst.match(/\$ComfyVersion\s*=\s*'([\d.]+)'/) || [])[1]
+const comfyZip = (inst.match(/\$ComfyZipName\s*=\s*'([^']+)'/) || [])[1]
+const comfyUrl = (inst.match(/\$ComfyUrl\s*=\s*'([^']+)'/) || [])[1]
+ok(!!comfyVer && !!comfyZip && !!comfyUrl, 'install.ps1: не нашёл $ComfyVersion/$ComfyZipName/$ComfyUrl')
+if (comfyVer && comfyZip) ok(comfyZip === `ComfyUI-v${comfyVer}.zip`, `ComfyZipName=${comfyZip} не соответствует ComfyVersion=${comfyVer}`)
+if (comfyVer && comfyUrl) ok(comfyUrl.includes(`/v${comfyVer}.zip`), `ComfyUrl (${comfyUrl}) не на тег v${comfyVer}`)
+if (comfyZip) ok(bundleHas(comfyZip), `в бандле нет ${comfyZip}`)
+
+const pyVer = (inst.match(/python-(\d+\.\d+\.\d+)-embed-amd64\.zip/) || [])[1]
+ok(!!pyVer, 'install.ps1: не нашёл версию портативного Python')
+if (pyVer) ok(bundleHas(`python-${pyVer}-embed-amd64.zip`), `в бандле нет python-${pyVer}-embed-amd64.zip`)
+
+const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+const elVer = String(pkg.devDependencies?.electron || pkg.dependencies?.electron || '').replace(/^[\^~]/, '')
+ok(!!elVer, 'package.json: нет версии electron')
+if (elVer) ok(bundleHas(`electron-v${elVer}-win32-x64.zip`), `в бандле нет electron-v${elVer}-win32-x64.zip (версия electron из package.json)`)
+
+const uvVer = (inst.match(/astral-sh\/uv\/releases\/download\/([\d.]+)\//) || [])[1]
+ok(!!uvVer, 'install.ps1: не нашёл версию uv')
+if (uvVer) ok(bundleHas('uv-x86_64-pc-windows-msvc.zip'), 'в бандле нет uv-x86_64-pc-windows-msvc.zip')
+
+// ─── 4) механика целостности в install.ps1 ─────────────────────────────────
+const need = [
+  ['function Test-ArchiveFile', 'нет функции проверки архива Test-ArchiveFile'],
+  ['function Clear-CorruptCache', 'нет Clear-CorruptCache'],
+  ['function Remove-StaleCacheFile', 'нет Remove-StaleCacheFile'],
+  ['function Get-HeadKind', 'нет разбора магических байтов (Get-HeadKind)'],
+]
+for (const [needle, msg] of need) ok(inst.includes(needle), `install.ps1: ${msg}`)
+
+// вызовы, а не только объявления
+const td = inst.match(/function Get-Download \{[\s\S]*?\n\}/)
+ok(!!td && /Test-ArchiveFile/.test(td[0]), 'Get-Download не проверяет скачанный файл')
+ok(!!td && /Remove-StaleCacheFile/.test(td[0]), 'Get-Download не чистит битый кэш')
+const ez = inst.match(/function Expand-ZipSafe \{[\s\S]*?\n\}/)
+ok(!!ez && /Test-ArchiveFile/.test(ez[0]), 'Expand-ZipSafe не проверяет архив перед распаковкой')
+ok(!!ez && /Expand-Archive/.test(ez[0]), 'Expand-ZipSafe: нет запасного движка Expand-Archive')
+const et = inst.match(/function Expand-TarGz \{[\s\S]*?\n\}/)
+ok(!!et && /Test-ArchiveFile/.test(et[0]), 'Expand-TarGz не проверяет архив перед распаковкой')
+const tr = inst.match(/trap \{[\s\S]*?\n\}/)
+ok(!!tr && /Clear-CorruptCache/.test(tr[0]), 'trap не чистит битый кэш (повторный запуск упрётся в ту же ошибку)')
+ok(/Get-ChildItem \$bundle -Recurse -File/.test(inst) && /Test-ArchiveFile \$src/.test(inst), 'посев бандла install/cache не проверяет его целостность')
+ok(!/\[IO\.Compression\.ZipFile\]::ExtractToDirectory/.test(inst), 'в install.ps1 остался прямой ExtractToDirectory мимо проверки архива')
+
+// ─── 5) кодировки ──────────────────────────────────────────────────────────
+function readBytes(p) {
+  return existsSync(p) ? readFileSync(p) : null
+}
+for (const p of ['install/install.ps1', 'install/install_gui.ps1']) {
+  const b = readBytes(join(ROOT, p))
+  if (!b) { fails.push(`${p}: файл не найден`); continue }
+  const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf
+  ok(bom, `${p}: нет UTF-8 BOM — PowerShell 5.1 прочитает кириллицу как ANSI`)
+}
+const au = readBytes(join(ROOT, 'install', 'apply_update.ps1'))
+if (au) {
+  const nonAscii = Array.from(au).filter((x) => x > 127).length
+  ok(nonAscii === 0, `apply_update.ps1: ${nonAscii} не-ASCII байт (апдейтер должен работать на любой кодировке консоли)`)
+} else {
+  fails.push('install/apply_update.ps1: файл не найден')
+}
+
+// ─── 6) переносы строк во всех .ps1 ────────────────────────────────────────
+// .gitattributes нормализует *.ps1 к CRLF на checkout, так что в рабочем дереве
+// бывает и чистый LF — это не ошибка. Опасен только МИКС: PowerShell 5.1 на
+// смешанных переносах спотыкается о многострочные строки и here-строки.
+for (const e of readdirSync(join(ROOT, 'install'), { withFileTypes: true })) {
+  if (!e.isFile() || !e.name.endsWith('.ps1')) continue
+  const b = readFileSync(join(ROOT, 'install', e.name))
+  let crlf = 0
+  let loneLF = 0
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] !== 0x0a) continue
+    if (i > 0 && b[i - 1] === 0x0d) crlf++
+    else loneLF++
+  }
+  ok(!(crlf > 0 && loneLF > 0), `install/${e.name}: смешанные переносы строк (CRLF=${crlf}, LF=${loneLF})`)
+}
+
+console.log(`\nPASS=${pass} FAIL=${fails.length}`)
+for (const f of fails) console.log('FAIL:', f)
+process.exit(fails.length ? 1 : 0)

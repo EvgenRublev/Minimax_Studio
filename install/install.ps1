@@ -161,6 +161,12 @@ trap {
         $where = ' (' + ($_.InvocationInfo.PositionMessage -replace '\s+', ' ') + ')'
     }
     try { Write-Log ('НЕПРЕДВЗЯТАЯ ОШИБКА: ' + $_.Exception.Message + $where) 'err' } catch { }
+    # (правка 939) Испортилось что-то одно - не тащим это через все повторные
+    # запуски: выкидываем из кэша файлы, которые не являются ожидаемыми архивами.
+    # Функция объявлена ниже по файлу, поэтому проверяем, что она уже существует.
+    try {
+        if (Get-Command Clear-CorruptCache -ErrorAction SilentlyContinue) { Clear-CorruptCache }
+    } catch { }
     try { Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) } catch { }
     exit 1
 }
@@ -171,6 +177,175 @@ $script:Curl = Join-Path $env:SystemRoot 'System32\curl.exe'
 if (-not (Test-Path $script:Curl)) { $script:Curl = $null }
 $script:UvExe = $null
 
+# (правка 939) Целостность скачанного. Самый частый отказ у юзеров: в
+# .install-cache остаётся оборванный архив или HTML-страница прокси/портала
+# вместо архива. Прежний Get-Download считал такой файл «уже скачано» (файл
+# есть, байт > 0), и каждый следующий запуск умирал на «не удалось распаковать
+# архив» ровно в той же точке на 0%. Теперь:
+#   • любой архив (из сети, из бандла и из кэша прошлого запуска) проверяется
+#     по магическим байтам - «это вообще тот тип архива, который мы ждём»;
+#   • install\checksums.json (scripts/make-installer-cache.mjs) даёт sha256 и
+#     размер для артефактов, которые неизменяемы: nodejs.org, python.org,
+#     релизные ассеты GitHub (electron, uv). Для них сверяется и сеть, и бандл;
+#   • архивы тегов GitHub (ComfyUI, зипи кастом-нод через codeload) GitHub
+#     пересобирает не байт-в-байт, поэтому для скачанного из сети проверяется
+#     только «это архив?», а sha - только у бандла установщика;
+#   • битый файл удаляется вместе с .part и сегментами докачки, иначе следующий
+#     запуск склеит те же битые байты.
+$script:Pins = @{}
+$script:IntegrityError = ''
+$pinFile = Join-Path $InstallDir 'checksums.json'
+if (Test-Path -LiteralPath $pinFile) {
+    try {
+        $pinJson = (Get-Content -LiteralPath $pinFile -Raw -Encoding UTF8 | ConvertFrom-Json)
+        if ($pinJson -and $pinJson.files) {
+            foreach ($prop in $pinJson.files.PSObject.Properties) {
+                $key = ([string]$prop.Name).ToLowerInvariant().Replace('\', '/')
+                $script:Pins[$key] = [pscustomobject]@{
+                    Rel    = [string]$prop.Name
+                    Sha256 = ([string]$prop.Value.sha256).ToLowerInvariant()
+                    Size   = [int64]$prop.Value.size
+                    Kind   = [string]$prop.Value.kind
+                    Pinned = [bool]$prop.Value.pinned
+                }
+            }
+            Info (('сведений о контрольных суммах: {0} файл(ов)' -f $script:Pins.Count))
+        }
+    } catch { }
+}
+
+# Путь внутри .install-cache относительно кэша ('nodes/foo.zip'); '' - вне кэша.
+function Get-CacheRel {
+    param([string]$Path)
+    try {
+        $full = [IO.Path]::GetFullPath($Path)
+        $base = [IO.Path]::GetFullPath($Cache)
+        if (-not $full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { return '' }
+        return (($full.Substring($base.Length).TrimStart('\', '/')) -replace '\\', '/')
+    } catch { return '' }
+}
+
+function Get-PinFor {
+    param([string]$Path, [string]$Rel = '')
+    if (-not $Rel) { $Rel = Get-CacheRel $Path }
+    if (-not $Rel) { return $null }
+    $key = $Rel.ToLowerInvariant().Replace('\', '/')
+    if ($script:Pins.ContainsKey($key)) { return $script:Pins[$key] }
+    return $null
+}
+
+# Какой архив мы ждём по имени файла ('' - не архив, проверять нечего).
+function Get-ExpectedKind {
+    param([string]$Path)
+    $p = $Path.ToLowerInvariant()
+    if ($p.EndsWith('.zip') -or $p.EndsWith('.whl')) { return 'zip' }
+    if ($p.EndsWith('.tar.gz') -or $p.EndsWith('.tgz')) { return 'gzip' }
+    if ($p.EndsWith('.exe')) { return 'exe' }
+    return ''
+}
+
+function Read-HeadBytes {
+    param([string]$Path, [int]$Count = 4)
+    try {
+        $fs = [IO.File]::OpenRead($Path)
+        try {
+            $buf = New-Object byte[] $Count
+            $n = $fs.Read($buf, 0, $Count)
+            if ($n -le 0) { return $null }
+            if ($n -lt $Count) { return $buf[0..($n - 1)] }
+            return $buf
+        } finally { $fs.Dispose() }
+    } catch { return $null }
+}
+
+function Get-HeadKind {
+    param([byte[]]$Head)
+    if (-not $Head -or $Head.Length -lt 2) { return '' }
+    if ($Head[0] -eq 0x50 -and $Head[1] -eq 0x4B) { return 'zip' }
+    if ($Head[0] -eq 0x1F -and $Head[1] -eq 0x8B) { return 'gzip' }
+    if ($Head[0] -eq 0x4D -and $Head[1] -eq 0x5A) { return 'exe' }
+    return ''
+}
+
+# Годен ли файл как архив ожидаемого типа. Причина отказа - в
+# $script:IntegrityError. -CheckPin сверяет sha256/размер для неизменяемых
+# артефактов (pin.pinned), -BundleSha - для файлов самого установщика: они
+# заморожены, поэтому сумма обязана совпадать даже у архивов тегов GitHub.
+function Test-ArchiveFile {
+    param([string]$Path, [string]$Rel = '', [string]$Kind = '', [switch]$CheckPin, [switch]$BundleSha)
+    $script:IntegrityError = ''
+    if (-not (Test-Path -LiteralPath $Path)) { $script:IntegrityError = 'файла нет'; return $false }
+    $len = [int64]0
+    try { $len = (Get-Item -LiteralPath $Path).Length } catch { $script:IntegrityError = 'размер не читается'; return $false }
+    if ($len -le 0) { $script:IntegrityError = 'файл пустой'; return $false }
+    $pin = Get-PinFor $Path -Rel $Rel
+    # (правка 939) внимание: в PowerShell имена переменных нечувствительны к
+    # регистру, поэтому локальная переменная не должна совпадать с параметром
+    # $Kind - иначе ожидаемый тип затирается и проверка всегда проходит.
+    $expectKind = if ($Kind) { $Kind } else { Get-ExpectedKind $Path }
+    if ($pin -and $pin.Kind) { $expectKind = $pin.Kind }
+    if ($expectKind) {
+        $got = Get-HeadKind (Read-HeadBytes $Path 4)
+        if ($got -ne $expectKind) {
+            $what = if ($got) { $got } else { 'не архив (страница прокси/портала или обрезанная закачка)' }
+            $script:IntegrityError = ('это ' + $what + ', ожидался ' + $expectKind)
+            return $false
+        }
+    }
+    if (-not $CheckPin -and -not $BundleSha) { return $true }
+    if (-not $pin) { return $true }
+    if (-not $pin.Pinned -and -not $BundleSha) { return $true }
+    if ($pin.Size -gt 0 -and $len -ne $pin.Size) {
+        $script:IntegrityError = ('размер ' + $len + ' байт, ожидался ' + $pin.Size)
+        return $false
+    }
+    if ($pin.Sha256) {
+        try { $h = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() } catch { $script:IntegrityError = 'sha256 не посчитать'; return $false }
+        if ($h -ne $pin.Sha256) { $script:IntegrityError = 'sha256 не совпал с контрольной суммой установщика'; return $false }
+    }
+    return $true
+}
+
+# Файл + его докачки (.part, сегменты .0/.1/... и .new).
+function Remove-StaleCacheFile {
+    param([string]$Path)
+    foreach ($p in @($Path, ($Path + '.part'))) {
+        Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+    }
+    try {
+        $dir = Split-Path -Parent $Path
+        $leaf = Split-Path -Leaf $Path
+        if (-not $dir -or -not $leaf) { return }
+        Get-ChildItem -LiteralPath $dir -Filter ($leaf + '*') -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $n = $_.Name
+            if ($n -ne $leaf -and $n.Length -gt $leaf.Length -and $n.Substring($leaf.Length) -match '^\.\d+(\.new)?$') {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { }
+}
+
+# (правка 939) Вызывается при выходе по ошибке: убирает из кэша всё, что не
+# является ожидаемым архивом, чтобы повторный запуск качал заново, а не падал на
+# распаковке того же мусора.
+function Clear-CorruptCache {
+    try {
+        if (-not (Test-Path -LiteralPath $Cache)) { return }
+        Get-ChildItem -LiteralPath $Cache -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $n = $_.Name.ToLowerInvariant()
+            if ($n.EndsWith('.part')) {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                return
+            }
+            if (-not (Get-ExpectedKind $_.Name)) { return }
+            if (-not (Test-ArchiveFile $_.FullName -CheckPin)) {
+                Remove-StaleCacheFile $_.FullName
+                Write-Log ('  снесён повреждённый файл кэша: ' + $_.FullName + ' (' + $script:IntegrityError + ')') 'warn'
+            }
+        }
+    } catch { }
+}
+
 # (правка 777) мелкие, но медленно качающиеся архивы (uv, node, python, get-pip,
 # ComfyUI, кастомные ноды, бинарник Electron) приложены прямо к установщику в
 # install\cache - раскладываем их в .install-cache и не качаем с сети вовсе.
@@ -178,12 +353,23 @@ $bundle = Join-Path $InstallDir 'cache'
 if (Test-Path $bundle) {
     $seeded = 0
     Get-ChildItem $bundle -Recurse -File | ForEach-Object {
+        $src = $_.FullName
         $rel = $_.FullName.Substring($bundle.Length).TrimStart('\', '/')
         $dst = Join-Path $Cache $rel
-        if (-not ((Test-Path $dst) -and (Get-Item $dst).Length -gt 0)) {
+        # (правка 939) сперва проверяем сам бандл: битый архив в установщике
+        # раньше молча раскладывался в кэш, и установка падала на распаковке
+        $pin = Get-PinFor $src -Rel $rel
+        $hasPin = ($null -ne $pin)
+        if (-not (Test-ArchiveFile $src -Rel $rel -CheckPin:$hasPin -BundleSha:$hasPin)) {
+            Warn ('архив в составе установщика повреждён: ' + $rel + ' (' + $script:IntegrityError + ') - буду скачивать его из сети')
+        } elseif (-not (Test-Path $dst) -or (Get-Item $dst).Length -le 0) {
             $d = Split-Path -Parent $dst
             if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
-            try { Copy-Item $_.FullName $dst -Force; $seeded++ } catch { }
+            try { Copy-Item $src $dst -Force; $seeded++ } catch { }
+        } elseif (-not (Test-ArchiveFile $dst -CheckPin:$hasPin)) {
+            # кэш прошлого запуска битый, а в установщике архив целый - чиним на месте
+            Warn ('кэш прошлого запуска повреждён: ' + $rel + ' (' + $script:IntegrityError + ') - кладу архив из установщика')
+            try { Copy-Item $src $dst -Force } catch { Remove-StaleCacheFile $dst }
         }
     }
     # (правка 792) $seeded - число, а int + 'строка' в PowerShell пытается привести
@@ -368,9 +554,17 @@ function Get-DownloadSegmented {
 
 function Get-Download {
     param([string]$Url, [string]$Dest)
-    if ((Test-Path $Dest) -and (Get-Item $Dest).Length -gt 0) {
-        Info ("уже скачано: " + (Split-Path $Dest -Leaf))
-        return
+    # (правка 939) «уже скачано» теперь означает «это действительно архив, и,
+    # если на него есть контрольная сумма, она совпала». Прежняя проверка
+    # «файл есть и байт > 0» делала битый кэш вечным: его сносила только ручная
+    # чистка .install-cache.
+    if (Test-Path -LiteralPath $Dest) {
+        if (Test-ArchiveFile $Dest -CheckPin) {
+            Info ("уже скачано: " + (Split-Path $Dest -Leaf))
+            return
+        }
+        Info ('кэш прошлого запуска не прошёл проверку (' + $script:IntegrityError + '), качаю заново: ' + (Split-Path $Dest -Leaf))
+        Remove-StaleCacheFile $Dest
     }
     $dir = Split-Path -Parent $Dest
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
@@ -446,6 +640,15 @@ function Get-Download {
             } catch {
                 $ok = $false
             }
+        }
+        # (правка 939) проверяем ДО того, как файл станет кэшированным: страница
+        # прокси/портала вместо архива или склеенные сегменты выглядят как успех
+        # (байты есть, размер совпал), но распаковка падает позже - и потом уже
+        # навсегда, потому что кэш «уже скачан».
+        if ($ok -and -not (Test-ArchiveFile $part -Rel (Get-CacheRel $Dest) -Kind (Get-ExpectedKind $Dest) -CheckPin)) {
+            Info ('  скачанное не прошло проверку: ' + $script:IntegrityError)
+            $ok = $false
+            Remove-StaleCacheFile $part
         }
     }
     }
@@ -524,6 +727,11 @@ function Get-DownloadMany {
             if (-not $ok) {
                 Remove-Item $f.Job.Dest -Force -ErrorAction SilentlyContinue
                 Info ('  не скачалось: ' + (Split-Path $f.Job.Dest -Leaf))
+            } elseif (-not (Test-ArchiveFile $f.Job.Dest -Kind (Get-ExpectedKind $f.Job.Dest))) {
+                # (правка 939) codeload отдаёт HTML на rate-limit - размер при этом
+                # ненулевой, а распаковка падает. Проверяем, что пришёл архив.
+                Remove-Item $f.Job.Dest -Force -ErrorAction SilentlyContinue
+                Info ('  не архив: ' + (Split-Path $f.Job.Dest -Leaf) + ' (' + $script:IntegrityError + ')')
             }
             [void]$running.Remove($f)
         }
@@ -627,25 +835,55 @@ function Ensure-VcRedist {
 
 function Expand-ZipSafe {
     param([string]$Zip, [string]$Dest)
-    if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
+    # (правка 939) Сначала проверяем, что это вообще zip: «tar.exe» на HTML-
+    # странице или на оборванном архиве выдаёт невнятный код ошибки, а битый файл
+    # при этом оставался в кэше и ронял каждую следующую попытку установки.
+    if (-not (Test-ArchiveFile $Zip -Kind 'zip')) {
+        $why = $script:IntegrityError
+        Remove-StaleCacheFile $Zip
+        throw ('архив повреждён: ' + $Zip + ' (' + $why + ') - удалил его из кэша, запустите установщик снова')
+    }
+    if (-not (Test-Path -LiteralPath $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
     $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (Test-Path $tar) {
+    if (Test-Path -LiteralPath $tar) {
         & $tar -xf $Zip -C $Dest
-        if ($LASTEXITCODE -ne 0) { throw ('не удалось распаковать архив: ' + $Zip) }
+        if ($LASTEXITCODE -ne 0) {
+            # (правка 939) tar/libarchive пасует на части zip-особенностей
+            # (data descriptor, очень длинные пути). Expand-Archive их читает -
+            # пробуем второй движок, прежде чем объявлять архив битым.
+            Info ('  tar.exe не распаковал (код ' + $LASTEXITCODE + '), пробую Expand-Archive')
+            try {
+                Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force -ErrorAction Stop
+            } catch {
+                $why = $_.Exception.Message
+                Remove-StaleCacheFile $Zip
+                throw ('не удалось распаковать архив: ' + $Zip + ' (' + $why + ') - архив удалён из кэша, запустите установщик снова')
+            }
+        }
     } else {
-        Expand-Archive -Path $Zip -DestinationPath $Dest -Force
+        # Windows 10 до 1803: tar.exe нет, остаёмся на Expand-Archive
+        Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
     }
 }
 
 function Expand-TarGz {
     param([string]$Archive, [string]$Dest)
-    if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
+    if (-not (Test-ArchiveFile $Archive -Kind 'gzip')) {
+        $why = $script:IntegrityError
+        Remove-StaleCacheFile $Archive
+        throw ('архив повреждён: ' + $Archive + ' (' + $why + ') - удалил его из кэша, запустите установщик снова')
+    }
+    if (-not (Test-Path -LiteralPath $Dest)) { New-Item -ItemType Directory -Force -Path $Dest | Out-Null }
     $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (-not (Test-Path $tar)) {
+    if (-not (Test-Path -LiteralPath $tar)) {
         throw 'tar.exe не найден: нужна Windows 10 1803+ (или распакуйте .tar.gz вручную).'
     }
     & $tar -xzf $Archive -C $Dest
-    if ($LASTEXITCODE -ne 0) { throw ('не удалось распаковать архив: ' + $Archive) }
+    if ($LASTEXITCODE -ne 0) {
+        $why = 'код tar ' + $LASTEXITCODE
+        Remove-StaleCacheFile $Archive
+        throw ('не удалось распаковать архив: ' + $Archive + ' (' + $why + ') - архив удалён из кэша, запустите установщик снова')
+    }
 }
 
 function Invoke-Pip {
@@ -1090,8 +1328,10 @@ if (-not $SkipApp) {
                         $dist = Join-Path $elDir 'dist'
                         if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
                         New-Item -ItemType Directory -Force -Path $dist | Out-Null
-                        try { Add-Type -AssemblyName System.IO.Compression.FileSystem } catch { }
-                        [IO.Compression.ZipFile]::ExtractToDirectory($elZip, $dist)
+                        # (правка 939) тот же контроль целостности и второй движок
+                        # распаковки, что у остальных архивов (был прямой
+                        # ZipFile::ExtractToDirectory без какой-либо проверки)
+                        Expand-ZipSafe $elZip $dist
                         Set-Content -LiteralPath (Join-Path $elDir 'path.txt') -Value 'electron.exe' -NoNewline
                         $elReady = Test-Path (Join-Path $dist 'electron.exe')
                     } catch {

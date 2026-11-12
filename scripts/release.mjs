@@ -83,6 +83,13 @@ console.log(`\n[release] === verify ===`);
 // при запуске должна оставаться на месте. Подробности — AGENTS.md.
 if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.mjs'])) process.exit(1);
 
+// (правка 939) Целостность установщика: офлайн-бандл (install/cache) сверяется по
+// sha256 с install/checksums.json, версии в install.ps1/package.json — с именами
+// файлов бандла, и на месте вся механика проверки загрузок. Битый архив внутри
+// setup.exe для юзера выглядит как «установка падает на 0%», поэтому релиз без
+// этой проверки не выпускаем. Суммы: `node scripts/make-installer-cache.mjs`.
+if (!run('installer integrity check', process.execPath, ['scripts/check-installer.mjs'])) process.exit(1);
+
 const checks = [];
 const check = (ok, label, hint) => checks.push({ ok, label, hint });
 

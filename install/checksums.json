@@ -1,0 +1,175 @@
+{
+  "note": "Контрольные суммы офлайн-бандла установщика (install/cache). Нужны, чтобы битый архив в кэше или в самом установщике обнаруживался до распаковки. Заполняется скриптом scripts/make-installer-cache.mjs.",
+  "generatedAt": "2026-11-12T09:00:24Z",
+  "pinnedMeaning": "pinned=true — артефакт неизменяем (nodejs.org, python.org, релизный ассет GitHub), сумму сверяем и для скачанного из сети; pinned=false — архив тега GitHub, сумма проверяется только для бандла.",
+  "files": {
+    "ComfyUI-v0.44.0.zip": {
+      "size": 13531801,
+      "sha256": "fc596ab1307dc1057932cf21c2c88a32220a5c053334d17ef629f5781a740fcf",
+      "kind": "zip",
+      "pinned": false
+    },
+    "electron-v44.9.0-win32-x64.zip": {
+      "size": 158625558,
+      "sha256": "88e08039d0ef359bab9f674e8051fa103bd8628ea7c5a5e1daaa610a8a0c6931",
+      "kind": "zip",
+      "pinned": true
+    },
+    "get-pip.py": {
+      "size": 2234489,
+      "sha256": "f4448a01e3ab2914c65f4ca59d4cacba6b2dbde19a483fbac46587f8bbaff424",
+      "kind": "",
+      "pinned": false
+    },
+    "node-v22.20.0-win-x64.zip": {
+      "size": 35500968,
+      "sha256": "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d",
+      "kind": "zip",
+      "pinned": true
+    },
+    "nodes/ComfyUI-Frame-Interpolation.zip": {
+      "size": 16856437,
+      "sha256": "18febf83edca39068a7947050672f056c8b70aaf0fcbb2380a4f0d88d90346b0",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-H3-FaceRefine.zip": {
+      "size": 20641079,
+      "sha256": "9268570fea9f76e5ac9e4244c792c99618e8b68a688060d9bd6a939612bf92f7",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-H3-FunControl.zip": {
+      "size": 46276,
+      "sha256": "c52920821c6060ff4a166aabad1f63bb0071d83c34d5a2a12c18838cc215b49e",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-MelBandRoFormer.zip": {
+      "size": 13994,
+      "sha256": "b8ceedbfeaa14e78286930c7f9d2db05bd8061493b50d5070c59ded5630c1e71",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-MiniMax-H3-SPEED.zip": {
+      "size": 47280579,
+      "sha256": "601a5640ff6016af25167fe50c273d4eb84f34312791c80e2e8752af06336a06",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-PT_H3ConcatAVLatent.zip": {
+      "size": 3405,
+      "sha256": "5f5e84147af6477ffba19d936505214b8c288255161d54bdcea0073fff1ac85e",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-TiledDiffusion.zip": {
+      "size": 26760,
+      "sha256": "13ce517935bc053000b5f2fa668fcb0872b58194e434207489a02fda8f376dba",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI-WanVideoWrapper.zip": {
+      "size": 19168405,
+      "sha256": "2d071807fa2ab1b1b2e77f1e5b2241dffd9d369691645012848fcdb7cb506616",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI_MiniMax_H3_Extender.zip": {
+      "size": 305293,
+      "sha256": "808de644482af6e4b5dc27a3cd2d276b76fb94b3b2df28ef8ec3f030076371dc",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI_Text_Translation.zip": {
+      "size": 69179,
+      "sha256": "f13dd70e504ea42a6cd7a7d39a05bb3f02d97d58a6299f57543dd44947cce722",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/ComfyUI_UltimateSDUpscaleGuider_H3.zip": {
+      "size": 275162,
+      "sha256": "13d44a64fb3535e92e019c483f90f1164f361e4fcb9bbefe89d408417d847494",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/Comfyui-MMH3-UltimateUpscale.zip": {
+      "size": 108966,
+      "sha256": "df7219e500f827b54acfb343ca5f8e6ed196ae66b2edc68ecfb17e82b65f243a",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/Comfyui_Minimax_h3_latent_Upscaler.zip": {
+      "size": 8897912,
+      "sha256": "2e8bb5f235bf1f6b80e95345fd365812242e139653b1d6eacaf5f0fe86822883",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui-kjnodes.zip": {
+      "size": 1117608,
+      "sha256": "8725a0aab104160588fadcb1d794befb5d91acf34a3e94a3ee0da652313956b4",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui-manager.zip": {
+      "size": 2339197,
+      "sha256": "ac2ea653b8b19a8ef7808f5cbf47f9f4f3524b8f4153a8c413639b8dc04b7d27",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui-minimax-h3-audio-T8.zip": {
+      "size": 2835756,
+      "sha256": "7e0fbe945bcd4a7ad5d4685de3550b5dbd2f66146d2bec633ac2a0494aaf9655",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui-videohelpersuite.zip": {
+      "size": 116396,
+      "sha256": "34a0bdd4e35ddadd84db7fcbf58daf6c3ebbab720bff6cdb50621571279c5765",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui-workflow-encrypt.zip": {
+      "size": 306655,
+      "sha256": "ba3b0d45507c2d68f5beb66691a12694ee768c583d8b84b19769c4920fbdea49",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/comfyui_controlnet_aux.zip": {
+      "size": 39934804,
+      "sha256": "20a064db4a175aabc66a4736e6c90aa13413279c465f62d819bd64de19a0c1fd",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/rgthree-comfy.zip": {
+      "size": 4101843,
+      "sha256": "99c509d618e9380c8d4acc6990c7a62ae8b6765d2b6b26272bd711276e0fa8ce",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/seedvr2_videoupscaler.zip": {
+      "size": 4864981,
+      "sha256": "04c61842bc00fd8673e6bc9a3b1b1935955461f363791070ed14d67d2a2e77fb",
+      "kind": "zip",
+      "pinned": false
+    },
+    "nodes/veda-sparse-attention.zip": {
+      "size": 189038,
+      "sha256": "c4dd5f442748d3b4cbbef2842ec8f1ebacf7e22ea2fd782509dd57a649c8d60d",
+      "kind": "zip",
+      "pinned": false
+    },
+    "python-3.12.10-embed-amd64.zip": {
+      "size": 11133606,
+      "sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+      "kind": "zip",
+      "pinned": true
+    },
+    "uv-x86_64-pc-windows-msvc.zip": {
+      "size": 15239500,
+      "sha256": "a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f",
+      "kind": "zip",
+      "pinned": true
+    }
+  }
+}
