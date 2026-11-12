@@ -1371,6 +1371,19 @@ function Invoke-SelfCheck {
         Fail ('нет папки ядра ComfyUI (main.py) рядом с ' + $Root + '. Починка: install.bat (шаг 4)')
     }
 
+    # (правка 945) Остатки оборванной замены ядра. Самодиагностика ничего не
+    # переносит, но молчать нельзя: в ComfyUI.keep лежат модели пользователя,
+    # и их нужно вернуть, а не удалить.
+    foreach ($left in @((Join-Path $Root 'ComfyUI.keep'), (Join-Path $Root 'ComfyUI.old'))) {
+        if (-not (Test-Path -LiteralPath $left)) { continue }
+        $sz = 0
+        try { $sz = [int](((Get-ChildItem -LiteralPath $left -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum) / 1MB) } catch { }
+        Warn ('остатки оборванной установки ядра: ' + $left + ' (' + $sz + ' МБ). Данные вернутся в ComfyUI сами - запусти install.bat (шаг 4)')
+    }
+    foreach ($d in @(Get-ChildItem -LiteralPath $Root -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'ComfyUI.keep.old-*' })) {
+        Warn ('сюда сложены данные, которые не удалось вернуть в ядро: ' + $d.Name + '. Скопируй их в ComfyUI (обычно в ComfyUI\models)')
+    }
+
     $py = Join-Path $cp.Root 'python_embeded\python.exe'
     if (Test-Path -LiteralPath $py) {
         Ok ('портативный Python: ' + $py)
@@ -1402,7 +1415,11 @@ function Invoke-SelfCheck {
         if (Test-Path -LiteralPath $nodesFile) {
             try {
                 foreach ($n in (Get-Content -LiteralPath $nodesFile -Raw -Encoding UTF8 | ConvertFrom-Json)) {
-                    if (-not (Test-Path -LiteralPath (Join-Path $cnDir ([string]$n.name)))) { $missing += [string]$n.name }
+                    # (правка 945) папки мало: нода без __init__.py не грузится
+                    # (это же проверяет шаг 6 установки)
+                    $p = Join-Path $cnDir ([string]$n.name)
+                    if (-not (Test-Path -LiteralPath $p)) { $missing += [string]$n.name }
+                    elseif (-not (Test-Path -LiteralPath (Join-Path $p '__init__.py'))) { $missing += ([string]$n.name + ' (папка есть, но __init__.py нет)') }
                 }
             } catch { Warn ('nodes.json не читается: ' + $_.Exception.Message) }
         } else {
@@ -1941,6 +1958,20 @@ $pythonDir = Join-Path $comfyRoot 'python_embeded'
 $python = Join-Path $pythonDir 'python.exe'
 $script:Python = $python
 
+# Данные пользователя, которые переносятся в новое ядро: модели, ноды,
+# настройки, готовые видео и подключённые внешние папки моделей.
+# (правка 945) Объявлены ДО установки ядра: те же имена использует
+# восстановление после оборванной замены (см. Restore-ComfyKeepData).
+$keep = @('models', 'custom_nodes', 'user', 'output', 'input', 'temp', 'extra_model_paths.yaml', 'comfy.settings.json')
+# (правка 905) В плоской раскладке python_embeded лежит ВНУТРИ папки
+# ядра, поэтому его тоже уносим и возвращаем: пересобирать 7 ГБ
+# пакетов при смене ядра незачем.
+if ($flat) { $keep += 'python_embeded' }
+# Резервная копия и временная папка - СНАРУЖИ ядра: в плоской
+# раскладке comfyApp это comfyRoot, и перенос «внутрь себя» упал бы.
+$stage = Join-Path $Root 'ComfyUI.keep'
+$backup = Join-Path $Root 'ComfyUI.old'
+
 # (правка 904) Ядро ComfyUI 0.44.0. В нём уже есть то, что мы раньше патчили
 # (gate_compress, minimax_h3_layout, block_index), плюс новые ноды H3 и PDD.
 $ComfyVersion = '0.44.0'
@@ -1964,12 +1995,100 @@ function Get-ComfyCoreVersion {
     return ''
 }
 
+# (правка 945) Рекурсивно переносит $Src в $Dst, НЕ затирая то, что уже лежит
+# на месте. Нужно при восстановлении данных после обрыва: ComfyUI, запущенный
+# между попытками, успевает создать пустые models\*\diffusion_models, а наивный
+# Move-Item на существующую папку падает и данные остаются в ComfyUI.keep.
+function Move-MergeInto {
+    param([string]$Src, [string]$Dst)
+    if (-not (Test-Path -LiteralPath $Dst)) {
+        Move-Item -LiteralPath $Src -Destination $Dst
+        return 1
+    }
+    $item = Get-Item -LiteralPath $Src -Force
+    if (-not $item.PSIsContainer) {
+        Move-Item -LiteralPath $Src -Destination $Dst -Force
+        return 1
+    }
+    $n = 0
+    foreach ($child in @(Get-ChildItem -LiteralPath $Src -Force)) {
+        $n += Move-MergeInto $child.FullName (Join-Path $Dst $child.Name)
+    }
+    if (@(Get-ChildItem -LiteralPath $Src -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $Src -Force -ErrorAction SilentlyContinue
+    }
+    return $n
+}
+
+# (правка 945) Возвращает models/custom_nodes/output/... из ComfyUI.keep в ядро.
+# Вызывается при старте установки (после обрыва прошлого запуска), при откате
+# неудачной замены ядра и после раскладки нового ядра.
+function Restore-ComfyKeepData {
+    param([string]$Stage, [string]$App, [string[]]$Keep)
+    $n = 0
+    foreach ($k in $Keep) {
+        $src = Join-Path $Stage $k
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $n += Move-MergeInto $src (Join-Path $App $k)
+    }
+    return $n
+}
+
 if (-not $SkipComfy) {
     Step 4 9 ('ComfyUI ' + $ComfyVersion) 'Ядро ComfyUI (~200 МБ с GitHub): 1-5 минут; при скачивании показываем скорость'
 
     if ($Force -and (Test-Path $comfyApp)) {
         Info 'удаляю ComfyUI (-Force)'
         Remove-Item $comfyApp -Recurse -Force
+    }
+
+    # (правка 945) Восстановление после оборванной замены ядра. Порядок в прошлых
+    # версиях: данные -> ComfyUI.keep, старое ядро -> ComfyUI.old, новое ядро ->
+    # на место. Обрыв (Ctrl-C, крестик окна, синий экран) на любом шаге оставлял
+    # эти папки, а следующий запуск просто сносил ComfyUI.keep - вместе с
+    # models/custom_nodes/output, то есть с моделями пользователя (~40 ГБ).
+    if (Test-Path $backup) {
+        if (Test-Path (Join-Path $comfyApp 'main.py')) {
+            # новое ядро уже на месте - старое можно убирать
+            Remove-Item $backup -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            # старое ядро так и не вернулось на место - возвращаем его целиком
+            if (Test-Path $comfyApp) { Remove-Item $comfyApp -Recurse -Force -ErrorAction SilentlyContinue }
+            try {
+                Move-Item $backup $comfyApp
+                Warn ('вернул прошлое ядро ComfyUI после оборванной установки (' + $backup + ')')
+            } catch {
+                Warn ('не удалось вернуть прошлое ядро ComfyUI: ' + $_.Exception.Message + '. Ядро переставится заново, но models из ' + $backup + ' нужно будет скопировать в ComfyUI вручную')
+            }
+        }
+    }
+    if (Test-Path $stage) {
+        if (-not (Test-Path $comfyApp)) { New-Item -ItemType Directory -Force -Path $comfyApp | Out-Null }
+        $restoredKeep = 0
+        try {
+            $restoredKeep = Restore-ComfyKeepData $stage $comfyApp $keep
+        } catch {
+            Warn ('не удалось вернуть данные из ComfyUI.keep: ' + $_.Exception.Message + ' - папку не удаляю, разбери вручную: ' + $stage)
+        }
+        if (Test-Path $stage) {
+            if (@(Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+                # (правка 945) не удаляем и не оставляем под тем же именем: иначе
+                # замена ядра следом упадёт на непустой ComfyUI.keep. Уводим в
+                # сторону с внятным именем - данные остаются у пользователя.
+                $aside = Join-Path $Root ('ComfyUI.keep.old-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+                try {
+                    Move-Item $stage $aside
+                    Warn ('часть данных не удалось вернуть - перенёс в ' + $aside + ', разбери вручную')
+                } catch {
+                    Warn ('в ComfyUI.keep остались файлы, которые не удалось вернуть: ' + $stage)
+                }
+            }
+        }
+        if ($restoredKeep -gt 0) {
+            Warn ('вернул данные пользователя после оборванной установки: ' + $restoredKeep + ' элемент(ов) из ComfyUI.keep')
+        }
     }
 
     $hasCore = Test-Path (Join-Path $comfyApp 'main.py')
@@ -2009,24 +2128,22 @@ if (-not $SkipComfy) {
             New-Item -ItemType Directory -Force -Path $comfyParent | Out-Null
         }
 
-        # Данные пользователя, которые переносятся в новое ядро: модели, ноды,
-        # настройки, готовые видео и подключённые внешние папки моделей.
-        $keep = @('models', 'custom_nodes', 'user', 'output', 'input', 'temp', 'extra_model_paths.yaml', 'comfy.settings.json')
-        # (правка 905) В плоской раскладке python_embeded лежит ВНУТРИ папки
-        # ядра, поэтому его тоже уносим и возвращаем: пересобирать 7 ГБ
-        # пакетов при смене ядра незачем.
-        if ($flat) { $keep += 'python_embeded' }
-        # Резервная копия и временная папка - СНАРУЖИ ядра: в плоской
-        # раскладке comfyApp это comfyRoot, и перенос «внутрь себя» упал бы.
-        $stage = Join-Path $Root 'ComfyUI.keep'
-        $backup = Join-Path $Root 'ComfyUI.old'
         $movedOld = $false
         try {
             # (правка 915) уводим в backup ЛЮБУЮ существующую папку ядра, даже без
             # main.py: остаток прерванной попытки (например ComfyUI\ComfyUI-0.44.0)
             # иначе не даёт положить новое ядро — Move-Item падает «файл уже существует».
             if (Test-Path $comfyApp) {
-                if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+                if (Test-Path $stage) {
+                    # (правка 945) сюда мы приходим уже после восстановления, так что
+                    # непустая папка означает, что данные вернуть не удалось: молча
+                    # удалять их нельзя - это модели пользователя.
+                    if (@(Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                        Remove-Item $stage -Recurse -Force
+                    } else {
+                        throw ('папка ComfyUI.keep не пуста (' + $stage + ') - перенеси её содержимое в ComfyUI вручную и запусти установку снова')
+                    }
+                }
                 New-Item -ItemType Directory -Force -Path $stage | Out-Null
                 foreach ($k in $keep) {
                     $src = Join-Path $comfyApp $k
@@ -2044,28 +2161,27 @@ if (-not $SkipComfy) {
             if ($movedOld -and -not (Test-Path $comfyApp) -and (Test-Path $backup)) {
                 Move-Item $backup $comfyApp
             }
+            # (правка 945) возвращаем слиянием: в новой папке ядра уже могут быть
+            # свои models/ и custom_nodes, и Remove-Item по ним убил бы данные.
             if (Test-Path $stage) {
-                foreach ($k in $keep) {
-                    $src = Join-Path $stage $k
-                    if (-not (Test-Path $src)) { continue }
-                    $dst = Join-Path $comfyApp $k
-                    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-                    Move-Item $src $dst -ErrorAction SilentlyContinue
-                }
+                try { Restore-ComfyKeepData $stage $comfyApp $keep | Out-Null } catch { }
             }
             throw ('не удалось развернуть ядро ComfyUI: ' + $_.Exception.Message)
         }
 
-        if ($movedOld) {
-            foreach ($k in $keep) {
-                $src = Join-Path $stage $k
-                if (-not (Test-Path $src)) { continue }
-                $dst = Join-Path $comfyApp $k
-                if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-                Move-Item $src $dst
+        # (правка 945) данные возвращаем ВСЕГДА, когда они есть в stage, а не только
+        # после переноса старого ядра: stage мог остаться от прошлой оборванной
+        # попытки (тогда $movedOld = false), и раньше такой stage просто удалялся.
+        if (Test-Path $stage) {
+            try {
+                Restore-ComfyKeepData $stage $comfyApp $keep | Out-Null
+            } catch {
+                Warn ('не удалось вернуть данные из ComfyUI.keep: ' + $_.Exception.Message + ' - папка сохранена: ' + $stage)
+            }
+            if (@(Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
-        if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
         if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
         Remove-Item $tmp -Recurse -Force
         Ok ('ComfyUI ' + $ComfyVersion + ' распакован')
@@ -2225,6 +2341,7 @@ if (-not $SkipComfy) {
     }
 
     $idx = 0
+    $nodesFailed = 0
     foreach ($node in $nodes) {
         $idx++
         $target = Join-Path $nodesDir $node.name
@@ -2252,10 +2369,25 @@ if (-not $SkipComfy) {
             Remove-Item $tmp -Recurse -Force
             Ok ($node.name + ' @ ' + $node.sha.Substring(0, 7))
         } catch {
-            Fail ($node.name + ': ' + $_.Exception.Message)
+            # (правка 945) Fail здесь останавливал ВСЮ студию: exit 1, а Electron
+            # на ненулевом коде не поднимает ComfyUI. Один недоступный архив с
+            # GitHub (прокси, лимит, обрыв) превращался в «установка с ошибками»
+            # без рабочей студии, хотя все остальные ноды уже на месте.
+            # Теперь это предупреждение: студия запускается, а повторный
+            # install.bat просто доставит недостающую ноду.
+            $nodesFailed++
+            Warn ($node.name + ': ' + $_.Exception.Message + ' - нода пропущена; студия работает без неё, повторный запуск install.bat доставит её')
         }
     }
     Write-Progress -Activity 'Кастомные ноды' -Completed
+
+    if ($nodesFailed -gt 0) {
+        if ($nodesFailed -eq @($nodes).Count) {
+            Warn ('ни одна внешняя нода не установилась (' + $nodesFailed + ' из ' + @($nodes).Count + '): похоже на сеть или прокси. Студия всё равно запустится, но часть воркфлоу будет недоступна - проверь сеть и запусти install.bat ещё раз')
+        } else {
+            Warn ('не установилось внешних нод: ' + $nodesFailed + ' из ' + @($nodes).Count + '. Студия запустится; починка: install.bat при следующем запуске')
+        }
+    }
 
     $localNodes = Join-Path $Root 'custom nodes'
     if (Test-Path $localNodes) {

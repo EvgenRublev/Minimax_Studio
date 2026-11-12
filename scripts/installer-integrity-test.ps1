@@ -180,6 +180,102 @@ Ok (Test-Path (Join-Path $Cache 'expand-ok\hello.txt')) 'unpacked content must e
 Ok (Test-ArchiveFile $comfy -CheckPin) 'unpinned valid zip: -CheckPin must pass'
 Ok (-not (Test-ArchiveFile $comfy -BundleSha)) ('-BundleSha must reject a bundle-named archive with a wrong sha, got: ' + $script:IntegrityError)
 
+# 8) (правка 945) восстановление данных после обрыва замены ядра:
+#    models в ComfyUI.keep должны вернуться в ядро, даже если ComfyUI уже успел
+#    создать пустые models\*, и ничего не должно потеряться по дороге.
+Invoke-Expression (Get-Fn '^function Move-MergeInto \{')
+Invoke-Expression (Get-Fn '^function Restore-ComfyKeepData \{')
+
+$keepApp = Join-Path $Cache 'app-core'
+$keepStage = Join-Path $Cache 'ComfyUI.keep'
+New-Item -ItemType Directory -Force -Path $keepApp | Out-Null
+[IO.File]::WriteAllText((Join-Path $keepApp 'main.py'), '# core')
+New-Item -ItemType Directory -Force -Path (Join-Path $keepApp 'models\diffusion_models') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $keepStage 'models\diffusion_models') | Out-Null
+[IO.File]::WriteAllText((Join-Path $keepStage 'models\diffusion_models\h3.safetensors'), 'weights')
+[IO.File]::WriteAllText((Join-Path $keepStage 'models\diffusion_models\extra.safetensors'), 'weights2')
+New-Item -ItemType Directory -Force -Path (Join-Path $keepStage 'output') | Out-Null
+[IO.File]::WriteAllText((Join-Path $keepStage 'output\clip.mp4'), 'video')
+[IO.File]::WriteAllText((Join-Path $keepStage 'extra_model_paths.yaml'), 'paths: []')
+$keepList = @('models', 'output', 'extra_model_paths.yaml')
+
+$nMoved = Restore-ComfyKeepData $keepStage $keepApp $keepList
+Ok ($nMoved -ge 4) ('restore must report moved items, got: ' + $nMoved)
+Ok (Test-Path (Join-Path $keepApp 'models\diffusion_models\h3.safetensors')) 'restore must merge models into an existing (empty) models dir'
+Ok (Test-Path (Join-Path $keepApp 'models\diffusion_models\extra.safetensors')) 'restore must move every model, not just the first'
+Ok (Test-Path (Join-Path $keepApp 'output\clip.mp4')) 'restore must move output'
+Ok (Test-Path (Join-Path $keepApp 'extra_model_paths.yaml')) 'restore must move extra_model_paths.yaml'
+Ok (-not (Test-Path (Join-Path $keepStage 'models'))) 'restore must not leave the emptied stage tree behind'
+Ok (-not (Test-Path (Join-Path $keepStage 'output'))) 'restore must clean the emptied output stage dir'
+Ok (Test-Path (Join-Path $keepApp 'main.py')) 'restore must not touch the new core files'
+
+# files already in the core must survive a merge (fresh core yaml vs user stage)
+$keepApp2 = Join-Path $Cache 'app-core2'
+$keepStage2 = Join-Path $Cache 'keep2'
+New-Item -ItemType Directory -Force -Path (Join-Path $keepApp2 'custom_nodes\keep-me') | Out-Null
+[IO.File]::WriteAllText((Join-Path $keepApp2 'custom_nodes\keep-me\__init__.py'), '# fresh')
+New-Item -ItemType Directory -Force -Path (Join-Path $keepStage2 'custom_nodes\from-user') | Out-Null
+[IO.File]::WriteAllText((Join-Path $keepStage2 'custom_nodes\from-user\__init__.py'), '# user')
+Restore-ComfyKeepData $keepStage2 $keepApp2 @('custom_nodes') | Out-Null
+Ok (Test-Path (Join-Path $keepApp2 'custom_nodes\keep-me\__init__.py')) 'merge must not delete nodes already in the new core'
+Ok (Test-Path (Join-Path $keepApp2 'custom_nodes\from-user\__init__.py')) 'merge must add nodes brought back from ComfyUI.keep'
+
+# stage without data and an empty stage must both be no-ops, not errors
+New-Item -ItemType Directory -Force -Path $keepStage2 | Out-Null
+Ok ((Restore-ComfyKeepData $keepStage2 $keepApp2 @('models')) -eq 0) 'empty stage must restore nothing'
+
+# 9) (правка 945) сам блок восстановления в шаге 4: старое ядро из ComfyUI.old
+#    должно возвращаться на место, а не удаляться вместе с ComfyUI.keep.
+# Anchor must stay ASCII: this test file has no BOM, so PS 5.1 reads its own
+# literals as ANSI and a Cyrillic pattern would never match install.ps1 (UTF-8 BOM).
+$iRec = Find-Line '^\s+if \(Test-Path \$backup\) \{'
+$iHas = Find-Line '^\s*\$hasCore = Test-Path'
+if ($iRec -lt 0 -or $iHas -lt 0 -or -not ($iRec -lt $iHas)) {
+  Ok $false 'recovery block (pravka 945) not found in install.ps1'
+} else {
+  $recBlock = ($lines[$iRec..($iHas - 1)] -join "`r`n")
+
+  $recRoot = Join-Path $Cache 'rec-root'
+  New-Item -ItemType Directory -Force -Path $recRoot | Out-Null
+  $script:wmsgs = @()
+  function Warn { param([string]$m) $script:wmsgs += $m }
+  $comfyApp = Join-Path $recRoot 'ComfyUI'
+  $stage = Join-Path $recRoot 'ComfyUI.keep'
+  $backup = Join-Path $recRoot 'ComfyUI.old'
+  $keep = @('models', 'custom_nodes', 'output')
+
+  # (a) interrupted before the new core was unpacked: old core sits in ComfyUI.old
+  New-Item -ItemType Directory -Force -Path (Join-Path $backup 'models\diffusion_models') | Out-Null
+  [IO.File]::WriteAllText((Join-Path $backup 'main.py'), '# old core')
+  [IO.File]::WriteAllText((Join-Path $backup 'models\diffusion_models\h3.safetensors'), 'w')
+  New-Item -ItemType Directory -Force -Path (Join-Path $stage 'models\diffusion_models') | Out-Null
+  [IO.File]::WriteAllText((Join-Path $stage 'models\diffusion_models\other.safetensors'), 'w2')
+  Invoke-Expression $recBlock
+  Ok (Test-Path (Join-Path $comfyApp 'main.py')) 'recovery must put the old core back in place'
+  Ok (Test-Path (Join-Path $comfyApp 'models\diffusion_models\h3.safetensors')) 'recovery must keep models that were inside the old core'
+  Ok (Test-Path (Join-Path $comfyApp 'models\diffusion_models\other.safetensors')) 'recovery must merge models back from ComfyUI.keep'
+  Ok (-not (Test-Path $backup)) 'recovery must not leave ComfyUI.old behind'
+  Ok (-not (Test-Path $stage)) 'recovery must not leave a drained ComfyUI.keep behind'
+  Ok ($wmsgs.Count -ge 2) ('recovery must report what it did, got: ' + $wmsgs.Count)
+
+  # (b) new core already unpacked, leftovers are pure garbage from the crash
+  $script:wmsgs = @()
+  New-Item -ItemType Directory -Force -Path $comfyApp | Out-Null
+  Remove-Item -LiteralPath $comfyApp -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force -Path $comfyApp | Out-Null
+  [IO.File]::WriteAllText((Join-Path $comfyApp 'main.py'), '# new core')
+  New-Item -ItemType Directory -Force -Path (Join-Path $backup 'x') | Out-Null
+  [IO.File]::WriteAllText((Join-Path $backup 'main.py'), '# stale old core')
+  Invoke-Expression $recBlock
+  Ok ((Get-Content -LiteralPath (Join-Path $comfyApp 'main.py') -Raw) -eq '# new core') 'recovery must not overwrite the unpacked new core'
+  Ok (-not (Test-Path $backup)) 'recovery must drop the leftover old core when the new one is in place'
+
+  # (c) nothing to recover: the block must be a silent no-op
+  $script:wmsgs = @()
+  Invoke-Expression $recBlock
+  Ok ($wmsgs.Count -eq 0) ('clean install must produce no recovery warnings, got: ' + ($wmsgs -join ' | '))
+}
+
 Remove-Item -LiteralPath $Cache -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ''

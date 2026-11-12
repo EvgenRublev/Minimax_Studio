@@ -330,6 +330,25 @@ ok(/Remove-StaleCacheFile \$sttArchive/.test(inst), 'битый STT-архив �
 const requestCloseBlock = gui.match(/\$requestClose = \{[\s\S]*?\n\}/)?.[0] ?? ''
 ok(/closing = \$true/.test(requestCloseBlock), 'окно установки спрашивает «Прервать?» дважды (флаг closing не ставится до Close)')
 
+// ─── 8) правка 945: обрыв замены ядра и недоступная нода ────────────────────
+// ComfyUI.keep после обрыва должен восстанавливаться, а не удаляться вместе с
+// моделями; недоступная внешняя нода не должна ронять установку (exit 1).
+ok(/function Restore-ComfyKeepData/.test(inst) && /function Move-MergeInto/.test(inst), 'нет восстановления ComfyUI.keep (модели теряются после обрыва)')
+const iBackupRecovery = inst.indexOf('if (Test-Path $backup) {')
+const iHasCore = inst.indexOf('$hasCore = Test-Path')
+ok(iBackupRecovery > 0 && iHasCore > 0 && iBackupRecovery < iHasCore, 'восстановление ComfyUI.old/keep идёт после проверки ядра (не выполнится)')
+ok(/ComfyUI\.keep\.old-/.test(inst), 'непринятые данные из ComfyUI.keep удаляются (нет переноса в сторону)')
+ok(/Restore-ComfyKeepData \$stage \$comfyApp \$keep/.test(inst), 'данные из ComfyUI.keep не возвращаются в ядро')
+ok(!/if \(Test-Path \$stage\) \{ Remove-Item \$stage -Recurse -Force \}/.test(inst), 'ComfyUI.keep удаляется без восстановления данных')
+const iCoreMove = inst.indexOf('Move-Item $inner.FullName $comfyApp')
+const iPostRestore = inst.indexOf('Restore-ComfyKeepData $stage $comfyApp $keep', iCoreMove + 1)
+const iBackupCleanup = inst.indexOf('if (Test-Path $backup) { Remove-Item $backup', iCoreMove + 1)
+ok(iCoreMove > 0 && iPostRestore > iCoreMove && (iBackupCleanup < 0 || iPostRestore < iBackupCleanup), 'после раскладки нового ядра данные не возвращаются из ComfyUI.keep')
+ok(!/Fail \(\$node\.name/.test(inst), 'недоступная нода по-прежнему Fail (exit 1, ComfyUI не запустится)')
+ok(/\$nodesFailed\+\+/.test(inst), 'нет счётчика неустановленных внешних нод')
+ok(/ни одна внешняя нода не установилась/.test(inst), 'нет подсказки «проверь сеть/прокси», если не встала ни одна нода')
+ok(/остатки оборванной установки ядра/.test(inst) && /ComfyUI\.keep\.old-\*/.test(inst), 'самодиагностика не видит брошенные ComfyUI.keep/ComfyUI.old')
+
 console.log(`\nPASS=${pass} FAIL=${fails.length}`)
 for (const f of fails) console.log('FAIL:', f)
 process.exit(fails.length ? 1 : 0)
