@@ -277,16 +277,21 @@ trap {
     # (правка 941) heartbeat пишет статус из своего потока - глушим его до записи
     # итогового state=error, иначе он перезатрёт ошибку.
     try { if (Get-Command Stop-StatusHeartbeat -ErrorAction SilentlyContinue) { Stop-StatusHeartbeat } } catch { }
-    # (правка 939) Испортилось что-то одно - не тащим это через все повторные
-    # запуски: выкидываем из кэша файлы, которые не являются ожидаемыми архивами.
-    # Функция объявлена ниже по файлу, поэтому проверяем, что она уже существует.
-    try {
-        if (Get-Command Clear-CorruptCache -ErrorAction SilentlyContinue) { Clear-CorruptCache }
-    } catch { }
-    try {
-        $hint = 'Подробности - в файле install.log (путь в этой строке). Повторный запуск продолжает установку с того же места; битые архивы из кэша удалены автоматически.'
-        Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) $hint
-    } catch { }
+    # (правка 944) В режиме самодиагностики (diagnostics.bat -SelfCheck) не трогаем
+    # ни кэш, ни статус установки: раньше trap на любом непойманном исключении
+    # сносил файлы из .install-cache и писал state=error поверх статуса «done».
+    if (-not $script:SelfCheckMode) {
+        # (правка 939) Испортилось что-то одно - не тащим это через все повторные
+        # запуски: выкидываем из кэша файлы, которые не являются ожидаемыми архивами.
+        # Функция объявлена ниже по файлу, поэтому проверяем, что она уже существует.
+        try {
+            if (Get-Command Clear-CorruptCache -ErrorAction SilentlyContinue) { Clear-CorruptCache }
+        } catch { }
+        try {
+            $hint = 'Подробности - в файле install.log (путь в этой строке). Повторный запуск продолжает установку с того же места; битые архивы из кэша удалены автоматически.'
+            Write-SetupStatus 'error' $script:StatusStep 9 ('Установка прервана: ' + $_.Exception.Message) $hint
+        } catch { }
+    }
     exit 1
 }
 
@@ -360,6 +365,12 @@ function Get-ExpectedKind {
     if ($p.EndsWith('.zip') -or $p.EndsWith('.whl')) { return 'zip' }
     if ($p.EndsWith('.tar.gz') -or $p.EndsWith('.tgz')) { return 'gzip' }
     if ($p.EndsWith('.exe')) { return 'exe' }
+    # (правка 944) get-pip.py - единственный не-архив, который мы качаем с сети.
+    # Магических байтов у него нет, поэтому HTML-страница прокси/портала проходила
+    # все проверки 939 и навсегда оставалась в кэше: pip не ставился ни разу,
+    # каждый запуск падал на «не удалось установить pip». Проверяем содержимое.
+    # Условие по имени, а не по расширению: в pip/uv-кэше тоже есть .py.
+    if ((Split-Path -Leaf $Path) -ieq 'get-pip.py') { return 'pyscript' }
     return ''
 }
 
@@ -386,6 +397,42 @@ function Get-HeadKind {
     return ''
 }
 
+# (правка 944) Проверка get-pip.py: это python-скрипт, а не архив. Признаки
+# подмены (страница прокси, «портал», обрезанный файл) видны по началу файла:
+# у скрипта первые килобайты - shebang/докстринг/import, у HTML - '<'.
+function Test-TextScript {
+    param([string]$Path)
+    try {
+        $len = (Get-Item -LiteralPath $Path).Length
+        if ($len -lt 1024) {
+            $script:IntegrityError = ('слишком маленький файл для python-скрипта: ' + $len + ' байт')
+            return $false
+        }
+        $take = [int][Math]::Min(4096, $len)
+        $text = ''
+        $fs = [IO.File]::OpenRead($Path)
+        try {
+            $buf = New-Object byte[] $take
+            $n = $fs.Read($buf, 0, $take)
+            if ($n -gt 0) { $text = [Text.Encoding]::UTF8.GetString($buf, 0, $n) }
+        } finally { $fs.Dispose() }
+        $head = $text.TrimStart()
+        if (-not $head) { $script:IntegrityError = 'файл пустой'; return $false }
+        if ($head.StartsWith('<')) {
+            $script:IntegrityError = 'это HTML-страница (прокси/портал), а не python-скрипт'
+            return $false
+        }
+        if ($head -notmatch '(?m)^\s*(import\s|from\s+\S+\s+import\s|#!)') {
+            $script:IntegrityError = 'в начале файла нет python-кода'
+            return $false
+        }
+        return $true
+    } catch {
+        $script:IntegrityError = 'файл не читается'
+        return $false
+    }
+}
+
 # Годен ли файл как архив ожидаемого типа. Причина отказа - в
 # $script:IntegrityError. -CheckPin сверяет sha256/размер для неизменяемых
 # артефактов (pin.pinned), -BundleSha - для файлов самого установщика: они
@@ -403,7 +450,10 @@ function Test-ArchiveFile {
     # $Kind - иначе ожидаемый тип затирается и проверка всегда проходит.
     $expectKind = if ($Kind) { $Kind } else { Get-ExpectedKind $Path }
     if ($pin -and $pin.Kind) { $expectKind = $pin.Kind }
-    if ($expectKind) {
+    if ($expectKind -eq 'pyscript') {
+        # (правка 944) get-pip.py: магических байтов нет - смотрим содержимое
+        if (-not (Test-TextScript $Path)) { return $false }
+    } elseif ($expectKind) {
         $got = Get-HeadKind (Read-HeadBytes $Path 4)
         if ($got -ne $expectKind) {
             $what = if ($got) { $got } else { 'не архив (страница прокси/портала или обрезанная закачка)' }
@@ -451,11 +501,12 @@ function Clear-CorruptCache {
     try {
         if (-not (Test-Path -LiteralPath $Cache)) { return }
         Get-ChildItem -LiteralPath $Cache -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            $n = $_.Name.ToLowerInvariant()
-            if ($n.EndsWith('.part')) {
-                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-                return
-            }
+            # (правка 944) .part больше НЕ удаляем: Get-Download продолжает закачку
+            # с места обрыва (-C -), а trap срабатывает в тот самый момент, когда
+            # связь оборвалась. Раньше вычищались все незавершённые загрузки - и
+            # подсказка «продолжит с того же места» была неправдой (torch ~1,8 ГБ
+            # качался заново). Начисто .part убирает только сама закачка (3-я
+            # попытка) либо Remove-StaleCacheFile, когда файл уже негоден.
             if (-not (Get-ExpectedKind $_.Name)) { return }
             if (-not (Test-ArchiveFile $_.FullName -CheckPin)) {
                 Remove-StaleCacheFile $_.FullName
@@ -738,7 +789,16 @@ function Get-Download {
                     }
                     Start-Sleep -Milliseconds 400
                 }
-                if ((Test-Path $part) -and (Get-Item $part).Length -gt 0) {
+                # (правка 944) код возврата curl раньше игнорировался: обрыв связи
+                # (curl 18/56) оставлял в .part ненулевой хвост, и файл считался
+                # скачанным. На codeload это особенно опасно: GitHub не отдаёт
+                # Content-Length, сверить размер нечем, а магические байты у
+                # обрезанного zip те же - «готовый» битый архив уезжал в кэш.
+                $curlCode = 1
+                try { $proc.WaitForExit(); $curlCode = $proc.ExitCode } catch { }
+                if ($curlCode -ne 0) {
+                    Info ('  curl завершился с кодом ' + $curlCode + ' - загрузка не закончена')
+                } elseif ((Test-Path $part) -and (Get-Item $part).Length -gt 0) {
                     $gotLen = (Get-Item $part).Length
                     if ($size -gt 0 -and $gotLen -ne $size) {
                         Info ('  размер не совпал: ' + $gotLen + ' из ' + $size + ' байт')
@@ -1414,6 +1474,12 @@ function Invoke-SelfCheck {
         if ($script:Pins.Count -eq 0) { Warn 'install\checksums.json пуст или отсутствует - сверять нечем' }
         foreach ($base in @((Join-Path $InstallDir 'cache'), $Cache)) {
             if (-not (Test-Path -LiteralPath $base)) { continue }
+            # (правка 944) sha бандла сверяем только у самого бандла. Для кэша
+            # прошлых запусков - магические байты (и sha только у неизменяемых
+            # артефактов): архивы тегов GitHub пересобираются, и скачанный из
+            # сети файл никогда не совпадёт с суммой бандла - было ложное
+            # «битый файл: nodes/...zip (sha256 не совпал)».
+            $isBundle = ($base -eq (Join-Path $InstallDir 'cache'))
             $n = 0
             $badDeep = @()
             Get-ChildItem -LiteralPath $base -Recurse -File -Force -EA SilentlyContinue | ForEach-Object {
@@ -1422,7 +1488,7 @@ function Invoke-SelfCheck {
                     $rel = $_.FullName.Substring($base.Length).TrimStart('\', '/')
                 }
                 if (-not (Get-PinFor $_.FullName -Rel $rel) -and -not (Get-ExpectedKind $_.Name)) { return }
-                $okArc = Test-ArchiveFile $_.FullName -Rel $rel -CheckPin -BundleSha
+                $okArc = Test-ArchiveFile $_.FullName -Rel $rel -CheckPin -BundleSha:$isBundle
                 if ($okArc) { $n++ } else { $badDeep += ($rel + ' (' + $script:IntegrityError + ')') }
             }
             Write-Log ('   проверено целых: ' + $n + ' - ' + $base)
@@ -2164,8 +2230,14 @@ if (-not $SkipComfy) {
         $target = Join-Path $nodesDir $node.name
         Write-Progress -Activity 'Кастомные ноды' -Status $node.name -PercentComplete (($idx / $nodes.Count) * 100)
 
+        # (правка 944) «уже установлена» = папка есть И в ней __init__.py: папка,
+        # оставшаяся от неудачного Move-Item/распаковки, раньше считалась готовой
+        # нодой НАВСЕГДА (пока не запустят с -Force), ComfyUI молча терял ноду, а
+        # установка завершалась без ошибок. Ту же проверку делает самодиагностика.
+        $nodeReady = (Test-Path $target) -and (Test-Path (Join-Path $target '__init__.py'))
+        if ($nodeReady -and -not $Force) { Info ($node.name + ': уже установлена'); continue }
         if (Test-Path $target) {
-            if (-not $Force) { Info ($node.name + ': уже установлена'); continue }
+            if (-not $nodeReady) { Info ($node.name + ': папка неполная - переустанавливаю') }
             Remove-Item $target -Recurse -Force
         }
 
@@ -2296,7 +2368,13 @@ if (-not $SkipApp) {
             $sttArchive = Join-Path $Cache $sttAsset
             Get-Download ('https://github.com/handy-computer/transcribe.cpp/releases/download/v' + $sttVersion + '/' + $sttAsset) $sttArchive
             $hash = (Get-FileHash $sttArchive -Algorithm SHA256).Hash.ToLower()
-            if ($hash -ne $sttSha) { throw 'контрольная сумма архива не совпала' }
+            if ($hash -ne $sttSha) {
+                # (правка 944) битый архив не оставляем в кэше: Get-Download считал
+                # его «уже скачанным» (gzip-заголовок на месте), и голосовой ввод
+                # не починился бы уже никогда - только руками чистить кэш.
+                Remove-StaleCacheFile $sttArchive
+                throw 'контрольная сумма архива не совпала (архив удалён из кэша - запустите установку снова)'
+            }
 
             $tmp = Join-Path $Cache 'stt-extract'
             if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }

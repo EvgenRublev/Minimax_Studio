@@ -312,6 +312,24 @@ for (const e of readdirSync(join(ROOT, 'install'), { withFileTypes: true })) {
   ok(!(crlf > 0 && loneLF > 0), `install/${e.name}: смешанные переносы строк (CRLF=${crlf}, LF=${loneLF})`)
 }
 
+// ─── 7) правка 944: доводка ревью установщика ──────────────────────────────
+// Обрыв закачки, HTML вместо скрипта, «папка = нода», удаление докачки в trap,
+// ложный sha бандла у кэша, двойной вопрос в окне установки.
+const dlBlock = inst.match(/function Get-Download \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(dlBlock.includes('ExitCode'), 'Get-Download игнорирует код возврата curl (обрыв закачки уедет в кэш как готовый)')
+const cccBlock = inst.match(/function Clear-CorruptCache \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(cccBlock.length > 0 && !/EndsWith\('\.part'\)/.test(cccBlock), 'Clear-CorruptCache удаляет .part (теряется докачка)')
+ok(/function Test-TextScript/.test(inst) && /get-pip\.py/.test(inst), 'get-pip.py не проверяется (HTML прокси остаётся в кэше навсегда)')
+ok(/expectKind -eq 'pyscript'/.test(inst), 'Test-ArchiveFile не проверяет pyscript (get-pip.py)')
+const trapBlock = inst.match(/trap \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(/SelfCheckMode/.test(trapBlock), 'trap меняет кэш и статус в режиме -SelfCheck')
+const step6Block = inst.match(/Step 6 9[\s\S]*?Step 7 9/)?.[0] ?? ''
+ok(/__init__\.py/.test(step6Block), 'шаг 6 считает ноду установленной по одной папке (без __init__.py)')
+ok(/-BundleSha:\$isBundle/.test(inst), '-Deep требует sha бандла у файлов кэша (ложные «битый файл»)')
+ok(/Remove-StaleCacheFile \$sttArchive/.test(inst), 'битый STT-архив остаётся в кэше (голосовой ввод не починится)')
+const requestCloseBlock = gui.match(/\$requestClose = \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(/closing = \$true/.test(requestCloseBlock), 'окно установки спрашивает «Прервать?» дважды (флаг closing не ставится до Close)')
+
 console.log(`\nPASS=${pass} FAIL=${fails.length}`)
 for (const f of fails) console.log('FAIL:', f)
 process.exit(fails.length ? 1 : 0)

@@ -936,6 +936,10 @@ function Get-CloseConfirmed {
 $requestClose = {
     if (-not (Get-CloseConfirmed)) { return }
     Stop-Install
+    # (правка 944) флаг ставим ДО Close: иначе FormClosing спрашивает «Прервать
+    # установку?» второй раз (state ещё 'running'), а ответ «Нет» оставлял окно
+    # открытым при уже остановленном установщике.
+    $script:closing = $true
     $form.Close()
 }
 

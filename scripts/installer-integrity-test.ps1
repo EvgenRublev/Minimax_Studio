@@ -132,6 +132,35 @@ Ok (-not (Test-Path $htmlPath)) 'Clear-CorruptCache must drop the html stub'
 Ok (-not (Test-Path $truncPath)) 'Clear-CorruptCache must drop the truncated zip'
 Ok (Test-Path $comfy) 'Clear-CorruptCache must keep an unpinned (GitHub ref) zip that has valid magic'
 
+# 5b) (правка 944) get-pip.py - не архив: проверяем содержимое, а не магию,
+#     и .part-докачку Clear-CorruptCache больше не трогает
+$pipBadDir = Join-Path $Cache 'pyscript-bad'
+New-Item -ItemType Directory -Force -Path $pipBadDir | Out-Null
+$pipBad = Join-Path $pipBadDir 'get-pip.py'
+[IO.File]::WriteAllBytes($pipBad, [Text.Encoding]::UTF8.GetBytes('<html><body>proxy portal</body></html>' + ('x' * 3000)))
+Ok ((Get-ExpectedKind 'get-pip.py') -eq 'pyscript') 'get-pip.py must be classified as pyscript'
+Ok (-not (Test-ArchiveFile $pipBad)) 'html named get-pip.py must fail'
+Ok ($script:IntegrityError -match 'HTML') ('html get-pip.py: reason should mention HTML, got: ' + $script:IntegrityError)
+
+$pipOkDir = Join-Path $Cache 'pyscript-ok'
+New-Item -ItemType Directory -Force -Path $pipOkDir | Out-Null
+$pipOk = Join-Path $pipOkDir 'get-pip.py'
+$pipBody = "#!/usr/bin/env python`nimport sys`n" + (('# filler line' + "`n") * 200)
+[IO.File]::WriteAllText($pipOk, $pipBody, (New-Object Text.UTF8Encoding($false)))
+Ok (Test-ArchiveFile $pipOk) 'a real python get-pip.py must pass'
+
+$bundlePip = Join-Path $InstallDir 'cache\get-pip.py'
+if (Test-Path -LiteralPath $bundlePip) {
+  Ok (Test-ArchiveFile $bundlePip -Rel 'get-pip.py' -CheckPin) 'bundle get-pip.py must pass its own check'
+}
+
+$resume = Join-Path $Cache 'torch-2.11.0+cu130-cp312-cp312-win_amd64.whl.part'
+[IO.File]::WriteAllBytes($resume, [byte[]](0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00))
+Clear-CorruptCache
+Ok (-not (Test-Path $pipBad)) 'Clear-CorruptCache must drop an html get-pip.py'
+Ok (Test-Path $pipOk) 'Clear-CorruptCache must keep a valid get-pip.py'
+Ok (Test-Path $resume) 'Clear-CorruptCache must keep .part (download resume)'
+
 # 6) Expand-ZipSafe: html stub must be rejected before tar.exe runs, and purged
 $bad = Join-Path $Cache 'expand-bad.zip'
 [IO.File]::WriteAllBytes($bad, [Text.Encoding]::UTF8.GetBytes('<!DOCTYPE html>' + ('y' * 4000)))
