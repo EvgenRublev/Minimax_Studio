@@ -793,6 +793,9 @@ function Ensure-VcRedist {
     }
     $shown = if ($cur) { 'версия ' + $cur } else { 'не установлен' }
     Info ('Visual C++ 2015-2022 x64: ' + $shown + ', нужен ' + $script:VcRedistMin + '+ - обновляю (без него torch не грузит c10.dll)')
+    # (правка 940) с этого момента redist считаем проблемным, пока не убедимся в
+    # обратном: любая ветка выхода ниже означает, что torch может упасть с 1114
+    $script:VcRedistBroken = $true
     $exe = Join-Path $Cache 'vc_redist.x64.exe'
     if (-not ((Test-Path $exe) -and (Get-Item $exe).Length -gt 0)) {
         try {
@@ -819,16 +822,24 @@ function Ensure-VcRedist {
     if ($code -eq 3010) {
         Warn 'VC++ redist обновлён, но Windows просит перезагрузку - до неё torch может не заработать'
     } elseif ($code -ne 0 -and $code -ne 1638) {
-        # Частая причина - установка без прав администратора (1603/5).
-        Warn ('VC++ redist вернул код ' + $code + '. Скачайте и поставьте вручную (от администратора): ' + $script:VcRedistUrl)
+        # (правка 940) 1602/1603 - отказ в повышении прав: на пер-запуске от
+        # обычного пользователя redist не встанет, и потом torch падает с
+        # WinError 1114. Говорим это прямо, а не «код N».
+        $hint = if ($code -eq 1602 -or $code -eq 1603 -or $code -eq 5) {
+            ' (прав администратора не хватило: запустите install.bat от администратора)'
+        } else { '' }
+        $script:VcRedistBroken = $true
+        Warn ('VC++ redist вернул код ' + $code + $hint + '. Скачайте и поставьте вручную (от администратора): ' + $script:VcRedistUrl)
         return
     }
     $after = Get-VcRuntimeVersion
     if ($after -and $after -ge $script:VcRedistMin) {
+        $script:VcRedistBroken = $false
         Ok ('Visual C++ 2015-2022 x64 обновлён: ' + $after)
     } elseif ($code -eq 3010) {
         # Версия обновится после перезагрузки - не пугаем повтором.
     } else {
+        $script:VcRedistBroken = $true
         Warn ('Visual C++ redist установлен, но System32 всё ещё показывает ' + $(if ($after) { $after } else { 'старую версию' }) + '. Перезагрузите Windows и запустите install.bat снова; если не поможет - поставьте вручную: ' + $script:VcRedistUrl)
     }
 }
@@ -1119,6 +1130,63 @@ if ($null -ne $freeGB) {
     }
 } else {
     Warn 'не удалось определить свободное место на диске'
+}
+
+# (правка 940) Условия окружения, которые раньше не проверялись, а потом
+# выглядели как «установка упала без причины». Всё это - предупреждения:
+# студия ставится в папку пользователя, права администратора ей не обязательны.
+
+$script:IsAdmin = $false
+try {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $script:IsAdmin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+} catch { }
+Info ('права администратора: ' + $(if ($script:IsAdmin) { 'есть' } else { 'нет (это нормально)' }))
+
+# Длинные пути: node_modules и ComfyUI легко дают > 260 символов, и без
+# LongPathsEnabled распаковка/удаление папок падает невнятной ошибкой.
+$longPaths = $null
+try {
+    $lp = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LongPathsEnabled -ErrorAction SilentlyContinue
+    if ($lp) { $longPaths = $lp.LongPathsEnabled }
+} catch { }
+if ($longPaths -eq 1) {
+    Ok 'длинные пути включены (LongPathsEnabled)'
+} elseif ($script:IsAdmin) {
+    try {
+        New-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LongPathsEnabled -PropertyType DWord -Value 1 -Force | Out-Null
+        Ok 'включили LongPathsEnabled (длинные пути в node_modules и ComfyUI)'
+    } catch {
+        Warn 'не удалось включить LongPathsEnabled в реестре; если распаковка упадёт - включите вручную: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System, LongPathsEnabled = 1'
+    }
+} else {
+    Warn 'длинные пути выключены (LongPathsEnabled=0): на глубоких папках распаковка и удаление могут падать. Лечится запуском install.bat от администратора (мы включим сам) либо вручную в реестре: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System, LongPathsEnabled = 1'
+}
+
+if ($Root.Length -gt 90) {
+    Warn ('путь очень длинный сам по себе (' + $Root.Length + ' симв.), а node_modules и ComfyUI добавляют ещё больше: если будут сбои распаковки, перенесите студию ближе к корню диска')
+}
+if ($Root -match '[^\x00-\x7F]') {
+    Warn 'в пути есть символы не-ASCII (кириллица): обычно работает, но при странных сбоях распаковки или удаления папок попробуйте путь только из латинских букв'
+}
+if ($Root -match '(?i)onedrive') {
+    Warn 'папка внутри OneDrive: синхронизация перехватывает файлы во время установки - перенесите студию вне OneDrive'
+}
+try {
+    $dtype = (Get-Item $Root).PSDrive.DriveType
+    if ($dtype -eq 'Network' -or $dtype -eq 'Removable') {
+        $dn = if ($drive) { $drive.Name } else { $Root }
+        Warn ('диск ' + $dn + ' - ' + $dtype + ': по сети и на съёмных носителях установка идёт заметно дольше, а tar.exe и антивирус чаще срываются')
+    }
+} catch { }
+
+if (Test-Path (Join-Path $env:SystemRoot 'System32\tar.exe')) {
+    Ok 'tar.exe доступен (распаковка архивов)'
+} else {
+    Warn 'в Windows нет System32\tar.exe (нужна Windows 10 1803+): zip распакуется Expand-Archive, но STT-архив (.tar.gz) распаковать будет нечем'
+}
+if (-not $script:Curl) {
+    Warn 'curl.exe не найден: качаем через Invoke-WebRequest - без докачки с места обрыва и без живой скорости'
 }
 
 # (правка 744) Проверяем не только pypi, но и GitHub (ComfyUI, ноды, STT):
@@ -1932,7 +2000,12 @@ if (-not $SkipComfy) {
 
     Info 'проверяю импорт torch...'
     & $python -c "import torch, torchvision, torchaudio; print('      torch', torch.__version__, '| cuda:', torch.cuda.is_available())"
-    if ($LASTEXITCODE -ne 0) { Fail 'torch не импортируется' } else { Ok 'torch работает' }
+    if ($LASTEXITCODE -ne 0) {
+    # (правка 940) на свежей машине самая частая причина именно этой ошибки -
+    # старый VC++ redist: c10.dll не грузится, import torch падает с WinError 1114
+    $extra = if ($script:VcRedistBroken) { ' - VC++ 2015-2022 x64 не обновился: поставьте его от администратора (' + $script:VcRedistUrl + '), затем запустите install.bat снова' } else { '' }
+    Fail ('torch не импортируется' + $extra)
+} else { Ok 'torch работает' }
 
     Info 'проверяю ключевые библиотеки...'
     & $python -c "import cv2, numpy, scipy, transformers, safetensors, comfy_kitchen; print('      cv2', cv2.__version__, '| numpy', numpy.__version__)"

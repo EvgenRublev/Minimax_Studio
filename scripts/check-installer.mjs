@@ -146,6 +146,31 @@ ok(!!tr && /Clear-CorruptCache/.test(tr[0]), 'trap не чистит битый 
 ok(/Get-ChildItem \$bundle -Recurse -File/.test(inst) && /Test-ArchiveFile \$src/.test(inst), 'посев бандла install/cache не проверяет его целостность')
 ok(!/\[IO\.Compression\.ZipFile\]::ExtractToDirectory/.test(inst), 'в install.ps1 остался прямой ExtractToDirectory мимо проверки архива')
 
+// (правка 940) проверки окружения: без них «не у всех» превращается в загадочные
+// сбои распаковки и «torch не импортируется» без подсказки.
+const envChecks = [
+  ['LongPathsEnabled', 'нет проверки/включения LongPathsEnabled (длинные пути в node_modules и ComfyUI)'],
+  ['WindowsBuiltInRole]::Administrator', 'нет определения прав администратора'],
+  ["-eq 'Network'", 'нет предупреждения про сетевой диск'],
+  ["-eq 'Removable'", 'нет предупреждения про съёмный диск'],
+  ['onedrive', 'нет предупреждения про OneDrive'],
+  ['[^\\x00-\\x7F]', 'нет предупреждения про не-ASCII в пути установки'],
+  ['System32\\tar.exe', 'нет проверки наличия tar.exe (Windows 10 1803+)'],
+  ['VcRedistBroken', 'нет отметки «VC++ redist не обновился» для подсказки на шаге 9'],
+]
+for (const [needle, msg] of envChecks) ok(inst.includes(needle), `install.ps1: ${msg}`)
+ok(inst.includes('WinError 1114'), 'install.ps1: ошибка torch не связывается с VC++ redist (WinError 1114)')
+
+// (правка 940) апдейтер обязан проверять место на диске до скачивания
+const appUpPath = join(ROOT, 'src', 'lib', 'app-update.ts')
+if (existsSync(appUpPath)) {
+  const au = readFileSync(appUpPath, 'utf8')
+  ok(au.includes('statfsSync'), 'app-update.ts: пропала проверка свободного места (statfsSync)')
+  ok(au.includes('Недостаточно места на диске'), 'app-update.ts: проверка места не даёт понятной ошибки')
+} else {
+  fails.push('src/lib/app-update.ts не найден — проверка апдейтера пропущена')
+}
+
 // ─── 5) кодировки ──────────────────────────────────────────────────────────
 function readBytes(p) {
   return existsSync(p) ? readFileSync(p) : null
