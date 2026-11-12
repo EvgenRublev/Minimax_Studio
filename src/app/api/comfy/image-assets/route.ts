@@ -9,7 +9,6 @@ import {
   DEFAULT_IMAGE_PROMPT_UPSAMPLER,
   IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
   isImagePromptUpsampler,
-  isFl2vaImageBase,
 } from '@/lib/comfy/image-template'
 
 /**
@@ -20,9 +19,10 @@ import {
  * DiT из diffusion_models/. Плюс флаг `ready` — есть ли на диске вся троица
  * image-обвязки, и `missing` — чего не хватает (подсказка во вкладке).
  *
- * (правка 934) Добавлены: `promptUpsamplers` (файлы апсемплера промпта),
- * `imageBases` (DiT, которые официальная карточка считает базой для image-LoRA,
- * то есть FL2VA) и `defaults` — что вкладка подставит сама.
+ * (правка 934) Добавлены: `promptUpsamplers` (файлы апсемплера промпта) и
+ * `defaults` — что вкладка подставит сама. (правка 937) `imageBases` убран:
+ * официальный FL2VA дал тот же результат, что видео-модель, поэтому база по
+ * умолчанию — основная модель из Настроек.
  */
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +44,6 @@ export async function GET() {
     // (правка 934) апсемплер лежит в text_encoders и именуется по своему ключу,
     // поэтому в imageTextEncoders не попадает — выделяем отдельно.
     const promptUpsamplers = textEncoders.filter(isImagePromptUpsampler)
-    const imageBases = diffusionModels.filter(isFl2vaImageBase)
 
     const has = (list: string[], name: string) => list.includes(name)
     const missing: string[] = []
@@ -61,12 +60,6 @@ export async function GET() {
       promptUpsamplers[0] ??
       ''
 
-    const diffusionDefault =
-      (cfg.diffusionModel && imageBases.includes(cfg.diffusionModel) ? cfg.diffusionModel : '') ||
-      imageBases[0] ||
-      cfg.diffusionModel ||
-      ''
-
     return NextResponse.json({
       ok: true,
       ready: missing.length === 0,
@@ -77,13 +70,13 @@ export async function GET() {
       imageModels,
       diffusionModels,
       promptUpsamplers,
-      imageBases,
       defaults: {
         imageLora: DEFAULT_IMAGE_LORA,
         textEncoder: DEFAULT_IMAGE_TEXT_ENCODER,
         vae: DEFAULT_IMAGE_VAE,
         promptUpsampler: upsamplerDefault || DEFAULT_IMAGE_PROMPT_UPSAMPLER,
-        diffusionModel: diffusionDefault,
+        // (правка 937) база — основная модель из Настроек, как в остальных вкладках.
+        diffusionModel: cfg.diffusionModel || '',
       },
       // Апсемплер не обязателен для запуска, но официальная карточка требует
       // держать его в графе: без него короткие промпты дают слабые результаты.

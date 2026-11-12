@@ -58,18 +58,11 @@ export const isImagePromptUpsampler = (name: string): boolean =>
   /prompt_upsampler|prompt-upsampler/i.test(name)
 
 /**
- * (правка 934) Официальная база для image-LoRA — трансформер FL2VA (в карточке:
- * «Load minimax_h3_fl2va_bf16 … the pruned and quantized FL2VA files work too»).
- * Community-мержи видео-модели (у нас стоит Singularity_x_10Eros-Max_PRISM) тоже
- * технически работают с LoRA, но это чужие веса после видеодобычи — от них лицо и
- * «плывёт». Поэтому при невыбранной модели предпочитает FL2VA.
+ * (правка 937) Базу для image-LoRA не «подсказываем»: живая проверка на нашей
+ * карте показала, что официальный FL2VA (minimax_h3_fl2va_pruned_w6a8, 16 ГБ) и
+ * community-мерж видео-модели дают в этой вкладке одинаковый результат. Так что
+ * база — основная модель из Настроек, а выбрать другую можно руками во вкладке.
  */
-export const isFl2vaImageBase = (name: string): boolean => /fl2va/i.test(name)
-export function pickImageBaseModel(available: string[]): string {
-  const fl2va = available.filter(isFl2vaImageBase)
-  if (fl2va.length > 0) return fl2va.sort((a, b) => a.localeCompare(b))[0]
-  return ''
-}
 
 /** Формат входа апсемплера — дословно как в эталонном StringFormat. */
 export function imageUpsamplerInput(aspect: string, request: string): string {
@@ -84,14 +77,51 @@ export const IMAGE_MAX_REFERENCES = 8
  * воркфлоу PrunaAI). `fast4` — наша 4-шаговая лестница (те же значения, что
  * pass-2 `3step`-вариант в minimax-h3-template.ts, но с полным стартом от 1.0):
  * подходит, когда база — дистиллированная 4-шаговая модель.
+ *
+ * (правка 936) `image10`/`image12` — те же официальные точки, но с вставленными
+ * серединами самых крупных прыжков. Пересчитать «официальную» сетку на другую
+ * длину нельзя: PrunaAI берёт значения из собственной таблицы сигм модели, у нас
+ * её нет. А такая достройка безопасна: траектория остаётся официальной,
+ * просто шаг в самых «грубых» местах становится мельче.
  */
+const IMAGE_SIGMAS_OFFICIAL: readonly number[] = [
+  1.0, 0.984753, 0.967905, 0.951688, 0.925372, 0.881923, 0.810083, 0.528718, 0.0,
+]
+
+/** Официальная сетка + деление пополам самого большого интервала, пока не набрано `steps`. */
+function extendOfficialSigmas(steps: number): string {
+  const pts = [...IMAGE_SIGMAS_OFFICIAL]
+  while (pts.length - 1 < steps) {
+    let at = 0
+    let gap = -1
+    for (let i = 0; i < pts.length - 1; i++) {
+      const g = pts[i] - pts[i + 1]
+      if (g > gap) {
+        gap = g
+        at = i
+      }
+    }
+    pts.splice(at + 1, 0, Number(((pts[at] + pts[at + 1]) / 2).toFixed(6)))
+  }
+  return pts.map((v) => (Number.isInteger(v) ? v.toFixed(1) : String(v))).join(', ')
+}
+
 export const IMAGE_SIGMA_SCHEDULES: Record<string, string> = {
   image8: '1.0, 0.984753, 0.967905, 0.951688, 0.925372, 0.881923, 0.810083, 0.528718, 0.0',
+  image10: extendOfficialSigmas(10),
+  image12: extendOfficialSigmas(12),
   fast4: '1.0, 0.9035, 0.6316, 0.3158, 0.0000',
 }
 export const IMAGE_SCHEDULE_LABELS: Record<string, string> = {
   image8: '8 шагов (официальная сетка)',
+  image10: '10 шагов (официальная + 2 точки)',
+  image12: '12 шагов (официальная + 4 точки)',
   fast4: '4 шага (дистиллированная модель)',
+}
+/** Число шагов по ключу сетки (для подписей в UI). */
+export function imageScheduleSteps(schedule?: string): number {
+  const s = IMAGE_SIGMA_SCHEDULES[schedule || 'image8'] ?? IMAGE_SIGMA_SCHEDULES.image8
+  return s.split(',').length - 1
 }
 
 /**

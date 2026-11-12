@@ -16,7 +16,6 @@ import {
   DEFAULT_IMAGE_VAE,
   IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
   imageTwoPassParams,
-  pickImageBaseModel,
 } from '@/lib/comfy/image-template'
 import { listModelFiles } from '@/lib/comfy/model-scan'
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
@@ -153,12 +152,10 @@ export async function POST(req: NextRequest) {
     }
 
     const imageLora = body.imageLora === undefined ? DEFAULT_IMAGE_LORA : body.imageLora
-    // (правка 934) База по умолчанию: официальная карточка требует FL2VA под
-    // image-LoRA. Если фронт модель не прислал — берём FL2VA с диска, и только
-    // если его нет — видео-модель из Настроек (как раньше).
-    const diffusionModels = listModelFiles(join(cfg.comfyCore, 'models'), 'diffusion_models')
-    const diffusionModel =
-      (body.diffusionModel || '').trim() || pickImageBaseModel(diffusionModels) || cfg.diffusionModel || ''
+    // (правка 937) База — основная модель из Настроек (как в других вкладках).
+    // Авто-подсказка «официальный FL2VA» убрана: живая проверка дала с ней тот же
+    // результат, что на текущей видео-модели, а весов это 16 ГБ.
+    const diffusionModel = (body.diffusionModel || cfg.diffusionModel || '').trim()
     if (!diffusionModel) {
       return NextResponse.json(
         { error: 'Не выбрана модель диффузии — укажите DiT во вкладке или основную модель в Настройках' },

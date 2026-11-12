@@ -131,19 +131,6 @@ export const MODELS: ModelDef[] = [
     category: 'vae',
     optional: true,
   },
-  // (правка 934) Официальная база под image-LoRA: карточка P-H3-Image требует
-  // FL2VA (подходят и прунутые/квантованные варианты). Без неё картинка идёт
-  // поверх видео-мержа, и детали лица («глаза плывут») заметно хуже.
-  {
-    id: 'image_base_fl2va',
-    label: 'Image Base (FL2VA pruned W6A8 — база для p-h3-image)',
-    relPath: 'diffusion_models/minimax_h3_fl2va_pruned_w6a8.safetensors',
-    url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_w6a8.safetensors?download=true',
-    sizeBytes: 15983746636,
-    sizeLabel: '~16 GB',
-    category: 'diffusion',
-    optional: true,
-  },
   // (правка 934) Prompt upsampler — та же Qwen3.5-9B, но дообученная под задачу,
   // и по карточке держать её в графе обязательно: короткие промпты без неё дают
   // слабые результаты. Исполняется внутри ComfyUI (CLIPLoader + TextGenerate).

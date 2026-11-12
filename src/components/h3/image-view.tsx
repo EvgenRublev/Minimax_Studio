@@ -47,7 +47,6 @@ import {
   IMAGE_MAX_REFERENCES,
   IMAGE_MEGAPIXELS,
   IMAGE_MP_HINT,
-  IMAGE_SIGMA_SCHEDULES,
   IMAGE_SCHEDULE_LABELS,
   IMAGE_BASE_SCALES,
   IMAGE_DENOISE2_RANGE,
@@ -57,6 +56,7 @@ import {
   DEFAULT_IMAGE_PROMPT_UPSAMPLER,
   imageBaseDims,
   imageQualityLabel,
+  imageScheduleSteps,
   imageTwoPassParams,
   type ImageTwoPassMode,
 } from '@/lib/comfy/image-template'
@@ -70,9 +70,8 @@ interface ImageAssets {
   vaes?: string[]
   imageModels?: string[]
   diffusionModels?: string[]
-  /** (правка 934) файлы апсемплера промпта и официальные базы FL2VA. */
+  /** (правка 934) файлы апсемплера промпта. */
   promptUpsamplers?: string[]
-  imageBases?: string[]
   upsamplerMissing?: boolean
   defaults?: { imageLora: string; textEncoder: string; vae: string; promptUpsampler?: string; diffusionModel?: string }
   error?: string
@@ -138,10 +137,7 @@ export function ImageView() {
     return q[params.aspect] ?? q['1:1']
   }, [params.quality, params.aspect])
 
-  const steps = useMemo(
-    () => (IMAGE_SIGMA_SCHEDULES[params.schedule] ?? IMAGE_SIGMA_SCHEDULES.image8).split(',').length - 1,
-    [params.schedule],
-  )
+  const steps = useMemo(() => imageScheduleSteps(params.schedule), [params.schedule])
 
   // (правка 935) параметры второго прохода и размер базы — те же функции, что и
   // на сервере, чтобы подпись «база → итог» не расходилась с реальным графом.
@@ -368,7 +364,18 @@ export function ImageView() {
           </div>
           <div className="text-[11px] text-muted-foreground -mt-2">
             {steps} {steps === 1 ? 'шаг' : 'шагов'} · euler · без CFG
+            {tp.mode !== 'off' ? ` + ${tp.steps2} шаг(ов) второго прохода` : ''}
           </div>
+          {/* Дистиллированная база и длинная сетка — частая причина «мыла» на тестах:
+              4-шаговая модель обучена на коротком шаге, официальная 8-шаговая сетка ей не пара. */}
+          {/4step|fastvideo/i.test(params.model || assets?.defaults?.diffusionModel || '') &&
+            params.schedule !== 'fast4' && (
+              <div className="text-[10px] text-amber-300 -mt-2">
+                База «{(params.model || assets?.defaults?.diffusionModel || '').replace(/^.*\//, '')}» —
+                дистиллированная 4-шаговая. Возьми «4 шага (дистиллированная модель)» или поменяй
+                модель в «Дополнительно».
+              </div>
+            )}
 
           {/* ─── Два прохода (правка 935) ─── */}
           <div className="space-y-2">
@@ -596,8 +603,8 @@ export function ImageView() {
                     <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">
-                        {assets?.defaults?.diffusionModel && assets.imageBases?.length
-                          ? `Авто — официальная база FL2VA (${assets.defaults.diffusionModel})`
+                        {assets?.defaults?.diffusionModel
+                          ? `Основная модель из Настроек (${assets.defaults.diffusionModel})`
                           : 'Основная модель (из Настроек)'}
                       </SelectItem>
                       {(assets?.diffusionModels ?? []).map((m) => (
@@ -605,24 +612,6 @@ export function ImageView() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {/* (правка 934) Официальная база для image-LoRA — FL2VA. Видео-мерж
-                      технически работает, но это чужие веса после видеобьютизации:
-                      от них чаще «плывут» лица и глаза. */}
-                  {(assets?.imageBases?.length ?? 0) > 0 &&
-                    params.model !== '' &&
-                    !/fl2va/i.test(params.model) && (
-                      <div className="text-[10px] text-amber-300">
-                        Выбран не FL2VA. Карточка P-H3-Image требует базу FL2VA
-                        ({assets?.imageBases?.[0]}) под image-LoRA; на видео-мерже детали лица
-                        заметно хуже.
-                      </div>
-                    )}
-                  {(assets?.imageBases?.length ?? 0) === 0 && (
-                    <div className="text-[10px] text-muted-foreground">
-                      На диске нет официальной базы FL2VA (minimax_h3_fl2va_pruned_w6a8, ~16 ГБ) —
-                      сейчас картинка идёт поверх видео-модели.
-                    </div>
-                  )}
                   <div className="text-[10px] text-muted-foreground">
                     Видео-модель + LoRA = картинка без отдельного image-DiT.
                   </div>
