@@ -134,6 +134,10 @@ $script:StatusState = 'idle'
 $script:StatusHint = ''
 $script:SpeedMBs = 0
 $script:SpeedDetail = ''
+# (правка 943) точка отсчёта «сколько идёт установка» определяется здесь, а не в
+# блоке heartbeat: Write-SetupStatus тоже пишет elapsed_min, и trap может вызвать
+# её раньше heartbeat.
+$script:StatusStartedAt = Get-Date
 # (правка 941) Статус читают чужие процессы (Electron, заставка, окно
 # установки), поэтому пишем атомарно: временный файл + Replace. Иначе читатель
 # может поймать половину JSON посреди записи - в том числе когда рядом пишет
@@ -175,8 +179,10 @@ function Write-SetupStatus {
         speed  = $script:SpeedMBs
         detail = $script:SpeedDetail
         # (правка 942) отдельное поле для heartbeat: текстовые поля трогает только
-        # установщик, heartbeat пишет сюда целое число минут
-        elapsed_min = 0
+        # установщик, heartbeat пишет сюда целое число минут. (правка 943) его пишет
+        # и Write-SetupStatus - иначе между записью шага и ближайшим тиком heartbeat
+        # счётчик «идёт N мин» обнуляется.
+        elapsed_min = $(if ($script:StatusStartedAt) { [int][Math]::Floor(((Get-Date) - $script:StatusStartedAt).TotalMinutes) } else { 0 })
         pid    = $PID
         ts     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
@@ -214,7 +220,6 @@ function Set-Speed {
 #     тик и файл разросся до 1,6 ГБ);
 #   • detail heartbeat НЕ трогает вообще - только числовое elapsed_min, причём
 #     перед записью проверяем размер файла. Текстовые поля добавляет установщик.
-$script:StatusStartedAt = Get-Date
 $script:Heartbeat = $null
 $script:HeartbeatMaxBytes = 200000
 function Start-StatusHeartbeat {
@@ -1266,10 +1271,14 @@ function Invoke-SelfCheck {
         if (Test-Path -LiteralPath (Join-Path $Root ('node_modules\' + $d))) { Ok ('зависимость: ' + $d) }
         else { Fail ('нет node_modules\' + $d + '. Починка: install.bat (шаг 3)') }
     }
-    if (Test-Path -LiteralPath (Join-Path $Root 'node_modules\electron\electron.exe')) {
-        Ok 'электрон (окно студии) на месте'
-    } else {
-        Warn 'нет node_modules\electron - окно студии не запустится (лечится install.bat, шаг 3)'
+    # (правка 943) Electron 44+ в npm-пакете лежит в node_modules\electron\dist\
+    # (path.txt указывает electron.exe внутри dist); сам установщик проверяет
+    # именно dist\electron.exe - проверка должна совпадать, иначе ложная жалоба.
+    $elExe = @((Join-Path $Root 'node_modules\electron\dist\electron.exe'), (Join-Path $Root 'node_modules\electron\electron.exe')) |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ($elExe) { Ok ('электрон (окно студии) на месте: ' + (Split-Path -Leaf $elExe)) }
+    else {
+        Warn 'нет node_modules\electron\dist\electron.exe - окно студии не запустится (лечится install.bat, шаг 3)'
     }
     $buildId = Join-Path $Root '.next\BUILD_ID'
     if (Test-Path -LiteralPath $buildId) {

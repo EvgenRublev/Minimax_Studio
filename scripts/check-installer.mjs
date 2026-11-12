@@ -187,6 +187,10 @@ ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('import tor
   'самодиагностика не проверяет импорт torch')
 ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('comfy-patches'),
   'самодиагностика не сверяет патчи ядра с установщиком')
+// (правка 943) путь к Electron в самодиагностике обязан совпадать с раскладкой
+// npm-пакета: node_modules\electron\dist\electron.exe (иначе ложная жалоба).
+ok((inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('electron\\dist\\electron.exe'),
+  'самодиагностика ищет Electron не в node_modules\\electron\\dist')
 ok(/SelfCheckMode/.test(inst), 'install.ps1: режим самодиагностики не отключает запись (посев бандла)')
 // статус: hint+log наружу, heartbeat держит ts живым, финал пишется без heartbeat
 ok(inst.includes('StatusHint'), 'install.ps1: статус не отдаёт hint')
@@ -208,7 +212,8 @@ const hb = inst.match(/function Start-StatusHeartbeat \{[\s\S]*?\n\}/)?.[0] ?? '
 ok(hb.length > 0, 'install.ps1: нет Start-StatusHeartbeat')
 ok(/ReadAllText\(\$file, \[System\.Text\.Encoding\]::UTF8\)/.test(hb), 'install.ps1: heartbeat читает статус не как UTF-8 (PS 5.1 испортит кириллицу)')
 ok(!/\$j\.detail\s*=/.test(hb), 'install.ps1: heartbeat правит текстовое поле detail — так detail растёт каждый тик')
-ok(/elapsed_min/.test(hb) && /elapsed_min\s*=\s*0/.test(inst), 'install.ps1: heartbeat не пишет elapsed_min')
+ok(/elapsed_min/.test(hb) && /elapsed_min\s*=\s*\$\(if \(\$script:StatusStartedAt\)/.test(inst), 'install.ps1: elapsed_min не пишется и в Write-SetupStatus (обнуляется между тиками heartbeat)')
+ok(!/^\$script:StatusStartedAt = Get-Date\s*$/m.test(inst.slice(inst.indexOf('function Start-StatusHeartbeat') - 900, inst.indexOf('function Start-StatusHeartbeat'))), 'install.ps1: heartbeat сбрасывает StatusStartedAt (счётчик «идёт N мин» начнётся заново)')
 ok(/New-Object System\.IO\.FileInfo\(\$file\)/.test(hb) && /-gt \$maxBytes/.test(hb), 'install.ps1: heartbeat не ограничивает размер файла статуса')
 // (правка 942) [string]$Hint = $null в PowerShell превращается в "", и проверка
 // ($null -ne $Hint) всегда истина: каждый вызов без -Hint стирал подсказку.
