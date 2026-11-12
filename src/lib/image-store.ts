@@ -12,31 +12,29 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
   DEFAULT_IMAGE_TWO_PASS,
+  DEFAULT_IMAGE_STEPS,
   IMAGE_ASPECTS,
   normalizeImageQuality,
+  normalizeImageSteps,
   type ImageQualityKey,
   type ImageTwoPassMode,
 } from '@/lib/comfy/image-template'
 
-/** Ступени разрешения (0.5…8 МП), см. IMAGE_MEGAPIXELS. */
+/** Ступени разрешения (0.5…16 МП), см. IMAGE_MEGAPIXELS. */
 export type ImageQuality = ImageQualityKey
-export type ImageSchedule = 'image8' | 'fast4'
 
 export interface ImageParams {
   prompt: string
   /** Соотношение сторон из IMAGE_ASPECTS. */
   aspect: string
-  /** 4 МП (лучше для правок) или 8 МП (лучше для текста). */
+  /** 4 МП (дефолт шаблона) … 16 МП (рекомендованное качество). */
   quality: ImageQuality
-  /** Сетка сигм: 8 шагов (официальная) или 4 шага (дистиллированная база). */
-  schedule: ImageSchedule
+  /** Шагов первого прохода (BasicScheduler simple); 6 — как в официальном шаблоне. */
+  steps: number
   /** 0 — каждый раз новый seed. */
   seed: number
-  /** DiT; '' — спросить у сервера (дефолт вкладки). */
+  /** DiT; '' — дефолт с сервера (официальная w4a8). */
   model: string
-  /** LoRA поверх DiT; '' — без LoRA (нужен image-DiT). */
-  lora: string
-  loraStrength: number
   /** '' — дефолт с сервера. */
   textEncoder: string
   /** '' — дефолт с сервера. */
@@ -44,10 +42,10 @@ export interface ImageParams {
   lowVramAttention: boolean
   chunkFeedForward: boolean
   /**
-   * (правка 934) Апсемплер промпта: имя файла p-h3-image_prompt_upsampler_*;
-   * '' — выключен (запрос уходит модели как есть).
+   * (правка 938) Энхансер промпта: имя файла qwen3.5_9b_*; '' — выключен
+   * (запрос уходит модели как есть).
    */
-  upsampler: string
+  enhancer: string
   /**
    * (правка 935) 'off' | 'detail' | 'upscale'. В 'upscale' качество (МП) — это
    * ИТОГ: базовый проход берётся меньше в baseScale раз по стороне.
@@ -67,16 +65,14 @@ export const DEFAULT_IMAGE_PARAMS: ImageParams = {
   prompt: '',
   aspect: '1:1',
   quality: '4',
-  schedule: 'image8',
+  steps: DEFAULT_IMAGE_STEPS,
   seed: 0,
   model: '',
-  lora: '',
-  loraStrength: 1,
   textEncoder: '',
   vae: '',
   lowVramAttention: true,
   chunkFeedForward: true,
-  upsampler: '',
+  enhancer: '',
   twoPass: 'off',
   baseScale: DEFAULT_IMAGE_TWO_PASS.baseScale,
   denoise2: DEFAULT_IMAGE_TWO_PASS.denoise,
@@ -149,10 +145,20 @@ export const useImageStore = create<ImageStoreState>()(
         const p = (persisted as { params?: Partial<ImageParams> } | null)?.params
         if (!p) return current
         const aspect = IMAGE_ASPECT_SET.has(p.aspect || '') ? p.aspect! : DEFAULT_IMAGE_PARAMS.aspect
+        // (правка 938) Убранные поля (schedule/lora/loraStrength/upsampler) из
+        // старого localStorage выбрасываем, steps зажимаем в допустимый диапазон.
+        const cleaned: Partial<ImageParams> = { ...p }
+        for (const key of ['schedule', 'lora', 'loraStrength', 'upsampler']) delete (cleaned as Record<string, unknown>)[key]
         return {
           ...current,
           ...(persisted as ImageStoreState),
-          params: { ...DEFAULT_IMAGE_PARAMS, ...p, aspect, quality: normalizeImageQuality(p.quality) },
+          params: {
+            ...DEFAULT_IMAGE_PARAMS,
+            ...cleaned,
+            aspect,
+            quality: normalizeImageQuality(p.quality),
+            steps: normalizeImageSteps(p.steps),
+          },
         }
       },
     },

@@ -3,84 +3,79 @@ import { join } from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { listModelFiles } from '@/lib/comfy/model-scan'
 import {
-  DEFAULT_IMAGE_LORA,
+  DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_TEXT_ENCODER,
   DEFAULT_IMAGE_VAE,
-  DEFAULT_IMAGE_PROMPT_UPSAMPLER,
-  IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
-  isImagePromptUpsampler,
+  DEFAULT_IMAGE_PROMPT_ENHANCER,
+  IMAGE_MODEL_CANDIDATES,
+  IMAGE_PE_CANDIDATES,
+  isImageDiT,
+  isImageTextEncoder,
+  isImageVae,
+  isImagePromptEnhancer,
 } from '@/lib/comfy/image-template'
 
 /**
- * (правка 929) GET /api/comfy/image-assets
+ * (правки 929, 938) GET /api/comfy/image-assets
  *
- * Список файлов, нужных режиму «Изображение», прямо с диска (ComfyUI трогать
- * не нужно): LoRA p-h3-image, image-ный текстовый энкодер, image-ный VAE и все
- * DiT из diffusion_models/. Плюс флаг `ready` — есть ли на диске вся троица
- * image-обвязки, и `missing` — чего не хватает (подсказка во вкладке).
- *
- * (правка 934) Добавлены: `promptUpsamplers` (файлы апсемплера промпта) и
- * `defaults` — что вкладка подставит сама. (правка 937) `imageBases` убран:
- * официальный FL2VA дал тот же результат, что видео-модель, поэтому база по
- * умолчанию — основная модель из Настроек.
+ * Список файлов, нужных режиму «Изображение», прямо с диска (ComfyUI трогать не
+ * нужно): официальные image-DiT (minimax_h3_image_pruned_*), общий с видео 32B
+ * текстовый энкодер (qwen3vl_32b_minimax_h3_*), image-ный VAE и энхансер
+ * промпта (qwen3.5_9b_*). Плюс флаг `ready` и `missing` — чего не хватает.
  */
 export const dynamic = 'force-dynamic'
-
-const isImageAsset = (name: string) => /p-h3-image|h3_image|h3-image/i.test(name)
 
 export async function GET() {
   try {
     const cfg = getAppConfig()
     const modelsRoot = join(cfg.comfyCore, 'models')
-    const loras = listModelFiles(modelsRoot, 'loras')
     const textEncoders = listModelFiles(modelsRoot, 'text_encoders')
     const vaes = listModelFiles(modelsRoot, 'vae')
     const diffusionModels = listModelFiles(modelsRoot, 'diffusion_models')
 
-    const imageTextEncoders = textEncoders.filter(isImageAsset)
-    const imageVaes = vaes.filter(isImageAsset)
-    const imageLoras = loras.filter(isImageAsset)
-    const imageModels = diffusionModels.filter(isImageAsset)
-    // (правка 934) апсемплер лежит в text_encoders и именуется по своему ключу,
+    const imageTextEncoders = textEncoders.filter(isImageTextEncoder)
+    const imageVaes = vaes.filter(isImageVae)
+    const imageModels = diffusionModels.filter(isImageDiT)
+    // (правка 938) энхансер лежит в text_encoders и именуется по своему ключу,
     // поэтому в imageTextEncoders не попадает — выделяем отдельно.
-    const promptUpsamplers = textEncoders.filter(isImagePromptUpsampler)
+    const promptEnhancers = textEncoders.filter(isImagePromptEnhancer)
 
     const has = (list: string[], name: string) => list.includes(name)
     const missing: string[] = []
-    if (!has(loras, DEFAULT_IMAGE_LORA)) missing.push(`loras/${DEFAULT_IMAGE_LORA}`)
+    if (!imageModels.some((m) => (IMAGE_MODEL_CANDIDATES as readonly string[]).includes(m))) {
+      missing.push(`diffusion_models/${DEFAULT_IMAGE_MODEL}`)
+    }
     if (!has(imageTextEncoders, DEFAULT_IMAGE_TEXT_ENCODER) && imageTextEncoders.length === 0) {
-      missing.push('image-текстовый энкодер (p-h3-image_text_encoder_*)')
+      missing.push('текстовый энкодер qwen3vl_32b_minimax_h3_*')
     }
     if (!has(vaes, DEFAULT_IMAGE_VAE) && imageVaes.length === 0) {
-      missing.push('image-VAE (p-h3-image_vae_*)')
+      missing.push(`vae/${DEFAULT_IMAGE_VAE}`)
     }
 
-    const upsamplerDefault =
-      IMAGE_PROMPT_UPSAMPLER_CANDIDATES.find((c) => promptUpsamplers.includes(c)) ??
-      promptUpsamplers[0] ??
-      ''
+    const enhancerDefault =
+      IMAGE_PE_CANDIDATES.find((c) => promptEnhancers.includes(c)) ?? promptEnhancers[0] ?? ''
+
+    const modelDefault =
+      IMAGE_MODEL_CANDIDATES.find((c) => imageModels.includes(c)) ?? imageModels[0] ?? DEFAULT_IMAGE_MODEL
 
     return NextResponse.json({
       ok: true,
       ready: missing.length === 0,
       missing,
-      loras: imageLoras,
       textEncoders: imageTextEncoders,
       vaes: imageVaes,
       imageModels,
       diffusionModels,
-      promptUpsamplers,
+      promptEnhancers,
       defaults: {
-        imageLora: DEFAULT_IMAGE_LORA,
+        diffusionModel: modelDefault,
         textEncoder: DEFAULT_IMAGE_TEXT_ENCODER,
         vae: DEFAULT_IMAGE_VAE,
-        promptUpsampler: upsamplerDefault || DEFAULT_IMAGE_PROMPT_UPSAMPLER,
-        // (правка 937) база — основная модель из Настроек, как в остальных вкладках.
-        diffusionModel: cfg.diffusionModel || '',
+        promptEnhancer: enhancerDefault || DEFAULT_IMAGE_PROMPT_ENHANCER,
       },
-      // Апсемплер не обязателен для запуска, но официальная карточка требует
-      // держать его в графе: без него короткие промпты дают слабые результаты.
-      upsamplerMissing: promptUpsamplers.length === 0,
+      // Энхансер не обязателен для запуска, но официальная карточка требует его
+      // в графе: без него короткие промпты дают слабые результаты.
+      enhancerMissing: promptEnhancers.length === 0,
     })
   } catch (e) {
     return NextResponse.json(

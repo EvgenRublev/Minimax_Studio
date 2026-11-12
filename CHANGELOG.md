@@ -11,6 +11,37 @@
 
 ## [7.1.22] — в разработке
 
+### Вкладка «Изображение»: официальная MiniMax H3 Image вместо LoRA-пути (правка 938)
+
+- **Один путь — официальный.** Вкладка работает на `Comfy-Org/MiniMax-H3-Image`:
+  отдельная image-модель `minimax_h3_image_pruned_*`, общий с видео 32B
+  текстовый энкодер `qwen3vl_32b_minimax_h3_*`, свой VAE
+  `minimax_h3_image_vae_fp16` и официальный энхансер промпта `qwen3.5_9b`.
+  Старый путь «видео-модель + LoRA p-h3-image» удалён из кода, UI и
+  `models-config.ts` — не как выбор рядом, а полностью.
+- **Сэмплирование как в эталоне:** вместо ручной сетки `ManualSigmas` —
+  `BasicScheduler(scheduler: simple)` + euler, 6 шагов по умолчанию (в эталонном
+  шаблоне `KSampler(euler, simple, 6, cfg 1)`). В селекторе шагов 4/6/8/10/12.
+- **Prompt enhancer по официальному рецепту:** `CLIPLoader(type=minimax)` +
+  `TextGenerateV2` (sampling on, thinking on, temperature 1, top_k 20, top_p 0.95)
+  + `JsonExtractString(key=expanded_caption)`. Тексты system/task-промптов и
+  параметры генерации сгенерированы побайтово из эталонных шаблонов t2i и edit в
+  `src/lib/comfy/image-pe.ts` (`scratchpad/gen-image-pe.mjs`). Для правок
+  энхансер получает картинки через автогров `images` (как edit-шаблон) и
+  edit-версию task-промпта.
+- **Разрешения:** добавлены ступени 10/12/16 МП и пропорция 21:9; строка 16 МП
+  взята дословно из официальной таблицы Comfy-Org (до 6272 по длинной стороне),
+  верхняя граница стороны в билдере и роуте поднята до 8192.
+- **Сайдкар:** вместо `image_lora`/`image_upsampler`/`image_schedule` пишутся
+  `image_steps` и `image_enhancer` — по ним прогон воспроизводится дословно.
+- **Модели:** в `models-config.ts` пункты `image_model` (w4a8, 11.7 ГБ),
+  `image_vae` (1.09 ГБ) и `image_prompt_enhancer` (6.8 ГБ); старые пункты
+  PrunaAI (LoRA / TE / VAE / апсемплер) удалены.
+- **Проверки:** `tsc --noEmit` — 0; `scratchpad/image-sizes-check.mjs` переписан
+  под новый путь (официальные таблицы 4/8/16 МП, BasicScheduler, энхансер с
+  картинками, два прохода, отсутствие LoRA/ManualSigmas) — **PASS=1387 FAIL=0**.
+  Живые прогоны на ГПУ — за пользователем.
+
 ### Вкладка «Изображение»: шаги 10 и 12, отказ от авто-базы FL2VA (правки 936, 937)
 
 - **Сетки 10 и 12 шагов** в селекторе «Сетка шагов». Официальной сетки для других

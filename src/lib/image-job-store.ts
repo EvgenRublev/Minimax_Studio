@@ -28,13 +28,14 @@ export interface ImageSubmitBody {
   prompt: string
   width: number
   height: number
-  schedule?: string
+  /** (правка 938) Шагов первого прохода (BasicScheduler simple). */
+  steps?: number
   seed?: number
   diffusionModel?: string
-  imageLora?: string | null
-  loraStrength?: number
   textEncoder?: string
   vae?: string
+  /** (правка 938) '' = авто, null = выключен. */
+  promptEnhancer?: string | null
   references?: Array<{ name?: string; filename?: string; subfolder?: string }>
   lowVramAttention?: boolean
   chunkFeedForward?: boolean

@@ -11,29 +11,30 @@ import {
   buildImageWorkflow,
   imageSamplerStages,
   IMAGE_MAX_REFERENCES,
-  DEFAULT_IMAGE_LORA,
+  DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_TEXT_ENCODER,
   DEFAULT_IMAGE_VAE,
-  IMAGE_PROMPT_UPSAMPLER_CANDIDATES,
+  IMAGE_PE_CANDIDATES,
+  isImageDiT,
+  normalizeImageSteps,
   imageTwoPassParams,
 } from '@/lib/comfy/image-template'
 import { listModelFiles } from '@/lib/comfy/model-scan'
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
 
 /**
- * (правка 929) POST /api/comfy/image — генерация изображения MiniMax H3
- * (режим p-h3-image): по тексту и правка по референсам.
+ * (правки 929, 938) POST /api/comfy/image — генерация изображения официальной
+ * MiniMax H3 Image (Comfy-Org/MiniMax-H3-Image): по тексту и правка по референсам.
  *
  * Body:
  *   prompt          — обязательный
  *   width, height   — сторона канваса (кратность 32 делает билдер)
- *   schedule?       — 'image8' (8 шагов, официальная сетка) | 'fast4' (4 шага)
+ *   steps?          — 4/6/8/10/12 (6 — как в официальном шаблоне)
  *   seed?           — 0 = случайный
- *   diffusionModel? — DiT: наша видео-модель или minimax_h3_image_pruned_*
- *   imageLora?      — LoRA поверх DiT ('' = без LoRA); по умолчанию p-h3-image LoRA
- *   loraStrength?   — 0..2, по умолчанию 1.0
- *   textEncoder?    — image-ный TE (обязателен, видео-TE несовместим)
- *   vae?            — image-ный VAE
+ *   diffusionModel? — DiT minimax_h3_image_pruned_* (по умолчанию w4a8)
+ *   textEncoder?    — qwen3vl_32b_minimax_h3_* (общий с видео)
+ *   vae?            — minimax_h3_image_vae_fp16
+ *   promptEnhancer? — qwen3.5_9b_* ('' — выключить); по умолчанию первый с диска
  *   references?     — массив референсов:
  *                       { name }                    — файл уже в ComfyUI/input/
  *                       { filename, subfolder }     — картинка из галереи (копируется в input/)
@@ -57,20 +58,16 @@ export async function POST(req: NextRequest) {
       prompt?: string
       width?: number
       height?: number
-      schedule?: string
+      steps?: number
       seed?: number
       diffusionModel?: string
-      imageLora?: string | null
-      loraStrength?: number
       textEncoder?: string
       vae?: string
       references?: RefInput[]
       lowVramAttention?: boolean
       chunkFeedForward?: boolean
-      /** (правка 934) '' = выключен; undefined — первый доступный с диска. */
-      promptUpsampler?: string | null
-      /** Соотношение сторон для формата входа апсемплера. */
-      aspect?: string
+      /** (правка 938) '' = выключен; undefined — первый доступный с диска. */
+      promptEnhancer?: string | null
       /** (правка 935) 'off' | 'detail' | 'upscale'; width/height = итоговый размер. */
       twoPass?: string
       baseScale?: number
@@ -86,8 +83,10 @@ export async function POST(req: NextRequest) {
     }
     const width = Number(body.width) || 2048
     const height = Number(body.height) || 2048
-    if (!(width >= 256 && width <= 4096 && height >= 256 && height <= 4096)) {
-      return NextResponse.json({ error: 'Размер стороны должен быть от 256 до 4096 пикселей' }, { status: 400 })
+    // (правка 938) Верхняя граница — официальная 16-мегапиксельная таблица
+    // (6272 по длинной стороне); ядро разрешает до MAX_RESOLUTION=16384.
+    if (!(width >= 256 && width <= 8192 && height >= 256 && height <= 8192)) {
+      return NextResponse.json({ error: 'Размер стороны должен быть от 256 до 8192 пикселей' }, { status: 400 })
     }
 
     const block = assertGenerationAllowed()
@@ -151,25 +150,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Референс без name/filename' }, { status: 400 })
     }
 
-    const imageLora = body.imageLora === undefined ? DEFAULT_IMAGE_LORA : body.imageLora
-    // (правка 937) База — основная модель из Настроек (как в других вкладках).
-    // Авто-подсказка «официальный FL2VA» убрана: живая проверка дала с ней тот же
-    // результат, что на текущей видео-модели, а весов это 16 ГБ.
-    const diffusionModel = (body.diffusionModel || cfg.diffusionModel || '').trim()
-    if (!diffusionModel) {
-      return NextResponse.json(
-        { error: 'Не выбрана модель диффузии — укажите DiT во вкладке или основную модель в Настройках' },
-        { status: 400 },
-      )
-    }
+    // (правка 938) DiT — только официальная image-модель. Основную модель из
+    // Настроек здесь брать нельзя: это видео-веса, с image-нодой они несовместимы.
+    // Старое значение из localStorage (видео-модель) молча отбрасываем — в UI
+    // такого выбора больше нет.
+    const requestedModel = (body.diffusionModel || '').trim()
+    const diffusionModel = requestedModel && isImageDiT(requestedModel) ? requestedModel : DEFAULT_IMAGE_MODEL
 
-    // (правка 934) Апсемплер промпта: undefined — взять первый доступный с диска
-    // (в порядке w4a8 → int8 → bf16), '' или null — выключить.
-    const upsamplerFiles = listModelFiles(join(cfg.comfyCore, 'models'), 'text_encoders')
-    const promptUpsampler =
-      body.promptUpsampler === undefined
-        ? IMAGE_PROMPT_UPSAMPLER_CANDIDATES.find((c) => upsamplerFiles.includes(c)) ?? ''
-        : (body.promptUpsampler || '').trim()
+    // (правка 938) Энхансер промпта: undefined — первый доступный с диска
+    // (w4a8_gptq → w4a8), '' или null — выключить.
+    const enhancerFiles = listModelFiles(join(cfg.comfyCore, 'models'), 'text_encoders')
+    const promptEnhancer =
+      body.promptEnhancer === undefined
+        ? IMAGE_PE_CANDIDATES.find((c) => enhancerFiles.includes(c)) ?? ''
+        : (body.promptEnhancer || '').trim()
+    const steps = normalizeImageSteps(body.steps)
 
     // (правка 935) Два прохода: диапазоны нормализует билдер, здесь те же
     // значения нужны для стадий прогресса и сайдкара. width/height — итог,
@@ -182,18 +177,15 @@ export async function POST(req: NextRequest) {
           prompt,
           width,
           height,
-          schedule: body.schedule,
+          steps,
           seed: body.seed,
           diffusionModel,
-          imageLora: imageLora || null,
-          loraStrength: body.loraStrength,
           textEncoder: body.textEncoder || DEFAULT_IMAGE_TEXT_ENCODER,
           vae: body.vae || DEFAULT_IMAGE_VAE,
           references,
           lowVramAttention: body.lowVramAttention,
           chunkFeedForward: body.chunkFeedForward,
-          promptUpsampler: promptUpsampler || null,
-          aspect: body.aspect,
+          promptEnhancer: promptEnhancer || null,
           twoPass: tp.mode,
           baseScale: tp.baseScale,
           denoise2: tp.denoise2,
@@ -219,17 +211,14 @@ export async function POST(req: NextRequest) {
         generation_mode: 'image',
         prompt,
         image_mode: references.length > 0 ? 'edit' : 't2i',
-        image_schedule: body.schedule || 'image8',
+        image_steps: steps,
         image_size: `${width}x${height}`,
         image_model: diffusionModel,
-        image_lora: imageLora || null,
-        image_lora_strength: body.loraStrength ?? 1,
         image_text_encoder: body.textEncoder || DEFAULT_IMAGE_TEXT_ENCODER,
         image_vae: body.vae || DEFAULT_IMAGE_VAE,
-        // (правка 934) чем поднимали промпт и в какой пропорции — чтобы сайдкар
-        // позволял повторить чужой результат дословно.
-        image_upsampler: promptUpsampler || null,
-        image_aspect: body.aspect || '',
+        // (правка 938) чем поднимали промпт — чтобы сайдкар позволял повторить
+        // чужой результат дословно.
+        image_enhancer: promptEnhancer || null,
         // (правка 935) режим проходов и сила второго — то же для повтора.
         image_two_pass: tp.mode,
         ...(tp.mode !== 'off' && {

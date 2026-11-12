@@ -1,16 +1,16 @@
 'use client'
 
 /**
- * (правка 929) ImageView — вкладка «Изображение»: генерация MiniMax H3 по
- * тексту и правка по референсам (режим p-h3-image).
+ * (правки 929, 938) ImageView — вкладка «Изображение»: генерация официальной
+ * MiniMax H3 Image (Comfy-Org) по тексту и правка по референсам.
  *
  * Layout как у «FPS»/«Tile Upscale»: слева параметры + статус, справа —
  * полученные картинки. Референсы: drag&drop файлов или выбор; image_1 — то,
  * что правим, остальные — картинки-источники (до 8 всего).
  *
- * LoRA p-h3-image (2 ГБ) кладётся поверх уже скачанной видео-модели, поэтому
- * отдельный 21-гигабайтный image-DiT не обязателен — переключается в
- * «Дополнительно».
+ * (правка 938) Путь один — официальный: отдельная image-модель minimax_h3_image_*,
+ * общий с видео 32B энкодер, свой image-VAE и энхансер промпта qwen3.5_9b.
+ * Старый путь «видео-модель + LoRA p-h3-image» убран совсем.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -39,7 +39,7 @@ import {
 import { GenerationStatus } from '@/components/h3/generation-status'
 import { ImageResultsGrid } from '@/components/h3/image-results-grid'
 import { uploadInputFile } from '@/lib/upload'
-import { useImageStore, type ImageReference, type ImageQuality, type ImageSchedule } from '@/lib/image-store'
+import { useImageStore, type ImageReference, type ImageQuality } from '@/lib/image-store'
 import { useImageJob } from '@/lib/image-job-store'
 import {
   IMAGE_ASPECTS,
@@ -47,17 +47,18 @@ import {
   IMAGE_MAX_REFERENCES,
   IMAGE_MEGAPIXELS,
   IMAGE_MP_HINT,
-  IMAGE_SCHEDULE_LABELS,
+  IMAGE_STEPS,
+  IMAGE_STEPS_LABELS,
   IMAGE_BASE_SCALES,
   IMAGE_DENOISE2_RANGE,
   IMAGE_STEPS2_RANGE,
   IMAGE_TWO_PASS_LABELS,
   IMAGE_TWO_PASS_MODES,
-  DEFAULT_IMAGE_PROMPT_UPSAMPLER,
+  DEFAULT_IMAGE_PROMPT_ENHANCER,
   imageBaseDims,
   imageQualityLabel,
-  imageScheduleSteps,
   imageTwoPassParams,
+  normalizeImageSteps,
   type ImageTwoPassMode,
 } from '@/lib/comfy/image-template'
 
@@ -65,15 +66,14 @@ interface ImageAssets {
   ok: boolean
   ready?: boolean
   missing?: string[]
-  loras?: string[]
   textEncoders?: string[]
   vaes?: string[]
   imageModels?: string[]
   diffusionModels?: string[]
-  /** (правка 934) файлы апсемплера промпта. */
-  promptUpsamplers?: string[]
-  upsamplerMissing?: boolean
-  defaults?: { imageLora: string; textEncoder: string; vae: string; promptUpsampler?: string; diffusionModel?: string }
+  /** (правка 938) файлы энхансера промпта (qwen3.5_9b_*). */
+  promptEnhancers?: string[]
+  enhancerMissing?: boolean
+  defaults?: { textEncoder: string; vae: string; promptEnhancer?: string; diffusionModel?: string }
   error?: string
 }
 
@@ -112,21 +112,11 @@ export function ImageView() {
       const res = await fetch('/api/comfy/image-assets')
       const data = await res.json()
       setAssets(data)
-      // (правка 929) Автовыбор LoRA: без image-DiT на диске картинка получается
-      // только видео-моделью + LoRA p-h3-image, поэтому пустой выбор («без LoRA»)
-      // был бы заведомо нерабочим — ставим LoRA сами. Пользовательский выбор
-      // (в т.ч. «Без LoRA») не перетираем: трогает только пустое значение.
-      if (data?.ok && !useImageStore.getState().params.lora) {
-        const def = data.defaults?.imageLora
-        if (def && (data.loras ?? []).includes(def) && (data.imageModels ?? []).length === 0) {
-          setParams({ lora: def })
-        }
-      }
       return data
     } catch {
       setAssets({ ok: false, error: 'Не удалось прочитать папку models' })
     }
-  }, [setParams])
+  }, [])
 
   useEffect(() => {
     void loadAssets()
@@ -137,7 +127,7 @@ export function ImageView() {
     return q[params.aspect] ?? q['1:1']
   }, [params.quality, params.aspect])
 
-  const steps = useMemo(() => imageScheduleSteps(params.schedule), [params.schedule])
+  const steps = params.steps
 
   // (правка 935) параметры второго прохода и размер базы — те же функции, что и
   // на сервере, чтобы подпись «база → итог» не расходилась с реальным графом.
@@ -228,16 +218,13 @@ export function ImageView() {
       prompt: params.prompt.trim(),
       width: size[0],
       height: size[1],
-      aspect: params.aspect,
-      schedule: params.schedule,
+      steps: params.steps,
       seed,
       diffusionModel: params.model || undefined,
-      imageLora: params.lora || null,
-      loraStrength: params.loraStrength,
       textEncoder: params.textEncoder || undefined,
       vae: params.vae || undefined,
-      // '' = авто (сервер сам берёт первый апсемплер с диска), null = выключен.
-      promptUpsampler: params.upsampler === '__off__' ? null : params.upsampler || undefined,
+      // '' = авто (сервер сам берёт первый энхансер с диска), null = выключен.
+      promptEnhancer: params.enhancer === '__off__' ? null : params.enhancer || undefined,
       references: references.map((r) => ({ name: r.name })),
       lowVramAttention: params.lowVramAttention,
       chunkFeedForward: params.chunkFeedForward,
@@ -260,7 +247,7 @@ export function ImageView() {
           <div className="flex items-center gap-2">
             <ImageIcon className="w-4 h-4 text-[#A855F7]" />
             <h2 className="text-sm font-semibold">Изображение</h2>
-            <span className="text-[11px] text-muted-foreground ml-auto">p-h3-image</span>
+            <span className="text-[11px] text-muted-foreground ml-auto">H3 Image · Comfy-Org</span>
           </div>
 
           {missing.length > 0 && (
@@ -274,7 +261,7 @@ export function ImageView() {
                   ))}
                 </ul>
                 <div className="mt-1 text-amber-200/80">
-                  Скачайте их в «Настройки → Модели» (группы LoRA / Text Encoder / VAE) или положите
+                  Скачайте их в «Настройки → Модели» (группы Image / Text Encoder / VAE) или положите
                   вручную в ComfyUI/models/.
                 </div>
               </div>
@@ -298,7 +285,7 @@ export function ImageView() {
             <div className="text-[11px] text-muted-foreground">
               {references.length > 0
                 ? `Правка: image_1 — исходник, остальные — источники. Нумерация в подсказке: <Picture 1>, <Picture 2>…`
-                : 'Генерация по тексту. 8 МП даёт более чистые детали, 4 МП — быстрее.'}
+                : 'Генерация по тексту. Официально 4…20 МП, лучше всего около 16 МП; 8 МП — компромисс по скорости.'}
             </div>
           </div>
 
@@ -335,18 +322,18 @@ export function ImageView() {
             {IMAGE_MP_HINT[params.quality] ? ` · ${IMAGE_MP_HINT[params.quality]}` : ''}
           </div>
 
-          {/* ─── Сетка шагов + seed ─── */}
+          {/* ─── Шаги + seed ─── */}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5">
-              <Label className="text-xs">Сетка шагов</Label>
+              <Label className="text-xs">Шаги</Label>
               <Select
-                value={params.schedule}
-                onValueChange={(v) => setParams({ schedule: v as ImageSchedule })}
+                value={String(params.steps)}
+                onValueChange={(v) => setParams({ steps: normalizeImageSteps(v) })}
               >
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(IMAGE_SCHEDULE_LABELS).map(([k, label]) => (
-                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                  {IMAGE_STEPS.map((s) => (
+                    <SelectItem key={s} value={String(s)}>{IMAGE_STEPS_LABELS[String(s)] ?? `${s} шагов`}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -363,19 +350,9 @@ export function ImageView() {
             </div>
           </div>
           <div className="text-[11px] text-muted-foreground -mt-2">
-            {steps} {steps === 1 ? 'шаг' : 'шагов'} · euler · без CFG
+            {steps} {steps === 1 ? 'шаг' : 'шагов'} · euler · simple · без CFG
             {tp.mode !== 'off' ? ` + ${tp.steps2} шаг(ов) второго прохода` : ''}
           </div>
-          {/* Дистиллированная база и длинная сетка — частая причина «мыла» на тестах:
-              4-шаговая модель обучена на коротком шаге, официальная 8-шаговая сетка ей не пара. */}
-          {/4step|fastvideo/i.test(params.model || assets?.defaults?.diffusionModel || '') &&
-            params.schedule !== 'fast4' && (
-              <div className="text-[10px] text-amber-300 -mt-2">
-                База «{(params.model || assets?.defaults?.diffusionModel || '').replace(/^.*\//, '')}» —
-                дистиллированная 4-шаговая. Возьми «4 шага (дистиллированная модель)» или поменяй
-                модель в «Дополнительно».
-              </div>
-            )}
 
           {/* ─── Два прохода (правка 935) ─── */}
           <div className="space-y-2">
@@ -458,7 +435,7 @@ export function ImageView() {
                     className="text-sm resize-y"
                   />
                   <div className="text-[10px] text-muted-foreground">
-                    Идёт второй строкой к запросу, апсемплер при этом не перезапускается.
+                    Идёт второй строкой к запросу, энхансер при этом не перезапускается.
                     Пусто — второй проход использует тот же текст, что и первый.
                   </div>
                 </div>
@@ -574,7 +551,7 @@ export function ImageView() {
             )}
           </div>
 
-          {/* ─── Дополнительно: модель / LoRA / TE / VAE / оптимизация ─── */}
+          {/* ─── Дополнительно: модель / TE / VAE / энхансер / оптимизация ─── */}
           <div className="space-y-2">
             <button
               type="button"
@@ -582,7 +559,7 @@ export function ImageView() {
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
               <ChevronDownIcon className={cn('w-3.5 h-3.5 transition-transform', advancedOpen && 'rotate-180')} />
-              Дополнительно (модель, LoRA, энкодер)
+              Дополнительно (модель, энкодер, VAE)
             </button>
 
             {advancedOpen && (
@@ -604,44 +581,18 @@ export function ImageView() {
                     <SelectContent>
                       <SelectItem value="__default__">
                         {assets?.defaults?.diffusionModel
-                          ? `Основная модель из Настроек (${assets.defaults.diffusionModel})`
-                          : 'Основная модель (из Настроек)'}
+                          ? `Авто (${assets.defaults.diffusionModel})`
+                          : 'Авто (minimax_h3_image_pruned_w4a8)'}
                       </SelectItem>
-                      {(assets?.diffusionModels ?? []).map((m) => (
+                      {(assets?.imageModels ?? []).map((m) => (
                         <SelectItem key={m} value={m}>{m}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   <div className="text-[10px] text-muted-foreground">
-                    Видео-модель + LoRA = картинка без отдельного image-DiT.
+                    Официальная image-модель Comfy-Org. w4a8 — самая лёгкая (12.5 ГБ),
+                    int8_convrot — точнее, bf16 — 40 ГБ.
                   </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs">LoRA p-h3-image</Label>
-                  <Select value={params.lora || '__off__'} onValueChange={(v) => setParams({ lora: v === '__off__' ? '' : v })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__off__">Без LoRA (только image-DiT)</SelectItem>
-                      {(assets?.loras ?? []).map((l) => (
-                        <SelectItem key={l} value={l}>{l}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {params.lora !== '' && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="range"
-                        min={0}
-                        max={2}
-                        step={0.05}
-                        value={params.loraStrength}
-                        onChange={(e) => setParams({ loraStrength: Number(e.target.value) })}
-                        className="flex-1"
-                      />
-                      <span className="text-[11px] tabular-nums w-10 text-right">{params.loraStrength.toFixed(2)}</span>
-                    </div>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -674,43 +625,38 @@ export function ImageView() {
                   </div>
                 </div>
                 <div className="text-[10px] text-muted-foreground">
-                  Энкодер и VAE обязаны быть image-ными: видео-энкодер (qwen3vl_32b_minimax_h3_*)
-                  с картинкой несовместим.
+                  Тот же 32B Qwen3-VL, что в видео: официальный image-шаблон использует его
+                  напрямую. VAE — только image-ный (minimax_h3_image_vae_fp16).
                 </div>
 
-                {/* ─── Апсемплер промпта (правка 934) ─── */}
+                {/* ─── Энхансер промпта (правка 938) ─── */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Апсемплер промпта</Label>
+                  <Label className="text-xs">Энхансер промпта</Label>
                   <Select
-                    value={params.upsampler || '__auto__'}
-                    onValueChange={(v) => setParams({ upsampler: v === '__auto__' ? '' : v })}
+                    value={params.enhancer || '__auto__'}
+                    onValueChange={(v) => setParams({ enhancer: v === '__auto__' ? '' : v })}
                     disabled={busy}
                   >
                     <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__auto__">
-                        Авто ({assets?.defaults?.promptUpsampler ?? 'первый с диска'})
+                        Авто ({assets?.defaults?.promptEnhancer ?? 'первый с диска'})
                       </SelectItem>
                       <SelectItem value="__off__">Выключен (запрос уходит как есть)</SelectItem>
-                      {(assets?.promptUpsamplers ?? []).map((u) => (
+                      {(assets?.promptEnhancers ?? []).map((u) => (
                         <SelectItem key={u} value={u}>{u}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   <div className="text-[10px] text-muted-foreground">
-                    Карточка P-H3-Image: модель чувствительна к формулировкам, короткий запрос без
-                    апсемплера даёт слабые детали (лица, глаза). Работает только при генерации по
-                    тексту — при правках по референсу промпт уходит как есть.
+                    Официальный рецепт: qwen3.5_9b переписывает запрос в подробное описание
+                    (JSON → expanded_caption) и работает при генерации по тексту, и при правках
+                    по референсу.
                   </div>
-                  {(assets?.promptUpsamplers?.length ?? 0) === 0 && (
+                  {(assets?.promptEnhancers?.length ?? 0) === 0 && (
                     <div className="text-[10px] text-amber-300">
-                      Файла апсемплера на диске нет ({DEFAULT_IMAGE_PROMPT_UPSAMPLER}) — скачайте его в
+                      Файла энхансера на диске нет ({DEFAULT_IMAGE_PROMPT_ENHANCER}) — скачайте его в
                       «Настройки → Модели», иначе качество коротких промптов остаётся низким.
-                    </div>
-                  )}
-                  {references.length > 0 && (
-                    <div className="text-[10px] text-muted-foreground">
-                      Сейчас включены референсы: апсемплер в этом режиме не участвует.
                     </div>
                   )}
                 </div>
