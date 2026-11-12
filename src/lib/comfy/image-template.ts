@@ -4,20 +4,22 @@
  *
  * Граф собирается в API-формате (как minimax-h3-template.ts):
  *
- *   UNETLoader(minimax_h3_image_pruned_*) → [LowVRAM] → [ChunkFF] → MiniMaxH3SigmaShift(1/1)
+ *   UNETLoader(minimax_h3_image_pruned_*) → [LowVRAM] → [ChunkFF]
  *   CLIPLoader(type=minimax, qwen3vl_32b_minimax_h3_*) + VAELoader(minimax_h3_image_vae_fp16)
  *   [enhancer] CLIPLoader(qwen3.5_9b_w4a8_gptq) → TextGenerateV2 → JsonExtractString
  *        → PH3ImageConditioning(prompt, width, height, image_1..image_N)
- *        → BasicGuider + BasicScheduler(simple) + KSamplerSelect(euler) → SamplerCustomAdvanced
- *        → LTXVSeparateAVLatent → VAEDecode → SaveImage
+ *        → LTXVSeparateAVLatent (видео-часть) → BasicGuider + BasicScheduler(simple)
+ *        + KSamplerSelect(euler) → SamplerCustomAdvanced → VAEDecode → SaveImage
  *
  * Почему так:
  *  • `PH3ImageConditioning` — image-нода ядра 0.44 (в свежем ядре её переименовали
  *    в `MiniMaxH3ImageConditioning`, как в эталонном шаблоне Comfy-Org; в
  *    API-формате входы задаются по именам, поэтому граф переносится один в один).
- *    Её выход-латент — обычный AV-латент H3 (видео-часть = один кадр), поэтому
- *    декод идёт через LTXVSeparateAVLatent + VAEDecode, как в видео-пайплайне.
- *  • Sigma Shift для картинки = 1.0/1.0 (не 12/3, как в видео) — требует сама нода.
+ *    Официальная image-модель H3 — один поток без аудио (правка 949), а нода
+ *    отдаёт AV-латент (он же нужен видео-пайплайну): в сэмплер идёт только его
+ *    видео-часть, и VAEDecode берёт выход сэмплера напрямую.
+ *  • Sigma Shift не ставим: у image-модели своя сетка PDD-сигм
+ *    (`MiniMaxH3ImageModelSampling` в патче ядра), узел ModelSamplingAV её бы затёр.
  *  • DiT — отдельная image-модель (`minimax_h3_image_pruned_*`). Путь «видео-модель
  *    + LoRA p-h3-image» отключён (правка 938): официальная модель легче (w4a8 —
  *    12.5 ГБ против 14.8 + 1.9 за LoRA) и это те же веса, из которых PrunaAI делала
@@ -27,16 +29,17 @@
  *    DiT). VAE — свой, image-ный.
  *  • Сэмплирование — `BasicScheduler(scheduler: simple)` + euler, 6 шагов по
  *    умолчанию: в эталоне это `KSampler(euler, simple, 6 шагов, cfg 1)`, а cfg 1 у нас
- *    и так означает «без CFG» (BasicGuider без negative).
+ *    и так означает «без CFG» (BasicGuider без negative). Шесть шагов — это ровно
+ *    шесть интервалов PDD-сетки чекпоинта.
  *  • Prompt enhancer — по карточке модели обязателен: H3 Image чувствительна к
  *    формулировкам. Работает внутри ComfyUI (CLIPLoader + TextGenerateV2 +
  *    JsonExtractString), промпты взяты дословно из эталонных шаблонов (image-pe.ts).
  *
  * (правка 935) Опционально граф достраивается вторым проходом:
  *
- *   …VAEDecode(pass 1) → [ImageScale → итог] → H3InjectVideoLatent(нулевой AV-латент
- *   нужного размера из PH3ImageConditioning) → BasicGuider + BasicScheduler(simple,
- *   steps/denoise второго прохода) → SamplerCustomAdvanced → VAEDecode → SaveImage
+ *   …VAEDecode(pass 1) → [ImageScale → итог] → VAEEncode(image-VAE) → BasicGuider +
+ *   BasicScheduler(simple, steps/denoise второго прохода) → SamplerCustomAdvanced →
+ *   VAEDecode → SaveImage
  *
  * Размер из `width`/`height` при этом трактуется как ИТОГОВЫЙ: база считается из
  * `baseScale`, поэтому двухпроходный режим не ломает точность разрешений (правка 930).
@@ -331,12 +334,11 @@ export function imageTwoPassParams(p: {
 }
 
 /**
- * (правка 935) Два прохода. H3 всегда строит нулевой латент, поэтому «второй
+ * (правки 935, 949) Два прохода. H3 всегда строит нулевой латент, поэтому «второй
  * проход» собирается так же, как в видео-режимах: результат первого прохода
  * декодируется, при необходимости растягивается до целевого размера, кодируется
- * image-VAE и внедряется в видео-поток AV-латента (`H3InjectVideoLatent` из
- * пака ComfyUI-H3-FaceRefine, он же в install/nodes.json), а сэмплер доходит
- * его снизу сетки сигм — то есть есть обычный img2img.
+ * image-VAE (`VAEEncode` — image-модель однопоточная, AV-инъекция ей не нужна)
+ * и сэмплер доходит его снизу сетки сигм — то есть обычный img2img.
  *
  *  • 'detail' — обе проходки в одном разрешении: композиция зафиксирована,
  *    второй проход только дорисовывает детали (глаза, текстуры, руки).
@@ -345,8 +347,7 @@ export function imageTwoPassParams(p: {
  *
  * Сила второго прохода — `denoise` + число шагов через `BasicScheduler`
  * ('simple'), как в tile-upscale и Face Refine: он берёт нижний хвост полной
- * сетки, поэтому шаги и сила независимы (в отличие от обрезки ManualSigmas —
- * см. docstring H3InjectVideoLatent).
+ * сетки, поэтому шаги и сила независимы.
  */
 export const IMAGE_TWO_PASS_MODES = ['off', 'detail', 'upscale'] as const
 export type ImageTwoPassMode = (typeof IMAGE_TWO_PASS_MODES)[number]
@@ -466,11 +467,10 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
   }
   // Картинка — без sparse-attention: она обучена на плотном внимании,
   // разреживание ломает композицию на одном кадре.
-  modelChain['7:5'] = {
-    inputs: { model: modelSrc, shift_video: 1.0, shift_audio: 1.0 },
-    class_type: 'MiniMaxH3SigmaShift',
-    _meta: { title: 'Sigma Shift 1.0/1.0' },
-  }
+  //
+  // (правка 949) MiniMaxH3SigmaShift здесь НЕ ставим: он подменяет
+  // model_sampling на ModelSamplingAV (сетка flow shift), а у официальной
+  // image-модели своя сетка PDD-сигм (MiniMaxH3ImageModelSampling).
 
   const refLinks: [string, number][] = []
   if (refs.length > 0) {
@@ -565,7 +565,8 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
   // ─── (правка 935) второй проход ───
   // Вторая conditioning-нода нужна, когда итоговое разрешение отличается от
   // базового ('upscale') или когда для второго прохода задана своя формулировка:
-  // её выход — и текст, и нулевой AV-латент нужного размера (1 кадр + 2 аудио).
+  // её выход — и текст, и нулевой AV-латент нужного размера (из него берём
+  // видео-часть, аудио image-модели не нужно).
   const suffix = (p.prompt2 || '').trim()
   const needCond2 = mode !== 'off' && (width !== finalW || height !== finalH || suffix !== '')
   const cond2Id = needCond2 ? IMAGE_COND2_NODE_ID : '7:8'
@@ -608,17 +609,20 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
       baseImages = [IMAGE_PASS2_SCALE_NODE_ID, 0]
     }
     pass2Nodes[IMAGE_PASS2_INJECT_NODE_ID] = {
-      inputs: { av_latent: [cond2Id, 1], images: baseImages, vae: ['7:7', 0] },
-      class_type: 'H3InjectVideoLatent',
-      _meta: { title: 'База в AV-латент (img2img)' },
+      // (правка 949) image-модель H3 однопоточная (без аудио), поэтому база
+      // второго прохода входит в сэмплер обычным VAEEncode, а не через
+      // H3InjectVideoLatent, которому нужен AV-латент.
+      inputs: { pixels: baseImages, vae: ['7:7', 0] },
+      class_type: 'VAEEncode',
+      _meta: { title: 'База в латент (img2img)' },
     }
     pass2Nodes[IMAGE_PASS2_SIGMAS_NODE_ID] = {
-      inputs: { model: ['7:5', 0], scheduler: 'simple', steps: steps2, denoise: denoise2 },
+      inputs: { model: modelSrc, scheduler: 'simple', steps: steps2, denoise: denoise2 },
       class_type: 'BasicScheduler',
       _meta: { title: `Сигмы прохода 2 (${steps2} шаг(ов), denoise ${denoise2})` },
     }
     pass2Nodes[IMAGE_PASS2_GUIDER_NODE_ID] = {
-      inputs: { model: ['7:5', 0], conditioning: [cond2Id, 0] },
+      inputs: { model: modelSrc, conditioning: [cond2Id, 0] },
       class_type: 'BasicGuider',
       _meta: { title: 'Guider (проход 2)' },
     }
@@ -643,13 +647,10 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
       class_type: 'SamplerCustomAdvanced',
       _meta: { title: 'Сэмплер (проход 2)' },
     }
-    pass2Nodes['7:25'] = {
-      inputs: { av_latent: [IMAGE_SAMPLER2_NODE_ID, 0] },
-      class_type: 'LTXVSeparateAVLatent',
-      _meta: { title: 'Separate AV Latent (проход 2)' },
-    }
     pass2Nodes[IMAGE_PASS2_DECODE_NODE_ID] = {
-      inputs: { samples: ['7:25', 0], vae: ['7:7', 0] },
+      // (правка 949) image-модель H3 однопоточная: после сэмплера сразу
+      // видео-латент, отделять AV не нужно.
+      inputs: { samples: [IMAGE_SAMPLER2_NODE_ID, 0], vae: ['7:7', 0] },
       class_type: 'VAEDecode',
       _meta: { title: 'Decode (проход 2)' },
     }
@@ -678,7 +679,7 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
       _meta: { title: 'Случайный шум' },
     },
     '7:10': {
-      inputs: { model: ['7:5', 0], conditioning: ['7:8', 0] },
+      inputs: { model: modelSrc, conditioning: ['7:8', 0] },
       class_type: 'BasicGuider',
       _meta: { title: 'Guider' },
     },
@@ -690,7 +691,7 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
     '7:11s': {
       // (правка 938) Как в официальном шаблоне: сетку сигм считает BasicScheduler
       // по собственной таблице модели. Ручной ManualSigmas ушёл вместе с LoRA-путём.
-      inputs: { model: ['7:5', 0], scheduler: 'simple', steps, denoise: 1.0 },
+      inputs: { model: modelSrc, scheduler: 'simple', steps, denoise: 1.0 },
       class_type: 'BasicScheduler',
       _meta: { title: `Сигмы (${steps} шаг(ов), simple)` },
     },
@@ -700,18 +701,21 @@ export function buildImageWorkflow(p: ImageGenParams): Record<string, unknown> {
         guider: ['7:10', 0],
         sampler: ['7:11', 0],
         sigmas: ['7:11s', 0],
-        latent_image: ['7:8', 1],
+        latent_image: ['7:13', 0],
       },
       class_type: 'SamplerCustomAdvanced',
       _meta: { title: 'Сэмплер' },
     },
     '7:13': {
-      inputs: { av_latent: [IMAGE_SAMPLER_NODE_ID, 0] },
+      // (правка 949) официальная image-модель H3 — один поток без аудио.
+      // PH3ImageConditioning отдаёт AV-латент (он же нужен видео-пайплайну),
+      // поэтому в сэмплер идёт только его видео-часть.
+      inputs: { av_latent: ['7:8', 1] },
       class_type: 'LTXVSeparateAVLatent',
-      _meta: { title: 'Separate AV Latent' },
+      _meta: { title: 'Видео-латент из AV' },
     },
     '7:14': {
-      inputs: { samples: ['7:13', 0], vae: ['7:7', 0] },
+      inputs: { samples: [IMAGE_SAMPLER_NODE_ID, 0], vae: ['7:7', 0] },
       class_type: 'VAEDecode',
       _meta: { title: 'Decode' },
     },

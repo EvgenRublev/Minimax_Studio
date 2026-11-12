@@ -99,14 +99,30 @@ if (existsSync(nodePatch)) {
     'MiniMaxH3AddGuide отдаёт выход latent (иначе аудио-гайд падает на av_latent)')
 }
 
-// 6. (правка 904) Ядро 0.44: core-патчи не нужны, ядро пиновано, ноды полные.
-const legacyCore = [
-  'comfy/ldm/minimax/model.py',
-  'comfy/model_detection.py',
-]
-for (const rel of legacyCore) {
-  expect(!existsSync(join(patchDir, rel)),
-    `ядро 0.44: нет устаревшего патча ${rel} (в 0.44 он уже в upstream)`)
+// 6. (правки 904, 949) Ядро 0.44 пиновано, но официальная H3 Image появилась
+//    в upstream позже, поэтому её модель и детекция теперь живут в патчах.
+//    Никаких старых копий «на всякий случай»: только эти два файла.
+{
+  const mmPatch = join(patchDir, 'comfy', 'ldm', 'minimax', 'model.py')
+  const detectPatch = join(patchDir, 'comfy', 'model_detection.py')
+  expect(existsSync(mmPatch), 'патч comfy/ldm/minimax/model.py на месте (H3 Image)')
+  expect(existsSync(detectPatch), 'патч comfy/model_detection.py на месте (H3 Image)')
+  if (existsSync(mmPatch)) {
+    const py = readFileSync(mmPatch, 'utf-8')
+    expect(/class\s+MiniMaxH3ImageModel\(MiniMaxH3Model\)/.test(py),
+      'model.py: есть MiniMaxH3ImageModel (один поток без аудио)')
+    expect(/class\s+MiniMaxH3ImageModelSampling\(/.test(py),
+      'model.py: сетка PDD-сигм для image-модели')
+    expect(/audio_latents_dim is not None/.test(py),
+      'model.py: аудио-поток стал необязательным (image-чекпоинт без audio_patch_proj)')
+  }
+  if (existsSync(detectPatch)) {
+    const py = readFileSync(detectPatch, 'utf-8')
+    expect(/minimax_h3_image/.test(py),
+      'model_detection.py: image-чекпоинт определяется как minimax_h3_image')
+    expect(/audio_patch_proj\.weight'.*in state_dict_keys/.test(py),
+      'model_detection.py: наличие аудио-потока решает тип модели')
+  }
 }
 expect(/function\s+readComfyVersion\s*\(/.test(sync),
   'sync_custom_nodes.js: читает версию ядра (readComfyVersion)')
@@ -286,6 +302,39 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   const imgTpl = read('src/lib/comfy/image-template.ts')
   expect(!/вЂ|Рї|РЎ/.test(imgTpl), 'image-template.ts: русский текст не в двойной кодировке')
   expect(/4 шага — быстрый прогон/.test(imgTpl), 'image-template.ts: подписи шагов читаются')
+}
+
+// 13. (правка 949) Официальная image-модель H3: один латент-поток без аудио.
+//     Ей нужны класс в model_base и запись в supported_models, а граф студии
+//     не должен подменять её PDD-сетку сигм и не должен скармливать AV-латент.
+{
+  const mbPatch = join(patchDir, 'comfy', 'model_base.py')
+  const smPatch = join(patchDir, 'comfy', 'supported_models.py')
+  expect(existsSync(mbPatch), 'патч ядра comfy/model_base.py на месте')
+  expect(existsSync(smPatch), 'патч ядра comfy/supported_models.py на месте')
+  if (existsSync(mbPatch)) {
+    const py = readFileSync(mbPatch, 'utf-8')
+    expect(/class\s+MiniMaxH3Image\(MiniMaxH3\)/.test(py),
+      'model_base.py: есть MiniMaxH3Image (ModelType.FLOW + свой model_sampling)')
+    expect(/MiniMaxH3ImageModelSampling\(model_config\)/.test(py),
+      'model_base.py: image-модель берёт сетку PDD-сигм, а не ModelSamplingAV')
+  }
+  if (existsSync(smPatch)) {
+    const py = readFileSync(smPatch, 'utf-8')
+    expect(/"image_model":\s*"minimax_h3_image"/.test(py),
+      'supported_models.py: объявлен MiniMaxH3Image')
+    expect(/\n\s+MiniMaxH3Image,/.test(py),
+      'supported_models.py: MiniMaxH3Image в списке models')
+  }
+  const imgTpl = read('src/lib/comfy/image-template.ts')
+  expect(!/class_type:\s*'H3InjectVideoLatent'/.test(imgTpl),
+    'image-template.ts: второй проход без AV-инъекции (image-модель однопоточная)')
+  expect(/class_type:\s*'VAEEncode'/.test(imgTpl),
+    'image-template.ts: база второго прохода входит через VAEEncode')
+  expect(!/class_type:\s*'MiniMaxH3SigmaShift'/.test(imgTpl),
+    'image-template.ts: не подменяет PDD-сетку image-модели на ModelSamplingAV')
+  expect(/class_type:\s*'LTXVSeparateAVLatent'/.test(imgTpl),
+    'image-template.ts: видео-часть AV-латента отделяется до сэмплера')
 }
 
 if (problems.length) {

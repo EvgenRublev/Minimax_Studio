@@ -11,6 +11,31 @@
 
 ## [7.1.22] — в разработке
 
+### Изображение: официальная image-модель H3 распознаётся и считается (правка 949)
+
+- **Симптом.** После починки VAE генерация падала ещё до сэмплинга:
+  `ERROR UNSUPPORTED DIFFUSION MODEL … ERROR: Could not detect model type of:
+  models\diffusion_models\minimax_h3_image_pruned_w4a8.safetensors`.
+- **Причина.** Ядро 0.44.0 знает только H3-видео (AV-поток): детектор искал
+  `audio_patch_proj`, которого у официальной image-модели нет, а класса
+  `MiniMaxH3Image` (один латент-поток, своя сетка PDD-сигм) в 0.44 тоже не было.
+- **Патчи ядра.** `comfy/ldm/minimax/model.py` — `MiniMaxH3ImageModel`,
+  необязательный аудио-поток, `pdd_grid`; `comfy/model_base.py` —
+  `MiniMaxH3Image` с `ModelType.FLOW` и `MiniMaxH3ImageModelSampling`;
+  `comfy/supported_models.py` — класс и регистрация; `comfy/model_detection.py` —
+  image-чекпоинт по отсутствию `audio_patch_proj`. Класс сэмплинга лежит в
+  `model.py`, а не отдельным `sampling.py`: установщик сверяет, что каждый патч
+  уже существует в ядре, новый файл ядра он бы не принял.
+- **Воркфлоу.** Официальная image-модель однопоточная, а `PH3ImageConditioning`
+  отдаёт AV-латент: в сэмплер идёт только видео-часть (`LTXVSeparateAVLatent`
+  до сэмплера), `VAEDecode` берёт выход сэмплера. Второй проход больше не
+  использует `H3InjectVideoLatent` (ему нужен AV-латент) — база входит обычным
+  `VAEEncode`. `MiniMaxH3SigmaShift` из image-графа убран: он подменял сетку
+  PDD-сигм чекпоинта на `ModelSamplingAV`.
+- **Проверено:** чекпоинт детектится как `minimax_h3_image`, 1378/1378 ключей
+  совпадают, все веса конечные, forward в bf16 отдаёт корректный латент
+  (H3 поддерживает bf16, не fp16 — это уже штатный выбор ядра).
+
 ### Изображение: официальный image-VAE грузится, подписи вкладки читаются (правки 946, 947)
 
 - **Симптом.** Любая генерация во вкладке «Изображение» падала с
