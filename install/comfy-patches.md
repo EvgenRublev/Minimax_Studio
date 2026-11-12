@@ -9,6 +9,8 @@ ComfyUI при каждом запуске (шаг 4, идемпотентно).
 | Файл | Что меняет |
 | --- | --- |
 | `comfy_extras/nodes_minimax_h3.py` | Наши правки поверх файла 0.44: второй выход `latent` у `MiniMaxH3AddGuide` и сидинг гайд-аудио в аудио-стрим латента с AV-маской 0 (правка 888); ноды `MiniMaxH3AudioOrSilent` и `MiniMaxH3AudioSliceFrom` (правки 313/885); flf-фикс keyframe-латентов при смене разрешения (правки 146/149); `first_frame` через cover-crop `center` (правка 154); сохранение aspect ratio референсов (правка 693) |
+| `comfy/ldm/minimax/vae.py` | `MiniMaxH3ImageVAE` — официальный image-VAE Comfy-Org (16 голов, 2D-rope, 2D `post_quant_conv`); в 0.44 его не было, и файл грузился как `PH3ImageVAE` с падением на `size mismatch` (правка 946) |
+| `comfy/sd.py` | загрузчик различает image-VAE по ширине `decoder.x_embedder`: 1024 — официальный, 2048 — p-h3-image (правка 946) |
 | `utils/extra_config.py` | принимает списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
 
 ## Чего здесь больше нет (и почему)

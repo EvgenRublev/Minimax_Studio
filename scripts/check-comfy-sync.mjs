@@ -253,6 +253,41 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     'install/install.ps1: ошибка VC-проверки не прерывает установку')
 }
 
+// 12. (правка 946) Официальный image-VAE (Comfy-Org/MiniMax-H3-Image).
+//     Ядро 0.44 собирало его как p-h3-image (32 головы, 3D-conv) и падало на
+//     `Error(s) in loading state_dict for PH3ImageVAE: size mismatch`; нужный
+//     класс живёт только в наших патчах ядра, поэтому проверяем сами файлы.
+{
+  const vaePatch = join(patchDir, 'comfy', 'ldm', 'minimax', 'vae.py')
+  const sdPatch = join(patchDir, 'comfy', 'sd.py')
+  expect(existsSync(vaePatch), 'патч ядра comfy/ldm/minimax/vae.py на месте')
+  expect(existsSync(sdPatch), 'патч ядра comfy/sd.py на месте')
+  if (existsSync(vaePatch)) {
+    const py = readFileSync(vaePatch, 'utf-8')
+    expect(/class\s+MiniMaxH3ImageVAE\(H3ImageVAE\)/.test(py),
+      'vae.py: есть MiniMaxH3ImageVAE (официальный image-VAE)')
+    expect(/rope_dim_ratio=0\.5,\s*rope_dims=2/.test(py),
+      'vae.py: официальный декодер — 16 голов и 2D-rope')
+    expect(/ops\.Conv2d\(24,\s*24,\s*1\)/.test(py),
+      'vae.py: у официального image-VAE 2D post_quant_conv')
+    expect(/class\s+PH3ImageVAE\(H3ImageVAE\)/.test(py),
+      'vae.py: p-h3-image остался 3D-декодером на 32 головы')
+  }
+  if (existsSync(sdPatch)) {
+    const py = readFileSync(sdPatch, 'utf-8')
+    expect(/MiniMaxH3ImageVAE\(operations=minimax_ops/.test(py),
+      'sd.py: официальный image-VAE выбирается при загрузке')
+    expect(/decoder\.x_embedder\.weight"\]\.shape\[0\]\s*==\s*1024/.test(py),
+      'sd.py: official и p-h3-image различаются по ширине декодера')
+  }
+  // (правка 947) подписи вкладки «Изображение» однажды сохранили двойной
+  // кодировкой (UTF-8 → CP1251) и в UI поехали кракозябры. Маркеры ниже не
+  // встречаются в нормальном русском тексте, только в такой порче.
+  const imgTpl = read('src/lib/comfy/image-template.ts')
+  expect(!/вЂ|Рї|РЎ/.test(imgTpl), 'image-template.ts: русский текст не в двойной кодировке')
+  expect(/4 шага — быстрый прогон/.test(imgTpl), 'image-template.ts: подписи шагов читаются')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)
