@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
 export const dynamic = 'force-dynamic'
@@ -32,6 +32,8 @@ interface SetupStatus {
   log?: string
   speed?: number
   detail?: string
+  /* (правка 942) минуты с начала установки: пишет heartbeat (числом) */
+  elapsed_min?: number
   pid?: number
   ts?: string
 }
@@ -39,6 +41,12 @@ interface SetupStatus {
 export async function GET() {
   try {
     if (!existsSync(STATUS_FILE)) return NextResponse.json({ ok: true, status: null })
+    // (правка 942) защитник от раздутого статус-файла: парсить мегабайты в
+    // интерфейс нельзя (вживую файл вырос до 1,6 ГБ из-за бага heartbeat).
+    if (statSync(STATUS_FILE).size > 262_144) {
+      console.warn('[setup-status] файл статуса слишком большой — наружу не отдаём')
+      return NextResponse.json({ ok: true, status: null })
+    }
     const st = JSON.parse(readFileSync(STATUS_FILE, 'utf8')) as SetupStatus
     const ts = Date.parse(st.ts || '')
     if (st.state === 'running' && (!Number.isFinite(ts) || Date.now() - ts > LIVE_MS)) {

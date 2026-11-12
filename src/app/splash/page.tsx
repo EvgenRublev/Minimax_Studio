@@ -39,10 +39,12 @@ interface SetupStatus {
   total?: number
   title?: string
   /* (правка 941) hint — что делать пользователю, log — путь к install.log;
-     detail — пояснение шага («прошло N мин», «загружено X из Y»). */
+     detail — пояснение шага («загружено X из Y»). */
   hint?: string
   log?: string
   detail?: string
+  /* (правка 942) минуты с начала установки — пишет heartbeat числом, а не текстом */
+  elapsed_min?: number
 }
 
 /** 8 видео-кадров (public/splash-videos). 9:16, зациклены, без звука. */
@@ -287,8 +289,11 @@ export default function SplashPage() {
               />
               Установка компонентов: [{setup.step ?? 0}/{setup.total ?? 9}] {setup.title || '…'}
               <span className="opacity-50">·</span>
+              {/* (правка 942) время берём из установщика (elapsed_min от heartbeat):
+                  собственный таймер заставки сбрасывается при каждом её монтировании,
+                  а «сколько идёт установка» должен показывать настоящий счётчик. */}
               <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
-                {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                {Math.max(setup.elapsed_min ?? 0, Math.floor(elapsed / 60))} мин
               </span>
             </p>
             {/* (правка 941) что происходит на шаге и сколько он уже идёт —

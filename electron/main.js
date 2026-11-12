@@ -21,7 +21,7 @@
  */
 const { app, BrowserWindow, Menu, MenuItem, dialog, shell, ipcMain, session } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
-const { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } = require('node:fs')
+const { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync, statSync } = require('node:fs')
 const fsPromises = require('node:fs').promises
 const path = require('node:path')
 const util = require('node:util')
@@ -448,6 +448,16 @@ const POWERSHELL = path.join(process.env.SystemRoot || 'C:\\Windows',
 
 function readSetupStatus() {
   try {
+    /* (правка 942) раздутый статус-файл не парсим и чиним: 256 КБ для JSON из
+       ~10 полей — с огромным запасом, а вживую из-за бага heartbeat он вырос до
+       1,6 ГБ и читался бы в интерфейс вечность. Установщик перепишет его на
+       следующем шаге. */
+    const sz = statSync(SETUP_STATUS)
+    if (sz.size > 262_144) {
+      appendConsole(`[desktop] setup_status.json слишком большой (${Math.round(sz.size / 1024)} КБ) — удаляю, установщик перепишет\n`)
+      try { require('node:fs').rmSync(SETUP_STATUS, { force: true }) } catch { /* ignore */ }
+      return null
+    }
     return JSON.parse(readFileSync(SETUP_STATUS, 'utf8'))
   } catch {
     return null

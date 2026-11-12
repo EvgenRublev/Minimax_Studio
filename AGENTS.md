@@ -101,6 +101,12 @@ ComfyUI/            ← comfyRoot == comfyCore
 5. **Осторожно с регистром имён в PowerShell:** параметр `$Kind` и локальная
    `$kind` — одна переменная (реальный баг правки 939: проверка типа архива
    always-pass). Локальные переменные не должны совпадать с параметрами.
+   Тот же класс ошибок (правка 942): `[string]$X = $null` в PowerShell приводит
+   дефолт к `""`, поэтому проверка `$null -ne $X` всегда истина (так `Set-Speed`
+   стирал `hint`); а `Get-Content` без `-Encoding` читает UTF-8 без BOM как ANSI
+   и портит кириллицу — все файлы с русским текстом (`install.ps1`,
+   `checksums.json`, `.next\BUILD_ID`, патчи ядра) читать только с
+   `-Encoding UTF8` или `[IO.File]::ReadAllText(..., UTF8)`.
 6. **Самодиагностика (правка 941):** `install\install.ps1 -SelfCheck [-Deep]`
    (точка входа для пользователя — `diagnostics.bat`) — read-only проверка уже поставленной
    студии: Node, node_modules, `.next`, раскладка ComfyUI, `python_embeded` +

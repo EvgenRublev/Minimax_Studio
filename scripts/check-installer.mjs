@@ -201,6 +201,36 @@ ok(trapBlk.includes('Write-SetupStatus') && /\$hint/.test(trapBlk), 'install.ps1
 const tailBlk = inst.slice(inst.lastIndexOf("# финальный статус"))
 ok(tailBlk.includes('Stop-StatusHeartbeat'), 'install.ps1: heartbeat не остановлен перед финальной записью статуса')
 ok(inst.includes('function Write-StatusJsonAtomic'), 'install.ps1: статус пишется неатомарно (читатель ловит полJSON)')
+// (правка 942) живой прогон установки на D: выявил две ошибки heartbeat:
+// файл статуса читался без -Encoding UTF8 (PS 5.1 → кракозябры), и heartbeat
+// дописывал текст в detail, из-за чего тот удваивался за тик (файл 1,6 ГБ).
+const hb = inst.match(/function Start-StatusHeartbeat \{[\s\S]*?\n\}/)?.[0] ?? ''
+ok(hb.length > 0, 'install.ps1: нет Start-StatusHeartbeat')
+ok(/ReadAllText\(\$file, \[System\.Text\.Encoding\]::UTF8\)/.test(hb), 'install.ps1: heartbeat читает статус не как UTF-8 (PS 5.1 испортит кириллицу)')
+ok(!/\$j\.detail\s*=/.test(hb), 'install.ps1: heartbeat правит текстовое поле detail — так detail растёт каждый тик')
+ok(/elapsed_min/.test(hb) && /elapsed_min\s*=\s*0/.test(inst), 'install.ps1: heartbeat не пишет elapsed_min')
+ok(/New-Object System\.IO\.FileInfo\(\$file\)/.test(hb) && /-gt \$maxBytes/.test(hb), 'install.ps1: heartbeat не ограничивает размер файла статуса')
+// (правка 942) [string]$Hint = $null в PowerShell превращается в "", и проверка
+// ($null -ne $Hint) всегда истина: каждый вызов без -Hint стирал подсказку.
+const wss = inst.match(/function Write-SetupStatus \{[\s\S]*?\r?\n\}/)?.[0] ?? ''
+const wssParams = wss.match(/param\(([^\n]*)\)/)?.[1] ?? ''
+ok(wssParams.length > 0, 'install.ps1: не найден param Write-SetupStatus')
+ok(!/\[string\]\$Hint/.test(wssParams), 'install.ps1: параметр $Hint объявлен как [string] — PowerShell приведёт $null к "" и сотрёт подсказку')
+ok(/(?:,\s*)\$Hint = \$null/.test(wssParams), 'install.ps1: Write-SetupStatus должен принимать $Hint без типа (маркер «не менять подсказку»)')
+const scBlk = inst.match(/function Invoke-SelfCheck \{[\s\S]*?\n\}/)?.[0] ?? ''
+for (const line of scBlk.split(/\r?\n/).filter((l) => /Get-Content|ReadAllText/.test(l))) {
+  ok(/-Encoding UTF8|Encoding::UTF8/.test(line), `install.ps1: самодиагностика читает файл без явной UTF-8: ${line.trim()}`)
+}
+for (const [needle, msg] of [
+  ['elapsed_min', 'install_gui.ps1: окно не показывает elapsed_min из heartbeat'],
+  ['идёт ', 'install_gui.ps1: окно не показывает, сколько минут идёт установка'],
+]) ok(gui.includes(needle), msg)
+const statusReads = [...gui.matchAll(/^.*(?:(?:Get-Content|ReadAllText)[^\n]*\$StatusFile|(?:\$StatusFile)[^\n]*(?:Get-Content|ReadAllText)).*$/gm)].map((m) => m[0])
+ok(statusReads.length > 0, 'install_gui.ps1: не найден код чтения setup_status.json — проверка кодировки не выполнена')
+for (const line of statusReads) ok(/-Encoding\s+UTF8|Encoding::UTF8/.test(line), `install_gui.ps1: статус читается без явной UTF-8 кодировки: ${line.trim()}`)
+// (правка 942) раздутый статус-файл не должен попадать в интерфейс: все три
+// читателя (окно установки, Electron, API заставки) ограничивают размер.
+ok(gui.includes('262144'), 'install_gui.ps1: нет защиты от раздутого setup_status.json')
 // окно установки: причину не обрезаем, подсказку и лог показываем
 ok(/'\['  \+ \$step/.test(gui) || gui.includes('$st.hint'), 'install_gui.ps1: окно установки не показывает hint из статуса')
 ok(gui.includes('$st.log'), 'install_gui.ps1: окно установки не показывает путь к логу')
@@ -216,6 +246,13 @@ const mainJs = existsSync(mainJsPath) ? readFileSync(mainJsPath, 'utf8') : ''
 ok(mainJs.includes('function writeSetupStatus(state, step, total, title, hint)'), 'electron/main.js: writeSetupStatus не принимает hint')
 ok(mainJs.includes('prev.hint'), 'electron/main.js: финальный статус теряет hint установщика')
 ok(mainJs.includes("log: path.join(APP_ROOT, 'install.log')"), 'electron/main.js: финальный статус не указывает путь к логу')
+// (правка 942) защита от раздутого статус-файла во всех трёх читателях
+ok(/262_?144/.test(mainJs), 'electron/main.js: нет проверки размера setup_status.json (раздутый файл читается в UI вечно)')
+const apiRoutePath = join(ROOT, 'src', 'app', 'api', 'setup-status', 'route.ts')
+const apiRoute = existsSync(apiRoutePath) ? readFileSync(apiRoutePath, 'utf8') : ''
+ok(/262_?144/.test(apiRoute), 'api/setup-status: нет проверки размера setup_status.json')
+ok(apiRoute.includes('elapsed_min'), 'api/setup-status: интерфейс статуса не знает про elapsed_min')
+ok(gui.includes('elapsed_min = 0'), 'install_gui.ps1: Write-StatusError не пишет elapsed_min')
 // (правка 941) точка входа для юзера: двойной клик = самодиагностика
 const diagPath = join(ROOT, 'diagnostics.bat')
 if (existsSync(diagPath)) {

@@ -153,14 +153,18 @@ function Write-StatusJsonAtomic {
     }
 }
 function Write-SetupStatus {
-    param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '', [string]$Hint = $null)
+    # (правка 942) $Hint сознательно БЕЗ [string]: в PowerShell объявление
+    # [string]$Hint = $null приводит значение по умолчанию к пустой строке, и
+    # проверка ($null -ne $Hint) всегда истина - каждый вызов Set-Speed/Step без
+    # -Hint стирал подсказку (в прогоне на D: hint был пустой уже на шаге 5).
+    param([string]$State, [int]$StepN = $script:StatusStep, [int]$TotalN = 9, [string]$Title = '', $Hint = $null)
     if ($StepN -gt 0) { $script:StatusStep = $StepN }
     $script:StatusState = $State
     if ($Title) { $script:StatusTitle = $Title }
     # (правка 941) hint - что делать пользователю, log - где смотреть подробности.
     # Раньше причина влезала в одну строку окна установки и обрезалась, а путь к
     # логу юзер искал сам.
-    if ($null -ne $Hint) { $script:StatusHint = $Hint }
+    if ($null -ne $Hint) { $script:StatusHint = [string]$Hint }
     $obj = [ordered]@{
         state  = $State
         step   = $StepN
@@ -170,6 +174,9 @@ function Write-SetupStatus {
         log    = $LogFile
         speed  = $script:SpeedMBs
         detail = $script:SpeedDetail
+        # (правка 942) отдельное поле для heartbeat: текстовые поля трогает только
+        # установщик, heartbeat пишет сюда целое число минут
+        elapsed_min = 0
         pid    = $PID
         ts     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
@@ -197,37 +204,47 @@ function Set-Speed {
 # (правка 941) Heartbeat статуса. Долгие шаги (пакеты Python ~15 ГБ, сборка,
 # smoke-запуск ComfyUI) раньше молчали десятками минут: заставка считает статус
 # неживым, если ts старше 12 минут, и показывала «установка не идёт». Раз в 10 с
-# освежаем ts и добавляем в detail «прошло N мин». Пишется из отдельного
+# освежаем ts и пишем elapsed_min - сколько минут шаг идёт. Пишется из отдельного
 # runspace'а, основного потока не блокирует.
+#
+# (правка 942) Две защиты, обе из живого прогона установки:
+#   • файл статуса читаем байтами как UTF-8. Get-Content без -Encoding в PowerShell
+#     5.1 читает UTF-8 без BOM как ANSI, кириллица превращается в кракозябры, и
+#     любая работа с текстом detail ломается (в прогоне на D: detail удваивался за
+#     тик и файл разросся до 1,6 ГБ);
+#   • detail heartbeat НЕ трогает вообще - только числовое elapsed_min, причём
+#     перед записью проверяем размер файла. Текстовые поля добавляет установщик.
 $script:StatusStartedAt = Get-Date
 $script:Heartbeat = $null
+$script:HeartbeatMaxBytes = 200000
 function Start-StatusHeartbeat {
     if ($script:Heartbeat) { return }
+    if (-not $script:HeartbeatMaxBytes) { $script:HeartbeatMaxBytes = 200000 }
     try {
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
         $rs.Open()
         $ps = [System.Management.Automation.PowerShell]::Create()
         $ps.Runspace = $rs
         [void]$ps.AddScript({
-            param([string]$file, [string]$startedIso, [int]$everySec)
+            param([string]$file, [string]$startedIso, [int]$everySec, [int]$maxBytes)
             while ($true) {
                 Start-Sleep -Seconds $everySec
                 try {
-                    $j = (Get-Content -LiteralPath $file -Raw -ErrorAction Stop) | ConvertFrom-Json
+                    $fi = New-Object System.IO.FileInfo($file)
+                    if (-not $fi.Exists) { continue }
+                    if ($fi.Length -gt $maxBytes) { continue }
+                    # UTF-8 явно: PS 5.1 по умолчанию читает без BOM как ANSI
+                    $j = ([System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)) | ConvertFrom-Json
                     if ($j.state -ne 'running') { break }
                     $started = [DateTime]::Parse($startedIso)
-                    $min = [int][Math]::Floor(((Get-Date) - $started).TotalMinutes)
-                    $base = [string]$j.detail
-                    if ($base -match 'прошло \d+ мин') { $base = ($base -replace '^прошло \d+ мин · ', '') }
-                    $j.detail = ('прошло ' + $min + ' мин') + $(if ($base) { ' · ' + $base } else { '' })
                     $j.ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-                    # атомарно (правка 941): читатель не должен поймать полJSON
+                    $j | Add-Member -NotePropertyName elapsed_min -NotePropertyValue ([int][Math]::Floor(((Get-Date) - $started).TotalMinutes)) -Force
                     $tmp = $file + '.tmp'
                     [System.IO.File]::WriteAllText($tmp, ($j | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
                     try { [System.IO.File]::Replace($tmp, $file) } catch { [System.IO.File]::Copy($tmp, $file, $true); [System.IO.File]::Delete($tmp) }
                 } catch { }
             }
-        }).AddArgument($StatusFile).AddArgument($script:StatusStartedAt.ToString('o')).AddArgument(10)
+        }).AddArgument($StatusFile).AddArgument($script:StatusStartedAt.ToString('o')).AddArgument(10).AddArgument($script:HeartbeatMaxBytes)
         $script:Heartbeat = [pscustomobject]@{ PS = $ps; Rs = $rs; Async = $ps.BeginInvoke() }
     } catch {
         $script:Heartbeat = $null
@@ -1256,7 +1273,7 @@ function Invoke-SelfCheck {
     }
     $buildId = Join-Path $Root '.next\BUILD_ID'
     if (Test-Path -LiteralPath $buildId) {
-        Ok ('production-сборка есть (BUILD_ID ' + ((Get-Content -LiteralPath $buildId -Raw).Trim()) + ')')
+        Ok ('production-сборка есть (BUILD_ID ' + ((Get-Content -LiteralPath $buildId -Raw -Encoding UTF8).Trim()) + ')')
     } else {
         Fail 'нет .next\BUILD_ID - интерфейс не собран. Починка: install.bat (шаг 3)'
     }
@@ -1273,11 +1290,11 @@ function Invoke-SelfCheck {
         $vf = Join-Path $cp.Core 'comfyui_version.py'
         $pf = Join-Path $cp.Core 'pyproject.toml'
         if (Test-Path -LiteralPath $vf) {
-            $t = Get-Content -LiteralPath $vf -Raw
+            $t = Get-Content -LiteralPath $vf -Raw -Encoding UTF8
             if ($t -match "version\s*=\s*['""]([^'""]+)['""]") { $ver = $Matches[1] }
         }
         if (-not $ver -and (Test-Path -LiteralPath $pf)) {
-            $t = Get-Content -LiteralPath $pf -Raw
+            $t = Get-Content -LiteralPath $pf -Raw -Encoding UTF8
             if ($t -match '(?m)^\s*version\s*=\s*["'']([^"'']+)["'']') { $ver = $Matches[1] }
         }
         if ($ver) { Ok ('версия ядра: ' + $ver) } else { Warn 'версия ядра не читается (comfyui_version.py / pyproject.toml)' }
@@ -1365,7 +1382,7 @@ function Invoke-SelfCheck {
         else { Warn ('патчи ядра расходятся: ' + ($bad -join '; ') + '. Перезапусти студию - патчи накатываются при старте') }
         $mh3 = Join-Path $cp.Core 'comfy_extras\nodes_minimax_h3.py'
         if (Test-Path -LiteralPath $mh3) {
-            $t = Get-Content -LiteralPath $mh3 -Raw -EA SilentlyContinue
+            $t = Get-Content -LiteralPath $mh3 -Raw -Encoding UTF8 -EA SilentlyContinue
             if ($t -and $t.Contains('PH3ImageConditioning')) { Ok 'нода PH3ImageConditioning в ядре есть' }
             else { Fail 'в ядре нет PH3ImageConditioning - вкладка «Изображение» не работает. Перезапусти студию (патчи накатываются при старте)' }
         }

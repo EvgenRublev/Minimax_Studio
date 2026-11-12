@@ -204,6 +204,10 @@ function Read-NewLog {
 function Get-Status {
     try {
         if (-not (Test-Path $StatusFile)) { return $null }
+        # (правка 942) раздутый файл статуса не читаем: парсить сотни мегабайт в
+        # окно установки нельзя. Кодировка - явная UTF-8 (PS 5.1 иначе читает
+        # UTF-8 без BOM как ANSI и портит кириллицу).
+        if ((Get-Item -LiteralPath $StatusFile).Length -gt 262144) { return $null }
         return (Get-Content -Path $StatusFile -Raw -Encoding UTF8 | ConvertFrom-Json)
     } catch { return $null }
 }
@@ -220,6 +224,7 @@ function Write-StatusError([string]$Title, [string]$Hint = '') {
             log   = (Join-Path $Root 'install.log')
             speed = 0
             detail = ''
+            elapsed_min = 0
             ts    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
         $json = ($o | ConvertTo-Json -Compress)
@@ -849,6 +854,15 @@ function Update-Ui {
             if ($null -ne $st.speed) { $sp = [double]$st.speed }
             $detail = ''
             if ($null -ne $st.detail) { $detail = [string]$st.detail }
+            # (правка 942) «идёт N мин» берём из отдельного числового поля
+            # elapsed_min, которое пишет heartbeat. Раньше он дописывал текст в
+            # detail - из-за кодировки (PS 5.1 читает UTF-8 без BOM как ANSI) это
+            # ломалось и detail удваивался каждый тик: файл статуса разросся до 1,6 ГБ.
+            $elapsed = 0
+            if ($null -ne $st.elapsed_min) { $elapsed = [int]$st.elapsed_min }
+            if ($elapsed -ge 1) {
+                $detail = ('идёт ' + $elapsed + ' мин') + $(if ($detail) { ' · ' + $detail } else { '' })
+            }
             if ($detail) {
                 $stepText.Text = ('шаг ' + $step + ' из ' + $total + ' · ' + $detail)
             }
