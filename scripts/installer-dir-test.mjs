@@ -3,16 +3,17 @@
  * (правка 961) Тест логики пути установки на РЕАЛЬНОМ install/installer.nsi.
  *
  * Зачем: страница выбора папки дописывает «Minimax Studio» к выбранному пути,
- * а NormalizeInstDir должен убирать задвоение и не пускать установку в корень
- * диска. Это уже ломалось дважды (правки 833 и 961), поэтому проверяем не
- * копию логики, а сам файл: из него вырезаются разделы распаковки/ярлыков/
- * реестра, в Section «Программа» подставляется тестовый $INSTDIR, и результат
- * нормализации пишется в файл.
+ * NormalizeInstDir убирает задвоение и не пускает установку в корень диска, а
+ * путь из реестра с версией в имени игнорируется. Всё это уже ломалось
+ * (правки 833 и 961), поэтому проверяем не копию логики, а сам файл: из него
+ * вырезаются разделы распаковки/ярлыков/реестра, в Section «Программа»
+ * подставляется тестовый $INSTDIR, результат пишется в файл.
  *
  * Запуск: node scripts/installer-dir-test.mjs
  * Требует makensis (NSIS 3.x); без него — SKIP (код 0).
+ * Тест записи в реестр восстанавливает прежнее значение HKCU в finally.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,45 +51,33 @@ for (const line of lines) {
   keep.push(line)
 }
 
-// Шаблон: в Section «Программа» подставляем путь и пишем результат
-// нормализации. Маркер @@PATH@@ заменяется на конкретный кейс.
-const template = keep
-  .join('\n')
-  .replace(/OutFile "[^"]*"/, 'OutFile "dir-test.exe"')
-  // путь из реестра не должен влиять на тест: .onInit подставляет InstallDir
-  // из HKCU, поэтому чтение отключаем
+const base = keep.join('\n').replace(/OutFile "[^"]*"/, 'OutFile "dir-test.exe"')
+const PROBE = '  FileOpen $9 "$TEMP\\\\instdir-probe.txt" w\n  FileWrite $9 "$INSTDIR"\n  FileClose $9\n'
+const SEC_MAIN = /(Section "Программа" SecMain[\s\S]*?)Call NormalizeInstDir\s*\r?\n/
+
+// Шаблон 1: путь задаётся тестом, пишем результат ПОСЛЕ NormalizeInstDir.
+// Чтение реестра отключаем — иначе .onInit перебьёт тестовый путь.
+const templatePath = base
   .replace(/^\s*ReadRegStr \$R0 HKCU .*$/m, '  StrCpy $R0 ""')
-  .replace(
-    /(Section "Программа" SecMain[\s\S]*?)Call NormalizeInstDir\s*\r?\n/,
-    '$1StrCpy $INSTDIR "@@PATH@@"\n  Call NormalizeInstDir\n' +
-      '  FileOpen $9 "$TEMP\\\\instdir-probe.txt" w\n  FileWrite $9 "$INSTDIR"\n  FileClose $9\n'
-  )
+  .replace(SEC_MAIN, '$1StrCpy $INSTDIR "@@PATH@@"\n  Call NormalizeInstDir\n' + PROBE)
+
+// Шаблон 2: реестр настоящий, пишем $INSTDIR ДО нормализации — так видно, что
+// именно подставил .onInit (страховка от «версия в имени папки»).
+const templateReg = base.replace(SEC_MAIN, '$1' + PROBE + '  Call NormalizeInstDir\n')
 
 const dir = mkdtempSync(join(tmpdir(), 'instdir-'))
 const nsi = join(dir, 'dir-test.nsi')
 const exe = join(dir, 'dir-test.exe')
 const probe = join(tmpdir(), 'instdir-probe.txt')
 
-const base = join(tmpdir(), 'instdir-cases')
-const cases = [
-  // [что в поле пути, ожидаемый $INSTDIR]
-  [`${base}\\`, base, 'хвостовой "\\" срезается'],
-  [base, base, 'обычный путь не меняется'],
-  [`${base}\\Minimax Studio\\Minimax Studio`, `${base}\\Minimax Studio`, 'задвоение от страницы выбора папки'],
-  [`${base}\\Minimax Studio\\`, `${base}\\Minimax Studio`, 'задвоение + хвостовой "\\"'],
-  ['C:\\', 'C:\\Minimax Studio', 'корень диска не принимаем'],
-]
-
-let pass = 0
-const fails = []
-for (const [input, expected, title] of cases) {
+function buildAndRun(template, input) {
   // BOM обязателен: без него makensis читает файл как ANSI, и русский текст в
   // собранном установщике превращается в кракозябры (правка 957).
   writeFileSync(nsi, '\ufeff' + template.replace('@@PATH@@', input), 'utf8')
   try {
     execFileSync(MAKENSIS, ['/V1', nsi], { cwd: dir, stdio: 'pipe' })
   } catch (e) {
-    console.error('FAIL: makensis не собрал тестовый установщик для пути ' + input)
+    console.error('FAIL: makensis не собрал тестовый установщик (путь: ' + input + ')')
     console.error(String(e.stdout || '').slice(-800), String(e.stderr || '').slice(-800))
     process.exit(1)
   }
@@ -98,14 +87,57 @@ for (const [input, expected, title] of cases) {
   } catch {
     /* инсталлятор может вернуть ненулевой код — важен записанный путь */
   }
-  const got = existsSync(probe) ? readFileSync(probe, 'utf8').replace(/\uFEFF/, '').trim() : '(файл не записан)'
+  return existsSync(probe) ? readFileSync(probe, 'utf8').replace(/\uFEFF/, '').trim() : '(файл не записан)'
+}
+
+let pass = 0
+const fails = []
+function check(title, input, expected, template = templatePath) {
+  const got = buildAndRun(template, input)
   if (got === expected) {
     pass++
-    console.log(`  ok   ${title}: ${input} -> ${got}`)
+    console.log(`  ok   ${title}: ${input || '(пусто)'} -> ${got}`)
   } else {
-    fails.push(`${title}: ${input} -> ожидалось "${expected}", получено "${got}"`)
-    console.log(`  FAIL ${title}: ${input} -> ${got} (ожидалось "${expected}")`)
+    fails.push(`${title}: ожидалось "${expected}", получено "${got}"`)
+    console.log(`  FAIL ${title}: ${input || '(пусто)'} -> ${got} (ожидалось "${expected}")`)
   }
+}
+
+const cases = join(tmpdir(), 'instdir-cases')
+check('хвостовой "\\" срезается', `${cases}\\`, cases)
+check('обычный путь не меняется', cases, cases)
+check('задвоение от страницы выбора папки', `${cases}\\Minimax Studio\\Minimax Studio`, `${cases}\\Minimax Studio`)
+check('задвоение + хвостовой "\\"', `${cases}\\Minimax Studio\\`, `${cases}\\Minimax Studio`)
+check('корень диска не принимаем', 'C:\\', 'C:\\Minimax Studio')
+
+// ─── реестр: путь с версией в имени игнорируется ────────────────────────────
+const REG_KEY = 'HKCU\\Software\\MiniMaxH3Studio'
+const defaultDir = join(process.env.USERPROFILE || 'C:\\Users\\PC', 'Minimax Studio')
+
+function regQuery() {
+  const r = spawnSync('reg.exe', ['query', REG_KEY, '/v', 'InstallDir'], { encoding: 'utf8' })
+  if (r.status !== 0) return null
+  const m = /InstallDir\s+REG_SZ\s+(.*)/.exec(r.stdout || '')
+  return m ? m[1].trim() : null
+}
+function regSet(value) {
+  spawnSync('reg.exe', ['add', REG_KEY, '/v', 'InstallDir', '/t', 'REG_SZ', '/d', value, '/f'], { encoding: 'utf8' })
+}
+function regRestore(prev) {
+  if (prev === null) spawnSync('reg.exe', ['delete', REG_KEY, '/v', 'InstallDir', '/f'], { encoding: 'utf8' })
+  else regSet(prev)
+}
+
+const prevDir = regQuery()
+try {
+  regSet('C:\\Old\\Minimax_Studio_7.1')
+  check('путь с версией из реестра игнорируется', '', defaultDir, templateReg)
+  regSet('C:\\Old\\MiniMax H3 Studio 7')
+  check('старый путь "… Studio 7" игнорируется', '', defaultDir, templateReg)
+  regSet('D:\\MyApps\\Studio')
+  check('нормальный путь из реестра используется', '', 'D:\\MyApps\\Studio', templateReg)
+} finally {
+  regRestore(prevDir)
 }
 
 rmSync(dir, { recursive: true, force: true })
