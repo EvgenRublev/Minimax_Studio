@@ -14,7 +14,7 @@
  * В браузерном режиме (без Electron) консоль недоступна — честная заглушка.
  */
 import { useEffect, useRef, useState } from 'react'
-import { CopyIcon, SaveIcon, Loader2Icon } from 'lucide-react'
+import { CopyIcon, SaveIcon, Loader2Icon, RefreshCwIcon, ListXIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,8 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [text, setText] = useState('')
   const [available, setAvailable] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
+  /** (правка 950) «Очистить очередь ComfyUI» / «Перезапустить ComfyUI». */
+  const [busyAction, setBusyAction] = useState<'purge' | 'restart' | null>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const stickRef = useRef(true)
 
@@ -111,6 +113,56 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     }
   }
 
+  /**
+   * (правка 950) Принудительный сброс очереди ComfyUI: снимает running
+   * (interrupt) и удаляет pending. Маршрут давно есть, но был доступен только
+   * из заводского сброса — теперь это аварийная кнопка в «Консоли».
+   */
+  const purgeQueue = async () => {
+    if (busyAction) return
+    setBusyAction('purge')
+    try {
+      const res = await fetch('/api/comfy/purge-queue', { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) {
+        toast.error('Не удалось сбросить очередь ComfyUI')
+      } else if (data.error) {
+        toast.warning(`Очередь сброшена с замечанием: ${data.error}`)
+      } else {
+        toast.success('Очередь ComfyUI очищена')
+      }
+    } catch {
+      toast.error('Не удалось сбросить очередь ComfyUI')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  /**
+   * (правка 950) Перезапуск ComfyUI из окна: единственное лечение по-настоящему
+   * зависшего процесса (задача в очереди, interrupt не помогает). Electron
+   * убивает дерево процессов и поднимает ComfyUI заново; ждём, пока порт
+   * ответит. В браузерном фолбэке моста нет — честно говорим об этом.
+   */
+  const restartComfy = async () => {
+    if (busyAction) return
+    const api = window.h3desktop?.comfy
+    if (!api?.restart) {
+      toast.error('Перезапуск ComfyUI доступен только в оконном режиме приложения')
+      return
+    }
+    setBusyAction('restart')
+    try {
+      const r = await api.restart()
+      if (r.ok) toast.success('ComfyUI перезапущен')
+      else toast.error(r.error || 'Не удалось перезапустить ComfyUI')
+    } catch {
+      toast.error('Не удалось перезапустить ComfyUI')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* (правка 568/570) Ширина: ОБЯЗАТЕЛЬНО sm:max-w — базовый DialogContent
@@ -129,6 +181,29 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* (правка 950) Аварийные действия: зависшая задача/процесс ComfyUI */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void purgeQueue()}
+              disabled={busyAction !== null}
+              className="gap-1.5 text-xs"
+              title="Снять выполняющуюся задачу (interrupt) и удалить все ожидающие из очереди ComfyUI"
+            >
+              {busyAction === 'purge' ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <ListXIcon className="w-3.5 h-3.5" />}
+              Очистить очередь
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void restartComfy()}
+              disabled={busyAction !== null || available === false}
+              className="gap-1.5 text-xs"
+              title="Убить процесс ComfyUI и запустить заново (лечит по-настоящему зависший сэмплер)"
+            >
+              {busyAction === 'restart' ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <RefreshCwIcon className="w-3.5 h-3.5" />}
+              Перезапустить ComfyUI
+            </Button>
             <Button
               variant="outline"
               size="sm"

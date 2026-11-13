@@ -441,6 +441,17 @@ export function useVideoGen() {
                     useGenProgress.getState().setVideoProgress(pct, 100)
                   }
                 }
+                // (правка 950) Текущий узел + шаг + время на узле: карточка
+                // показывает «3D-апскейлер · 2:14» вместо голых 0%/50%.
+                if (s.status === 'running' && (progData.node || progData.title)) {
+                  useGenProgress.getState().setVideoStage({
+                    node: typeof progData.node === 'string' ? progData.node : null,
+                    title: typeof progData.title === 'string' ? progData.title : null,
+                    step: typeof progData.step === 'number' ? progData.step : null,
+                    total: typeof progData.total === 'number' ? progData.total : null,
+                    elapsedMs: typeof progData.nodeMs === 'number' ? progData.nodeMs : null,
+                  })
+                }
               }
             } catch { /* non-critical */ }
 
@@ -1548,6 +1559,10 @@ export function useVideoGen() {
     progressValue: progressStore.video.progressValue,
     progressMax: progressStore.video.progressMax,
     executingNode: progressStore.video.executingNode,
+    executingTitle: progressStore.video.executingTitle,
+    nodeStep: progressStore.video.nodeStep,
+    nodeTotal: progressStore.video.nodeTotal,
+    nodeElapsedMs: progressStore.video.nodeElapsedMs,
     statusMessage: progressStore.video.statusMessage,
     generate,
     interrupt,

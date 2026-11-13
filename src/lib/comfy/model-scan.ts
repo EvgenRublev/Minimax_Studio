@@ -4,9 +4,8 @@ import { listExternalModels } from '@/lib/extra-model-paths'
 
 /**
  * (правка 934) Список .safetensors в категории моделей ComfyUI: локальная папка
- * + пути из extra_model_paths.yaml. Раньше эта функция жила в роуте
- * /api/comfy/image-assets, а роут /api/comfy/image копировал логику — вынесено,
- * чтобы оба роута видели один и тот же набор файлов.
+ * + пути из extra_model_paths.yaml. Нужен роутам, которые показывают файлы с
+ * диска (движковые селекторы, диагностика моделей).
  */
 export function listModelFiles(modelsRoot: string, category: string): string[] {
   const names = new Set<string>()

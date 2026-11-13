@@ -32,6 +32,13 @@ export interface GenerationState {
   progressMax: number
   /** Which ComfyUI node is currently executing. */
   executingNode: string | null
+  /** (правка 950) Человеческая подпись узла из `_meta.title` воркфлоу. */
+  executingTitle: string | null
+  /** (правка 950) Шаг/всего текущего сэмплера (из трекера стадий). */
+  nodeStep: number | null
+  nodeTotal: number | null
+  /** (правка 950) Сколько уже идёт текущий узел, мс. */
+  nodeElapsedMs: number | null
   /** Timestamp when generation started. */
   startedAt: number | null
   /** Status message from the backend. */
@@ -49,6 +56,10 @@ const IDLE_STATE: GenerationState = {
   progressValue: 0,
   progressMax: 0,
   executingNode: null,
+  executingTitle: null,
+  nodeStep: null,
+  nodeTotal: null,
+  nodeElapsedMs: null,
   startedAt: null,
   statusMessage: null,
   frozenStageKind: undefined,
@@ -73,6 +84,14 @@ interface GenStore {
   setVideoPromptId: (id: string | null) => void
   setVideoProgress: (value: number, max: number) => void
   setVideoExecutingNode: (node: string | null) => void
+  /** (правка 950) Текущий узел/шаг/время на узле — из /api/comfy/progress. */
+  setVideoStage: (info: {
+    node?: string | null
+    title?: string | null
+    step?: number | null
+    total?: number | null
+    elapsedMs?: number | null
+  }) => void
   setVideoStatusMessage: (msg: string | null) => void
   /** Set which prompt the shared card/preview tracks.
    *  Without `force`, an already-tracked ACTIVE prompt is kept — a newly
@@ -137,6 +156,18 @@ export const useGenProgress = create<GenStore>()(
 
   setVideoExecutingNode: (node) =>
     set((s) => ({ video: { ...s.video, executingNode: node } })),
+
+  setVideoStage: (info) =>
+    set((s) => ({
+      video: {
+        ...s.video,
+        executingNode: info.node !== undefined ? info.node : s.video.executingNode,
+        executingTitle: info.title !== undefined ? info.title : s.video.executingTitle,
+        nodeStep: info.step !== undefined ? info.step : s.video.nodeStep,
+        nodeTotal: info.total !== undefined ? info.total : s.video.nodeTotal,
+        nodeElapsedMs: info.elapsedMs !== undefined ? info.elapsedMs : s.video.nodeElapsedMs,
+      },
+    })),
 
   setVideoStatusMessage: (msg) =>
     set((s) => ({ video: { ...s.video, statusMessage: msg } })),

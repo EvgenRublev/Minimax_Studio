@@ -1466,12 +1466,6 @@ function Invoke-SelfCheck {
         }
         if ($bad.Count -eq 0) { Ok 'патчи ядра совпадают с установщиком' }
         else { Warn ('патчи ядра расходятся: ' + ($bad -join '; ') + '. Перезапусти студию - патчи накатываются при старте') }
-        $mh3 = Join-Path $cp.Core 'comfy_extras\nodes_minimax_h3.py'
-        if (Test-Path -LiteralPath $mh3) {
-            $t = Get-Content -LiteralPath $mh3 -Raw -Encoding UTF8 -EA SilentlyContinue
-            if ($t -and $t.Contains('PH3ImageConditioning')) { Ok 'нода PH3ImageConditioning в ядре есть' }
-            else { Fail 'в ядре нет PH3ImageConditioning - вкладка «Изображение» не работает. Перезапусти студию (патчи накатываются при старте)' }
-        }
     }
 
     # ---- конфигурация путей к моделям ----

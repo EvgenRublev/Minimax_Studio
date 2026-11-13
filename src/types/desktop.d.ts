@@ -16,6 +16,10 @@ export interface H3DesktopBridge {
   fullscreen?: (on: boolean) => void
   /** (правка 868) подписка на смену фулскрина (внешний вход/выход); отписка в return. */
   onFullscreenChange?: (cb: (on: boolean) => void) => () => void
+  /** (правка 950) «Перезапустить ComfyUI» из «Консоли» (только Electron). */
+  comfy?: {
+    restart: () => Promise<{ ok: boolean; error?: string }>
+  }
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */
     get: () => Promise<string>

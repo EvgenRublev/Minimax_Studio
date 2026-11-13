@@ -99,30 +99,19 @@ if (existsSync(nodePatch)) {
     'MiniMaxH3AddGuide отдаёт выход latent (иначе аудио-гайд падает на av_latent)')
 }
 
-// 6. (правки 904, 949) Ядро 0.44 пиновано, но официальная H3 Image появилась
-//    в upstream позже, поэтому её модель и детекция теперь живут в патчах.
-//    Никаких старых копий «на всякий случай»: только эти два файла.
-{
-  const mmPatch = join(patchDir, 'comfy', 'ldm', 'minimax', 'model.py')
-  const detectPatch = join(patchDir, 'comfy', 'model_detection.py')
-  expect(existsSync(mmPatch), 'патч comfy/ldm/minimax/model.py на месте (H3 Image)')
-  expect(existsSync(detectPatch), 'патч comfy/model_detection.py на месте (H3 Image)')
-  if (existsSync(mmPatch)) {
-    const py = readFileSync(mmPatch, 'utf-8')
-    expect(/class\s+MiniMaxH3ImageModel\(MiniMaxH3Model\)/.test(py),
-      'model.py: есть MiniMaxH3ImageModel (один поток без аудио)')
-    expect(/class\s+MiniMaxH3ImageModelSampling\(/.test(py),
-      'model.py: сетка PDD-сигм для image-модели')
-    expect(/audio_latents_dim is not None/.test(py),
-      'model.py: аудио-поток стал необязательным (image-чекпоинт без audio_patch_proj)')
-  }
-  if (existsSync(detectPatch)) {
-    const py = readFileSync(detectPatch, 'utf-8')
-    expect(/minimax_h3_image/.test(py),
-      'model_detection.py: image-чекпоинт определяется как minimax_h3_image')
-    expect(/audio_patch_proj\.weight'.*in state_dict_keys/.test(py),
-      'model_detection.py: наличие аудио-потока решает тип модели')
-  }
+// 6. (правки 904, 951) Ядро 0.44 пиновано. Режим «Изображение» удалён вместе с
+//    его патчами ядра — в патчах снова не должно быть подмены comfy/*.py.
+const legacyCore = [
+  'comfy/ldm/minimax/model.py',
+  'comfy/ldm/minimax/vae.py',
+  'comfy/model_base.py',
+  'comfy/model_detection.py',
+  'comfy/supported_models.py',
+  'comfy/sd.py',
+]
+for (const rel of legacyCore) {
+  expect(!existsSync(join(patchDir, rel)),
+    `ядро 0.44: нет патча ${rel} (образ «Изображение» удалён — правка 951)`)
 }
 expect(/function\s+readComfyVersion\s*\(/.test(sync),
   'sync_custom_nodes.js: читает версию ядра (readComfyVersion)')
@@ -269,72 +258,29 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     'install/install.ps1: ошибка VC-проверки не прерывает установку')
 }
 
-// 12. (правка 946) Официальный image-VAE (Comfy-Org/MiniMax-H3-Image).
-//     Ядро 0.44 собирало его как p-h3-image (32 головы, 3D-conv) и падало на
-//     `Error(s) in loading state_dict for PH3ImageVAE: size mismatch`; нужный
-//     класс живёт только в наших патчах ядра, поэтому проверяем сами файлы.
+// 12. (правка 951) Режим «Изображение» удалён полностью: нет вкладки, роутов,
+//     сторов, шаблона и пунктов моделей. Держим регресс, чтобы он не вернулся
+//     случайно (качество официальной image-модели не устроило).
 {
-  const vaePatch = join(patchDir, 'comfy', 'ldm', 'minimax', 'vae.py')
-  const sdPatch = join(patchDir, 'comfy', 'sd.py')
-  expect(existsSync(vaePatch), 'патч ядра comfy/ldm/minimax/vae.py на месте')
-  expect(existsSync(sdPatch), 'патч ядра comfy/sd.py на месте')
-  if (existsSync(vaePatch)) {
-    const py = readFileSync(vaePatch, 'utf-8')
-    expect(/class\s+MiniMaxH3ImageVAE\(H3ImageVAE\)/.test(py),
-      'vae.py: есть MiniMaxH3ImageVAE (официальный image-VAE)')
-    expect(/rope_dim_ratio=0\.5,\s*rope_dims=2/.test(py),
-      'vae.py: официальный декодер — 16 голов и 2D-rope')
-    expect(/ops\.Conv2d\(24,\s*24,\s*1\)/.test(py),
-      'vae.py: у официального image-VAE 2D post_quant_conv')
-    expect(/class\s+PH3ImageVAE\(H3ImageVAE\)/.test(py),
-      'vae.py: p-h3-image остался 3D-декодером на 32 головы')
-  }
-  if (existsSync(sdPatch)) {
-    const py = readFileSync(sdPatch, 'utf-8')
-    expect(/MiniMaxH3ImageVAE\(operations=minimax_ops/.test(py),
-      'sd.py: официальный image-VAE выбирается при загрузке')
-    expect(/decoder\.x_embedder\.weight"\]\.shape\[0\]\s*==\s*1024/.test(py),
-      'sd.py: official и p-h3-image различаются по ширине декодера')
-  }
-  // (правка 947) подписи вкладки «Изображение» однажды сохранили двойной
-  // кодировкой (UTF-8 → CP1251) и в UI поехали кракозябры. Маркеры ниже не
-  // встречаются в нормальном русском тексте, только в такой порче.
-  const imgTpl = read('src/lib/comfy/image-template.ts')
-  expect(!/вЂ|Рї|РЎ/.test(imgTpl), 'image-template.ts: русский текст не в двойной кодировке')
-  expect(/4 шага — быстрый прогон/.test(imgTpl), 'image-template.ts: подписи шагов читаются')
-}
-
-// 13. (правка 949) Официальная image-модель H3: один латент-поток без аудио.
-//     Ей нужны класс в model_base и запись в supported_models, а граф студии
-//     не должен подменять её PDD-сетку сигм и не должен скармливать AV-латент.
-{
-  const mbPatch = join(patchDir, 'comfy', 'model_base.py')
-  const smPatch = join(patchDir, 'comfy', 'supported_models.py')
-  expect(existsSync(mbPatch), 'патч ядра comfy/model_base.py на месте')
-  expect(existsSync(smPatch), 'патч ядра comfy/supported_models.py на месте')
-  if (existsSync(mbPatch)) {
-    const py = readFileSync(mbPatch, 'utf-8')
-    expect(/class\s+MiniMaxH3Image\(MiniMaxH3\)/.test(py),
-      'model_base.py: есть MiniMaxH3Image (ModelType.FLOW + свой model_sampling)')
-    expect(/MiniMaxH3ImageModelSampling\(model_config\)/.test(py),
-      'model_base.py: image-модель берёт сетку PDD-сигм, а не ModelSamplingAV')
-  }
-  if (existsSync(smPatch)) {
-    const py = readFileSync(smPatch, 'utf-8')
-    expect(/"image_model":\s*"minimax_h3_image"/.test(py),
-      'supported_models.py: объявлен MiniMaxH3Image')
-    expect(/\n\s+MiniMaxH3Image,/.test(py),
-      'supported_models.py: MiniMaxH3Image в списке models')
-  }
-  const imgTpl = read('src/lib/comfy/image-template.ts')
-  expect(!/class_type:\s*'H3InjectVideoLatent'/.test(imgTpl),
-    'image-template.ts: второй проход без AV-инъекции (image-модель однопоточная)')
-  expect(/class_type:\s*'VAEEncode'/.test(imgTpl),
-    'image-template.ts: база второго прохода входит через VAEEncode')
-  expect(!/class_type:\s*'MiniMaxH3SigmaShift'/.test(imgTpl),
-    'image-template.ts: не подменяет PDD-сетку image-модели на ModelSamplingAV')
-  expect(/class_type:\s*'LTXVSeparateAVLatent'/.test(imgTpl),
-    'image-template.ts: видео-часть AV-латента отделяется до сэмплера')
+  const gone = [
+    'src/components/h3/image-view.tsx',
+    'src/components/h3/image-results-grid.tsx',
+    'src/lib/image-store.ts',
+    'src/lib/image-job-store.ts',
+    'src/lib/comfy/image-template.ts',
+    'src/lib/comfy/image-pe.ts',
+    'src/app/api/comfy/image/route.ts',
+    'src/app/api/comfy/image-assets/route.ts',
+  ]
+  for (const rel of gone) expect(!existsSync(join(ROOT, rel)), `удалён файл режима «Изображение»: ${rel}`)
+  const sidebar = read('src/components/h3/sidebar.tsx')
+  expect(!/label: 'Изображение'/.test(sidebar), 'sidebar: вкладки «Изображение» нет')
+  const models = read('src/lib/models-config.ts')
+  expect(!/id: 'image_model'/.test(models), 'models-config: нет image_model')
+  expect(!/id: 'image_vae'/.test(models), 'models-config: нет image_vae')
+  expect(!/id: 'image_prompt_enhancer'/.test(models), 'models-config: нет image_prompt_enhancer')
+  const queue = read('src/lib/gen-queue-store.ts')
+  expect(!/\|\s*'image'/.test(queue), 'очередь: тип image удалён')
 }
 
 if (problems.length) {

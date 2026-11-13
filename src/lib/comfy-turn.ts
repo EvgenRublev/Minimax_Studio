@@ -26,10 +26,6 @@ import {
 
 /** Режимы, которые исполняет ComfyUI и которые обязаны идти строго по одному. */
 export const COMFY_GATED_TYPES: ReadonlySet<QueueItemType> = new Set<QueueItemType>([
-  // (правка 932) 'image' — вкладка «Изображение» исполняется тем же ComfyUI.
-  // Без него acquireComfyTurn() сразу возвращал false, submit() молча
-  // выходил, а карточка навсегда зависала в «Отправка…» (promptId: null).
-  'image',
   'video',
   'refine',
   'controlnet',
@@ -64,11 +60,14 @@ const SESSION_STARTED_AT = Date.now()
 let verifyingHolderId: string | null = null
 
 /**
- * Аварийный таймаут: если поллер режима умер и элемент навсегда остался
- * `submitting`/`running`, не блокируем очередь до перезапуска приложения.
- * 6 часов с запасом покрывают самые длинные генерации.
+ * (правка 950) Сторож хода: раньше это был ЖЁСТКИЙ таймаут 6 часов от выдачи
+ * хода — одна залипшая карточка блокировала очередь до перезапуска, а долгая
+ * легитимная генерация не отличалась от зависшей. Теперь таймер
+ * ПРОГРЕСС-зависимый: любое обновление прогресса/сообщения задачи
+ * перезапускает отсчёт. 30 минут без единого шага — задача снимается с
+ * очереди (сама генерация в ComfyUI при этом не отменяется).
  */
-const HOLDER_TIMEOUT_MS = 6 * 60 * 60 * 1000
+const HOLDER_STALL_MS = 30 * 60 * 1000
 
 function itemById(id: string): QueueItem | undefined {
   return useGenQueue.getState().items.find((item) => item.id === id)
@@ -122,14 +121,34 @@ function clearHolderTimer() {
   cancelledReleaseTimer = null
 }
 
+/** (правка 950) Ключ «признаков жизни» держателя: изменился → перезапуск сторожа. */
+let lastHolderKey = ''
+
+function holderProgressKey(item: QueueItem | undefined): string {
+  if (!item) return ''
+  return `${item.progressValue}/${item.progressMax}/${item.startedAt ?? ''}/${item.message ?? ''}`
+}
+
 function armHolderTimer() {
   clearHolderTimer()
   holderTimer = setTimeout(() => {
-    if (holderId) {
-      console.warn(`[comfy-turn] watchdog: отпускаю зависший ход ${holderId}`)
-      releaseHolder('watchdog')
+    if (!holderId) return
+    const stalled = holderId
+    const item = itemById(stalled)
+    // Снимаем ход, но НЕ отменяем задачу и не рушим её карточку: ComfyUI мог
+    // ещё работать. Следующая задача встанет за ней в очередь ComfyUI.
+    console.warn(`[comfy-turn] нет прогресса ${HOLDER_STALL_MS / 60000} мин — снимаю ход ${stalled}`)
+    releaseHolder('stalled')
+    if (item) {
+      useGenQueue
+        .getState()
+        .setMessage(
+          stalled,
+          `Нет прогресса ${HOLDER_STALL_MS / 60000} мин — задача снята с очереди ` +
+          '(в ComfyUI генерация могла ещё идти, подробности — в «Консоли»)',
+        )
     }
-  }, HOLDER_TIMEOUT_MS)
+  }, HOLDER_STALL_MS)
 }
 
 /**
@@ -148,6 +167,7 @@ function ensureHolderFromQueue(): boolean {
   if (activeWithPrompt.length === 0) return false
 
   holderId = activeWithPrompt[0].id
+  lastHolderKey = holderProgressKey(activeWithPrompt[0])
   armHolderTimer()
   console.log(`[comfy-turn] восстановлен активный ход ${holderId}`)
   return true
@@ -173,6 +193,7 @@ function releaseHolder(reason: string) {
   if (!holderId) return
   const released = holderId
   holderId = null
+  lastHolderKey = ''
   clearHolderTimer()
   console.log(`[comfy-turn] ход освобождён ${released} (${reason})`)
   pump()
@@ -191,6 +212,14 @@ function ensureSubscription() {
         if (item.status === 'cancelled') scheduleCancelledRelease()
         else releaseHolder(`status ${item.status}`)
         return
+      }
+      // (правка 950) прогресс/статус-сообщение обновились — сторож заново.
+      // Так долгая, но ЖИВАЯ генерация не снимается с очереди, а зависшая
+      // без единого шага за 30 минут — снимается.
+      const key = holderProgressKey(item)
+      if (key !== lastHolderKey) {
+        lastHolderKey = key
+        armHolderTimer()
       }
     }
     // Элемент могли отменить/удалить, пока он ждал ход. `pump` вычистит
@@ -229,6 +258,7 @@ function pump() {
     }
 
     holderId = next.id
+    lastHolderKey = holderProgressKey(item)
     armHolderTimer()
     console.log(`[comfy-turn] ход выдан ${next.id} (${item.type})`)
 

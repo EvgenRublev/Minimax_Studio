@@ -207,8 +207,17 @@ export async function submitWorkflowJson(
   if (!data.prompt_id) throw new Error('ComfyUI вернул ответ без prompt_id.')
   // (правка 255) регистрируем стадии ДО первых WS-событий промпта
   // (правка 479) + tile-геометрию для монотонного прогресса tile-upscale
+  // (правка 950) + подписи узлов из _meta.title — карточка статуса и лог
+  // студии показывают, на каком именно узле идут минуты.
+  const nodeTitles: Record<string, string> = {}
+  for (const [id, node] of Object.entries(workflow as Record<string, { _meta?: { title?: unknown } }>)) {
+    const title = node?._meta?.title
+    if (typeof title === 'string' && title) nodeTitles[id] = title
+  }
   if (stages && stages.length > 0) {
-    registerPromptStages(data.prompt_id, stages, tileGeometry)
+    registerPromptStages(data.prompt_id, stages, tileGeometry, nodeTitles)
+  } else if (Object.keys(nodeTitles).length > 0) {
+    registerPromptStages(data.prompt_id, [], tileGeometry, nodeTitles)
   }
   return data
 }

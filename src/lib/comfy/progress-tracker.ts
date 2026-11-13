@@ -75,6 +75,17 @@ interface ProgressEntry {
   /** Узел, который ComfyUI исполняет прямо сейчас (из 'executing'). */
   executingNode: string | null
   /**
+   * (правка 950) Подписи узлов из `_meta.title` отправленного воркфлоу
+   * (node_id → «Latent Upscaler (3D) → 1920×1088»). UI показывает их в
+   * карточке статуса: без этого «0%» и «50%» невозможно отличить от
+   * зависания — юзер не знает, на каком узле стоит генерация.
+   */
+  nodeTitles: Record<string, string> | null
+  /** (правка 950) Когда начался текущий исполняемый узел (мс). */
+  nodeStartedAt: number | null
+  /** (правка 950) Время последнего WS-события по промпту (мс). */
+  lastEventAt: number | null
+  /**
    * Последний сэмплер, от которого было ЛЮБОЕ событие (executing или
    * progress). Прогресс сэмплера течёт непрерывно, пока он работает, —
    * это самое надёжное «что исполняется СЕЙЧАС»: одиночное забегающее
@@ -118,6 +129,7 @@ function newEntry(): ProgressEntry {
     nodes: [], byNode: {}, done: false, stage2Seen: false, previewStage: 0,
     stageSpecs: null, nodeStage: null, stageObserved: [], maxStage: -1,
     executingNode: null, lastStageEvidence: null,
+    nodeTitles: null, nodeStartedAt: null, lastEventAt: null,
     tileTotalUnits: null, tileTotalTiles: null, tileTotalChunks: null,
     tileStepsPerUnit: null, tileKjCount: 0,
   }
@@ -143,10 +155,14 @@ export function registerPromptStages(
   promptId: string,
   stages: string[][],
   tileGeometry?: TileGeometry | null,
+  nodeTitles?: Record<string, string> | null,
 ) {
   ensureConnected()
   const entry = progressMap.get(promptId) ?? newEntry()
   progressMap.set(promptId, entry)
+  // (правка 950) подписи узлов — до первого 'executing', чтобы первая же
+  // строка лога и карточка уже знали человеческое имя узла.
+  if (nodeTitles && Object.keys(nodeTitles).length > 0) entry.nodeTitles = nodeTitles
   if (!stages.length) return
   entry.stageSpecs = stages
   const map: Record<string, number> = {}
@@ -272,6 +288,7 @@ export function applyTrackerMessage(msg: {
       if (!entry.byNode[node]) {
         entry.byNode[node] = { value: 0, max: 1 }
       }
+      entry.lastEventAt = Date.now() // (правка 950) признак жизни задачи
       entry.byNode[node].value = (msg.data.value as number) || 0
       entry.byNode[node].max = (msg.data.max as number) || 1
       if (!entry.nodes.includes(node)) {
@@ -328,6 +345,7 @@ export function applyTrackerMessage(msg: {
           entry = newEntry()
           progressMap.set(pid, entry)
         }
+        entry.lastEventAt = Date.now() // (правка 950) KJ-превью = задача жива
         // (правка 479) Tile-upscale: каждый KJ-событие = 1 шаг 1 тайла-чанка.
         // Считаем ВСЕ события монотонно — это честный прогресс 0→100.
         // (правка 487) Boundary-0 событие (step=0 — затравка из шума ДО
@@ -410,6 +428,21 @@ export function applyTrackerMessage(msg: {
           entry = newEntry()
           progressMap.set(msg.data.prompt_id, entry)
         }
+        // (правка 950) Смена узла — строка в лог студии (попадает в
+        // h3-studio-console-*.txt): по ней видно, где именно идут минуты.
+        const now = Date.now()
+        if (entry.executingNode !== msg.data.node) {
+          const title = entry.nodeTitles?.[msg.data.node]
+          const spent = entry.nodeStartedAt !== null ? (now - entry.nodeStartedAt) / 1000 : null
+          const prev = entry.executingNode
+          console.log(
+            `[stage] ${msg.data.prompt_id.slice(0, 8)} → ${msg.data.node}` +
+            `${title ? ` «${title}»` : ''}` +
+            `${prev && spent !== null ? ` [${prev}: ${spent.toFixed(1)}s]` : ''}`,
+          )
+          entry.nodeStartedAt = now
+        }
+        entry.lastEventAt = now
         // (правка 255) помним исполняемый узел — по нему KJ-превью
         // псевдо-узел 'preview' получает стадию (обёртка превью общая)
         entry.executingNode = msg.data.node
@@ -709,6 +742,47 @@ export function getStageInfo(
 export function getProgress(promptId: string): ProgressEntry | null {
   ensureConnected()
   return progressMap.get(promptId) ?? null
+}
+
+/**
+ * (правка 950) Что исполняется прямо сейчас: узел, его подпись из воркфлоу,
+ * сколько он уже идёт и как давно было последнее WS-событие. Карточка статуса
+ * показывает это рядом с процентами — «0% / 50%» перестают быть слепой зоной.
+ */
+export interface PromptNodeInfo {
+  node: string | null
+  title: string | null
+  /** Сколько мс идёт текущий узел. */
+  nodeMs: number | null
+  /** Сколько мс прошло с последнего WS-события по задаче. */
+  lastEventMs: number | null
+  stage: number | null
+  totalStages: number | null
+  step: number | null
+  total: number | null
+}
+
+const EMPTY_NODE_INFO: PromptNodeInfo = {
+  node: null, title: null, nodeMs: null, lastEventMs: null,
+  stage: null, totalStages: null, step: null, total: null,
+}
+
+export function getPromptNodeInfo(promptId: string): PromptNodeInfo {
+  ensureConnected()
+  const entry = progressMap.get(promptId)
+  if (!entry) return EMPTY_NODE_INFO
+  const stage = getStageInfo(promptId)
+  const node = entry.done ? null : entry.executingNode
+  return {
+    node,
+    title: node ? (entry.nodeTitles?.[node] ?? null) : null,
+    nodeMs: node && entry.nodeStartedAt !== null ? Date.now() - entry.nodeStartedAt : null,
+    lastEventMs: entry.lastEventAt !== null ? Date.now() - entry.lastEventAt : null,
+    stage: stage?.stage ?? null,
+    totalStages: stage?.totalStages ?? null,
+    step: stage?.total && stage.total > 0 ? stage.step : null,
+    total: stage?.total && stage.total > 0 ? stage.total : null,
+  }
 }
 
 /** Get the latest preview image for a prompt_id. Returns null if none. */

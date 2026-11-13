@@ -181,8 +181,8 @@ ok(/function Invoke-SelfCheck/.test(inst), 'install.ps1: нет функции �
 ok(inst.includes('if ($SelfCheck -or $Deep)'), 'install.ps1: самодиагностика не вызывается')
 ok(/nodes\.json/.test(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? ''),
   'самодиагностика не сверяет кастомные ноды с install/nodes.json')
-ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('PH3ImageConditioning'),
-  'самодиагностика не проверяет патч ядра (PH3ImageConditioning)')
+ok(!(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('PH3ImageConditioning'),
+  'самодиагностика всё ещё проверяет удалённый режим «Изображение» (правка 951)')
 ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('import torch'),
   'самодиагностика не проверяет импорт torch')
 ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('comfy-patches'),

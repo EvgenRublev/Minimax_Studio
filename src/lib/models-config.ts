@@ -97,45 +97,6 @@ export const MODELS: ModelDef[] = [
     // аудио), поэтому «Скачать все» тянет её вместе с базовыми моделями,
     // и жёлтый баннер «модели не скачаны» требует её наравне с ними.
   },
-  // (правка 938) Режим «Изображение» — официальная MiniMax H3 Image
-  // (Comfy-Org/MiniMax-H3-Image). Текстовый энкодер у неё общий с видео —
-  // это уже обязательный `text_encoder` выше (qwen3vl_32b_minimax_h3_nvfp4_awq),
-  // поэтому отдельного энкодера здесь нет. Файлы OPTIONAL: «Скачать все» их не
-  // тянет (это ~19.6 ГБ, нужны не всем), но панель «Модели» их показывает, а
-  // вкладка подсказывает, чего не хватает.
-  {
-    id: 'image_model',
-    label: 'Image Diffusion (MiniMax H3 Image W4A8)',
-    relPath: 'diffusion_models/minimax_h3_image_pruned_w4a8.safetensors',
-    url: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/diffusion_models/minimax_h3_image_pruned_w4a8.safetensors?download=true',
-    sizeBytes: 12549794530,
-    sizeLabel: '~11.7 GB',
-    category: 'diffusion',
-    optional: true,
-  },
-  {
-    id: 'image_vae',
-    label: 'Image VAE (MiniMax H3 Image FP16)',
-    relPath: 'vae/minimax_h3_image_vae_fp16.safetensors',
-    url: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/vae/minimax_h3_image_vae_fp16.safetensors?download=true',
-    sizeBytes: 1168505312,
-    sizeLabel: '~1.09 GB',
-    category: 'vae',
-    optional: true,
-  },
-  // (правка 938) Энхансер промпта: qwen3.5_9b, официально рекомендуется карточкой
-  // и стоит в обоих эталонных шаблонах. Исполняется внутри ComfyUI
-  // (CLIPLoader + TextGenerateV2).
-  {
-    id: 'image_prompt_enhancer',
-    label: 'Image Prompt Enhancer (Qwen3.5 9B W4A8 GPTQ)',
-    relPath: 'text_encoders/qwen3.5_9b_w4a8_gptq.safetensors',
-    url: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors?download=true',
-    sizeBytes: 7343591088,
-    sizeLabel: '~6.8 GB',
-    category: 'text_encoder',
-    optional: true,
-  },
   {
     id: 'upscaler',
     label: 'Latent Upscaler 3D (FP16)',

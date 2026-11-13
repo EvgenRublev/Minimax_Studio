@@ -16,7 +16,6 @@ import {
   SparklesIcon,
   ScanFaceIcon,
   ScissorsIcon, // (правка 720) вкладка «Монтаж»
-  ImageIcon, // (правка 929) вкладка «Изображение»
   Wand2Icon,
   WaypointsIcon,
 } from 'lucide-react'
@@ -32,7 +31,7 @@ import {
 
 // (правка 442) Вкладки «Ассистент» больше нет: ассистент — правая панель
 // на вкладках «Генерация» и «Продление».
-export type TabType = 'generate' | 'extend' | 'refine' | 'image' | 'upscale' | 'tile-upscale' | 'controlnet' | 'fps' | 'face-refine' | 'gallery' | 'montage' | 'learn'
+export type TabType = 'generate' | 'extend' | 'refine' | 'upscale' | 'tile-upscale' | 'controlnet' | 'fps' | 'face-refine' | 'gallery' | 'montage' | 'learn'
 
 interface SidebarProps {
   activeTab: TabType
@@ -45,7 +44,6 @@ const navItems = [
   { id: 'generate' as TabType, label: 'Генерация', icon: ClapperboardIcon, color: '#06B6D4' },
   { id: 'extend' as TabType, label: 'Продление', icon: FilmIcon, color: '#06B6D4' },
   { id: 'refine' as TabType, label: 'Refine', icon: Wand2Icon, color: '#10B981' },
-  { id: 'image' as TabType, label: 'Изображение', icon: ImageIcon, color: '#A855F7' }, // (правка 929)
   { id: 'controlnet' as TabType, label: 'ControlNet', icon: WaypointsIcon, color: '#FB923C' },
   { id: 'tile-upscale' as TabType, label: 'Tile Upscale', icon: Grid3x3Icon, color: '#EC4899' },
   { id: 'fps' as TabType, label: 'FPS', icon: GaugeIcon, color: '#22D3EE' },

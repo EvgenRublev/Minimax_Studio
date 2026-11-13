@@ -6,7 +6,6 @@ import { StudioSidebar, TabType } from '@/components/h3/sidebar'
 import { GenerateView } from '@/components/h3/generate-view'
 import { ExtendView } from '@/components/h3/extend-view'
 import { RefineView } from '@/components/h3/refine-view'
-import { ImageView } from '@/components/h3/image-view' // (правка 929)
 import { UpscaleView } from '@/components/h3/upscale-view'
 import { TileUpscaleView } from '@/components/h3/tile-upscale-view'
 import { ControlNetView } from '@/components/h3/controlnet-view' // (правка 497)
@@ -46,7 +45,6 @@ const TAB_CONTENT = {
   generate: GenerateView,
   extend: ExtendView,
   refine: RefineView,
-  image: ImageView, // (правка 929)
   upscale: UpscaleView,
   'tile-upscale': TileUpscaleView,
   controlnet: ControlNetView, // (правка 497)
@@ -96,7 +94,6 @@ export default function Home() {
     const gotoGenerate = () => setActiveTab('generate')
     const gotoExtend = () => setActiveTab('extend')
     const gotoRefine = () => setActiveTab('refine')
-    const gotoImage = () => setActiveTab('image') // (правка 929)
     const gotoUpscale = () => setActiveTab('upscale')
     const gotoTileUpscale = () => setActiveTab('tile-upscale')
     const gotoControlNet = () => setActiveTab('controlnet') // (правка 497)
@@ -115,7 +112,6 @@ export default function Home() {
     window.addEventListener('h3:goto-generate', gotoGenerate)
     window.addEventListener('h3:goto-extend', gotoExtend)
     window.addEventListener('h3:goto-refine', gotoRefine)
-    window.addEventListener('h3:goto-image', gotoImage) // (правка 929)
     window.addEventListener('h3:goto-upscale', gotoUpscale)
     window.addEventListener('h3:goto-tile-upscale', gotoTileUpscale)
     window.addEventListener('h3:goto-controlnet', gotoControlNet) // (правка 497)
@@ -127,7 +123,6 @@ export default function Home() {
       window.removeEventListener('h3:goto-generate', gotoGenerate)
       window.removeEventListener('h3:goto-extend', gotoExtend)
       window.removeEventListener('h3:goto-refine', gotoRefine)
-      window.removeEventListener('h3:goto-image', gotoImage) // (правка 929)
       window.removeEventListener('h3:goto-upscale', gotoUpscale)
       window.removeEventListener('h3:goto-tile-upscale', gotoTileUpscale)
       window.removeEventListener('h3:goto-controlnet', gotoControlNet) // (правка 497)

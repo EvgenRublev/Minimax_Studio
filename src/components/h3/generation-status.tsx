@@ -38,6 +38,20 @@ interface GenerationStatusProps {
    *   'Refine', потому что она делила вид 'single' с рефайном целиком).
    */
   stageKind?: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet'
+  /**
+   * (правка 950) Текущий узел ComfyUI и время на нём — из /api/comfy/progress.
+   * Показываем рядом с процентами, чтобы «0%»/«50%» не выглядели зависанием.
+   */
+  executingNode?: string | null
+  executingTitle?: string | null
+  nodeStep?: number | null
+  nodeTotal?: number | null
+  nodeElapsedMs?: number | null
+  /**
+   * (правка 950) «Кадры» (FLF): Pass 1 идёт в полном разрешении, поэтому
+   * подпись «Pass 1 · черновик» врёт — пишем «полное разрешение».
+   */
+  passFullRes?: boolean
 }
 
 /** Подпись текущей стадии с учётом вида вкладки (правка 255, 478). */
@@ -45,6 +59,7 @@ function stageLabel(
   kind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet',
   stage: number,
   totalStages: number,
+  fullResPass1 = false,
 ): string {
   // (правка 478+479) метка вкладки Tile Upscale: «Тайл X/Y»
   if (kind === 'tile') return totalStages > 0 ? `Тайл ${stage}/${totalStages}` : 'Tile Upscale'
@@ -63,7 +78,10 @@ function stageLabel(
   if (kind === 'single') return 'Refine'
   // passes: единственный проход (драфт) не нумеруем как «1/1»
   if (totalStages <= 1) return 'Проход'
-  return `Pass ${stage}/${totalStages}${stage === 1 ? ' · черновик' : ' · детализация'}`
+  // (правка 950) FLF генерирует Pass 1 сразу в полном разрешении — не
+  // называем его черновиком.
+  const firstPass = fullResPass1 ? ' · полное разрешение' : ' · черновик'
+  return `Pass ${stage}/${totalStages}${stage === 1 ? firstPass : ' · детализация'}`
 }
 
 function formatElapsed(ms: number): string {
@@ -91,12 +109,15 @@ function GenPreview({
   active,
   stageKind,
   isGenerating,
+  passFullRes = false,
 }: {
   promptId: string | null
   active: boolean
   stageKind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet'
   /** (правка 696) true во время активной генерации — используем frozen kind. */
   isGenerating: boolean
+  /** (правка 950) FLF: Pass 1 в полном разрешении. */
+  passFullRes?: boolean
 }) {
   // (правка 696) Frozen stageKind из стора — до всех early-returns (hook order).
   const frozenKind = useGenProgress((s) => s.video.frozenStageKind)
@@ -175,7 +196,7 @@ function GenPreview({
                 правка 696 — frozen kind во время генерации */}
             {stageOnly.preparing
               ? 'Подготовка модели…'
-              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages)}{stageOnly.total > 0 ? ` · шаг ${stageOnly.step}/${stageOnly.total}` : ''}</>}
+              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{stageOnly.total > 0 ? ` · шаг ${stageOnly.step}/${stageOnly.total}` : ''}</>}
           </span>
         )}
       </div>
@@ -198,7 +219,7 @@ function GenPreview({
   const stage = previewData.stage
   const passLabel = stage
     // (правка 487) фаза подготовки модели — без ложных «Тайл 1/N»
-    ? (stage.preparing ? 'Подготовка модели…' : stageLabel(activeKind, stage.stage, stage.totalStages))
+    ? (stage.preparing ? 'Подготовка модели…' : stageLabel(activeKind, stage.stage, stage.totalStages, passFullRes))
     : 'Превью'
   const step = stage && stage.total > 0 ? stage.step : previewData.step
   const total = stage && stage.total > 0 ? stage.total : previewData.total
@@ -257,7 +278,14 @@ export function GenerationStatus({
   startedAt,
   promptId,
   stageKind = 'passes',
+  executingNode = null,
+  executingTitle = null,
+  nodeStep = null,
+  nodeTotal = null,
+  nodeElapsedMs = null,
+  passFullRes = false,
 }: GenerationStatusProps) {
+  const nodeLabel = executingTitle || executingNode
   return (
     <div className="space-y-2">
       {/* Phase + elapsed */}
@@ -293,6 +321,17 @@ export function GenerationStatus({
         </div>
       </div>
 
+      {/* (правка 950) Текущий узел: «3D-апскейлер · 2:14» вместо голых 0/50% */}
+      {isGenerating && phase === 'running' && nodeLabel && (
+        <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          <span className="truncate min-w-0" title={nodeLabel}>{nodeLabel}</span>
+          <span className="shrink-0 font-mono tabular-nums text-muted-foreground/80">
+            {nodeStep != null && nodeTotal != null && nodeTotal > 0 ? `шаг ${nodeStep}/${nodeTotal} · ` : ''}
+            {nodeElapsedMs != null ? formatElapsed(nodeElapsedMs) : ''}
+          </span>
+        </div>
+      )}
+
       {/* Progress bar */}
       <div className="h-2 bg-[var(--surface-2)] rounded-full overflow-hidden">
         {isGenerating ? (
@@ -325,6 +364,7 @@ export function GenerationStatus({
           active={phase === 'running' || phase === 'queued'}
           stageKind={stageKind}
           isGenerating={isGenerating}
+          passFullRes={passFullRes}
         />
       )}
 

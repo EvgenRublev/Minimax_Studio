@@ -21,7 +21,6 @@ import { persist } from 'zustand/middleware'
 /* ──────────────────── Types ──────────────────── */
 
 export type QueueItemType =
-  | 'image'
   | 'music'
   | 'sound'
   | 'video'
@@ -57,7 +56,6 @@ export interface QueueItem {
 /* ──────────────────── Accent colors ──────────────────── */
 
 export const TYPE_ACCENT: Record<QueueItemType, string> = {
-  image: '#8B5CF6',
   music: '#10B981',
   sound: '#14B8A6',
   video: '#06B6D4',
@@ -70,7 +68,6 @@ export const TYPE_ACCENT: Record<QueueItemType, string> = {
 }
 
 export const TYPE_LABEL: Record<QueueItemType, string> = {
-  image: 'Изображение',
   music: 'Музыка',
   sound: 'Звук',
   video: 'Видео',
@@ -96,6 +93,13 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000
  *  задачи нет: держать её в очереди вечно смысла нет. */
 const SUBMIT_GHOST_MS = 2 * 60 * 1000
 
+/** (правка 951) Все известные типы очереди: старые записи удалённого режима
+ *  «Изображение» (type 'image') не должны попадать в UI после обновления —
+ *  иначе TYPE_ICON/TYPE_LABEL дадут undefined и карточка упадёт. */
+const KNOWN_TYPES: ReadonlySet<QueueItemType> = new Set<QueueItemType>([
+  'music', 'sound', 'video', 'refine', 'upscale', 'controlnet', 'fps', 'tile-upscale', 'face-refine',
+])
+
 /** Drop finished + stale items when rehydrating from localStorage. */
 function rehydrateItems(persisted: unknown): QueueItem[] {
   const items = (persisted as { items?: QueueItem[] } | null)?.items
@@ -103,6 +107,7 @@ function rehydrateItems(persisted: unknown): QueueItem[] {
   const now = Date.now()
   return items.filter(
     (i) =>
+      KNOWN_TYPES.has(i.type) &&
       (i as { type?: string }).type !== 'inpaint' &&
       now - i.createdAt < MAX_AGE_MS &&
       i.status !== 'done' &&

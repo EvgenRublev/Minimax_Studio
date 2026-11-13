@@ -220,7 +220,7 @@ function rewritePromptTags(
 /* ──────────────── Component ──────────────── */
 
 export function GenerateView() {
-  const { phase, error, progressValue, progressMax, statusMessage, promptId, generate, interrupt, reset } = useVideoGen()
+  const { phase, error, progressValue, progressMax, statusMessage, promptId, executingTitle, nodeStep, nodeTotal, nodeElapsedMs, generate, interrupt, reset } = useVideoGen()
   const videoStartedAt = useGenProgress((s) => s.video.startedAt)
 
   const video = useGenStore((s) => s.video)
@@ -1220,6 +1220,14 @@ export function GenerateView() {
                 </button>
               ))}
             </div>
+            {/* (правка 950) FLF не делает низкоразрешённый Pass 1: оба прохода
+                идут в целевом разрешении — по времени это заметно дороже t2v. */}
+            {video.mode === 'flf' && (
+              <div className="text-[10px] text-amber-300/80">
+                Оба прохода идут в полном разрешении (3D-апскейлер пропускается) — «Кадры»
+                дороже обычного «Текста» примерно вдвое. Для пробы возьмите 720p или драфт.
+              </div>
+            )}
           </div>
 
           {/* (правка 829) «Зациклено»: бесшовный цикл — конец переходит в начало.
@@ -2057,6 +2065,11 @@ export function GenerateView() {
             onReset={reset}
             startedAt={videoStartedAt}
             promptId={promptId}
+            executingTitle={executingTitle}
+            nodeStep={nodeStep}
+            nodeTotal={nodeTotal}
+            nodeElapsedMs={nodeElapsedMs}
+            passFullRes={video.mode === 'flf'}
           />
         </div>
       </div>

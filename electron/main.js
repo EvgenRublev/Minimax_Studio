@@ -240,6 +240,8 @@ appendConsole(`[desktop] MiniMax H3 Studio — захват консоли за�
 
 /* ── Дочерние процессы (убиваются при выходе) ── */
 const children = new Set()
+/** (правка 950) Текущий процесс ComfyUI — нужен для перезапуска из UI. */
+let comfyChild = null
 
 /* (правка 587) ComfyUI/python на Windows часто пишет в консоль в OEM-кодировке
  * (cp866) — toString('utf8') даёт кракозябры в панели «Консоль». Если
@@ -431,7 +433,13 @@ function startComfy() {
   if (v.asyncOffload !== '1') args.push('--disable-async-offload', '--disable-pinned-memory')
   if (v.vramHeadroom !== '0') args.push('--vram-headroom', v.vramHeadroom)
   console.log(`[desktop] ComfyUI: ${args.join(' ')}`)
-  return spawnChild(COMFY_PY, args)
+  const child = spawnChild(COMFY_PY, args)
+  // (правка 950) держим ссылку для «Перезапустить ComfyUI» из «Консоли»
+  comfyChild = child
+  child.on('exit', () => {
+    if (comfyChild === child) comfyChild = null
+  })
+  return child
 }
 
 /* ── (правка 748) Первый запуск: зависимости не установлены ──────
@@ -613,6 +621,53 @@ ipcMain.handle('h3:console-save', async (_e, text) => {
     await fsPromises.writeFile(r.filePath, text, 'utf8')
     console.log(`[desktop] лог консоли сохранён: ${r.filePath}`)
     return { ok: true, path: r.filePath }
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) }
+  }
+})
+
+/* (правка 950) «Перезапустить ComfyUI» из панели «Консоль». Единственное
+ * лечение по-настоящему зависшего процесса: интеррапт и удаление из очереди
+ * не помогают, если сэмплер встал внутри CUDA/C-вызова. Убиваем дерево
+ * процессов ComfyUI (killTree — как before-quit), ждём освобождения порта и
+ * запускаем заново через тот же startComfy(), затем ждём /system_stats. */
+ipcMain.handle('h3:comfy-restart', async () => {
+  if (quitting) return { ok: false, error: 'Приложение завершается' }
+  if (!existsSync(COMFY_PY)) return { ok: false, error: 'ComfyUI не установлен (python_embeded не найден)' }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const responds = async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${COMFY_PORT}/system_stats`, { signal: AbortSignal.timeout(3000) })
+      return res.ok
+    } catch { return false }
+  }
+  try {
+    const old = comfyChild
+    comfyChild = null
+    if (old && old.pid) {
+      console.log(`[desktop] перезапуск ComfyUI: останавливаю PID ${old.pid}`)
+      appendConsole(`[desktop] перезапуск ComfyUI по кнопке: останавливаю PID ${old.pid}\n`)
+      killTree(old.pid)
+      const until = Date.now() + 15000
+      while (Date.now() < until && await responds()) await sleep(300)
+      if (await responds()) {
+        return { ok: false, error: 'Старый ComfyUI не остановился за 15 с — закройте приложение и запустите снова' }
+      }
+    }
+    console.log('[desktop] перезапуск ComfyUI: запускаю заново')
+    appendConsole('[desktop] перезапуск ComfyUI по кнопке: запускаю заново\n')
+    const child = startComfy()
+    if (!child) return { ok: false, error: 'ComfyUI не запустился (python_embeded не найден)' }
+    const deadline = Date.now() + 180_000
+    while (Date.now() < deadline) {
+      if (await responds()) {
+        console.log('[desktop] ComfyUI перезапущен и отвечает')
+        return { ok: true }
+      }
+      if (!comfyChild) return { ok: false, error: 'ComfyUI завершился сразу после запуска — подробности в «Консоли»' }
+      await sleep(1000)
+    }
+    return { ok: false, error: 'ComfyUI не поднялся за 180 с — подробности в «Консоли»' }
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) }
   }

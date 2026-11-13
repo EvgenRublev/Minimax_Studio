@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ImageIcon,
   MusicIcon,
   Volume2Icon,
   VideoIcon,
@@ -21,6 +20,7 @@ import {
   GaugeIcon, // (правка 554) FPS
   Grid3x3Icon,
   ScanFaceIcon,
+  FilmIcon,
 } from 'lucide-react'
 import { useGenQueue, TYPE_ACCENT, TYPE_LABEL, type QueueItemType } from '@/lib/gen-queue-store'
 import { useGenProgress } from '@/lib/gen-progress-store' // (правка 931) чистый сброс карточки при отмене
@@ -30,8 +30,7 @@ import { cn } from '@/lib/utils'
 
 /* ──────────────────── Icon Map ──────────────────── */
 
-const TYPE_ICON: Record<QueueItemType, typeof ImageIcon> = {
-  image: ImageIcon,
+const TYPE_ICON: Record<QueueItemType, typeof FilmIcon> = {
   music: MusicIcon,
   sound: Volume2Icon,
   video: VideoIcon,
@@ -234,7 +233,6 @@ function useGlobalQueuePoller() {
                 if (
                   item.type === 'controlnet' ||
                   item.type === 'fps' ||
-                  item.type === 'image' || // (правка 929)
                   item.type === 'tile-upscale' ||
                   item.type === 'face-refine'
                 ) {
@@ -290,10 +288,6 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
   if (item.type === 'fps' && item.promptId) {
     const { markFpsCancelRequested } = await import('@/lib/fps-job-store')
     markFpsCancelRequested(item.promptId)
-  }
-  if (item.type === 'image' && item.promptId) {
-    const { markImageCancelRequested } = await import('@/lib/image-job-store')
-    markImageCancelRequested(item.promptId)
   }
   if (item.type === 'tile-upscale' && item.promptId) {
     const { markTileUpscaleCancelRequested } = await import('@/lib/tile-upscale-job-store')

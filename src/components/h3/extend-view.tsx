@@ -72,7 +72,7 @@ function newId(): string {
 }
 
 export function ExtendView() {
-  const { phase, error, progressValue, progressMax, statusMessage, promptId, generate, interrupt, reset } = useVideoGen()
+  const { phase, error, progressValue, progressMax, statusMessage, promptId, executingTitle, nodeStep, nodeTotal, nodeElapsedMs, generate, interrupt, reset } = useVideoGen()
   const videoStartedAt = useGenProgress((s) => s.video.startedAt)
 
   const video = useGenStore((s) => s.video)
@@ -1182,6 +1182,10 @@ export function ExtendView() {
             onReset={reset}
             startedAt={videoStartedAt}
             promptId={promptId}
+            executingTitle={executingTitle}
+            nodeStep={nodeStep}
+            nodeTotal={nodeTotal}
+            nodeElapsedMs={nodeElapsedMs}
             // (правка 430) Двухпроходный extend: стадий clips×2 (pass 1+2 на
             // клип) — подпись «Клип N/M · проход K/2», а не «Клип N/2M».
             stageKind={video.extendTwoPass ? 'clips2' : 'clips'}

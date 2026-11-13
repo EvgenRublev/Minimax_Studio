@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('h3desktop', {
   // (правка 868) полноэкранный режим окна (просмотр «Монтажа» на весь экран, F):
   // CSS-оверлей не прячет таскбар, просим нативный setFullScreen у окна.
   fullscreen: (on) => ipcRenderer.send('h3:window-fullscreen', Boolean(on)),
+  // (правка 950) «Перезапустить ComfyUI» из панели «Консоль»: main-процесс
+  // убивает дерево процессов ComfyUI и поднимает его заново. Возвращает
+  // { ok, error? } — рендерер показывает тост и ждёт готовности порта.
+  comfy: {
+    restart: () => ipcRenderer.invoke('h3:comfy-restart'),
+  },
   /** Подписка на смену фулскрина (внешний вход/выход); возвращает отписку. */
   onFullscreenChange: (cb) => {
     const handler = (_e, on) => cb(!!on)
