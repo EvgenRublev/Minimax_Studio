@@ -439,6 +439,9 @@ export async function POST(req: NextRequest) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ delete: uploadedThisRequest }),
+            // (правка 954) best-effort-очистка не должна подвешивать ответ:
+            // если ComfyUI занят/завис, роут ждал этот fetch бесконечно.
+            signal: AbortSignal.timeout(5_000),
           }).catch(() => {})
         } catch { /* best-effort */ }
       }

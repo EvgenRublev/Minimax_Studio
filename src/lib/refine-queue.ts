@@ -176,6 +176,18 @@ const isCancelled = (id: string) =>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * (правка 952) Сторож раннера Refine.
+ *
+ * Глобальный comfy-turn отпускает ХОД очереди через 30 минут без прогресса,
+ * но раннер Refine сериализован собственным флагом `running` + `runTask()`:
+ * если ComfyUI залип на задаче (бесконечный сэмплер, дедлок ноды), этот
+ * цикл опроса крутился вечно, и ВСЕ следующие рефайны стояли в очереди, хотя
+ * шлюз уже был свободен. Теперь 30 минут без изменения процента у running-
+ * задачи — честная ошибка, раннер переходит к следующей.
+ */
+const REFINE_STALL_MS = 30 * 60 * 1000
+
 async function runTask(id: string, task: RefineTask): Promise<void> {
   const q = () => useGenQueue.getState()
 
@@ -262,6 +274,9 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
 
   // ── Опрос статуса + прогресса (как awaitJobDone прежней вкладки) ──
   let unknownStreak = 0
+  // (правка 952) последний реальный сдвиг прогресса (running без изменений = залип)
+  let lastPct = -1
+  let lastAdvance = Date.now()
   for (;;) {
     if (isCancelled(id)) return
     await sleep(1500)
@@ -287,6 +302,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
     if (s.status !== 'unknown') unknownStreak = 0
     if (s.status === 'running' && q().items.find((i) => i.id === id)?.status !== 'running') {
       q().setStatus(id, 'running')
+      lastAdvance = Date.now()
     }
     if (s.status === 'running' || s.status === 'queued') {
       try {
@@ -295,9 +311,22 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
           const pd = await pr.json()
           if (pd.progress && typeof pd.progress.percent === 'number') {
             q().setProgress(id, pd.progress.percent, 100)
+            // (правка 952) процент сдвинулся — задача жива, отсчёт сторожа заново.
+            if (pd.progress.percent !== lastPct) {
+              lastPct = pd.progress.percent
+              lastAdvance = Date.now()
+            }
           }
         }
       } catch { /* non-critical */ }
+      // (правка 952) ComfyUI отвечает 'running', но прогресса нет 30 минут:
+      // не держим очередь рефайна вечно (остальные задачи ждут этот runTask).
+      if (s.status === 'running' && Date.now() - lastAdvance > REFINE_STALL_MS) {
+        const msg = 'Нет прогресса 30 минут — задача снята с очереди рефайна ' +
+          '(подробности в «Консоли»; ComfyUI мог ещё работать)'
+        console.warn(`[refine] ${msg} prompt=${promptId.slice(0, 8)}`)
+        throw new Error(msg)
+      }
       continue
     }
     if (s.status === 'error') throw new Error(s.detail || 'Ошибка выполнения')
@@ -485,6 +514,10 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
   const q = () => useGenQueue.getState()
   try {
     let unknownStreak = 0
+    // (правка 952) та же защита, что у живого раннера: восстановление после
+    // перезагрузки не должно опрашивать зависшую задачу вечно.
+    let lastPct = -1
+    let lastAdvance = Date.now()
     for (;;) {
       const cur = q().items.find((i) => i.id === item.id)
       if (!cur || cur.status === 'cancelled') return
@@ -507,6 +540,23 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
       }
       if (s.status === 'running' || s.status === 'queued') {
         unknownStreak = 0
+        try {
+          const pr = await fetch(`/api/comfy/progress?prompt_id=${encodeURIComponent(promptId)}`)
+          if (pr.ok) {
+            const pd = await pr.json()
+            if (pd.progress && typeof pd.progress.percent === 'number') {
+              q().setProgress(item.id, pd.progress.percent, 100)
+              if (pd.progress.percent !== lastPct) {
+                lastPct = pd.progress.percent
+                lastAdvance = Date.now()
+              }
+            }
+          }
+        } catch { /* non-critical */ }
+        if (s.status === 'running' && Date.now() - lastAdvance > REFINE_STALL_MS) {
+          q().setStatus(item.id, 'error', 'Нет прогресса 30 минут после перезагрузки — отслеживание остановлено')
+          return
+        }
         continue
       }
       if (s.status === 'unknown') {

@@ -437,7 +437,9 @@ export async function cancelPrompt(promptId: string): Promise<void> {
       signal: AbortSignal.timeout(5_000),
     }).catch(() => {})
   const interruptRunning = () =>
-    fetch(`${COMFY_URL}/interrupt`, { method: 'POST' }).catch(() => {})
+    // (правка 954) таймаут: interrupt не должен подвешивать отмену, если
+    // ComfyUI занят GPU-шагом и не отвечает.
+    fetch(`${COMFY_URL}/interrupt`, { method: 'POST', signal: AbortSignal.timeout(5_000) }).catch(() => {})
 
   const state = await inQueueState()
   if (state === null) {
