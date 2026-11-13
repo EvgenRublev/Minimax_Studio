@@ -26,7 +26,7 @@
 ;    «Internal compiler error #12345: error creating mmap»:
 ;      $env:TMP='D:\nsis-tmp'; $env:TEMP='D:\nsis-tmp'; makensis installer.nsi
 ;
-; Результат — Minimax_H3_Studio_7.1.22_setup.exe: ~450 МБ без офлайн-кэша
+; Результат — Minimax_H3_Studio_7.1.24_setup.exe: ~450 МБ без офлайн-кэша
 ; зависимостей (install\cache\ пуст) и ~835 МБ с заполненным кэшем. В git он не
 ; входит (лимит GitHub — 100 МБ на файл), поэтому собирается локально и
 ; выкладывается отдельно от репозитория.
@@ -44,7 +44,7 @@
 ; имени файла-архива (OutFile) и в package.json — переезжать из-за релиза на
 ; новую папку юзеру незачем (8+ ГБ зависимостей лежат внутри).
 Name "MiniMax H3 Studio"
-OutFile "Minimax_H3_Studio_7.1.23_setup.exe"
+OutFile "Minimax_H3_Studio_7.1.24_setup.exe"
 Unicode True
 
 ; (правка 833) LZMA без /SOLID: солидный блок на 1.63 ГБ ломается при
@@ -95,8 +95,8 @@ InstallDirRegKey HKCU "Software\MiniMaxH3Studio" "InstallDir"
 ; версии. VIProductVersion даёт числовую версию (её читает Windows),
 ; VIAddVersionKey — текстовые поля во вкладке «Подробно».
 ; При выпуске новой версии менять APP_VERSION здесь и OutFile выше.
-!define APP_VERSION "7.1.23"
-!define APP_VERSION4 "7.1.23.0"
+!define APP_VERSION "7.1.24"
+!define APP_VERSION4 "7.1.24.0"
 VIProductVersion "${APP_VERSION4}"
 VIFileVersion "${APP_VERSION4}"
 VIAddVersionKey /LANG=${LANG_RUSSIAN} "ProductName" "MiniMax H3 Studio"
