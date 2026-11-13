@@ -16,6 +16,10 @@
 ;
 ; 2) NSIS 3.x: winget install --id NSIS.NSIS -e    (нужен только makensis.exe).
 ;    Из папки сборки:  makensis installer.nsi
+;    (правка 961) Копию .nsi для сборки переносить только побайтово
+;    (Copy-Item, robocopy) и сохранять UTF-8 BOM: Set-Content/Get-Content,
+;    редакторы и архиваторы BOM теряют, а проверка scripts/check-installer.mjs
+;    этого не пропустит. Сборки без BOM уже давали кракозябры в setup.exe.
 ;
 ; 3) Компрессор — SetCompressor lzma БЕЗ /SOLID (важно, см. ниже): солидный
 ;    блок на 1.63 ГБ NSIS 3.13 не распаковывает — установка падает с
@@ -38,6 +42,10 @@
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+; (правка 961) StrStr нужен, чтобы отличить «путь с версией в имени» от
+; нормального пути из реестра.
+!include "StrFunc.nsh"
+${StrStr}
 
 ; (правка 833) Версия УБРАНА из имени программы/папки установки: раньше было
 ; "Minimax_Studio_7.1", теперь просто "Minimax Studio". Версия живёт только в
@@ -55,16 +63,24 @@ SetCompressor lzma
 ; No admin needed: the app must stay user-writable (config, .next, data).
 RequestExecutionLevel user
 
-; (правка 833) ГЛАВНЫЙ ФИКС «путь задваивается».
-; По документации NSIS (Reference/InstallDir): часть строки InstallDir ПОСЛЕ
-; последней "\" доклеивается к выбранной в диалоге папке. То есть юзер жмёт
-; «Обзор», выбирает D:\Minimax Studio (или заходит ВУЖЕ в уже созданную
-; Minimax_Studio_7.1) - и получает D:\Minimax Studio\Minimax_Studio_7.1, а при
-; выборе готовой папки ещё раз - ...\Minimax_Studio_7.1\Minimax_Studio_7.1.
-; Трэил-бэкслэш в конце InstallDir отключает это доклеивание (документированный
-; способ), установщик ставит файлы ровно туда, что написано в поле.
-InstallDir "$PROFILE\Minimax Studio\"
-InstallDirRegKey HKCU "Software\MiniMaxH3Studio" "InstallDir"
+; (правка 961) Дефолтная папка — БЕЗ версии в имени, и имя папки дописывается
+; к выбранному пути автоматически.
+;
+; Как это работает (Reference/InstallDir): компонент InstallDir ПОСЛЕ последней
+; "\" страница выбора папки приклеивает к той папке, которую выбрал юзер:
+;   • выбрал D:\             -> D:\Minimax Studio (папка создастся сама);
+;   • выбрал D:\Games        -> D:\Games\Minimax Studio;
+;   • выбрал уже готовую ...\Minimax Studio -> задвоение отсекает
+;     NormalizeInstDir, в поле остаётся один компонент.
+; Хвостовой "\" в InstallDir НЕ ставим: именно он отключал автодополнение
+; (правка 833), и юзеру приходилось вписывать имя папки руками.
+InstallDir "$PROFILE\Minimax Studio"
+
+; (правка 961) InstallDirRegKey больше не используем: он подставлял путь из
+; реестра как есть, а у обновившихся юзеров там старая папка с версией в
+; названии (C:\...\Minimax_Studio_7.1). Установщик снова ставил в неё, и
+; версия в имени папки «застревала». Путь из реестра читает .onInit — и
+; только если в нём нет версии в имени.
 
 !define MUI_ABORTWARNING
 ; (правка 748) Иконка программы — и для setup.exe, и для ярлыков ниже.
@@ -107,20 +123,57 @@ VIAddVersionKey /LANG=${LANG_RUSSIAN} "FileVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=${LANG_RUSSIAN} "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=${LANG_RUSSIAN} "Comments" "ComfyUI 0.44.0, Python 3.12.10, Electron 44.9.0; офлайн-кэш зависимостей"
 
-; (правка 833) Страховка от «задвоенного» пути, который юзер мог ввести сам
-; (или оставить от старых версий): если путь кончается doubled-компонентом,
-; лишний хвост отрезается. Вызывается NSIS при валидации пути (Browse/Далее).
-Function .onVerifyInstDir
+; (правка 961) Приведение $INSTDIR к «одному компоненту». Функция
+; идемпотентна: зовётся из .onVerifyInstDir и ещё раз перед распаковкой файлов.
+Function NormalizeInstDir
+  ; 1) срезать хвостовой "\" ("D:\Games\" -> "D:\Games"); корень диска
+  ;    ("D:\" = 3 символа) не трогаем - его закрывает шаг 4.
+  StrCpy $R1 "$INSTDIR" "" -1
+  StrCmp $R1 "\" 0 nd_dedupe
+  StrLen $R2 "$INSTDIR"
+  StrCmp $R2 3 nd_dedupe
+  StrCpy $INSTDIR "$INSTDIR" -1
+nd_dedupe:
+  ; 2) "...\Minimax Studio\Minimax Studio" -> "...\Minimax Studio"
+  ;    (страница выбора папки дописывает компонент к уже готовой папке)
   StrCpy $R1 "$INSTDIR" "" -30
-  StrCmp $R1 "\Minimax Studio\Minimax Studio" 0 chk_legacy
-  StrCpy $INSTDIR "$INSTDIR" -14
-  Goto odv_done
-chk_legacy:
-  ; старый вариант: ...\Minimax_Studio_7.1\Minimax_Studio_7.1
+  StrCmp $R1 "\Minimax Studio\Minimax Studio" 0 nd_legacy
+  StrCpy $INSTDIR "$INSTDIR" -15
+nd_legacy:
+  ; 3) задвоение от старых версий: "...\Minimax_Studio_7.1\Minimax_Studio_7.1"
   StrCpy $R1 "$INSTDIR" "" -38
-  StrCmp $R1 "\Minimax_Studio_7.1\Minimax_Studio_7.1" 0 odv_done
-  StrCpy $INSTDIR "$INSTDIR" -18
-odv_done:
+  StrCmp $R1 "\Minimax_Studio_7.1\Minimax_Studio_7.1" 0 nd_root
+  StrCpy $INSTDIR "$INSTDIR" -19
+nd_root:
+  ; 4) корень диска не принимаем. Важно: NSIS хранит его как "C:" — при
+  ;    записи в $INSTDIR хвостовой "\" срезается сам. Иначе файлы вывалились
+  ;    бы прямо в корень диска.
+  StrLen $R2 "$INSTDIR"
+  StrCmp $R2 2 0 nd_done
+  StrCpy $R1 "$INSTDIR" "" -1
+  StrCmp $R1 ":" 0 nd_done
+  StrCpy $INSTDIR "$INSTDIR\Minimax Studio"
+nd_done:
+FunctionEnd
+
+Function .onVerifyInstDir
+  Call NormalizeInstDir
+FunctionEnd
+
+; (правка 961) Путь из реестра подставляем, только если в имени папки нет
+; версии сборки. У обновившихся юзеров там старая папка (..._7.1 или
+; "MiniMax H3 Studio 7") - установщик снова ставил в неё, и версия в названии
+; папки «застревала» навсегда. В таком случае берём дефолт.
+Function .onInit
+  ReadRegStr $R0 HKCU "Software\MiniMaxH3Studio" "InstallDir"
+  StrCmp $R0 "" oi_done
+  ${StrStr} $R1 "$R0" "_7."
+  StrCmp $R1 "" 0 oi_done
+  ${StrStr} $R1 "$R0" "Studio 7"
+  StrCmp $R1 "" 0 oi_done
+  StrCpy $INSTDIR "$R0"
+  Call NormalizeInstDir
+oi_done:
 FunctionEnd
 
 Function FinishShow
@@ -137,6 +190,10 @@ FunctionEnd
 
 Section "Программа" SecMain
   SectionIn RO
+  ; (правка 961) Последняя страховка: нормализуем путь ещё раз прямо перед
+  ; распаковкой — даже если страница выбора папки не зовёт .onVerifyInstDir
+  ; (юзер вписал путь руками и сразу нажал «Установить»).
+  Call NormalizeInstDir
   SetOutPath "$INSTDIR"
   File /r "src\*.*"
 
