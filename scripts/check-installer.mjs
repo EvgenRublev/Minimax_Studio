@@ -179,6 +179,14 @@ const guiPath = join(ROOT, 'install', 'install_gui.ps1')
 const gui = existsSync(guiPath) ? readFileSync(guiPath, 'utf8') : ''
 ok(inst.includes('[switch]$SelfCheck'), 'install.ps1: нет режима -SelfCheck')
 ok(inst.includes('[switch]$Deep'), 'install.ps1: нет режима -Deep (сверка sha256)')
+// (правка 964) окно зависимостей не должно показывать старый «done» и не
+// должно перекачивать ComfyUI/torch, если привезена готовая сборка со штампом.
+ok(gui.includes('Remove-Item -LiteralPath $StatusFile'),
+  'install_gui: старый setup_status.json не сбрасывается перед новой установкой (правка 964)')
+ok(gui.includes('[switch]$SkipComfy'),
+  'install_gui: нет режима -SkipComfy (апдейт заново качает ComfyUI/torch)')
+ok(gui.includes('H3_APP_VERSION'),
+  'install_gui: нет авто-определения готовой сборки для -SkipComfy')
 ok(/function Invoke-SelfCheck/.test(inst), 'install.ps1: нет функции самодиагностики')
 ok(inst.includes('if ($SelfCheck -or $Deep)'), 'install.ps1: самодиагностика не вызывается')
 ok(/nodes\.json/.test(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? ''),

@@ -14,10 +14,13 @@
 # Параметры:
 #   -Root <dir>   папка программы (по умолчанию — родитель install\)
 #   -NoAutoStart  не запускать приложение после установки
+#   -SkipComfy    (правка 964) обновление зависимостей приложения: не трогать
+#                 Python/ComfyUI (иначе апдейт заново качает torch ~3.5 ГБ)
 
 param(
     [string]$Root = '',
-    [switch]$NoAutoStart
+    [switch]$NoAutoStart,
+    [switch]$SkipComfy
 )
 
 # ------------------------------------------------------ single instance ---
@@ -124,6 +127,21 @@ function New-RoundPath {
 if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 $Root = [IO.Path]::GetFullPath($Root)
 if ($Root.Length -gt 3 -and $Root.EndsWith('\')) { $Root = $Root.Substring(0, $Root.Length - 1) }
+
+# (правка 964) Апдейт привозит готовую сборку со штампом версии — значит
+# ComfyUI/Python уже стоят и их не надо переустанавливать. Иначе окно
+# «Зависимости» после каждого обновления заново качало torch (~3.5 ГБ).
+# Чистая установка (штампа нет) по-прежнему ставит всё целиком.
+if (-not $PSBoundParameters.ContainsKey('SkipComfy')) {
+    try {
+        $stampPath = Join-Path $Root '.next\H3_APP_VERSION'
+        if (Test-Path -LiteralPath $stampPath) {
+            $stamp = (Get-Content -LiteralPath $stampPath -Raw -Encoding UTF8).Trim()
+            $pkgVer = (Get-Content -LiteralPath (Join-Path $Root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
+            if ($stamp -and $stamp -eq $pkgVer) { $SkipComfy = $true }
+        }
+    } catch { }
+}
 
 $Cache = Join-Path $Root '.install-cache'
 $StatusFile = Join-Path $Cache 'setup_status.json'
@@ -805,6 +823,13 @@ function Start-Install {
     }
     try {
         $argLine = '-NoProfile -NoLogo -ExecutionPolicy Bypass -File "' + $InstallPs + '" -Root "' + $Root + '" -NoPause'
+        if ($SkipComfy) { $argLine += ' -SkipComfy' }
+        # (правка 964) Перед новым запуском убираем ПРОШЛЫЙ setup_status.json:
+        # иначе окно показывало старое «Готово, шаг 9/9» из предыдущей установки,
+        # пока новый install.ps1 в это время качал torch. «Запустить программу»
+        # появлялось поверх реально идущей установки.
+        Remove-Item -LiteralPath $StatusFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ($StatusFile + '.tmp') -Force -ErrorAction SilentlyContinue
         # (правка 789) stderr ребёнка в файл: без него вывод упавшего
         # install.ps1 пропадал в скрытом окне, и «без отчёта» было непонятно.
         try { New-Item -ItemType Directory -Force -Path $Cache | Out-Null } catch { }
@@ -884,6 +909,11 @@ function Update-Ui {
             }
         }
         'done' {
+            # (правка 964) «done» от прошлой установки не должен выигрывать у
+            # живого дочернего процесса: пока child не завершился, показываем
+            # прогресс, а не «Готово» (иначе кнопка запуска появлялась во время
+            # скачивания пакетов).
+            if ($script:child -and -not $script:child.HasExited) { return }
             $script:pct = 100
             $status.Text = 'Готово - зависимости установлены'
             $status.ForeColor = $C_OK
