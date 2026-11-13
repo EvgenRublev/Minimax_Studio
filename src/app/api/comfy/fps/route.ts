@@ -11,7 +11,8 @@ import { buildFpsWorkflow } from '@/lib/comfy/fps-template'
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
 import { readPromptChain, readMetaImageRefs } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
-import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
+import { getVideoFormatSettings } from '@/lib/video-format-server'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 386)
 
 /**
  * POST /api/comfy/fps — frame interpolation (VFI): RIFE VFI / FILM VFI. (правка 268)
@@ -37,6 +38,8 @@ import { getVideoFormatSettings } from '@/lib/video-format-server' // (прав�
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as {
       sourceFilename?: string
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
-      return NextResponse.json({ error: 'sourceFilename (или inputSource) обязателен' }, { status: 400 })
+      return NextResponse.json({ error: st("sourceFilename (или inputSource) обязателен") }, { status: 400 })
     }
 
     const quickBlock = assertGenerationAllowed()
@@ -107,14 +110,14 @@ export async function POST(req: NextRequest) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
-        return NextResponse.json({ error: `Файл не найден в input: ${inName}` }, { status: 404 })
+        return NextResponse.json({ error: st("Файл не найден в input: {{p1}}", { p1: inName }) }, { status: 404 })
       }
       let probe: { width: number; height: number; frames: number; durationSec: number; fps?: number }
       try {
         probe = await probeVideoFile(inPath)
       } catch (e) {
         return NextResponse.json(
-          { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+          { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
       }
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
     }
     if (!existsSync(sourcePath)) {
-      return NextResponse.json({ error: `Файл не найден: ${safeName}` }, { status: 404 })
+      return NextResponse.json({ error: st("Файл не найден: {{p1}}", { p1: safeName }) }, { status: 404 })
     }
 
     await fs.mkdir(cfg.inputDir, { recursive: true })
@@ -189,7 +192,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       await fs.unlink(destPath).catch(() => {})
       return NextResponse.json(
-        { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+        { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
         { status: 400 },
       )
     }

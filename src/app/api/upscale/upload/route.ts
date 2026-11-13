@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createWriteStream, mkdirSync, renameSync, unlinkSync } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) POST /api/upscale/upload
@@ -193,6 +194,8 @@ async function streamMultipartFile(
 }
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   let destPath = ''
   try {
     const dir = path.join(process.cwd(), 'data', 'upscale-input')
@@ -229,6 +232,6 @@ export async function POST(req: NextRequest) {
     }
     const msg = err instanceof Error ? err.message : String(err)
     const status = err instanceof UploadError ? 400 : 500
-    return NextResponse.json({ error: `Ошибка загрузки: ${msg}` }, { status })
+    return NextResponse.json({ error: st("Ошибка загрузки: {{p1}}", { p1: msg }) }, { status })
   }
 }

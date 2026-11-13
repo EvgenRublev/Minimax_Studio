@@ -85,7 +85,7 @@ function AboutVersion() {
       .catch(() => { /* сервер недоступен — метка останется прочерком */ })
   }, [])
   return (
-    <div className="text-xs text-muted-foreground">{ver ? `Версия ${ver}` : tt("Версия …")}</div>
+    <div className="text-xs text-muted-foreground">{ver ? tt("Версия {{p1}}", { p1: ver }) : tt("Версия …")}</div>
   )
 }
 import { Label } from '@/components/ui/label'
@@ -458,7 +458,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         if (failed) {
           toast.error(tt("Полный сброс выполнен частично"), {
-            description: `Не удалось: ${reason}. Проверьте, запущена ли программа, и повторите.`,
+            description: tt("Не удалось: {{p1}}. Проверьте, запущена ли программа, и повторите.", { p1: reason }),
           })
           return
         }
@@ -549,7 +549,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           useGenStore.setState((s) => ({
             video: { ...s.video, startFrame: null, endFrame: null },
           }))
-          toast.success(`Кэш очищен (удалено: ${data.deleted})`)
+          toast.success(tt("Кэш очищен (удалено: {{p1}})", { p1: data.deleted }))
         } else {
           toast.error(data.error || 'Ошибка очистки кэша')
         }
@@ -568,7 +568,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           // (правка 134) Галерея: сигнал на перечитывание — видео удалены на
           // бэкенде, галерея сразу опустеет (не дожидаясь переключения вкладок).
           useGalleryRefresh.getState().bump()
-          toast.success(`Контент удалён (удалено: ${data.deleted})`)
+          toast.success(tt("Контент удалён (удалено: {{p1}})", { p1: data.deleted }))
         } else {
           toast.error(data.error || 'Ошибка удаления контента')
         }
@@ -607,22 +607,22 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               влезать (узкое окно/новая вкладка) — min-width:auto удержит
               читаемость, сработает overflow-x-auto. */}
           <div className="flex items-center gap-0.5 p-1 rounded-lg bg-[var(--surface-2)]/60 border border-border mb-2 overflow-x-auto">
-            {TABS.map((t) => (
+            {TABS.map((item) => (
               <button
-                key={t.id}
+                key={item.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => setTab(item.id)}
                 className={cn(
                   // (правка 120) whitespace-nowrap: «Внешний вид» — двухсловное имя,
                   // без запрета переноса лезло в две строки (у остальных слов переноса нет)
                   'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap',
-                  tab === t.id
+                  tab === item.id
                     ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
                     : 'text-muted-foreground border border-transparent hover:text-foreground',
                 )}
               >
-                <span className="shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5">{t.icon}</span>
-                {t.label}
+                <span className="shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5">{item.icon}</span>
+                {tt(item.label)}
               </button>
             ))}
           </div>
@@ -890,7 +890,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </div>
                 <button
                   type="button"
-                  title={llmVideoVision ? 'Выключить видение видео' : 'Включить видение видео'}
+                  title={llmVideoVision ? tt("Выключить видение видео") : tt("Включить видение видео")}
                   onClick={() => setLlmVideoVision(!llmVideoVision)}
                   className={cn(
                     'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
@@ -1514,14 +1514,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             </div>
             {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}
             <p className="text-xs text-muted-foreground whitespace-pre-line leading-relaxed">
-              {ABOUT_TEXT}
+              {tt(ABOUT_TEXT)}
             </p>
 
             {/* (правка 484) Ссылки автора */}
             <div className="space-y-1.5">
               {ABOUT_LINKS.map((l) => (
                 <div key={l.url} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-muted-foreground shrink-0">{l.label}:</span>
+                  <span className="text-muted-foreground shrink-0">{tt(l.label)}:</span>
                   <a
                     href={l.url}
                     target="_blank"
@@ -1530,7 +1530,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   >
                     {l.url}
                   </a>
-                  {l.hint && <span className="text-muted-foreground/60">({l.hint})</span>}
+                  {l.hint && <span className="text-muted-foreground/60">({tt(l.hint)})</span>}
                 </div>
               ))}
             </div>
@@ -1539,9 +1539,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="border-t border-border/50 pt-3 space-y-1.5">
               <div className="text-xs font-medium text-muted-foreground">{tt("Техническая информация")}</div>
               {ABOUT_TECH.map((t) => (
-                <div key={t.label} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-muted-foreground/70 shrink-0">{t.label}:</span>
-                  <span className="text-muted-foreground">{t.value}</span>
+                <div key={tt(t.label)} className="flex items-baseline gap-2 text-xs">
+                  <span className="text-muted-foreground/70 shrink-0">{tt(t.label)}:</span>
+                  <span className="text-muted-foreground">{tt(t.value)}</span>
                 </div>
               ))}
             </div>
@@ -1635,7 +1635,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-400">
               <AlertTriangleIcon className="w-5 h-5" />
-              {CONFIRM[confirmAction].title}
+              {tt(CONFIRM[confirmAction].title)}
             </DialogTitle>
             <DialogDescription>
               {CONFIRM[confirmAction].desc}
@@ -1727,7 +1727,7 @@ function ExtraModelPathsPanel() {
       setDirty(true)
       toast.success(
         found.length > 1
-          ? `Добавлено категорий: ${found.length} (структура ComfyUI)`
+          ? tt("Добавлено категорий: {{p1}} (структура ComfyUI)", { p1: found.length })
           : tt("Папка добавлена"),
       )
     } catch {
@@ -1930,7 +1930,7 @@ function ManualDownloadPanel() {
   const copy = async (text: string, what: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      toast.success(`${what} скопирован`)
+      toast.success(tt("{{p1}} скопирован", { p1: what }))
     } catch {
       toast.error(tt("Не удалось скопировать"))
     }
@@ -2003,8 +2003,8 @@ function ManualDownloadPanel() {
                 className="p-2 rounded-md bg-[var(--surface-2)]/60 border border-border space-y-1"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-foreground/90 truncate" title={m.label}>
-                    {m.label}
+                  <span className="text-xs text-foreground/90 truncate" title={tt(m.label)}>
+                    {tt(m.label)}
                   </span>
                   <Badge variant="secondary" className="text-[10px] shrink-0">{m.sizeLabel}</Badge>
                 </div>

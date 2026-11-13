@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const COMFY_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/+$/, '')
 
@@ -8,6 +9,8 @@ const COMFY_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/
  * This version of ComfyUI expects: { unload_models: true, free_memory: true }
  */
 export async function POST() {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const res = await fetch(`${COMFY_URL}/free`, {
       method: 'POST',
@@ -22,6 +25,6 @@ export async function POST() {
     return NextResponse.json({ ok: true })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: `Не удалось связаться с ComfyUI: ${msg}` }, { status: 502 })
+    return NextResponse.json({ error: st("Не удалось связаться с ComfyUI: {{p1}}", { p1: msg }) }, { status: 502 })
   }
 }

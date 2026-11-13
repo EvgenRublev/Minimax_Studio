@@ -12,6 +12,7 @@
  */
 import { toast } from 'sonner'
 import { uploadInputFile } from './upload'
+import { t } from '@/lib/i18n' // (правка 955)
 
 /** Нормализованный кроп-прямоугольник (0..1 от размера картинки). */
 export interface CropRect {
@@ -128,8 +129,8 @@ export async function applyCropToRef(
 ): Promise<void> {
   try {
     onPatch(await applyRefCrop(ref, rect, blob))
-    toast.success('Кроп применён')
+    toast.success(t("Кроп применён"))
   } catch (err) {
-    toast.error(err instanceof Error ? err.message : 'Не удалось применить кроп')
+    toast.error(err instanceof Error ? err.message : t("Не удалось применить кроп"))
   }
 }

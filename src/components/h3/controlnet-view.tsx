@@ -221,7 +221,7 @@ export function ControlNetView() {
     )
     if (file) {
       setSourceSafe(file as ControlNetSource)
-      toast.success(`Источник: ${file.filename}`)
+      toast.success(tt("Источник: {{p1}}", { p1: file.filename }))
     } else {
       setSourceSafe({
         url: `/api/comfy/file?filename=${encodeURIComponent(storeTarget.filename)}&subfolder=${encodeURIComponent(storeTarget.subfolder)}`,
@@ -249,7 +249,7 @@ export function ControlNetView() {
         subfolder: '',
         inputSource: path,
       })
-      toast.success(`Источник: ${file.name}`)
+      toast.success(tt("Источник: {{p1}}", { p1: file.name }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tt("Ошибка загрузки видео"))
     } finally {
@@ -297,7 +297,7 @@ export function ControlNetView() {
     // мог бы устареть в момент длительной загрузки).
     const room = 9 - useControlNetTarget.getState().refImages.length
     if (room <= 0) { toast.error(tt("Максимум 9 картинок-референсов")); return }
-    if (images.length > room) toast.error(`Максимум 9 референсов — добавлено ${room}`)
+    if (images.length > room) toast.error(tt("Максимум 9 референсов — добавлено {{p1}}", { p1: room }))
     setUploadingRefs(true)
     try {
       for (const raw of images.slice(0, room)) {
@@ -478,7 +478,7 @@ export function ControlNetView() {
           filename: parsed.filename ?? '',
           subfolder: parsed.subfolder ?? '',
         })
-        toast.success(`Источник: ${parsed.filename}`)
+        toast.success(tt("Источник: {{p1}}", { p1: parsed.filename }))
       } catch { toast.error(tt("Не удалось прочитать перетащенное видео")) }
       return
     }
@@ -539,7 +539,7 @@ export function ControlNetView() {
                   <button
                     key={v}
                     type="button"
-                    title={v === 'map' && params.controlType === 'direct' ? 'Недоступно в режиме «Прямой»' : hint}
+                    title={v === 'map' && params.controlType === 'direct' ? tt("Недоступно в режиме «Прямой»") : hint}
                     disabled={mapDisabled}
                     onClick={() => patchParams(
                       v === 'map'
@@ -734,7 +734,7 @@ export function ControlNetView() {
                       <button
                         onClick={() => removeRef(r.id)}
                         className="absolute right-0.5 top-0.5 p-0.5 rounded bg-black/70 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title={`Удалить (${r.name})`}
+                        title={tt("Удалить ({{p1}})", { p1: r.name })}
                       >
                         <XIcon className="w-3 h-3" />
                       </button>
@@ -917,7 +917,7 @@ export function ControlNetView() {
                       {/* Шаги (правка 802: один слайдер — сплита сигм нет) */}
                       <div className="space-y-1">
                         <SettingSlider
-                          label={isDraft ? 'Шаги драфта' : 'Шаги (Pass 1)'}
+                          label={isDraft ? tt("Шаги драфта") : tt("Шаги (Pass 1)")}
                           labelTitle={isDraft
                             ? 'Сколько шагов делает модель, рисуя видео. Стандарт — 6: надёжно сходится; 4 — быстрее, но на части сюжетов появляется тряска/сетка. Ниже 4 смысла нет.'
                             : 'Сколько шагов делает черновой проход (low-res). Стандарт — 6; 4 — быстрее, но возможен тряска/сетка. Ниже 4 смысла нет.'}
@@ -958,7 +958,7 @@ export function ControlNetView() {
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
-                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              <SelectItem key={o.value} value={o.value}>{tt(o.label)}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -981,7 +981,7 @@ export function ControlNetView() {
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SCHEDULER_OPTIONS.map((o) => (
-                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              <SelectItem key={o.value} value={o.value}>{tt(o.label)}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1046,7 +1046,7 @@ export function ControlNetView() {
                             </SelectTrigger>
                             <SelectContent className="bg-[var(--surface-3)] border-border">
                               {SAMPLER_OPTIONS.map((o) => (
-                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                <SelectItem key={o.value} value={o.value}>{tt(o.label)}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -1083,8 +1083,8 @@ export function ControlNetView() {
                     busy && 'opacity-50 pointer-events-none',
                   )}
                   title={outputFolder
-                    ? `Папка результата: ${outputFolder}`
-                    : 'Папка результата: общая папка output'}
+                    ? tt("Папка результата: {{p1}}", { p1: outputFolder })
+                    : tt("Папка результата: общая папка output")}
                 >
                   <FolderIcon className="w-3.5 h-3.5" />
                   <span className="flex-1 text-left truncate">{outputFolder || 'Общая папка'}</span>
@@ -1344,7 +1344,7 @@ export function ControlNetView() {
                         ev.stopPropagation()
                         toggleHistoryFavorite(e.id)
                       }}
-                      title={e.favorite ? 'Убрать из избранного' : 'В избранное'}
+                      title={e.favorite ? tt("Убрать из избранного") : tt("В избранное")}
                       className={cn(
                         'shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center transition-colors',
                         e.favorite ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-amber-400',
@@ -1353,7 +1353,7 @@ export function ControlNetView() {
                       <StarIcon className="w-3 h-3" fill={e.favorite ? 'currentColor' : 'none'} />
                     </button>
                     <p className="flex-1 min-w-0 text-xs text-foreground/90 leading-snug line-clamp-2 break-words">
-                      {e.text}
+                      {tt(e.text)}
                     </p>
                     <button
                       type="button"
@@ -1383,13 +1383,13 @@ export function ControlNetView() {
                 </div>
                 {EXAMPLES.map((ex) => (
                   <div
-                    key={ex.title}
+                    key={tt(ex.title)}
                     className="px-2.5 py-1.5 hover:bg-white/5 cursor-pointer"
                     onClick={() => applyExample(ex.text)}
                   >
-                    <p className="text-xs font-medium text-foreground">{ex.title}</p>
+                    <p className="text-xs font-medium text-foreground">{tt(ex.title)}</p>
                     <p className="text-[10px] text-muted-foreground/80 line-clamp-2 leading-snug break-words">
-                      {ex.text}
+                      {tt(ex.text)}
                     </p>
                   </div>
                 ))}

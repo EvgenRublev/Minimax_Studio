@@ -3461,7 +3461,7 @@ export function MontageView() {
           trimRaf = requestAnimationFrame(() => {
             trimRaf = 0
             setTrim(shot.key, side, pendingNv, dur)
-            setTrimBadge({ x: bx, y: by, text: `${(Math.max(0.1, en - st) / sp).toFixed(2)} с` })
+            setTrimBadge({ x: bx, y: by, text: tt("{{p1}} с", { p1: (Math.max(0.1, en - st) / sp).toFixed(2) }) })
           })
         }
       }
@@ -3572,7 +3572,7 @@ export function MontageView() {
           setTrimBadge({
             x: clientX,
             y: clientY,
-            text: `→ V${vTrack + 1} · ${at.toFixed(2)} с`,
+            text: tt("→ V{{p1}} · {{p2}} с", { p1: vTrack + 1, p2: at.toFixed(2) }),
           })
           return
         }
@@ -3625,7 +3625,7 @@ export function MontageView() {
         setTrimBadge({
           x: clientX,
           y: clientY,
-          text: `${actualDragStart.toFixed(2)} с${actualDragGap >= 0.02 ? ` (пауза +${actualDragGap.toFixed(2)} с)` : ' (встык)'}${blocked ? ' · упор' : ''}`,
+          text: tt("{{p1}} с{{p2}}{{p3}}", { p1: actualDragStart.toFixed(2), p2: actualDragGap >= 0.02 ? ` (пауза +${actualDragGap.toFixed(2)} с)` : ' (встык)', p3: blocked ? ' · упор' : '' }),
         })
       }
 
@@ -3799,12 +3799,12 @@ export function MontageView() {
         // новый ряд. В этих зонах слой пока не двигаем, только показываем бейдж.
         if (kind === 'layer') {
           if (isOverBase(clientY)) {
-            setTrimBadge({ x: clientX, y: clientY, text: `→ V1 · ${want.toFixed(2)} с` })
+            setTrimBadge({ x: clientX, y: clientY, text: tt("→ V1 · {{p1}} с", { p1: want.toFixed(2) }) })
             return
           }
           const nt = newTopTrack(clientY)
           if (nt != null) {
-            setTrimBadge({ x: clientX, y: clientY, text: `→ V${nt + 1} · ${want.toFixed(2)} с` })
+            setTrimBadge({ x: clientX, y: clientY, text: tt("→ V{{p1}} · {{p2}} с", { p1: nt + 1, p2: want.toFixed(2) }) })
             return
           }
         }
@@ -3812,7 +3812,7 @@ export function MontageView() {
         if (kind === 'audio') {
           const nt = newAudioTrack(clientY)
           if (nt != null) {
-            setTrimBadge({ x: clientX, y: clientY, text: `→ A${nt} · ${want.toFixed(2)} с` })
+            setTrimBadge({ x: clientX, y: clientY, text: tt("→ A{{p1}} · {{p2}} с", { p1: nt, p2: want.toFixed(2) }) })
             return
           }
         }
@@ -3824,7 +3824,7 @@ export function MontageView() {
         curAt = +want.toFixed(3)
         curTrack = Math.min(MAX_TRACKS, Math.max(1, track))
         setClip(curAt, curTrack)
-        setTrimBadge({ x: clientX, y: clientY, text: `${curAt.toFixed(2)} с · ${kind === 'layer' ? 'V' : 'A'}${curTrack}` })
+        setTrimBadge({ x: clientX, y: clientY, text: tt("{{p1}} с · {{p2}}{{p3}}", { p1: curAt.toFixed(2), p2: kind === 'layer' ? 'V' : 'A', p3: curTrack }) })
       }
       const onMove = (ev: PointerEvent) => {
         latestX = ev.clientX
@@ -3969,7 +3969,7 @@ export function MontageView() {
             raf = 0
             commit()
             const outLen = dur > 0 ? (dur - ts - te) / sp : 0
-            setTrimBadge({ x: bx, y: by, text: dur > 0 ? `${outLen.toFixed(2)} с` : '…' })
+            setTrimBadge({ x: bx, y: by, text: dur > 0 ? tt("{{p1}} с", { p1: outLen.toFixed(2) }) : '…' })
           })
         }
       }
@@ -4195,7 +4195,7 @@ export function MontageView() {
                           const active = seqSet.w === s.w && seqSet.h === s.h
                           return (
                             <button
-                              key={s.label}
+                              key={tt(s.label)}
                               className={cn(
                                 'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors',
                                 active
@@ -4204,7 +4204,7 @@ export function MontageView() {
                               )}
                               onClick={() => setSeqSet((q) => ({ ...q, w: s.w, h: s.h }))}
                             >
-                              <span>{s.label}</span>
+                              <span>{tt(s.label)}</span>
                               {active && <span className="h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />}
                             </button>
                           )
@@ -4698,7 +4698,7 @@ export function MontageView() {
                 onClick={() => {
                   if (layerRows.length > 0) removeVideoTrack(layerRows[0])
                 }}
-                title={layerRows.length > 0 ? `Удалить верхнюю видеодорожку V${layerRows[0] + 1}` : 'Нет дополнительных видеодорожек для удаления'}
+                title={layerRows.length > 0 ? tt("Удалить верхнюю видеодорожку V{{p1}}", { p1: layerRows[0] + 1 }) : tt("Нет дополнительных видеодорожек для удаления")}
               >
                 <span className="font-mono text-[11px] font-semibold">V−</span>
               </button>
@@ -4726,7 +4726,7 @@ export function MontageView() {
                 onClick={() => {
                   if (audioRows.length > 0) removeAudioTrack(audioRows[audioRows.length - 1])
                 }}
-                title={audioRows.length > 0 ? `Удалить аудиодорожку A${audioRows[audioRows.length - 1]}` : 'Нет аудиодорожек для удаления'}
+                title={audioRows.length > 0 ? tt("Удалить аудиодорожку A{{p1}}", { p1: audioRows[audioRows.length - 1] }) : tt("Нет аудиодорожек для удаления")}
               >
                 <span className="font-mono text-[11px] font-semibold">A−</span>
               </button>
@@ -4826,7 +4826,7 @@ export function MontageView() {
                   muted ? 'text-muted-foreground/50' : 'text-muted-foreground hover:text-foreground',
                 )}
                 onClick={() => setMuted((v) => !v)}
-                title={muted ? 'Включить звук превью' : 'Выключить звук превью'}
+                title={muted ? tt("Включить звук превью") : tt("Выключить звук превью")}
               >
                 {muted ? <VolumeXIcon className="h-3.5 w-3.5" /> : <Volume2Icon className="h-3.5 w-3.5" />}
               </button>
@@ -4890,7 +4890,7 @@ export function MontageView() {
             <button
               className="rounded-lg border border-border bg-[var(--surface-2)] p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
               onClick={toggleFullscreen}
-              title={isFs ? 'Выйти из полноэкранного режима (F)' : 'Просмотр на весь экран (F)'}
+              title={isFs ? tt("Выйти из полноэкранного режима (F)") : tt("Просмотр на весь экран (F)")}
             >
               {isFs ? <MinimizeIcon className="h-3.5 w-3.5" /> : <MaximizeIcon className="h-3.5 w-3.5" />}
             </button>
@@ -4968,7 +4968,7 @@ export function MontageView() {
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
-                  title={`Дорожка V${t + 1}: перетащите сюда файл из галереи`}
+                  title={tt("Дорожка V{{p1}}: перетащите сюда файл из галереи", { p1: t + 1 })}
                 >
                   <div className="absolute left-1.5 top-1 z-20 flex items-center gap-0.5 rounded-md border border-border/60 bg-[var(--surface-2)]/90 px-1.5 py-0.5 shadow-sm backdrop-blur-sm">
                     <span className="pointer-events-none font-mono text-[9px] font-semibold text-muted-foreground">
@@ -4983,7 +4983,7 @@ export function MontageView() {
                         removeVideoTrack(t)
                       }}
                       className="rounded px-0.5 font-mono text-[10px] leading-none text-muted-foreground hover:bg-red-500/30 hover:text-red-300"
-                      title={`Удалить дорожку V${t + 1}`}
+                      title={tt("Удалить дорожку V{{p1}}", { p1: t + 1 })}
                     >
                       ×
                     </button>
@@ -5015,7 +5015,7 @@ export function MontageView() {
                           backgroundPosition: 'center',
                           backgroundRepeat: 'no-repeat',
                         }}
-                        title={`${l.name} · дорожка V${t + 1} · старт ${l.at.toFixed(2)} с · длина ${layerLen(l).toFixed(1)} с${l.muted ? ' · звук выключен' : ` · громкость ${Math.round((l.vol ?? 1) * 100)}%`}`}
+                        title={tt("{{p1}} · дорожка V{{p2}} · старт {{p3}} с · длина {{p4}} с{{p5}}", { p1: l.name, p2: t + 1, p3: l.at.toFixed(2), p4: layerLen(l).toFixed(1), p5: l.muted ? ' · звук выключен' : ` · громкость ${Math.round((l.vol ?? 1) * 100)}%` })}
                       >
                         {!strip && (
                           <img
@@ -5116,7 +5116,7 @@ export function MontageView() {
                       removeVideoTrack(0)
                     }}
                     className="rounded px-0.5 font-mono text-[10px] leading-none text-muted-foreground hover:bg-red-500/30 hover:text-red-300"
-                    title={layerRows.length > 0 ? 'Удалить дорожку V1' : 'Очистить дорожку V1'}
+                    title={layerRows.length > 0 ? tt("Удалить дорожку V1") : tt("Очистить дорожку V1")}
                   >
                     ×
                   </button>
@@ -5149,7 +5149,7 @@ export function MontageView() {
                       backgroundPosition: 'center',
                       backgroundRepeat: 'no-repeat',
                     }}
-                    title={`${row.shot.name} · старт ${row.offset.toFixed(2)} с · длина ${row.len.toFixed(1)} с${row.gap >= 0.02 ? ` · пауза перед клипом ${row.gap.toFixed(2)} с` : ''}`}
+                    title={tt("{{p1}} · старт {{p2}} с · длина {{p3}} с{{p4}}", { p1: row.shot.name, p2: row.offset.toFixed(2), p3: row.len.toFixed(1), p4: row.gap >= 0.02 ? ` · пауза перед клипом ${row.gap.toFixed(2)} с` : '' })}
                   >
                     {!strip && (
                       <img
@@ -5243,7 +5243,7 @@ export function MontageView() {
                   onPointerDown={(e) => {
                     if ((e.target as HTMLElement | null) === e.currentTarget) startScrub(e)
                   }}
-                  title={`Аудиодорожка A${t}: перетащите сюда аудиофайл из проводника`}
+                  title={tt("Аудиодорожка A{{p1}}: перетащите сюда аудиофайл из проводника", { p1: t })}
                 >
                   <div className="absolute left-1.5 top-1 z-20 flex items-center gap-0.5 rounded-md border border-emerald-500/30 bg-[var(--surface-2)]/90 px-1.5 py-0.5 shadow-sm backdrop-blur-sm">
                     <span className="pointer-events-none font-mono text-[9px] font-semibold text-emerald-400">
@@ -5258,7 +5258,7 @@ export function MontageView() {
                         removeAudioTrack(t)
                       }}
                       className="rounded px-0.5 font-mono text-[10px] leading-none text-emerald-400/70 hover:bg-red-500/30 hover:text-red-300"
-                      title={`Удалить аудиодорожку A${t}`}
+                      title={tt("Удалить аудиодорожку A{{p1}}", { p1: t })}
                     >
                       ×
                     </button>
@@ -5278,7 +5278,7 @@ export function MontageView() {
                           a.muted && 'opacity-40',
                         )}
                         style={{ left: `${a.at * pps}px`, width: `${w}px` }}
-                        title={`${a.name} · дорожка A${t} · старт ${a.at.toFixed(2)} с · длина ${audioLen(a).toFixed(1)} с · ${Math.round(a.vol)}%`}
+                        title={tt("{{p1}} · дорожка A{{p2}} · старт {{p3}} с · длина {{p4}} с · {{p5}}%", { p1: a.name, p2: t, p3: a.at.toFixed(2), p4: audioLen(a).toFixed(1), p5: Math.round(a.vol) })}
                       >
                         <div className="pointer-events-none absolute inset-0 flex items-center px-2 opacity-25">
                           <MusicIcon className="h-3 w-3 shrink-0 text-emerald-200" />
@@ -5432,7 +5432,7 @@ export function MontageView() {
                     onDragEnd={() => { dragRef.current = null; setDropIdx(null) }}
                     onClick={() => addShot(f)}
                     className="group cursor-grab overflow-hidden rounded-lg border border-border bg-[var(--surface-2)] transition-all hover:-translate-y-0.5 hover:border-[#A78BFA]/70 hover:shadow-[0_4px_14px_rgba(0,0,0,0.25)] active:cursor-grabbing"
-                    title={`${f.filename} — перетащите на таймлайн`}
+                    title={tt("{{p1}} — перетащите на таймлайн", { p1: f.filename })}
                   >
                     <div className="relative aspect-video overflow-hidden bg-black">
                       <img
@@ -5474,7 +5474,7 @@ export function MontageView() {
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{tt("В кадре:")}{' '} <strong className="text-foreground/90">{layerLen(selectedLayer).toFixed(2)} {' '}{tt("с")}</strong></span>
-                    <span>{tt("Исходник:")}{' '} {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
+                    <span>{tt("Исходник:")}{' '} {selectedLayer.duration ? tt("{{p1}} с", { p1: selectedLayer.duration.toFixed(2) }) : '…'}</span>
                   </div>
                   <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
                     {tt("Слой V")}{selectedLayer.track + 1} {' '}{tt("лежит над базовой дорожкой; его звук микшируется с базой. Тяните клип по ряду или между рядами, за края — подрезка.")}
@@ -5691,7 +5691,7 @@ export function MontageView() {
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{tt("В сборке:")}{' '} <strong className="text-foreground/90">{audioLen(selectedAudio).toFixed(2)} {' '}{tt("с")}</strong></span>
-                    <span>{tt("Файл:")}{' '} {selectedAudio.duration ? `${selectedAudio.duration.toFixed(2)} с` : '…'}</span>
+                    <span>{tt("Файл:")}{' '} {selectedAudio.duration ? tt("{{p1}} с", { p1: selectedAudio.duration.toFixed(2) }) : '…'}</span>
                   </div>
                   <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
                     {tt("Звук дорожки A")}{selectedAudio.track} {' '}{tt("микшируется с базой без нормализации.")}
@@ -5836,7 +5836,7 @@ export function MontageView() {
                         <span>
                           {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} {' '}{tt("с")}
                         </span>
-                        <span>{selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
+                        <span>{selected.duration ? tt("{{p1}} с", { p1: selected.duration.toFixed(2) }) : '…'}</span>
                       </div>
                     </div>
                   </div>
@@ -5848,7 +5848,7 @@ export function MontageView() {
                           {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} {' '}{tt("с")}
                         </strong>
                       </span>
-                      <span>{tt("Исходник:")}{' '} {selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
+                      <span>{tt("Исходник:")}{' '} {selected.duration ? tt("{{p1}} с", { p1: selected.duration.toFixed(2) }) : '…'}</span>
                     </div>
                     {(selected.gap ?? 0) >= 0.02 && (
                       <div className="flex items-center justify-between rounded bg-[#7C3AED]/15 px-2 py-1 text-[11px] text-[#A78BFA]">
@@ -6104,8 +6104,8 @@ export function MontageView() {
                         )}
                         title={
                           isByp(k)
-                            ? `Включить эффект «${titleLabel}» (сейчас в байпасе — До)`
-                            : `Байпас эффекта «${titleLabel}» (сравнить До/После)`
+                            ? tt("Включить эффект «{{p1}}» (сейчас в байпасе — До)", { p1: titleLabel })
+                            : tt("Байпас эффекта «{{p1}}» (сравнить До/После)", { p1: titleLabel })
                         }
                       >
                         {isByp(k) ? <EyeOffIcon className="h-3 w-3" /> : <EyeIcon className="h-3 w-3" />}
@@ -6323,7 +6323,7 @@ export function MontageView() {
                                         setChannelPts(next)
                                       }}
                                     >
-                                      <title>{`${pointLabels[idx]}: X=${Math.round(pxNorm * 100)}%, Y=${Math.round(pyNorm * 100)}% (тяните в любую сторону, двойной клик — сброс)`}</title>
+                                      <title>{tt("{{p1}}: X={{p2}}%, Y={{p3}}% (тяните в любую сторону, двойной клик — сброс)", { p1: pointLabels[idx], p2: Math.round(pxNorm * 100), p3: Math.round(pyNorm * 100) })}</title>
                                     </circle>
                                   )
                                 })}
@@ -6703,7 +6703,7 @@ export function MontageView() {
           className="pointer-events-none fixed z-[10000] rounded border border-[#A78BFA] bg-black/80 px-1.5 py-0.5 font-mono text-[11px] text-white"
           style={{ left: trimBadge.x + 14, top: trimBadge.y + 14 }}
         >
-          {trimBadge.text}
+          {tt(trimBadge.text)}
         </div>
       )}
     </div>

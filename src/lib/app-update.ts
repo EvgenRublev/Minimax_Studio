@@ -38,6 +38,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
+import { st } from '@/lib/i18n/server' // (правка 955)
 
 const ROOT = process.cwd()
 const UPDATE_DIR = join(ROOT, '.update')
@@ -268,7 +269,7 @@ export function cancelDownload(): { ok: boolean } {
 }
 
 export async function startUpdateDownload(info: UpdateInfo): Promise<{ ok: boolean; error?: string }> {
-  if (dlState?.status === 'downloading') return { ok: false, error: 'Загрузка уже идёт' }
+  if (dlState?.status === 'downloading') return { ok: false, error: st("Загрузка уже идёт") }
 
   mkdirSync(UPDATE_DIR, { recursive: true })
 
@@ -280,7 +281,7 @@ export async function startUpdateDownload(info: UpdateInfo): Promise<{ ok: boole
     if (free < needed) {
       return {
         ok: false,
-        error: `Недостаточно места на диске: свободно ${(Number(free) / 1024 ** 3).toFixed(1)} ГБ, нужно ~${(Number(needed) / 1024 ** 3).toFixed(1)} ГБ`,
+        error: st("Недостаточно места на диске: свободно {{p1}} ГБ, нужно ~{{p2}} ГБ", { p1: (Number(free) / 1024 ** 3).toFixed(1), p2: (Number(needed) / 1024 ** 3).toFixed(1) }),
       }
     }
   } catch { /* statfs недоступен — не блокируем */ }
@@ -539,13 +540,13 @@ async function doPrepareApply(): Promise<{ ok: boolean; error?: string; armed?: 
     // Staging потерян (ручная чистка и т.п.). Без zip раскладывать нечего.
     try { unlinkSync(ARMED) } catch { /* ignore */ }
     if (!existsSync(ZIP_PATH)) {
-      return { ok: false, error: 'Подготовленные файлы обновления потеряны — скачайте обновление заново' }
+      return { ok: false, error: st("Подготовленные файлы обновления потеряны — скачайте обновление заново") }
     }
   }
 
   const meta = readJsonSafe<ZipMeta>(ZIP_META)
   if (!meta || !existsSync(ZIP_PATH)) {
-    return { ok: false, error: 'Обновление ещё не скачано — сначала нажмите «Скачать»' }
+    return { ok: false, error: st("Обновление ещё не скачано — сначала нажмите «Скачать»") }
   }
 
   // (правка 790) Тотальная проверка перед взведением: digest из фида, если
@@ -555,13 +556,13 @@ async function doPrepareApply(): Promise<{ ok: boolean; error?: string; armed?: 
   const expected = feed.info?.sha256 || meta.sha256
   if (!expected) {
     // (правка 925) Раньше при пустом expected хэш-контроль молча пропускался.
-    return { ok: false, error: 'Нет зафиксированной контрольной суммы обновления — скачайте его заново' }
+    return { ok: false, error: st("Нет зафиксированной контрольной суммы обновления — скачайте его заново") }
   }
   const actual = await sha256File(ZIP_PATH)
   if (actual !== expected) {
     try { unlinkSync(ZIP_PATH) } catch { /* ignore */ }
     try { unlinkSync(ZIP_META) } catch { /* ignore */ }
-    return { ok: false, error: 'Контрольная сумма скачанного файла не совпала — удалите обновление и скачайте заново' }
+    return { ok: false, error: st("Контрольная сумма скачанного файла не совпала — удалите обновление и скачайте заново") }
   }
 
   clearDir(STAGING)
@@ -571,15 +572,15 @@ async function doPrepareApply(): Promise<{ ok: boolean; error?: string; armed?: 
   const pkg = readJsonSafe<{ version?: string }>(join(STAGING, 'package.json'))
   if (!pkg?.version) {
     clearDir(STAGING)
-    return { ok: false, error: 'В архиве нет package.json — архив повреждён, скачайте обновление заново' }
+    return { ok: false, error: st("В архиве нет package.json — архив повреждён, скачайте обновление заново") }
   }
   if (pkg.version !== meta.version) {
     clearDir(STAGING)
-    return { ok: false, error: `Версия в архиве (${pkg.version}) не совпадает с релизом (${meta.version})` }
+    return { ok: false, error: st("Версия в архиве ({{p1}}) не совпадает с релизом ({{p2}})", { p1: pkg.version, p2: meta.version }) }
   }
   if (!existsSync(join(STAGING, '.next', 'BUILD_ID'))) {
     clearDir(STAGING)
-    return { ok: false, error: 'В архиве нет готовой сборки .next — архив неполный' }
+    return { ok: false, error: st("В архиве нет готовой сборки .next — архив неполный") }
   }
 
   // Зависимости меняются? Хэш package-lock в архиве vs у пользователя.
@@ -598,7 +599,7 @@ async function doPrepareApply(): Promise<{ ok: boolean; error?: string; armed?: 
     manifest = { algo: 'sha256-lines-v1', hash: stagingAggregateHash(STAGING) }
   } catch {
     clearDir(STAGING)
-    return { ok: false, error: 'Не удалось посчитать контрольные суммы файлов обновления — скачайте его заново' }
+    return { ok: false, error: st("Не удалось посчитать контрольные суммы файлов обновления — скачайте его заново") }
   }
   const armed: ArmedUpdate = {
     version: meta.version,

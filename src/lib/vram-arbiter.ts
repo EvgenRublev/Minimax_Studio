@@ -15,6 +15,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { awaitLlmStartup, llmPid, stopLlm } from './llm-runner'
 import { getAppConfig } from './app-config'
+import { st } from '@/lib/i18n/server' // (правка 955)
 
 const execFileAsync = promisify(execFile)
 
@@ -377,7 +378,7 @@ export async function evictLlmVerified(): Promise<EvictResult> {
     }
     if (Date.now() > deadline) {
       const mb = procs.get(pid) ?? 0
-      return { ok: false, error: `LLM (PID ${pid}) не освободил VRAM за 15 с (${mb < 0 ? 'объём неизвестен' : `${mb} МБ`})` }
+      return { ok: false, error: st("LLM (PID {{p1}}) не освободил VRAM за 15 с ({{p2}})", { p1: pid, p2: mb < 0 ? 'объём неизвестен' : `${mb} МБ` }) }
     }
     await sleep(500)
   }
@@ -463,7 +464,7 @@ export async function evictComfyVerified(timeoutMs = 30_000): Promise<EvictResul
       return { ok: true }
     }
     if (Date.now() > deadline) {
-      return { ok: false, error: `ComfyUI не освободил VRAM за ${timeoutMs / 1000} с (занято ${used} МБ > ${threshold} МБ)` }
+      return { ok: false, error: st("ComfyUI не освободил VRAM за {{p1}} с (занято {{p2}} МБ > {{p3}} МБ)", { p1: timeoutMs / 1000, p2: used, p3: threshold }) }
     }
     await sleep(1500)
   }
@@ -550,7 +551,7 @@ export async function runGeneration<T>(submit: () => Promise<T>): Promise<GateRe
     // но страховка): возвращаем структурированную ошибку вместо unhandled rejection.
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[vram] runGeneration UNEXPECTED ERROR: ${msg}`)
-    return { ok: false, error: `Внутренняя ошибка диспетчера VRAM: ${msg}`, status: 500 }
+    return { ok: false, error: st("Внутренняя ошибка диспетчера VRAM: {{p1}}", { p1: msg }), status: 500 }
   }
 }
 
@@ -587,7 +588,7 @@ export async function startChat<T>(start: () => Promise<T>): Promise<GateResult<
       // (фикс Phase 4) Страховка: сиротная ошибка из mutex-цепочки.
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[vram] startChat UNEXPECTED ERROR: ${msg}`)
-      return { ok: false, error: `Внутренняя ошибка диспетчера VRAM: ${msg}`, status: 500 }
+      return { ok: false, error: st("Внутренняя ошибка диспетчера VRAM: {{p1}}", { p1: msg }), status: 500 }
     }
   } finally {
     chatActive = false

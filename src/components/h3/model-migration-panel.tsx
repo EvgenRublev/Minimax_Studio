@@ -106,7 +106,7 @@ export function ModelMigrationPanel() {
         if (allFound && errCount === 0) {
           toast.success(msg)
         } else {
-          toast.warning(msg + (errCount > 0 ? ` · Ошибок: ${errCount}` : ''))
+          toast.warning(msg + (errCount > 0 ? t("· Ошибок: {{p1}}", { p1: errCount }) : ''))
         }
 
         // (правка 74) Чаты перенесены — подгружаем их в UI (вкладка «Ассистент»)
@@ -115,7 +115,7 @@ export function ModelMigrationPanel() {
         }
       }
     } catch (err) {
-      toast.error(`Ошибка: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(t("Ошибка: {{p1}}", { p1: err instanceof Error ? err.message : String(err) }))
     } finally {
       setMigrating(false)
     }

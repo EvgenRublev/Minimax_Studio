@@ -3,6 +3,7 @@ import path from 'path'
 import { ensureUpscale, fetchUpscaleHealth, bridgeUrl } from '@/lib/upscale-runner'
 import { isPathInsideRoots } from '@/lib/local-file'
 import { upscaleAllowedRoots } from '@/lib/upscale-paths'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) POST /api/upscale/render
@@ -16,6 +17,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = (await req.json().catch(() => null)) as {
       feature?: string
@@ -26,7 +29,7 @@ export async function POST(req: NextRequest) {
     const input = body?.input
     const options = body?.options ?? {}
     if (!feature || !input) {
-      return NextResponse.json({ error: 'Нужны feature и input' }, { status: 400 })
+      return NextResponse.json({ error: st("Нужны feature и input") }, { status: 400 })
     }
     // (правка 716) feature проверяется по allow-list, input — по разрешённым
     // корням. Раньше произвольный абсолютный путь уходил в Python-мост, и
@@ -35,13 +38,13 @@ export async function POST(req: NextRequest) {
     const ALLOWED_FEATURES = new Set(['nr-image', 'nr-video', 'vsr-image', 'vsr-video', 'fi-video'])
     if (!ALLOWED_FEATURES.has(feature)) {
       return NextResponse.json(
-        { error: `Неизвестная функция: ${feature}. Доступно: ${[...ALLOWED_FEATURES].join(', ')}` },
+        { error: st("Неизвестная функция: {{p1}}. Доступно: {{p2}}", { p1: feature, p2: [...ALLOWED_FEATURES].join(', ') }) },
         { status: 400 },
       )
     }
     if (!isPathInsideRoots(path.resolve(input), upscaleAllowedRoots())) {
       return NextResponse.json(
-        { error: 'Путь вне разрешённых папок (выход и/или загрузка)' },
+        { error: st("Путь вне разрешённых папок (выход и/или загрузка)") },
         { status: 400 },
       )
     }

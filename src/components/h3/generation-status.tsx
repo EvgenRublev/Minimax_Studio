@@ -199,7 +199,7 @@ function GenPreview({
                 правка 696 — frozen kind во время генерации */}
             {stageOnly.preparing
               ? tt("Подготовка модели…")
-              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{stageOnly.total > 0 ? ` · шаг ${stageOnly.step}/${stageOnly.total}` : ''}</>}
+              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{stageOnly.total > 0 ? tt("· шаг {{p1}}/{{p2}}", { p1: stageOnly.step, p2: stageOnly.total }) : ''}</>}
           </span>
         )}
       </div>
@@ -331,7 +331,7 @@ export function GenerationStatus({
         <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
           <span className="truncate min-w-0" title={nodeLabel}>{nodeLabel}</span>
           <span className="shrink-0 font-mono tabular-nums text-muted-foreground/80">
-            {nodeStep != null && nodeTotal != null && nodeTotal > 0 ? `шаг ${nodeStep}/${nodeTotal} · ` : ''}
+            {nodeStep != null && nodeTotal != null && nodeTotal > 0 ? tt("шаг {{p1}}/{{p2}} ·", { p1: nodeStep, p2: nodeTotal }) : ''}
             {nodeElapsedMs != null ? formatElapsed(nodeElapsedMs) : ''}
           </span>
         </div>

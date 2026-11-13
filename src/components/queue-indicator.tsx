@@ -426,7 +426,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             {/* Real-time message from WanGP (e.g. "Downloading model...") */}
             {currentRunning?.message && (
               <span className="text-[10px] text-blue-400 leading-tight max-w-[180px] truncate">
-                {currentRunning.message}
+                {t(currentRunning.message)}
               </span>
             )}
             {currentRunning && currentRunning.progressMax > 0 && (
@@ -477,7 +477,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
               <span className="text-xs font-semibold text-foreground">
-                Очередь генераций{t("Очередь генераций")}
+                {t("Очередь генераций")}{t("Очередь генераций")}
               </span>
               <div className="flex items-center gap-1">
                 {items.some((it) => it.status === 'done' || it.status === 'error' || it.status === 'cancelled') && (
@@ -537,9 +537,9 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <StatusIcon status={item.status} color={itemAccent} message={item.message} />
+                        <StatusIcon status={item.status} color={itemAccent} message={item.message ?? ''} />
                         <span className="text-xs font-medium text-foreground truncate">
-                          {item.label}
+                          {t(item.label)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
@@ -555,14 +555,14 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
                       {/* Real-time message (e.g. "Downloading model...") */}
                       {item.message && isActive && (
                         <p className={cn("text-[10px] mt-0.5 truncate", isDownloading(item.message) ? "text-cyan-400" : "text-blue-400")}>
-                          {item.message}
+                          {t(item.message)}
                         </p>
                       )}
                       {/* (фикс M4) Причина ошибки — раньше панель показывала
                           только «Ошибка», без объяснения. */}
                       {item.error && !isActive && (
-                        <p className="text-[10px] mt-0.5 truncate text-red-400" title={item.error}>
-                          {item.error}
+                        <p className="text-[10px] mt-0.5 truncate text-red-400" title={t(item.error)}>
+                          {t(item.error)}
                         </p>
                       )}
                       {/* Mini progress bar for active items */}
@@ -617,7 +617,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             {activeCount > 0 && (
               <div className="px-3 py-2 border-t border-border">
                 <p className="text-[10px] text-muted-foreground text-center">
-                  {activeCount} {activeCount === 1 ? t("задача") : activeCount < 5 ? t("задачи") : t("задач")} в{' '}{t("в очереди")}
+                  {activeCount} {activeCount === 1 ? t("задача") : activeCount < 5 ? t("задачи") : t("задач")} {' '}{t("в")}{' '}{t("в очереди")}
                 </p>
               </div>
             )}

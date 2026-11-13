@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenQueue } from '@/lib/gen-queue-store'
 import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
+import { t } from '@/lib/i18n' // (правка 955)
 
 export type FaceRefinePhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -235,7 +236,7 @@ async function pollOnce() {
       if (unknownStreak >= 10) {
         useFaceRefineJob.setState({
           phase: 'error',
-          error: 'ComfyUI не отвечает (сервер остановлен или перезапущен) — отслеживание остановлено',
+          error: t("ComfyUI не отвечает (сервер остановлен или перезапущен) — отслеживание остановлено"),
           busy: false,
         })
         const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
@@ -294,7 +295,7 @@ async function pollOnce() {
       if (unknownStreak >= 10) {
         useFaceRefineJob.setState({
           phase: 'error',
-          error: 'Задача не найдена в ComfyUI (сервер был перезапущен) — отслеживание остановлено',
+          error: t("Задача не найдена в ComfyUI (сервер был перезапущен) — отслеживание остановлено"),
           busy: false,
         })
         if (qi) useGenQueue.getState().setStatus(qi.id, 'error', 'Задача не найдена в ComfyUI — отслеживание остановлено')

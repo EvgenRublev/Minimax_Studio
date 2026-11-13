@@ -12,6 +12,7 @@ import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
 import { playNotificationSound } from '@/lib/sound'
 import { finalDimsFromMegapixels, framesForDuration, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas, resolveGenerationFinalDims, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
+import { t as tt } from '@/lib/i18n' // (правка 955)
 
 /** (правка 158) flf: вычисляем номинал из пресета + размеров кадра —
  *  ТОЖЕ формула, что и на сервере (body.targetDimensions в route.ts).
@@ -776,7 +777,7 @@ export function useVideoGen() {
                     })
                     if (concatRes.ok) {
                       const concatData = await concatRes.json()
-                      toast.success(`Склеено: ${concatData.filename}`, { duration: 5000 })
+                      toast.success(tt("Склеено: {{p1}}", { p1: concatData.filename }), { duration: 5000 })
                       // (правка 259) Склейка завершается ПОСЛЕ фазы 'done' —
                       // её фазовые перезагрузки к этому моменту давно отработали,
                       // и итоговое видео не появлялось в галереях до ручного
@@ -806,11 +807,11 @@ export function useVideoGen() {
                     } else {
                       const errData = await concatRes.json().catch(() => ({}))
                       console.warn(`[concat] FAILED:`, errData.error || concatRes.status)
-                      toast.error('Автосклейка не удалась', { description: errData.error, duration: 6000 })
+                      toast.error(tt("Автосклейка не удалась"), { description: errData.error, duration: 6000 })
                     }
                   } catch (ce) {
                     console.warn('[concat] request error:', ce)
-                    toast.error('Автосклейка: ошибка сети', { duration: 5000 })
+                    toast.error(tt("Автосклейка: ошибка сети"), { duration: 5000 })
                   }
                 }
               } else {
@@ -1475,7 +1476,7 @@ export function useVideoGen() {
         queue.setStatus(queueId, 'error', displayMsg)
         // Явный тост: 409 от vram-arbiter (ассистент занят VRAM) и другие
         // ошибки отправки должны быть видны сразу, а не только в очереди задач
-        toast.error('Генерация не отправлена', { description: displayMsg, duration: 8000 })
+        toast.error(tt("Генерация не отправлена"), { description: displayMsg, duration: 8000 })
         const cur = useGenProgress.getState().video
         if (cur.phase === 'idle' || cur.phase === 'done' || cur.phase === 'error' || cur.phase === 'submitting') {
           useGenProgress.getState().setVideoPhase('error')
@@ -1544,7 +1545,7 @@ export function useVideoGen() {
     // Remove cancelled item from queue
     useGenQueue.getState().remove(current.id)
 
-    toast.info('Генерация отменена')
+    toast.info(tt("Генерация отменена"))
   }, [cleanupExtendClips, clearTimer])
 
   const reset = useCallback(() => {

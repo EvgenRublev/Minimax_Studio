@@ -193,7 +193,9 @@ export function GalleryView() {
   }, [renameValue, filter, load])
 
   const deleteFolder = useCallback(async (name: string) => {
-    if (!confirm(`Удалить папку «${name}»?\nПапка должна быть пустой (без видео и подпапок) — содержимое не пострадает.`)) return
+    // (правка 955) ключ с переносом строки: в ru i18next вернёт его же (с \n),
+    // в en — значение из каталога с тем же переносом
+    if (!confirm(t('Удалить папку «{{p1}}»?\nПапка должна быть пустой (без видео и подпапок) — содержимое не пострадает.', { p1: name }))) return
     try {
       const r = await fetch('/api/comfy/folders', {
         method: 'DELETE',
@@ -233,7 +235,7 @@ export function GalleryView() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      toast.success(`Перемещено в «${targetFolder || 'Общая'}»`, { description: payload.filename })
+      toast.success(t("Перемещено в «{{p1}}»", { p1: targetFolder || 'Общая' }), { description: payload.filename })
       await load(true)
     } catch (err) {
       toast.error(t("Не удалось переместить"), { description: err instanceof Error ? err.message : String(err) })
@@ -372,7 +374,7 @@ export function GalleryView() {
                   ? t("Все видео из всех папок")
                   : filter === ''
                     ? t("Общая папка (без проектов)")
-                    : `Папка «${filter}» (включая подпапки)`}
+                    : t("Папка «{{p1}}» (включая подпапки)", { p1: filter })}
                 {!loading && (
                   <> · <span className="text-foreground/80 font-medium">{visibleFiles.length}</span> {' '}{t("шт.")}</>
                 )}

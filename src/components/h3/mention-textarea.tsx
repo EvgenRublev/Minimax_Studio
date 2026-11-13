@@ -14,6 +14,7 @@ import {
   MentionPreviewCard,
   parseMentionTag,
 } from './mention-preview'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export interface MentionItem {
   id: string
@@ -193,6 +194,8 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
     { value, onChange, onKeyDown, placeholder, className, mentions = [] },
     ref,
   ) {
+  const { t } = useTranslation() // (правка 955)
+
     const [showPopup, setShowPopup] = useState(false)
     const [filter, setFilter] = useState('')
     const [selectedIndex, setSelectedIndex] = useState(0)
@@ -682,7 +685,7 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
           return (
             <MentionPreviewCard
               previewUrl={mention.previewUrl}
-              label={mention.label}
+              label={t(mention.label)}
               kind={hoverTag.kind}
               position={position}
             />
@@ -721,7 +724,7 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
             className="absolute z-50 rounded-lg border border-border bg-[var(--surface-3)] shadow-2xl shadow-black/60 overflow-hidden"
           >
             <div className="px-2.5 py-1.5 text-[10px] text-muted-foreground/70 border-b border-border/50">
-              Выберите референс
+              {t("Выберите референс")}
             </div>
             <div className="max-h-48 overflow-y-auto py-1">
               {filteredMentions.map((m, i) => {
@@ -775,7 +778,7 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
                         {title}
                       </span>
                       <span className="block text-[10px] text-muted-foreground/70 truncate">
-                        {m.label}
+                        {t(m.label)}
                       </span>
                     </span>
                     {i === selectedIndex && (

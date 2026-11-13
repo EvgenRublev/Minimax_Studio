@@ -4,6 +4,7 @@ import { join } from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sttStatus } from '@/lib/stt-runner'
 import { stopStt } from '@/lib/stt-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 72) STT-модели: скачивание, прогресс, отмена.
@@ -101,6 +102,8 @@ export async function GET(request: Request) {
 
 /* ─── POST /api/stt/models/download ─── */
 export async function POST(request: Request) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   let body: Record<string, unknown>
   try {
     body = await request.json()
@@ -111,7 +114,7 @@ export async function POST(request: Request) {
   const name = (typeof body.name === 'string' ? body.name : '').trim()
   const cat = STT_MODEL_CATALOG.find((m) => m.name === name)
   if (!cat) {
-    return NextResponse.json({ error: `Неизвестная модель: ${name}` }, { status: 400 })
+    return NextResponse.json({ error: stT("Неизвестная модель: {{p1}}", { p1: name }) }, { status: 400 })
   }
 
   if (active.has(name)) {
@@ -160,12 +163,14 @@ export async function POST(request: Request) {
 
 /* ─── DELETE /api/stt/models/download?name=small ─── */
 export async function DELETE(request: Request) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   const url = new URL(request.url)
   const name = (url.searchParams.get('name') || '').trim()
   if (!name) return NextResponse.json({ error: 'name required' }, { status: 400 })
 
   const st = active.get(name)
-  if (!st) return NextResponse.json({ ok: false, error: 'Нет активного скачивания' }, { status: 404 })
+  if (!st) return NextResponse.json({ ok: false, error: stT("Нет активного скачивания") }, { status: 404 })
 
   st.cancelled = true
   st.controller.abort()

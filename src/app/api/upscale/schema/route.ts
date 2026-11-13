@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { bridgeUrl } from '@/lib/upscale-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) GET /api/upscale/schema
@@ -8,6 +9,8 @@ import { bridgeUrl } from '@/lib/upscale-runner'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const r = await fetch(bridgeUrl('/schema'), { signal: AbortSignal.timeout(8000) })
     if (!r.ok) {
@@ -16,6 +19,6 @@ export async function GET() {
     }
     return NextResponse.json(await r.json())
   } catch {
-    return NextResponse.json({ error: 'Upscale-сервис не отвечает (мост не запущен)' }, { status: 503 })
+    return NextResponse.json({ error: st("Upscale-сервис не отвечает (мост не запущен)") }, { status: 503 })
   }
 }

@@ -14,6 +14,7 @@
  */
 import { useState, type ReactNode } from 'react'
 import { RefViewerDialog, type CropRect, type RefViewerData } from './ref-viewer-dialog'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export interface RefPreviewThumbProps {
   /** Тип рефа: картинка / видео / аудио. */
@@ -74,6 +75,8 @@ export function RefPreviewThumb({
   originalSrc,
   onCrop,
 }: RefPreviewThumbProps) {
+  const { t } = useTranslation() // (правка 955)
+
   const [data, setData] = useState<RefViewerData | null>(null)
   const canOpen = !!(path || url)
 
@@ -101,7 +104,7 @@ export function RefPreviewThumb({
         type="button"
         onClick={open}
         disabled={!canOpen}
-        title={title ?? (canOpen ? 'Открыть во весь экран' : undefined)}
+        title={title ?? (canOpen ? t("Открыть во весь экран") : undefined)}
         className={className}
       >
         {children}

@@ -327,7 +327,7 @@ export function PromptEditorDialog({
                     key={m.id}
                     type="button"
                     onClick={() => insert(m.trigger)}
-                    title={m.label}
+                    title={tt(m.label)}
                     className="px-2 py-1 rounded-md text-[10px] font-mono border border-border bg-[var(--surface-2)] hover:border-cyan-500/40 hover:text-cyan-300 transition-colors"
                   >
                     {m.trigger.replace(/[<>]/g, '')}
@@ -378,12 +378,12 @@ export function PromptEditorDialog({
               <div className="space-y-1">
                 {SKELETONS.map((s) => (
                   <button
-                    key={s.label}
+                    key={tt(s.label)}
                     type="button"
                     onClick={() => insert(s.text)}
                     className="w-full text-left px-2 py-1.5 rounded-md text-xs border border-border bg-[var(--surface-2)]/70 text-foreground/85 hover:border-cyan-500/40 transition-colors"
                   >
-                    {s.label} <span className="text-muted-foreground/60">{tt("— вставить скелет")}</span>
+                    {tt(s.label)} <span className="text-muted-foreground/60">{tt("— вставить скелет")}</span>
                   </button>
                 ))}
               </div>
@@ -423,7 +423,7 @@ export function PromptEditorDialog({
                         ev.stopPropagation()
                         toggleHistoryFavorite(e.id)
                       }}
-                      title={e.favorite ? 'Убрать из избранного' : 'В избранное'}
+                      title={e.favorite ? tt("Убрать из избранного") : tt("В избранное")}
                       className={cn(
                         'shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center transition-colors',
                         e.favorite ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-amber-400',
@@ -432,7 +432,7 @@ export function PromptEditorDialog({
                       <StarIcon className="w-3 h-3" fill={e.favorite ? 'currentColor' : 'none'} />
                     </button>
                     <p className="flex-1 min-w-0 text-xs text-foreground/90 leading-snug line-clamp-2 break-words">
-                      {e.text}
+                      {tt(e.text)}
                     </p>
                     <button
                       type="button"
@@ -458,13 +458,13 @@ export function PromptEditorDialog({
                 </div>
                 {EXAMPLES.map((ex) => (
                   <div
-                    key={ex.title}
+                    key={tt(ex.title)}
                     className="px-2 py-1.5 hover:bg-white/5 cursor-pointer rounded-md"
                     onClick={() => applyPrompt(ex.text)}
                   >
-                    <p className="text-xs font-medium text-foreground">{ex.title}</p>
+                    <p className="text-xs font-medium text-foreground">{tt(ex.title)}</p>
                     <p className="text-[10px] text-muted-foreground/80 line-clamp-2 leading-snug break-words">
-                      {ex.note}
+                      {tt(ex.note)}
                     </p>
                   </div>
                 ))}

@@ -14,6 +14,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * GET /api/loras
@@ -190,6 +191,8 @@ function abortUpload(part: MultipartFilePart | null): void {
  * повторном включении. Сброс идёт в фоне — не блокирует ответ.
  */
 export async function PUT(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json()
     const { name, strength, enabled, trigger } = body as { name: string; strength?: number; enabled?: boolean; trigger?: string }
@@ -247,7 +250,7 @@ export async function PUT(req: NextRequest) {
       if (busy) {
         return NextResponse.json({
           ok: true,
-          warning: 'Патчи ComfyUI не сброшены: идёт генерация. Сброс произойдёт при следующем переключении.',
+          warning: stT("Патчи ComfyUI не сброшены: идёт генерация. Сброс произойдёт при следующем переключении."),
         })
       }
       const COMFY_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/+$/, '')

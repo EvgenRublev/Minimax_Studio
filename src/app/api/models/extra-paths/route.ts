@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { statSync } from 'fs'
 import { detectExtraEntries } from '@/lib/extra-model-paths'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -13,23 +14,25 @@ export const dynamic = 'force-dynamic'
  * Ответ: { ok, entries: [{path, category}] }.
  */
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as { path?: string }
     const p = (body?.path ?? '').trim()
     if (!p) {
-      return NextResponse.json({ error: 'Укажите путь к папке' }, { status: 400 })
+      return NextResponse.json({ error: st("Укажите путь к папке") }, { status: 400 })
     }
     let isDir = false
     try {
       isDir = statSync(p).isDirectory()
     } catch {
-      return NextResponse.json({ error: `Папка не найдена: ${p}` }, { status: 404 })
+      return NextResponse.json({ error: st("Папка не найдена: {{p1}}", { p1: p }) }, { status: 404 })
     }
     if (!isDir) {
-      return NextResponse.json({ error: 'Это файл, нужна папка' }, { status: 400 })
+      return NextResponse.json({ error: st("Это файл, нужна папка") }, { status: 400 })
     }
     return NextResponse.json({ ok: true, entries: detectExtraEntries(p) })
   } catch {
-    return NextResponse.json({ error: 'Не удалось проверить папку' }, { status: 500 })
+    return NextResponse.json({ error: st("Не удалось проверить папку") }, { status: 500 })
   }
 }

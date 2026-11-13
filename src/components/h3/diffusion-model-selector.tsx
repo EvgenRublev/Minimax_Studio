@@ -104,7 +104,7 @@ export function DiffusionModelSelector() {
       })
       if (res.ok) {
         toast.success(
-          value && value !== defaultModel ? `Модель: ${value}` : t("Базовая модель"),
+          value && value !== defaultModel ? t("Модель: {{p1}}", { p1: value }) : t("Базовая модель"),
           { duration: 2500 },
         )
       }

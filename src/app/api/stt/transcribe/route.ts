@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ensureStt, STT_PORT } from '@/lib/stt-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 65) POST /api/stt/transcribe
@@ -10,6 +11,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(request: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   let started: { ok: boolean; error?: string }
   try {
     started = await ensureStt()
@@ -34,20 +37,20 @@ export async function POST(request: Request) {
     const declared = Number(request.headers.get('content-length') || 0)
     if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
       return NextResponse.json(
-        { ok: false, error: 'Аудиофайл слишком большой (максимум 48 МБ)' },
+        { ok: false, error: st("Аудиофайл слишком большой (максимум 48 МБ)") },
         { status: 413 },
       )
     }
     const body = await request.arrayBuffer()
     if (!body || body.byteLength < 64) {
       return NextResponse.json(
-        { ok: false, error: 'Пустая аудиозапись — ничего не распознано' },
+        { ok: false, error: st("Пустая аудиозапись — ничего не распознано") },
         { status: 400 },
       )
     }
     if (body.byteLength > MAX_UPLOAD_BYTES) {
       return NextResponse.json(
-        { ok: false, error: 'Аудиофайл слишком большой (максимум 48 МБ)' },
+        { ok: false, error: st("Аудиофайл слишком большой (максимум 48 МБ)") },
         { status: 413 },
       )
     }
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
       // каких-либо строк в логе. maxDuration роута и так 300.
       signal: AbortSignal.timeout(300_000),
     })
-    const data = await r.json().catch(() => ({ ok: false, error: 'Некорректный ответ STT-сервера' }))
+    const data = await r.json().catch(() => ({ ok: false, error: st("Некорректный ответ STT-сервера") }))
     // (правка 873) Круг «браузер -> сервер -> whisper» виден в консоли
     // десктопа: раньше успех проксировался молча, и по логу невозможно было
     // понять, дошёл ли запрос до STT-сервера.

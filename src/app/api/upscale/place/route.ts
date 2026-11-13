@@ -5,6 +5,7 @@ import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders'
 import { ensureUpscaleMeta } from '@/lib/upscale-meta'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 727) POST /api/upscale/place
@@ -24,6 +25,8 @@ import { ensureUpscaleMeta } from '@/lib/upscale-meta'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = (await req.json().catch(() => null)) as
       | { path?: unknown; subfolder?: unknown; job_id?: unknown; source_name?: unknown }
@@ -31,16 +34,16 @@ export async function POST(req: NextRequest) {
     const rawPath = typeof body?.path === 'string' ? body.path : ''
     const sub = sanitizeFolderPath(typeof body?.subfolder === 'string' ? body.subfolder : '')
     if (!rawPath) {
-      return NextResponse.json({ error: 'Нужен path' }, { status: 400 })
+      return NextResponse.json({ error: st("Нужен path") }, { status: 400 })
     }
 
     const OUTPUT_DIR = path.resolve(getAppConfig().outputDir)
     const src = path.resolve(rawPath)
     if (src !== OUTPUT_DIR && !src.startsWith(OUTPUT_DIR + path.sep)) {
-      return NextResponse.json({ error: 'Файл вне папки output' }, { status: 400 })
+      return NextResponse.json({ error: st("Файл вне папки output") }, { status: 400 })
     }
     if (!existsSync(src)) {
-      return NextResponse.json({ error: 'Файл результата не найден' }, { status: 404 })
+      return NextResponse.json({ error: st("Файл результата не найден") }, { status: 404 })
     }
     // '' — общая папка: результат уже на месте, двигать некуда.
     if (!sub) {
@@ -57,7 +60,7 @@ export async function POST(req: NextRequest) {
     while (existsSync(dest)) {
       dest = path.join(dir, `${stem}_${counter++}${ext}`)
       if (counter > 1000) {
-        return NextResponse.json({ error: 'Слишком много совпадений имён' }, { status: 500 })
+        return NextResponse.json({ error: st("Слишком много совпадений имён") }, { status: 500 })
       }
     }
 

@@ -21,9 +21,10 @@ function applyEdits(text, edits) {
 
 export function apply(text, analysis, opts = {}) {
   const tFn = analysis.tFn || opts.fn || 't'
+  const baseFn = analysis.baseFn || opts.fn || 't'
   const mod = opts.module || '@/lib/i18n'
   const hookDecl = tFn === 't' ? 'const { t } = useTranslation()' : `const { t: ${tFn} } = useTranslation()`
-  const plainImport = tFn === 't' ? `import { t } from '${mod}'` : tFn === 'st' ? `import { st } from '${mod}'` : `import { t as ${tFn} } from '${mod}'`
+  const plainImport = tFn === baseFn ? `import { ${baseFn} } from '${mod}'` : `import { ${baseFn} as ${tFn} } from '${mod}'`
   const sf = analysis.sf
   const extra = []
   let hookCount = 0

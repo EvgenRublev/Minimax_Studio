@@ -67,6 +67,7 @@ import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-
 import { useAssistantDraft } from '@/lib/assistant-draft-store'
 import { DEFAULT_LLM_MODEL_ID } from '@/components/h3/llm-model-selector' // (правка 268)
 import { MODELS } from '@/lib/models-config'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /** Live download state derived from /api/models/status. */
 interface DlInfo {
@@ -112,6 +113,8 @@ export function AssistantView({
   /** (правка 442) Кнопка сворачивания панели в узкий рейл (в шапке). */
   onCollapse?: () => void
 } = {}) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const inPanel = panelMode !== undefined
   // (правка 442) Список чатов в панели — выдвижной поверх чата (места мало).
   const [chatListOpen, setChatListOpen] = useState(false)
@@ -251,10 +254,10 @@ export function AssistantView({
       try {
         await navigator.clipboard.writeText(prompt)
         setCopiedPrompt(id)
-        toast.success('Промпт скопирован')
+        toast.success(tt("Промпт скопирован"))
         setTimeout(() => setCopiedPrompt(null), 2000)
       } catch {
-        toast.error('Не удалось скопировать')
+        toast.error(tt("Не удалось скопировать"))
       }
     },
     [],
@@ -330,14 +333,14 @@ export function AssistantView({
                           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80 animate-pulse" />
                         )}
                         {clipMarker !== null
-                          ? `Клип ${clipMarker}`
-                          : fenceStreaming ? 'генерируется…' : ''}
+                          ? tt("Клип {{p1}}", { p1: clipMarker })
+                          : fenceStreaming ? tt("генерируется…") : ''}
                       </span>
                       <button
                         type="button"
                         onClick={() => copyPrompt(prompt, prompt.slice(0, 40))}
                         className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-[var(--surface-2)] transition-colors"
-                        title="Скопировать промпт"
+                        title={tt("Скопировать промпт")}
                       >
                         {copiedPrompt === prompt.slice(0, 40) ? (
                           <CheckIcon className="w-3 h-3 text-emerald-400" />
@@ -590,11 +593,11 @@ export function AssistantView({
         setDl({ active: false, received: 0, total: null, speed: 0, error: d.error || 'Не удалось начать загрузку' })
         toast.error(d.error || 'Не удалось начать загрузку')
       } else {
-        toast.success('Загрузка модели началась')
+        toast.success(tt("Загрузка модели началась"))
       }
     } catch {
-      setDl({ active: false, received: 0, total: null, speed: 0, error: 'Ошибка запуска загрузки' })
-      toast.error('Ошибка запуска загрузки')
+      setDl({ active: false, received: 0, total: null, speed: 0, error: tt("Ошибка запуска загрузки") })
+      toast.error(tt("Ошибка запуска загрузки"))
     }
   }, [status?.modelId])
 
@@ -605,7 +608,7 @@ export function AssistantView({
     const isVideo = file.type.startsWith('video/')
     const isImage = file.type.startsWith('image/')
     if (!isVideo && !isImage) {
-      toast.error('Поддерживаются только изображения и видео')
+      toast.error(tt("Поддерживаются только изображения и видео"))
       return
     }
     // (правка 349) Старое превью отзываем при замене вложения — иначе
@@ -664,7 +667,7 @@ export function AssistantView({
             attInfo = { path, name: attachment.name, kind: attachment.kind, src: 'chat' }
             atts = [{ path, name: attachment.name, kind: attachment.kind }]
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Не удалось загрузить файл')
+            toast.error(err instanceof Error ? err.message : tt("Не удалось загрузить файл"))
             setAttUploading(false)
             removeAttachment()
             return
@@ -786,7 +789,7 @@ export function AssistantView({
     // при генерации молча теряет метки (generate-view, правка 150) —
     // предупреждаем, но НЕ блокируем вставку.
     if (hasRefTags(clean) && st.video.mode !== 'ref') {
-      toast.warning('В промпте метки референсов (<Picture N>…), а форма в режиме «Текст»/«Кадры» — при генерации они будут удалены. Переключите режим на «Референсы» или уберите метки.')
+      toast.warning(tt("В промпте метки референсов (<Picture N>…), а форма в режиме «Текст»/«Кадры» — при генерации они будут удалены. Переключите режим на «Референсы» или уберите метки."))
     }
     // (правка 161) Кнопка видна только когда !streaming — стрим завершён.
     // Но серверный assistantBusy может ещё быть true (drain-насос не
@@ -795,7 +798,7 @@ export function AssistantView({
     // LLM (strim уже закончен), реальный gate — 409 от runGeneration.
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-generate'))
-    toast.success('Промпт вставлен в редактор')
+    toast.success(tt("Промпт вставлен в редактор"))
   }, [])
 
   /** (правка 502) Вставка fence-промпта controlnet-чата в поле промпта
@@ -806,7 +809,7 @@ export function AssistantView({
     useControlNetTarget.getState().setPrompt(clean)
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-controlnet'))
-    toast.success('Промпт вставлен во вкладку ControlNet')
+    toast.success(tt("Промпт вставлен во вкладку ControlNet"))
   }, [])
 
   /** (правка 427) Вставка fence-промпта extend-чата в карточку клипа N.
@@ -821,7 +824,7 @@ export function AssistantView({
     const clips = [...st.video.extendClips]
     const idx = clipNumber - 1
     if (idx < 0 || idx >= clips.length) {
-      toast.error(`Клипа ${clipNumber} нет — добавьте его на вкладке «Продление»`)
+      toast.error(tt("Клипа {{p1}} нет — добавьте его на вкладке «Продление»", { p1: clipNumber }))
       return
     }
     clips[idx] = { ...clips[idx], prompt: clean }
@@ -831,13 +834,13 @@ export function AssistantView({
     // «метки будут удалены» было ложным. Проверяем только реально мёртвые
     // метки: <Subject N>/<Video 2+> и <Picture N> без такого номера в рефах.
     if (hasExtendDeadTags(clean)) {
-      toast.warning('В промпте клипа метки <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически, других видео-рефов нет.')
+      toast.warning(tt("В промпте клипа метки <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически, других видео-рефов нет."))
     } else if (hasDanglingPictureTags(clean, st.video.extendImageRefs.length)) {
-      toast.warning(`В промпте клипа есть <Picture N>, но картинок-рефов в «Продлении» ${st.video.extendImageRefs.length} — такой тег ссылается в пустоту.`)
+      toast.warning(tt("В промпте клипа есть <Picture N>, но картинок-рефов в «Продлении» {{p1}} — такой тег ссылается в пустоту.", { p1: st.video.extendImageRefs.length }))
     }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
-    toast.success(`Промпт вставлен в клип ${clipNumber}`)
+    toast.success(tt("Промпт вставлен в клип {{p1}}", { p1: clipNumber }))
   }, [])
 
   /** (правка 428) Массовая вставка: ассистент обычно выдаёт промпты ВСЕХ
@@ -862,20 +865,20 @@ export function AssistantView({
       else if (hasDanglingPictureTags(clean, refCount)) withDangling++
     }
     if (applied === 0) {
-      toast.error('Нечего вставлять — клипы не найдены')
+      toast.error(tt("Нечего вставлять — клипы не найдены"))
       return
     }
     st.patchVideo({ extendClips: clips })
     // (правка 919) <Picture N> в продлении рабочие — про них молчим, если
     // номер существует. Предупреждаем только о мёртвых метках.
     if (withDeadTags > 0) {
-      toast.warning(`В ${withDeadTags} вставленных промптах есть <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически.`)
+      toast.warning(tt("В {{p1}} вставленных промптах есть <Subject N>/<Video N> — в продлении они не сработают: <Video 1> добавляется автоматически.", { p1: withDeadTags }))
     } else if (withDangling > 0) {
-      toast.warning(`В ${withDangling} вставленных промптах есть <Picture N> без такого номера среди картинок-рефов (их ${refCount}).`)
+      toast.warning(tt("В {{p1}} вставленных промптах есть <Picture N> без такого номера среди картинок-рефов (их {{p2}}).", { p1: withDangling, p2: refCount }))
     }
     void fetch('/api/llm/release', { method: 'POST' }).catch(() => {})
     window.dispatchEvent(new CustomEvent('h3:goto-extend'))
-    toast.success(`Промпты вставлены в клипы: ${applied} шт.`)
+    toast.success(tt("Промпты вставлены в клипы: {{p1}} шт.", { p1: applied }))
   }, [])
 
   /**
@@ -911,11 +914,11 @@ export function AssistantView({
             <span className={cn('rounded-xl gradient-creative flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20', inPanel ? 'w-7 h-7' : 'w-9 h-9')}>
               <BotIcon className={cn('text-white', inPanel ? 'w-3.5 h-3.5' : 'w-4.5 h-4.5')} />
             </span>
-            Ассистент
+            {' '}{tt("Ассистент")}
           </h1>
         </div>
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-xs text-muted-foreground">Загрузка…</div>
+          <div className="text-xs text-muted-foreground">{tt("Загрузка…")}</div>
         </div>
       </div>
     )
@@ -933,7 +936,7 @@ export function AssistantView({
         if (!hasClipboardImage(e.clipboardData)) return
         e.preventDefault()
         if (attUploading) {
-          toast.error('Дождитесь отправки сообщения — текущее вложение загружается')
+          toast.error(tt("Дождитесь отправки сообщения — текущее вложение загружается"))
           return
         }
         void getClipboardImageFiles(e.clipboardData).then((files) => {
@@ -954,7 +957,7 @@ export function AssistantView({
             <button
               type="button"
               onClick={() => setChatListOpen((o) => !o)}
-              title="Список чатов"
+              title={tt("Список чатов")}
               className={cn(
                 'shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center transition-colors',
                 chatListOpen
@@ -970,12 +973,12 @@ export function AssistantView({
               <span className={cn('rounded-xl gradient-creative flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20', inPanel ? 'w-7 h-7' : 'w-9 h-9')}>
                 <BotIcon className={cn('text-white', inPanel ? 'w-3.5 h-3.5' : 'w-4.5 h-4.5')} />
               </span>
-              Ассистент
+              {' '}{tt("Ассистент")}
             </h1>
             <p className={cn('text-muted-foreground mt-1 truncate', inPanel ? 'text-[10px]' : 'text-xs')}>
               {inPanel
-                ? `Локальная LLM: ${llmDisplayName(status?.modelId, status?.modelName)}`
-                : `Локальная LLM (${llmDisplayName(status?.modelId, status?.modelName)}) · видит картинки · чаты сохраняются`}
+                ? tt("Локальная LLM: {{p1}}", { p1: llmDisplayName(status?.modelId, status?.modelName) })
+                : tt("Локальная LLM ({{p1}}) · видит картинки · чаты сохраняются", { p1: llmDisplayName(status?.modelId, status?.modelName) })}
             </p>
           </div>
           {modelReady && (
@@ -990,7 +993,7 @@ export function AssistantView({
                 )}
               >
                 <span className={cn('w-1.5 h-1.5 rounded-full', running ? 'bg-emerald-400' : 'bg-muted-foreground/50')} />
-                {running ? (status?.gpuMode === 'gpu' ? 'GPU' : 'CPU') : 'спит'}
+                {running ? (status?.gpuMode === 'gpu' ? 'GPU' : 'CPU') : tt("спит")}
               </span>
             </div>
           )}
@@ -998,7 +1001,7 @@ export function AssistantView({
             <button
               type="button"
               onClick={onCollapse}
-              title="Свернуть панель"
+              title={tt("Свернуть панель")}
               className="shrink-0 w-8 h-8 rounded-lg border border-border bg-[var(--surface-2)] flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
             >
               <ChevronRightIcon className="w-4 h-4" />
@@ -1017,31 +1020,26 @@ export function AssistantView({
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">
-                {status?.modelId === 'llm_custom' ? 'Файл своей модели не найден' : 'Модель ассистента не скачана'}
+                {status?.modelId === 'llm_custom' ? tt("Файл своей модели не найден") : tt("Модель ассистента не скачана")}
               </h3>
               <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
                 {status?.modelId === 'llm_custom' ? (
                   <>
-                    Проверьте путь к своей модели в <b>Настройках → LLM</b>: файл
-                    «{status?.modelName || '—'}» недоступен. Свои модели студия
-                    не скачивает — исправьте путь или очистите поле, чтобы
-                    вернуться к встроенной модели.
+                    {tt("Проверьте путь к своей модели в")}{' '} <b>{tt("Настройках → LLM")}</b>{tt(": файл «")}{status?.modelName || '—'}{tt("» недоступен. Свои модели студия не скачивает — исправьте путь или очистите поле, чтобы вернуться к встроенной модели.")}
                   </>
                 ) : (
                   <>
-                    Локальная модель ассистента ({llmDisplayName(status?.modelId, status?.modelName)})
-                    — скачивается в <span className="font-mono text-[10px]">ComfyUI/models/llm/</span>. Работает
-                    локально, без интернета, прямо на вашем железе.
+                    {tt("Локальная модель ассистента (")}{llmDisplayName(status?.modelId, status?.modelName)}{tt(") — скачивается в")}{' '} <span className="font-mono text-[10px]">ComfyUI/models/llm/</span>{tt(". Работает локально, без интернета, прямо на вашем железе.")}
                   </>
                 )}
               </p>
             </div>
             {status?.modelId === 'llm_custom' ? null : dl.error ? (
               <div className="space-y-2">
-                <p className="text-xs text-red-400 break-words">Ошибка: {dl.error}</p>
+                <p className="text-xs text-red-400 break-words">{tt("Ошибка:")}{' '} {tt(dl.error)}</p>
                 <Button variant="outline" size="sm" onClick={startDownload} className="gap-1.5">
                   <DownloadIcon className="w-3.5 h-3.5" />
-                  Повторить
+                  {' '}{tt("Повторить")}
                 </Button>
               </div>
             ) : dl.active ? (
@@ -1062,8 +1060,8 @@ export function AssistantView({
                   {dl.received > 0
                     ? `${(dl.received / 1024 / 1024 / 1024).toFixed(2)} / ${sizeLabel || '~5.7 ГБ'}` +
                       (dl.total && dl.total > 0 ? ` · ${Math.floor((dl.received / dl.total) * 100)}%` : '') +
-                      (dl.speed > 0 ? ` · ${(dl.speed / 1024 / 1024).toFixed(1)} МБ/с` : '')
-                    : 'Подключение к серверу загрузки…'}
+                      (dl.speed > 0 ? tt("· {{p1}} МБ/с", { p1: (dl.speed / 1024 / 1024).toFixed(1) }) : '')
+                    : tt("Подключение к серверу загрузки…")}
                 </p>
               </div>
             ) : (
@@ -1072,12 +1070,11 @@ export function AssistantView({
                 className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white border-0 font-semibold gap-2"
               >
                 <DownloadIcon className="w-4 h-4" />
-                Скачать модель ({sizeLabel || '~5.7 ГБ'})
+                {' '}{tt("Скачать модель (")}{sizeLabel || '~5.7 ГБ'})
               </Button>
             )}
             <p className="text-[10px] text-muted-foreground/60">
-              После загрузки первый запуск занимает 1–2 минуты. Пока идёт генерация видео,
-              модель при нехватке VRAM сама стартует в CPU-режиме.
+              {tt("После загрузки первый запуск занимает 1–2 минуты. Пока идёт генерация видео, модель при нехватке VRAM сама стартует в CPU-режиме.")}
             </p>
           </div>
         </div>
@@ -1100,10 +1097,10 @@ export function AssistantView({
                   <p className="text-sm text-muted-foreground">
                     {/* (правка 427) Приветствие зависит от режима чата. */}
                     {isExtendChat
-                      ? 'Опишите, как продолжить видео — ассистент соберёт промпты клипов (каждый отдельным блоком с меткой clip: N) с учётом исходника и референсов продления.'
+                      ? tt("Опишите, как продолжить видео — ассистент соберёт промпты клипов (каждый отдельным блоком с меткой clip: N) с учётом исходника и референсов продления.")
                       : isControlNetChat
-                        ? 'Опишите сцену — ассистент соберёт промпт для ControlNet. Движение и камеру задаёт контрольное видео, в промпте — только сцена, внешность, стиль, свет и звук.'
-                        : 'Опишите идею видео по-русски — ассистент соберёт готовый промпт (на английском, с тегами ваших референсов) и запомнит диалог.'}
+                        ? tt("Опишите сцену — ассистент соберёт промпт для ControlNet. Движение и камеру задаёт контрольное видео, в промпте — только сцена, внешность, стиль, свет и звук.")
+                        : tt("Опишите идею видео по-русски — ассистент соберёт готовый промпт (на английском, с тегами ваших референсов) и запомнит диалог.")}
                   </p>
                 </div>
               </div>
@@ -1146,7 +1143,7 @@ export function AssistantView({
                             path={m.attachment.path}
                             url={attSrc}
                             className="block max-w-full"
-                            title="Открыть вложение во весь экран"
+                            title={tt("Открыть вложение во весь экран")}
                           >
                             {m.attachment.kind === 'image' ? (
                               <img
@@ -1192,7 +1189,7 @@ export function AssistantView({
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
                         >
                           <ArrowDownToLineIcon className="w-3 h-3" />
-                          В промпт
+                          {' '}{tt("В промпт")}
                         </button>
                       </div>
                     )}
@@ -1240,10 +1237,10 @@ export function AssistantView({
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
                               >
                                 <ArrowDownToLineIcon className="w-3 h-3" />
-                                Вставить все ({marked.length})
+                                {' '}{tt("Вставить все (")}{marked.length})
                               </button>
                               <span className="text-[10px] text-muted-foreground/60">
-                                → клипы {marked.map((p) => p.clip).join(', ')}
+                                {tt("→ клипы")}{' '} {marked.map((p) => p.clip).join(', ')}
                               </span>
                             </div>
                           ) : (
@@ -1255,7 +1252,7 @@ export function AssistantView({
                                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
                                 >
                                   <ArrowDownToLineIcon className="w-3 h-3" />
-                                  В клип {p.clip}
+                                  {' '}{tt("В клип")}{' '} {p.clip}
                                 </button>
                               </div>
                             ))
@@ -1272,10 +1269,10 @@ export function AssistantView({
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
                               >
                                 <ArrowDownToLineIcon className="w-3 h-3" />
-                                Вставить все ({unmarked.length})
+                                {' '}{tt("Вставить все (")}{unmarked.length})
                               </button>
                               <span className="text-[10px] text-muted-foreground/60">
-                                → клипы {unmarked.map((_, i) => i + 1).join(', ')}
+                                {tt("→ клипы")}{' '} {unmarked.map((_, i) => i + 1).join(', ')}
                               </span>
                             </div>
                           ) : (
@@ -1283,14 +1280,14 @@ export function AssistantView({
                               if (extendClipsCount === 0) {
                                 return fi === unmarked[0].fi ? (
                                   <p key={fi} className="text-[10px] text-muted-foreground/60">
-                                    Нет клипов — добавьте их на вкладке «Продление», затем вставьте промпт.
+                                    {tt("Нет клипов — добавьте их на вкладке «Продление», затем вставьте промпт.")}
                                   </p>
                                 ) : null
                               }
                               return (
                                 <div key={fi} className="flex items-center gap-1 flex-wrap">
                                   <span className="text-[10px] text-muted-foreground/60 mr-0.5">
-                                    {unmarked.length > 1 ? `Промпт ${fi + 1} →` : 'В клип:'}
+                                    {unmarked.length > 1 ? tt("Промпт {{p1}} →", { p1: fi + 1 }) : tt("В клип:")}
                                   </span>
                                   {Array.from({ length: extendClipsCount }, (_, k) => (
                                     <button
@@ -1299,7 +1296,7 @@ export function AssistantView({
                                       onClick={() => insertIntoClip(content, k + 1)}
                                       className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
                                     >
-                                      Клип {k + 1}
+                                      {tt("Клип")}{' '} {k + 1}
                                     </button>
                                   ))}
                                 </div>
@@ -1315,7 +1312,7 @@ export function AssistantView({
                   { streamingHere && (
                 <div className="flex justify-start">
                   <div className="select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words bg-[var(--surface-2)]/60 border border-border/60 text-foreground/95 rounded-bl-sm">
-                    {streamText ? renderChatContent(streamText, true) : 'Готовлю ответ…'}
+                    {streamText ? renderChatContent(streamText, true) : tt("Готовлю ответ…")}
                   </div>
                 </div>
               )}
@@ -1342,7 +1339,7 @@ export function AssistantView({
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors"
                   >
                     <WandSparklesIcon className="w-3 h-3" />
-                    {extendClipsCount > 0 ? 'Промпты для всех клипов' : 'Предложить клипы продления'}
+                    {extendClipsCount > 0 ? tt("Промпты для всех клипов") : tt("Предложить клипы продления")}
                   </button>
                 ) : isControlNetChat ? (
                   /* (правка 502) ControlNet-чат: «Исправить промпт» (правка 560
@@ -1361,7 +1358,7 @@ export function AssistantView({
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors"
                   >
                     <WandSparklesIcon className="w-3 h-3" />
-                    {controlnetHasPrompt ? 'Исправить промпт' : 'Придумать промпт'}
+                    {controlnetHasPrompt ? tt("Исправить промпт") : tt("Придумать промпт")}
                   </button>
                 ) : (
                 <button
@@ -1377,7 +1374,7 @@ export function AssistantView({
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors"
                 >
                   <WandSparklesIcon className="w-3 h-3" />
-                  {hasPrompt ? 'Исправить мой промпт' : 'Предложить идеи'}
+                  {hasPrompt ? tt("Исправить мой промпт") : tt("Предложить идеи")}
                 </button>
                 )}
               </div>
@@ -1398,13 +1395,13 @@ export function AssistantView({
                 )}
                 <span className="text-xs text-foreground truncate flex-1 min-w-0">{attachment.name}</span>
                 {attUploading ? (
-                  <span className="text-[10px] text-amber-400 animate-pulse shrink-0">Загрузка…</span>
+                  <span className="text-[10px] text-amber-400 animate-pulse shrink-0">{tt("Загрузка…")}</span>
                 ) : (
                   <button
                     type="button"
                     onClick={removeAttachment}
                     className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors shrink-0"
-                    title="Убрать вложение"
+                    title={tt("Убрать вложение")}
                   >
                     <XIcon className="w-3.5 h-3.5" />
                   </button>
@@ -1416,7 +1413,7 @@ export function AssistantView({
                     type="button"
                     onClick={() => { setInput(''); removeAttachment() }}
                     className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors shrink-0"
-                    title="Очистить поле ввода и вложение"
+                    title={tt("Очистить поле ввода и вложение")}
                   >
                     <Trash2Icon className="w-3.5 h-3.5" />
                   </button>
@@ -1429,7 +1426,7 @@ export function AssistantView({
                 type="button"
                 onClick={() => attFileRef.current?.click()}
                 disabled={streaming || attUploading}
-                title="Прикрепить изображение или видео для анализа LLM"
+                title={tt("Прикрепить изображение или видео для анализа LLM")}
                 className={cn(
                   'shrink-0 inline-flex items-center justify-center rounded-xl border transition-colors',
                   'h-11 w-11',
@@ -1461,13 +1458,13 @@ export function AssistantView({
                       // уходил БЕЗ вложения, а повторный send (по завершении
                       // загрузки) молча отбрасывался (running=true).
                       if (attUploading) {
-                        toast.error('Дождитесь загрузки вложения')
+                        toast.error(tt("Дождитесь загрузки вложения"))
                         return
                       }
                       void send()
                     }
                   }}
-                  placeholder="Опишите идею сцены… (Enter — отправить, Shift+Enter — новая строка)"
+                  placeholder={tt("Опишите идею сцены… (Enter — отправить, Shift+Enter — новая строка)")}
                   rows={1}
                   // (правка 452) Точный вертикальный ритм: 11+20+11 + 2px рамки =
                   // ровно 44px (h-11 кнопок) — текст, плейсхолдер и кнопки стоят
@@ -1494,18 +1491,18 @@ export function AssistantView({
               {streaming ? (
                 <Button variant="outline" size="sm" onClick={stop} className="h-11 gap-1.5">
                   <SquareIcon className="w-4 h-4" />
-                  Стоп
+                  {' '}{tt("Стоп")}
                 </Button>
               ) : (
                 <Button
                   size="sm"
                   onClick={() => { void send() }}
                   disabled={!input.trim() || chatBlocked || attUploading}
-                  title={chatBlocked ? '⚙️ Идёт генерация видео — отправка недоступна' : 'Отправить'}
+                  title={chatBlocked ? tt("⚙️ Идёт генерация видео — отправка недоступна") : tt("Отправить")}
                   className="h-11 px-4 gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 hover:border-amber-500/50 font-medium shadow-sm shadow-amber-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <SendIcon className="w-4 h-4" />
-                  Отправить
+                  {' '}{tt("Отправить")}
                 </Button>
               )}
             </div>
@@ -1564,7 +1561,7 @@ export function AssistantView({
             onClick={newChat}
           >
             <PlusIcon className="w-3.5 h-3.5" />
-            Новый чат
+            {' '}{tt("Новый чат")}
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -1598,13 +1595,13 @@ export function AssistantView({
                     }}
                     onBlur={commitRename}
                     className="flex-1 min-w-0 rounded-md border border-cyan-500/50 bg-[var(--surface-2)] px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-                    placeholder="Название чата"
+                    placeholder={tt("Название чата")}
                   />
                   <button
                     type="button"
                     onClick={commitRename}
                     className="shrink-0 w-6 h-6 flex items-center justify-center text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded"
-                    title="Сохранить (Enter)"
+                    title={tt("Сохранить (Enter)")}
                   >
                     <CheckIcon className="w-3.5 h-3.5" />
                   </button>
@@ -1612,7 +1609,7 @@ export function AssistantView({
                     type="button"
                     onClick={cancelRename}
                     className="shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground/60 hover:text-red-400 hover:bg-red-500/10 rounded"
-                    title="Отмена (Esc)"
+                    title={tt("Отмена (Esc)")}
                   >
                     <XIcon className="w-3.5 h-3.5" />
                   </button>
@@ -1622,20 +1619,20 @@ export function AssistantView({
                   <p
                     className="text-xs text-foreground truncate"
                     onDoubleClick={(e) => { e.stopPropagation(); startRename(c.id, c.title) }}
-                    title={c.title}
+                    title={tt(c.title)}
                   >
-                    {c.title}
+                    {tt(c.title)}
                     {c.id === streamChatId && (
                       <span
                         className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400/80 animate-pulse align-middle"
-                        title="Ответ генерируется в этом чате"
+                        title={tt("Ответ генерируется в этом чате")}
                       />
                     )}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60">
                     {c.id === streamChatId
-                      ? 'ответ идёт…'
-                      : `${c.messages.length} сообщ. · ${new Date(c.updatedAt).toLocaleDateString('ru-RU')}`}
+                      ? tt("ответ идёт…")
+                      : tt("{{p1}} сообщ. · {{p2}}", { p1: c.messages.length, p2: new Date(c.updatedAt).toLocaleDateString('ru-RU') })}
                   </p>
                 </div>
               )}
@@ -1648,7 +1645,7 @@ export function AssistantView({
                       startRename(c.id, c.title)
                     }}
                     className="shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground/40 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Переименовать (двойной клик по имени)"
+                    title={tt("Переименовать (двойной клик по имени)")}
                   >
                     <PencilIcon className="w-3 h-3" />
                   </button>
@@ -1659,7 +1656,7 @@ export function AssistantView({
                       deleteChat(c.id)
                     }}
                     className="shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Удалить чат"
+                    title={tt("Удалить чат")}
                   >
                     <XIcon className="w-3 h-3" />
                   </button>
@@ -1670,7 +1667,7 @@ export function AssistantView({
           })}
           {chats.filter((c) => c.mode === assistantMode).length === 0 && (
             <p className="text-[10px] text-muted-foreground/50 text-center py-6 px-3">
-              Нет чатов в режиме «{assistantMode === 'extend' ? 'Продление' : assistantMode === 'controlnet' ? 'ControlNet' : 'Генерация'}». Создайте новый.
+              {tt("Нет чатов в режиме «")}{assistantMode === 'extend' ? tt("Продление") : assistantMode === 'controlnet' ? 'ControlNet' : tt("Генерация")}{tt("». Создайте новый.")}
             </p>
           )}
         </div>

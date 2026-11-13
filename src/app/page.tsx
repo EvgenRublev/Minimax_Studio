@@ -39,7 +39,8 @@ import { sweepOrphanRefineItems } from '@/lib/refine-queue'
 // «Продлении»; событие «открыть ассистента» разворачивает панель через стор.
 import { useAssistantPanel } from '@/lib/assistant-panel-store'
 import { toast } from 'sonner' // (правка 790) тосты проверки обновлений
-import { notesSummary } from '@/components/h3/release-notes' // (правка 891)
+import { notesSummary } from '@/components/h3/release-notes'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 891)
 
 const TAB_CONTENT = {
   generate: GenerateView,
@@ -56,6 +57,8 @@ const TAB_CONTENT = {
 }
 
 export default function Home() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [activeTab, setActiveTab] = useState<TabType>('generate')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -175,33 +178,33 @@ export default function Home() {
           : null
         const summary = notesSrc?.notes ? notesSummary(notesSrc.notes) : ''
         if (j.armed) {
-          toast.info(`Обновление до v${j.armed.version} готово — перезапустите студию для установки`, {
+          toast.info(tt("Обновление до v{{p1}} готово — перезапустите студию для установки", { p1: j.armed.version }), {
             description: summary || undefined,
             // (правка 794) duration: Infinity — тост не исчезает сам, только
             // крестиком: стартовое уведомление об обновлении нельзя пропустить.
             duration: Infinity,
             action: window.h3desktop?.applyUpdate
               ? {
-                  label: 'Перезапустить',
+                  label: tt("Перезапустить"),
                   onClick: () => void window.h3desktop?.applyUpdate?.(),
                 }
               : undefined,
           })
         } else if (j.update) {
-          toast.warning(`Доступно обновление студии: v${j.update.version}`, {
+          toast.warning(tt("Доступно обновление студии: v{{p1}}", { p1: j.update.version }), {
             description: summary || undefined,
             // (правка 794) Не исчезает сам — см. выше.
             duration: Infinity,
             action: {
-              label: 'Скачать',
+              label: tt("Скачать"),
               onClick: () => {
                 void fetch('/api/update/download', { method: 'POST' })
                   .then((r) => r.json())
                   .then((d) => {
                     if (!d.ok) toast.error(d.error || 'Не удалось начать загрузку')
-                    else toast.success(`Загрузка v${j.update.version} началась — прогресс в Настройках → О программе`)
+                    else toast.success(tt("Загрузка v{{p1}} началась — прогресс в Настройках → О программе", { p1: j.update.version }))
                   })
-                  .catch(() => toast.error('Ошибка запроса к серверу'))
+                  .catch(() => toast.error(tt("Ошибка запроса к серверу")))
               },
             },
           })

@@ -27,6 +27,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const POLL_MS = 2000
 /** Пауза на «Готово» перед переходом, мс. */
@@ -60,6 +61,8 @@ const SPLASH_TILES = [
 ]
 
 export default function SplashPage() {
+  const { t } = useTranslation() // (правка 955)
+
   const router = useRouter()
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -234,9 +237,9 @@ export default function SplashPage() {
                 (window as unknown as { h3desktop?: { close: () => void } }).h3desktop?.close()
               }
               className="pointer-events-auto ml-1 rounded-md border border-white/10 bg-black/25 px-2 py-1 text-[11px] leading-none text-white/55 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white"
-              title="Закрыть программу"
+              title={t("Закрыть программу")}
             >
-              закрыть ✕
+              {t("закрыть ✕")}
             </button>
           )}
         </div>
@@ -249,7 +252,7 @@ export default function SplashPage() {
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 6 9 17l-5-5" />
             </svg>
-            <span className="text-sm font-medium">Готово — открываем студию…</span>
+            <span className="text-sm font-medium">{t("Готово — открываем студию…")}</span>
           </div>
         ) : setup?.state === 'error' ? (
           /* (правка 748) Установка упала — честно говорим и не ждём вечно. */
@@ -261,7 +264,7 @@ export default function SplashPage() {
                 а сообщение про битый архив содержит длинный путь. */}
             <p className="max-w-2xl text-center text-xs" style={{ color: 'var(--muted-foreground)' }}>
               {setup.hint || 'Подробности — в файле install.log в папке программы.'}
-              {' '}Можно закрыть программу и запустить снова — установка продолжится с того места, где оборвалась.
+              {' '}{t("Можно закрыть программу и запустить снова — установка продолжится с того места, где оборвалась.")}
             </p>
             {setup.log && (
               <p className="max-w-2xl break-all text-center text-[10px] opacity-60" style={{ color: 'var(--muted-foreground)' }}>
@@ -287,13 +290,13 @@ export default function SplashPage() {
                 className="inline-block h-1.5 w-1.5 rounded-full animate-[splash-pulse_1.5s_ease-in-out_infinite]"
                 style={{ background: 'var(--splash-a)' }}
               />
-              Установка компонентов: [{setup.step ?? 0}/{setup.total ?? 9}] {setup.title || '…'}
+              {' '}{t("Установка компонентов: [")}{setup.step ?? 0}/{setup.total ?? 9}] {setup.title || '…'}
               <span className="opacity-50">·</span>
               {/* (правка 942) время берём из установщика (elapsed_min от heartbeat):
                   собственный таймер заставки сбрасывается при каждом её монтировании,
                   а «сколько идёт установка» должен показывать настоящий счётчик. */}
               <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
-                {Math.max(setup.elapsed_min ?? 0, Math.floor(elapsed / 60))} мин
+                {Math.max(setup.elapsed_min ?? 0, Math.floor(elapsed / 60))} {' '}{t("мин")}
               </span>
             </p>
             {/* (правка 941) что происходит на шаге и сколько он уже идёт —
@@ -301,7 +304,7 @@ export default function SplashPage() {
             {(setup.hint || setup.detail) && (
               <p className="max-w-2xl text-center text-[11px] opacity-70" style={{ color: 'var(--muted-foreground)' }}>
                 {setup.detail && <span>{setup.detail} · </span>}
-                {setup.hint}
+                {t(setup.hint ?? '')}
               </p>
             )}
           </>
@@ -320,8 +323,8 @@ export default function SplashPage() {
                 style={{ background: 'var(--splash-a)' }}
               />
               {failed
-                ? 'ComfyUI стартует дольше обычного — детали в окне консоли…'
-                : 'Идёт загрузка ComfyUI…'}
+                ? t("ComfyUI стартует дольше обычного — детали в окне консоли…")
+                : t("Идёт загрузка ComfyUI…")}
               <span className="opacity-50">·</span>
               <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
                 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}

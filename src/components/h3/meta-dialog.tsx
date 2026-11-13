@@ -81,6 +81,8 @@ interface RefEntry {
 }
 
 function RefRow({ ref, index, onView }: { ref: RefEntry; index: number; onView?: (r: RefEntry) => void }) {
+  const { t } = useTranslation() // (правка 955)
+
   const type = (ref.type || '').toLowerCase()
   const Icon = type === 'image' ? ImageIcon : type === 'video' ? FilmIcon : AudioLinesIcon
   // (правка 476) Картинки и видео открываются во вьювере по клику на строку
@@ -113,7 +115,7 @@ function RefRow({ ref, index, onView }: { ref: RefEntry; index: number; onView?:
         viewable && 'cursor-pointer hover:border-cyan-500/40 transition-colors',
       )}
       onClick={viewable ? () => onView?.(ref) : undefined}
-      title={viewable ? 'Открыть во вьювере' : undefined}
+      title={viewable ? t("Открыть во вьювере") : undefined}
     >
       <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5">#{index + 1}</span>
       {showThumb ? (
@@ -138,7 +140,7 @@ function RefRow({ ref, index, onView }: { ref: RefEntry; index: number; onView?:
         <p className="text-xs text-foreground/90 truncate" title={basename(ref.path)}>{basename(ref.path)}</p>
         <p className="text-[10px] text-muted-foreground">
           {intent}
-          {ref.role ? ` · роль: ${ref.role}` : ''}
+          {ref.role ? t("· роль: {{p1}}", { p1: ref.role }) : ''}
         </p>
       </div>
     </div>
@@ -390,7 +392,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                     </ParamCell>
                     <ParamCell label={t("Длительность")}>
                       {typeof params?.duration_seconds === 'number'
-                        ? `${formatDuration(params.duration_seconds)} (${params.duration_seconds.toFixed(1)} с)`
+                        ? t("{{p1}} ({{p2}} с)", { p1: formatDuration(params.duration_seconds), p2: params.duration_seconds.toFixed(1) })
                         : '—'}
                     </ParamCell>
                     <ParamCell label="FPS">
@@ -484,10 +486,10 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                   {durationSeconds != null
                     ? `${durationSeconds.toFixed(1)} c${videoLength != null ? ` · ${videoLength} кадр.` : ''}`
                     : videoLength != null && fps != null
-                      ? `${(videoLength / fps).toFixed(1)} c · ${videoLength} кадр.`
+                      ? t("{{p1}} c · {{p2}} кадр.", { p1: (videoLength / fps).toFixed(1), p2: videoLength })
                       : '—'}
                 </ParamCell>
-                <ParamCell label={pass2Ran ? 'Шаги (pass1 + pass2)' : 'Шаги'}>
+                <ParamCell label={pass2Ran ? t("Шаги (pass1 + pass2)") : t("Шаги")}>
                   {stepsLabel ?? '—'}
                 </ParamCell>
                 {/* (правка 829) «Зациклено»: в mp4 ровно один цикл (pad —

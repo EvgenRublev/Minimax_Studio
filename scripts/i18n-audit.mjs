@@ -19,6 +19,7 @@ import { createRequire } from 'module'
 const require = createRequire(import.meta.url)
 const ts = require('typescript')
 const { CY } = { CY: /[А-Яа-яЁё]/ }
+const norm = (s) => s.replace(/\\n/g, '\n').replace(/\s+/g, ' ').trim()
 
 const AREAS = fs.readdirSync(path.join('src/lib/i18n/messages/en')).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5))
 const catalog = {}
@@ -37,6 +38,7 @@ function walk(dir, out = []) {
 
 const files = walk('src')
 const used = new Set()
+const literals = new Set() // русские литералы где угодно в коде: подписи модульных таблиц
 const codeKeys = new Map() // key → файлы
 for (const f of files) {
   const text = fs.readFileSync(f, 'utf8')
@@ -46,12 +48,17 @@ for (const f of files) {
       const a = n.arguments[0]
       if (a && ts.isStringLiteral(a)) { used.add(a.text); if (!codeKeys.has(a.text)) codeKeys.set(a.text, []); codeKeys.get(a.text).push(path.relative('.', f)) }
     }
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) { const v = norm(n.text ?? n.getText().slice(1, -1)); if (v && CY.test(v)) literals.add(v) }
+    if (ts.isJsxText(n)) { const v = norm(n.text); if (v && CY.test(v)) literals.add(v) }
     ts.forEachChild(n, visit)
   }
   visit(sf)
 }
 
 const missing = [...codeKeys.keys()].filter((k) => CY.test(k) && !(k in catalog))
+// «использовано» = вызов t("…") ИЛИ русский литерал в коде (подпись модульной
+// таблицы переводится динамически: t(item.label), литерал при этом виден в файле)
+const unused = Object.keys(catalog).filter((k) => !used.has(k) && !literals.has(k) && !literals.has(k.replace(/\\n/g, '\n')))
 if (process.argv.includes('--dump')) {
   const stub = {}
   for (const k of missing.sort((a, b) => a.localeCompare(b, 'ru'))) stub[k] = ''
@@ -59,7 +66,6 @@ if (process.argv.includes('--dump')) {
   fs.writeFileSync('scratchpad/i18n-missing.json', JSON.stringify(stub, null, 2), 'utf8')
   console.log(`ключей в scratchpad/i18n-missing.json: ${missing.length}`)
 }
-const unused = Object.keys(catalog).filter((k) => !used.has(k))
 
 // --- 1) сколько показных строк ещё НЕ обёрнуто в t() (progress-метрика) ---
 const { analyze } = await import('./i18n-scan.mjs')

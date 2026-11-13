@@ -13,6 +13,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * POST /api/comfy/upload
@@ -36,6 +37,8 @@ const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 const UNSAFE_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   let tmpPath: string | null = null
   let part: MultipartFilePart | null = null
   try {
@@ -76,7 +79,7 @@ export async function POST(req: NextRequest) {
       tmpPath = null
       if (tooLarge) {
         part.cancel()
-        return NextResponse.json({ error: 'Файл слишком большой (лимит 1 ГБ)' }, { status: 413 })
+        return NextResponse.json({ error: st("Файл слишком большой (лимит 1 ГБ)") }, { status: 413 })
       }
       throw e
     }

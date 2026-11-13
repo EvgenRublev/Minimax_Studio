@@ -106,7 +106,7 @@ export function FpsView() {
     )
     if (file) {
       setSourceSafe(file as FpsSource)
-      toast.success(`Источник: ${file.filename}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.filename }))
     } else {
       setSourceSafe({
         url: `/api/comfy/file?filename=${encodeURIComponent(storeTarget.filename)}&subfolder=${encodeURIComponent(storeTarget.subfolder)}`,
@@ -131,7 +131,7 @@ export function FpsView() {
         subfolder: '',
         inputSource: path,
       })
-      toast.success(`Источник: ${file.name}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.name }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
@@ -198,7 +198,7 @@ export function FpsView() {
           filename: parsed.filename ?? '',
           subfolder: parsed.subfolder ?? '',
         })
-        toast.success(`Источник: ${parsed.filename}`)
+        toast.success(t("Источник: {{p1}}", { p1: parsed.filename }))
       } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
       return
     }
@@ -326,9 +326,9 @@ export function FpsView() {
                 >
                   <div className="flex items-center gap-1.5">
                     <m.icon className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="text-xs font-medium text-foreground">{m.label}</span>
+                    <span className="text-xs font-medium text-foreground">{t(m.label)}</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{m.hint}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{t(m.hint)}</p>
                 </button>
               ))}
             </div>

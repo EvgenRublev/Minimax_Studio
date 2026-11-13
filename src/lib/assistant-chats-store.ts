@@ -10,6 +10,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { t } from '@/lib/i18n' // (правка 955) заголовок нового чата на языке интерфейса
 
 export interface AssistantChatMessage {
   role: 'user' | 'assistant'
@@ -127,7 +128,7 @@ export const useAssistantChats = create<AssistantChatsState>()(
         const chatMode: AssistantChatMode = mode ?? get().assistantMode
         set((s) => ({
           chats: capChats([
-            { id, title: 'Новый чат', createdAt: Date.now(), updatedAt: Date.now(), mode: chatMode, messages: [] },
+            { id, title: t('Новый чат'), createdAt: Date.now(), updatedAt: Date.now(), mode: chatMode, messages: [] },
             ...s.chats,
           ]),
           activeChatId: id,
@@ -191,7 +192,7 @@ export const useAssistantChats = create<AssistantChatsState>()(
             s.chats.map((c) => {
               if (c.id !== id) return c
               const title =
-                (c.title === 'Новый чат' || !c.title) && msg.role === 'user'
+                (c.title === 'Новый чат' || c.title === t('Новый чат') || !c.title) && msg.role === 'user'
                   ? msg.content.trim().replace(/\s+/g, ' ').slice(0, 48) || 'Чат'
                   : c.title
               return {

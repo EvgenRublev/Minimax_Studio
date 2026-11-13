@@ -85,7 +85,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      toast.success(`Скопировано: ${lineCount} строк лога`)
+      toast.success(tt("Скопировано: {{p1}} строк лога", { p1: lineCount }))
     } catch {
       toast.error(tt("Не удалось скопировать в буфер обмена"))
     }
@@ -98,7 +98,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       const api = window.h3desktop?.console
       if (api) {
         const r = await api.save(text)
-        if (r.ok) toast.success(`Лог сохранён: ${r.path}`)
+        if (r.ok) toast.success(tt("Лог сохранён: {{p1}}", { p1: r.path }))
         else if (!r.canceled) toast.error(r.error || 'Не удалось сохранить файл')
       } else {
         // Браузерный фолбэк — скачать .txt (консоль там недоступна, но на
@@ -130,7 +130,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       if (!res.ok || !data) {
         toast.error(tt("Не удалось сбросить очередь ComfyUI"))
       } else if (data.error) {
-        toast.warning(`Очередь сброшена с замечанием: ${data.error}`)
+        toast.warning(tt("Очередь сброшена с замечанием: {{p1}}", { p1: data.error }))
       } else {
         toast.success(tt("Очередь ComfyUI очищена"))
       }

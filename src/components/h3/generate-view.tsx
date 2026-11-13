@@ -357,13 +357,13 @@ export function GenerateView() {
       for (const file of files) {
         const kind = detectKind(file.name)
         if (!kind) {
-          toast.error(`Неподдерживаемый файл: ${file.name}`)
+          toast.error(tt("Неподдерживаемый файл: {{p1}}", { p1: file.name }))
           continue
         }
-        if (kind === 'image' && ++img > refLimits.image) { toast.error(`Максимум ${refLimits.image} картинок-референсов`); img--; continue }
-        if (kind === 'video' && ++vid > refLimits.video) { toast.error(`Максимум ${refLimits.video} видео-референсов`); vid--; continue }
-        if (kind === 'audio' && ++aud > refLimits.audio) { toast.error(`Максимум ${refLimits.audio} аудио-референсов`); aud--; continue }
-        if (current.length + accepted.length >= refLimits.total) { toast.error(`Максимум ${refLimits.total} референсов всего`); break }
+        if (kind === 'image' && ++img > refLimits.image) { toast.error(tt("Максимум {{p1}} картинок-референсов", { p1: refLimits.image })); img--; continue }
+        if (kind === 'video' && ++vid > refLimits.video) { toast.error(tt("Максимум {{p1}} видео-референсов", { p1: refLimits.video })); vid--; continue }
+        if (kind === 'audio' && ++aud > refLimits.audio) { toast.error(tt("Максимум {{p1}} аудио-референсов", { p1: refLimits.audio })); aud--; continue }
+        if (current.length + accepted.length >= refLimits.total) { toast.error(tt("Максимум {{p1}} референсов всего", { p1: refLimits.total })); break }
         accepted.push(file)
       }
       if (!accepted.length) return
@@ -382,7 +382,7 @@ export function GenerateView() {
           // если звука нет — сразу снимаем галочку и говорим почему.
           const noAudio = kind === 'video' && hasAudio === false
           if (noAudio) {
-            toast.info(`В видео «${file.name}» нет аудиодорожки`, {
+            toast.info(tt("В видео «{{p1}}» нет аудиодорожки", { p1: file.name }), {
               description: tt("Галочка «использовать звук» снята автоматически."),
             })
           }
@@ -408,7 +408,7 @@ export function GenerateView() {
         const nowRefs = useGenStore.getState().video.refs
         const room = Math.max(0, refLimits.total - nowRefs.length)
         if (items.length > room) {
-          toast.error(`Максимум ${refLimits.total} референсов всего`)
+          toast.error(tt("Максимум {{p1}} референсов всего", { p1: refLimits.total }))
           items.length = room
         }
         if (items.length) addRefs(items)
@@ -467,7 +467,7 @@ export function GenerateView() {
   const addAudioOnlyFiles = useCallback((files: File[]) => {
     const audio = files.filter((f) => detectKind(f.name) === 'audio')
     const rejected = files.length - audio.length
-    if (rejected > 0) toast.error(`Только аудио — ${rejected} файл(ов) отклонено`)
+    if (rejected > 0) toast.error(tt("Только аудио — {{p1}} файл(ов) отклонено", { p1: rejected }))
     if (audio.length) void addReferenceFiles(audio)
   }, [addReferenceFiles])
 
@@ -775,7 +775,7 @@ export function GenerateView() {
     }
     if (removedTags.length) {
       toast.warning(tt("Режим генерации"), {
-        description: `Метки ${removedTags.join(', ')} убраны из промпта (не поддерживаются в режиме «${mode === 't2v' ? 'Текст' : 'Кадры'}»).`,
+        description: tt("Метки {{p1}} убраны из промпта (не поддерживаются в режиме «{{p2}}»).", { p1: removedTags.join(', '), p2: mode === 't2v' ? 'Текст' : 'Кадры' }),
       })
     }
     if (!prompt) {
@@ -805,7 +805,7 @@ export function GenerateView() {
       }
       if (dangling.size) {
         toast.error(tt("Промпт ссылается на несуществующие референсы"), {
-          description: `Тег${dangling.size > 1 ? 'и' : ''} ${[...dangling].join(', ')} — под этим номером нет файла. Добавьте референс или удалите тег из промпта.`,
+          description: tt("Тег{{p1}} {{p2}} — под этим номером нет файла. Добавьте референс или удалите тег из промпта.", { p1: dangling.size > 1 ? 'и' : '', p2: [...dangling].join(', ') }),
           duration: 8000,
         })
         return
@@ -1004,7 +1004,7 @@ export function GenerateView() {
             name={ref.name}
             path={ref.path}
             className="w-14 h-14 rounded-md overflow-hidden bg-black/40 border border-border shrink-0 flex items-center justify-center hover:border-cyan-500/60 transition-colors disabled:cursor-not-allowed"
-            title={ref.kind === 'audio' ? 'Открыть плеер / обрезку' : 'Открыть референс'}
+            title={ref.kind === 'audio' ? tt("Открыть плеер / обрезку") : tt("Открыть референс")}
             trimStart={ref.trimStart}
             trimEnd={ref.trimEnd}
             audioVolume={ref.audioVolume}
@@ -1044,7 +1044,7 @@ export function GenerateView() {
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono text-muted-foreground">#{index + 1}</span>
               <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', meta.color)}>
-                {meta.label} → &lt;{meta.tag} {typeNum}&gt;
+                {tt(meta.label)} → &lt;{meta.tag} {typeNum}&gt;
               </span>
             </div>
             <p className="text-xs text-foreground/80 truncate" title={ref.name}>
@@ -1195,10 +1195,10 @@ export function GenerateView() {
               className="text-xs text-muted-foreground"
               title={
                 video.mode === 't2v'
-                  ? 'Видео создаётся только по текстовому описанию. Аудио ниже можно добавить для голоса персонажей.'
+                  ? tt("Видео создаётся только по текстовому описанию. Аудио ниже можно добавить для голоса персонажей.")
                   : video.mode === 'flf'
-                    ? 'Загрузите первый кадр (и при желании последний) — видео плавно построится между ними, а описание задаёт, что происходит по пути.'
-                    : 'Добавьте картинки, видео или аудио — модель будет опираться на них как на образцы.'
+                    ? tt("Загрузите первый кадр (и при желании последний) — видео плавно построится между ними, а описание задаёт, что происходит по пути.")
+                    : tt("Добавьте картинки, видео или аудио — модель будет опираться на них как на образцы.")
               }
             >
               {tt("Режим генерации")}
@@ -1256,8 +1256,8 @@ export function GenerateView() {
                         : 'border-border bg-[var(--surface-2)] hover:border-violet-500/30 cursor-pointer',
                   )}
                   title={loopDisabled
-                    ? 'Зацикливание недоступно в режиме продления: там видео собирается из клипов, и стык задаётся исходником.'
-                    : 'Сэмплер получает латент с обёрнутыми клипами по краям, поэтому конец плавно переходит в начало. Ролик можно ставить на повтор без шва в картинке и звуке.'}
+                    ? tt("Зацикливание недоступно в режиме продления: там видео собирается из клипов, и стык задаётся исходником.")
+                    : tt("Сэмплер получает латент с обёрнутыми клипами по краям, поэтому конец плавно переходит в начало. Ролик можно ставить на повтор без шва в картинке и звуке.")}
                 >
                   <input
                     type="checkbox"
@@ -1311,8 +1311,8 @@ export function GenerateView() {
               className="text-xs text-muted-foreground"
               title={
                 video.pipeline === 'draft'
-                  ? 'Один быстрый проход — черновое качество, зато недолго. Довести до полного качества можно позже во вкладке Refine.'
-                  : 'Сначала быстрый черновик в малом разрешении, затем доработка до чёткого результата. Дольше, но качественнее.'
+                  ? tt("Один быстрый проход — черновое качество, зато недолго. Довести до полного качества можно позже во вкладке Refine.")
+                  : tt("Сначала быстрый черновик в малом разрешении, затем доработка до чёткого результата. Дольше, но качественнее.")
               }
             >
               {tt("Качество прохода")}
@@ -1399,7 +1399,7 @@ export function GenerateView() {
                       }}
                     >
                       <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md disabled:cursor-not-allowed disabled:opacity-50">
-                        <SelectValue placeholder={video.mode === 'flf' ? 'Из кадра' : 'Соотношение'} />
+                        <SelectValue placeholder={video.mode === 'flf' ? tt("Из кадра") : tt("Соотношение")} />
                       </SelectTrigger>
                       {video.mode !== 'flf' && (
                         <SelectContent className="bg-[var(--surface-3)] border-border">
@@ -1892,7 +1892,7 @@ export function GenerateView() {
                                 4 быстрее, но на части сюжетов тряска/сетка. */}
                             <div className="space-y-1">
                               <SettingSlider
-                                label={isDraft ? 'Шаги драфта' : 'Шаги (pass 1)'}
+                                label={isDraft ? tt("Шаги драфта") : tt("Шаги (pass 1)")}
                                 labelTitle={
                                   isDraft
                                     ? 'Сколько шагов делает модель, рисуя видео. Стандарт — 6: надёжно сходится; 4 — быстрее, но на части сюжетов появляется тряска или сетка. Ниже 4 смысла нет.'
@@ -1943,7 +1943,7 @@ export function GenerateView() {
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
                               <SelectItem key={o.value} value={o.value}>
-                                {o.label}
+                                {tt(o.label)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1967,7 +1967,7 @@ export function GenerateView() {
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SCHEDULER_OPTIONS.map((o) => (
                               <SelectItem key={o.value} value={o.value}>
-                                {o.label}
+                                {tt(o.label)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2036,7 +2036,7 @@ export function GenerateView() {
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
                               <SelectItem key={o.value} value={o.value}>
-                                {o.label}
+                                {tt(o.label)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2245,7 +2245,7 @@ export function GenerateView() {
                           ev.stopPropagation()
                           toggleHistoryFavorite(e.id)
                         }}
-                        title={e.favorite ? 'Убрать из избранного' : 'В избранное'}
+                        title={e.favorite ? tt("Убрать из избранного") : tt("В избранное")}
                         className={cn(
                           'shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center transition-colors',
                           e.favorite ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-amber-400',
@@ -2254,7 +2254,7 @@ export function GenerateView() {
                         <StarIcon className="w-3 h-3" fill={e.favorite ? 'currentColor' : 'none'} />
                       </button>
                       <p className="flex-1 min-w-0 text-xs text-foreground/90 leading-snug line-clamp-2 break-words">
-                        {e.text}
+                        {tt(e.text)}
                       </p>
                       <button
                         type="button"
@@ -2284,13 +2284,13 @@ export function GenerateView() {
                   </div>
                   {EXAMPLES.map((ex) => (
                     <div
-                      key={ex.title}
+                      key={tt(ex.title)}
                       className="px-2.5 py-1.5 hover:bg-white/5 cursor-pointer"
                       onClick={() => applyExample(ex.text)}
                     >
-                      <p className="text-xs font-medium text-foreground">{ex.title}</p>
+                      <p className="text-xs font-medium text-foreground">{tt(ex.title)}</p>
                       <p className="text-[10px] text-muted-foreground/80 line-clamp-2 leading-snug break-words">
-                        {ex.text}
+                        {tt(ex.text)}
                       </p>
                     </div>
                   ))}
@@ -2319,7 +2319,7 @@ export function GenerateView() {
                       ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
                       : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:text-foreground',
                   )}
-                  title={outputFolder ? `Папка проекта: ${outputFolder} — видео кладутся в неё, галерея показывает её и подпапки` : 'Папка проекта: видео кладутся в неё, галерея показывает только её'}
+                  title={outputFolder ? tt("Папка проекта: {{p1}} — видео кладутся в неё, галерея показывает её и подпапки", { p1: outputFolder }) : tt("Папка проекта: видео кладутся в неё, галерея показывает только её")}
                 >
                   <FolderIcon className="w-3.5 h-3.5" />
                   <span className="max-w-[120px] truncate">{outputFolder || 'Общая папка'}</span>
@@ -2373,10 +2373,10 @@ export function GenerateView() {
               disabled={!canGenerateNow}
               title={
                 assistantBusy
-                  ? '💬 Ассистент отвечает — дождитесь ответа или прервите его'
+                  ? tt("💬 Ассистент отвечает — дождитесь ответа или прервите его")
                   : canGenerate
-                    ? 'Сгенерировать видео (Ctrl+Enter)'
-                    : 'Введите промпт'
+                    ? tt("Сгенерировать видео (Ctrl+Enter)")
+                    : tt("Введите промпт")
               }
               className="h-11 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-sm font-semibold shadow-lg shadow-cyan-500/20"
             >

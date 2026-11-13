@@ -22,6 +22,7 @@ import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { resolveFaceDetectors } from '@/lib/comfy/face-detectors'
 import { enabledCustomLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * POST /api/comfy/face-refine — перерисовка мелких лиц в готовом видео
@@ -87,6 +88,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as {
       sourceFilename?: string
@@ -124,7 +127,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
-      return NextResponse.json({ error: 'sourceFilename (или inputSource) обязателен' }, { status: 400 })
+      return NextResponse.json({ error: st("sourceFilename (или inputSource) обязателен") }, { status: 400 })
     }
 
     const quickBlock = assertGenerationAllowed()
@@ -146,13 +149,13 @@ export async function POST(req: NextRequest) {
       inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
-        return NextResponse.json({ error: `Файл не найден в input: ${inName}` }, { status: 404 })
+        return NextResponse.json({ error: st("Файл не найден в input: {{p1}}", { p1: inName }) }, { status: 404 })
       }
       try {
         probe = await probeVideoFile(inPath)
       } catch (e) {
         return NextResponse.json(
-          { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+          { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
       }
@@ -163,7 +166,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
       }
       if (!existsSync(sourcePath)) {
-        return NextResponse.json({ error: `Файл не найден: ${safeName}` }, { status: 404 })
+        return NextResponse.json({ error: st("Файл не найден: {{p1}}", { p1: safeName }) }, { status: 404 })
       }
       // Копия output → input (без перезаписи чужих файлов — суффикс при коллизии).
       await fs.mkdir(cfg.inputDir, { recursive: true })
@@ -188,7 +191,7 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         await fs.unlink(destPath).catch(() => {})
         return NextResponse.json(
-          { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+          { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
       }
@@ -237,7 +240,7 @@ export async function POST(req: NextRequest) {
     const identityReferenceForRun = facePoint ? undefined : identityReference
     if (identityReferenceForRun && !existsSync(path.join(cfg.inputDir, identityReferenceForRun))) {
       return NextResponse.json(
-        { error: `Референс лица не найден в input: ${identityReferenceForRun}` },
+        { error: st("Референс лица не найден в input: {{p1}}", { p1: identityReferenceForRun }) },
         { status: 404 },
       )
     }

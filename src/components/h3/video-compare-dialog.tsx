@@ -379,8 +379,8 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
             className="shrink-0 w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             title={
               mode === 'frame'
-                ? 'В режиме «Кадр» воспроизведение отключено'
-                : playing ? 'Пауза (пробел)' : 'Играть (пробел)'
+                ? tt("В режиме «Кадр» воспроизведение отключено")
+                : playing ? tt("Пауза (пробел)") : tt("Играть (пробел)")
             }
           >
             {playing ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5 translate-x-[1px]" />}
@@ -456,7 +456,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
             type="button"
             onClick={() => setMuted((m) => !m)}
             className="shrink-0 p-1.5 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-            title={muted ? 'Включить звук (A)' : 'Выключить звук'}
+            title={muted ? tt("Включить звук (A)") : tt("Выключить звук")}
           >
             {muted ? <VolumeXIcon className="w-4 h-4" /> : <Volume2Icon className="w-4 h-4" />}
           </button>

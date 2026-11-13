@@ -4,6 +4,7 @@ import * as React from 'react'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface SettingSliderProps {
   label: string
@@ -41,6 +42,8 @@ export function SettingSlider({
   inputHint,
   labelTitle,
 }: SettingSliderProps) {
+  const { t } = useTranslation() // (правка 955)
+
   // Guard against undefined/null from stale localStorage
   const safeValue = typeof value === 'number' && !isNaN(value) ? value : min
   const manual = inputMin !== undefined || inputMax !== undefined
@@ -76,7 +79,7 @@ export function SettingSlider({
           <input
             type="text"
             inputMode="decimal"
-            aria-label={`${label}: ручной ввод (${inMin}–${inMax})`}
+            aria-label={t("{{p1}}: ручной ввод ({{p2}}–{{p3}})", { p1: label, p2: inMin, p3: inMax })}
             title={inputHint || `Допустимо ${inMin}–${inMax}`}
             value={draft ?? String(safeValue)}
             onChange={(e) => setDraft(e.target.value)}
@@ -109,7 +112,7 @@ export function SettingSlider({
               'text-xs font-mono tabular-nums',
               outOfSlider ? 'text-amber-300' : 'text-foreground/80',
             )}
-            title={outOfSlider ? 'Вне диапазона ползунка (ручной ввод)' : undefined}
+            title={outOfSlider ? t("Вне диапазона ползунка (ручной ввод)") : undefined}
           >
             {formatValue ? formatValue(safeValue) : safeValue}{unit ? ` ${unit}` : ''}
           </span>

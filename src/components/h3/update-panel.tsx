@@ -279,7 +279,7 @@ export function UpdatePanel() {
           <span className="text-muted-foreground">
             {fmtSize(dl.bytesReceived)}
             {dl.totalBytes ? ` / ${fmtSize(dl.totalBytes)}` : ''}
-            {dl.speed > 0 ? ` · ${fmtSize(dl.speed)}/с` : ''}
+            {dl.speed > 0 ? t("· {{p1}}/с", { p1: fmtSize(dl.speed) }) : ''}
           </span>
         </div>
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -334,7 +334,7 @@ export function UpdatePanel() {
         <div className="text-[11px] text-red-400">
           {failedDl.status === 'cancelled'
             ? t("Загрузка остановлена — начните заново (прогресс сохранён).")
-            : `Ошибка загрузки: ${failedDl.error || 'неизвестная'}`}
+            : t("Ошибка загрузки: {{p1}}", { p1: failedDl.error || 'неизвестная' })}
         </div>
       )}
 

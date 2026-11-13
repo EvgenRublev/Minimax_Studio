@@ -18,8 +18,21 @@ import { CY } from './i18n-rules.mjs'
 const argv = process.argv.slice(2)
 const APPLY = argv.includes('--apply')
 const SERVER = argv.includes('--server')
-const targets = argv.filter((a) => !a.startsWith('--'))
+let targets = argv.filter((a) => !a.startsWith('--'))
 const opts = SERVER ? { fn: 'st', module: '@/lib/i18n/server' } : {}
+const MANUAL_OUT = (argv.find((a) => a.startsWith('--manual-out=')) || '').slice('--manual-out='.length)
+
+/** (правка 955) Контуры интерфейса: всё, что переводим (без «Обучения», ворокфлоу-шаблонов и LLM-промптов). */
+const EXCLUDE = /\\learn\\|\\comfy\\|assistant-stream|llm-runner|llm-context-trim|llm-sampling|llm-audio-guard|llm-media|llm-bonsai|llm-ref-digest|h3-prompt-spec|app-config|settings-mirror|settings-storage|prefs-sync|\\i18n\\/
+function collect(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) { if (!EXCLUDE.test(p)) collect(p, out) }
+    else if (/\.(ts|tsx)$/.test(e.name) && !e.name.endsWith('.d.ts') && !EXCLUDE.test(p)) out.push(p)
+  }
+  return out
+}
+if (argv.includes('--ui')) targets = ['src/components', 'src/hooks', 'src/app', 'src/lib'].flatMap((d) => collect(d))
 
 function filesOf(list) {
   const out = []
@@ -43,6 +56,7 @@ const catalog = JSON.stringify(
 
 let totKeys = 0
 let totManual = 0
+const manualRows = []
 const allKeys = new Set()
 for (const f of filesOf(targets)) {
   const text = fs.readFileSync(f, 'utf8')
@@ -52,7 +66,7 @@ for (const f of filesOf(targets)) {
   const r = apply(text, a, opts)
   const rel = path.relative(process.cwd(), f)
   console.log(`\n== ${rel}: t()=${a.keys.length} manual=${a.manual.length} left-as-is=${a.skipped.length}`)
-  for (const m of a.manual) console.log(`   ~ ${m.line}: [${m.why}] ${m.text}`)
+  for (const m of a.manual) { console.log(`   ~ ${m.line}: [${m.why}] ${m.text}`); manualRows.push(`${rel}:${m.line}\t[${m.why}]\t${m.text}`) }
   for (const d of r.dropped) console.log(`   ! конфликт правки у ${d.start}: ${d.text}`)
   for (const k of a.keys) { totKeys++; if (!catalog.includes(JSON.stringify(k.key))) allKeys.add(k.key) }
   totManual += a.manual.length
@@ -60,4 +74,5 @@ for (const f of filesOf(targets)) {
 }
 fs.mkdirSync('scratchpad', { recursive: true })
 fs.writeFileSync('scratchpad/i18n-keys.json', JSON.stringify([...allKeys], null, 2), 'utf8')
+fs.writeFileSync(MANUAL_OUT || 'scratchpad/i18n-manual.txt', manualRows.join('\n') + '\n', 'utf8')
 console.log(`\nИТОГ: строк к переводу=${totKeys} (новых ключей=${allKeys.size}), разbor руками=${totManual}, режим=${APPLY ? 'apply' : 'report'}`)

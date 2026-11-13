@@ -20,6 +20,7 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
+import { t } from '@/lib/i18n' // (правка 955)
 
 /* ────────────────────────────────────────────────────────────────
  * Типы API (вынесены из upscale-view.tsx)
@@ -205,7 +206,7 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
     } catch (e) {
       if (!opts?.auto) {
         s._setFlag({ gaveUp: true })
-        toast.error(e instanceof Error ? e.message : 'Не удалось запустить сервис Upscale')
+        toast.error(e instanceof Error ? e.message : t("Не удалось запустить сервис Upscale"))
       }
     } finally {
       s._setFlag({ startBusy: false })
@@ -230,16 +231,16 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
       // (фикс) активный job умирает вместе с сервисом — иначе isBusy навсегда.
       const j = get().job
       if (j && isUpscaleJobActive(j)) {
-        get()._setJob({ ...j, status: 'cancelled', message: 'Сервис остановлен' })
-        toast.info('Рендер прерван — сервис остановлен')
+        get()._setJob({ ...j, status: 'cancelled', message: t("Сервис остановлен") })
+        toast.info(t("Рендер прерван — сервис остановлен"))
       }
-      toast.success('Сервис Upscale остановлен')
+      toast.success(t("Сервис Upscale остановлен"))
     } catch {
       // (фикс) ошибка остановки: состояние НЕ трогаем — сервис на сервере
       // скорее всего ещё жив. Если сбросить st/gaveUp, tick через 2.5 с
       // молча перезапустит сервис, который пользователь просил остановить.
       // Пользователь увидит тост и может повторить попытку вручную.
-      toast.error('Не удалось остановить сервис — попробуйте ещё раз')
+      toast.error(t("Не удалось остановить сервис — попробуйте ещё раз"))
     } finally {
       void get().tick()
     }
@@ -247,7 +248,7 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
 
   run: async (feature, input, options): Promise<{ ok: boolean; jobId?: string; error?: string; busy?: boolean }> => {
     set({
-      job: { id: '…', status: 'queued', progress: 0, message: 'Запуск…', error: null, output: null },
+      job: { id: '…', status: 'queued', progress: 0, message: t("Запуск…"), error: null, output: null },
     })
     try {
       const r = await fetch('/api/upscale/render', {
@@ -273,9 +274,9 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
         return { ok: false, error, busy: !!d.busy }
       }
       set({
-        job: { id: d.jobId, status: 'queued', progress: 0, message: 'Ожидание GPU', error: null, output: null },
+        job: { id: d.jobId, status: 'queued', progress: 0, message: t("Ожидание GPU"), error: null, output: null },
       })
-      toast.info('Рендер запущен')
+      toast.info(t("Рендер запущен"))
       return { ok: true, jobId: d.jobId }
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Не удалось запустить рендер'
@@ -291,17 +292,17 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
     // (фикс) id ещё плейсхолдерный — /render в полёте, отменять на мосту нечего
     // (было: /cancel?id=… → 404 → пугающий тост об ошибке).
     if (j.id === '…') {
-      toast.info('Рендер ещё запускается — отмена будет доступна через несколько секунд')
+      toast.info(t("Рендер ещё запускается — отмена будет доступна через несколько секунд"))
       return
     }
     get()._setFlag({ cancelBusy: true })
     try {
       const r = await fetch(`/api/upscale/cancel?id=${encodeURIComponent(j.id)}`, { method: 'POST' })
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string }
-      if (r.ok && d.ok) toast.info('Отмена отправлена — процесс завершится')
+      if (r.ok && d.ok) toast.info(t("Отмена отправлена — процесс завершится"))
       else toast.error(d.error ?? 'Не удалось отправить отмену')
     } catch {
-      toast.error('Сервис Upscale не отвечает')
+      toast.error(t("Сервис Upscale не отвечает"))
     } finally {
       get()._setFlag({ cancelBusy: false })
     }
@@ -327,11 +328,11 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
       if (!prev || prev.id !== d.id) return
       get()._setJob(d)
       if (d.status === 'done') {
-        toast.success('Обработка завершена — результат в общей галерее')
+        toast.success(t("Обработка завершена — результат в общей галерее"))
       } else if (d.status === 'error') {
         toast.error(d.error ?? 'Ошибка обработки')
       } else if (d.status === 'cancelled') {
-        toast.info('Обработка отменена')
+        toast.info(t("Обработка отменена"))
       }
     } catch {
       /* мост не ответил — следующий тик попробует снова */

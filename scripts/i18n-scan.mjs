@@ -3,7 +3,7 @@
  * (замена на t("…"), хук useTranslation, импорт). Ничего не пишет сам.
  */
 import { ts, CY, normKey } from './i18n-rules.mjs'
-import { isDataUse, isDisplayPosition, enclosingFunction, hasTBinding } from './i18n-classify.mjs'
+import { isDataUse, isDisplayPosition, enclosingFunction, pickFnName } from './i18n-classify.mjs'
 
 function q(s) { return JSON.stringify(s) }
 
@@ -29,18 +29,23 @@ function parts(node) {
   let key = ''
   const params = []
   let hasNewline = false
+  let rawBraces = false
   for (const p of out) {
-    if (p.text !== undefined) { if (p.text.includes('\n')) hasNewline = true; key += p.text }
-    else { params.push({ name: `p${params.length + 1}`, expr: p.expr }); key += `{{${params[params.length - 1].name}}}` }
+    if (p.text !== undefined) {
+      if (p.text.includes('\n')) hasNewline = true
+      if (/\{\{|\}\}/.test(p.text)) rawBraces = true
+      key += p.text
+    } else { params.push({ name: `p${params.length + 1}`, expr: p.expr }); key += `{{${params[params.length - 1].name}}}` }
   }
-  return { key: normKey(key), params, hasNewline }
+  return { key: normKey(key), params, hasNewline, rawBraces }
 }
 
 export function analyze(fileName, text, opts = {}) {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  // имя переводчика: в файлах, где уже есть локальная переменная t (тайм-линии),
-  // берём tt — иначе t("…") будет вызовом числа/строки
-  const tFn = opts.fn || (hasTBinding(sf) ? 'tt' : 't')
+  // имя переводчика: в файлах, где уже есть локальная переменная t или st
+  // (тайм-линии, fs.statSync), берём свободное — иначе вызов превратится в вызов значения
+  const baseFn = opts.fn || 't'
+  const tFn = pickFnName(sf, baseFn)
   const edits = []
   const keys = []
   const manual = []
@@ -72,13 +77,13 @@ export function analyze(fileName, text, opts = {}) {
     const pos = node.getStart(sf)
     const line = sf.getLineAndCharacterOfPosition(pos).line + 1
     if (isDataUse(node)) {
-      if (CY.test(node.getText())) manual.push({ line, why: 'сравнение/поиск', text: normKey(node.getText()).slice(0, 90) })
+      if (CY.test(node.getText())) manual.push({ line, why: 'сравнение/поиск', text: normKey(node.getText()).slice(0, 90), full: normKey(node.text ?? node.getText()) })
       return
     }
     if (!isDisplayPosition(node)) { skipped.push({ line, text: normKey(node.getText()).slice(0, 60) }); return }
-    const { key, params, hasNewline } = parts(node)
+    const { key, params, hasNewline, rawBraces } = parts(node)
     if (hasNewline) { manual.push({ line, why: 'многострочный текст — ключ схлопнет перенос', text: key.slice(0, 90) }); return }
-    if (/\{\{|\}\}/.test(key)) { manual.push({ line, why: 'в тексте есть {{ или }} — это синтаксис подстановки', text: key.slice(0, 90) }); return }
+    if (rawBraces) { manual.push({ line, why: 'в исходном тексте есть {{ или }} — это синтаксис подстановки', text: key.slice(0, 90) }); return }
     if (!CY.test(key)) { skipped.push({ line, text: key.slice(0, 60) }); return }
     const enc = enclosingFunction(node)
     if (!enc) { manual.push({ line, why: 'уровень модуля — нужен вызов при рендере', text: key.slice(0, 90) }); return }
@@ -124,5 +129,5 @@ export function analyze(fileName, text, opts = {}) {
   }
   ts.forEachChild(sf, visit)
 
-  return { sf, edits, keys, manual, skipped, fnUsage, tFn }
+  return { sf, edits, keys, manual, skipped, fnUsage, tFn, baseFn }
 }

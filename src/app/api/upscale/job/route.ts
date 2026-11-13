@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import path from 'path'
 import { fetchUpscaleHealth, bridgeUrl } from '@/lib/upscale-runner'
 import { ensureUpscaleMeta } from '@/lib/upscale-meta'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) GET /api/upscale/job?id=<jobId>
@@ -15,9 +16,11 @@ import { ensureUpscaleMeta } from '@/lib/upscale-meta'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const id = new URL(req.url).searchParams.get('id')
   if (!id) {
-    return NextResponse.json({ error: 'Не указан id' }, { status: 400 })
+    return NextResponse.json({ error: st("Не указан id") }, { status: 400 })
   }
   try {
     const r = await fetch(bridgeUrl(`/jobs/${encodeURIComponent(id)}`), {
@@ -61,6 +64,6 @@ export async function GET(req: NextRequest) {
     } catch {
       hint = ' (Upscale-сервис не отвечает)'
     }
-    return NextResponse.json({ error: `Не удалось получить статус job${hint}` }, { status: 503 })
+    return NextResponse.json({ error: st("Не удалось получить статус job{{p1}}", { p1: hint }) }, { status: 503 })
   }
 }

@@ -156,7 +156,7 @@ function AudioTrimEditor({
           type="button"
           onClick={togglePlay}
           className="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 hover:bg-emerald-500/30 transition-colors shrink-0"
-          title={playing ? 'Пауза' : 'Играть выделение'}
+          title={playing ? t("Пауза") : t("Играть выделение")}
         >
           {playing ? <PauseIcon className="w-4 h-4" /> : <PlayIcon className="w-4 h-4 ml-0.5" />}
         </button>
@@ -196,7 +196,7 @@ function AudioTrimEditor({
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-muted-foreground">
               <span>{t("Конец")}</span>
-              <span className="font-mono text-emerald-300">{trimEnd == null ? `${fmt(duration)} (до конца)` : fmt(end)}</span>
+              <span className="font-mono text-emerald-300">{trimEnd == null ? t("{{p1}} (до конца)", { p1: fmt(duration) }) : fmt(end)}</span>
             </div>
             <input
               type="range"

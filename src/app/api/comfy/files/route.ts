@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { listGalleryFolders } from '@/lib/gallery-folders'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * GET /api/comfy/files?type=all|video|image
@@ -118,6 +119,8 @@ async function listDir(
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const { searchParams } = new URL(req.url)
   const typeFilter = searchParams.get('type') || 'all'
   const includeHot = searchParams.get('include_hot') === '1'
@@ -159,6 +162,6 @@ export async function GET(req: NextRequest) {
     // раньше UI показывал пустую галерею, и пользователь не понимал, что
     // папка output недоступна. Отдаём 500 с текстом ошибки.
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: `Не удалось прочитать галерею: ${msg}`, files: [], folders: [] }, { status: 500, headers: NO_STORE })
+    return NextResponse.json({ error: st("Не удалось прочитать галерею: {{p1}}", { p1: msg }), files: [], folders: [] }, { status: 500, headers: NO_STORE })
   }
 }

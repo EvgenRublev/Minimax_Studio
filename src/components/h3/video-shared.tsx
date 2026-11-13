@@ -169,8 +169,8 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
           <input
             type="text"
             inputMode="numeric"
-            aria-label={`Длительность: ручной ввод в секундах (${secMin}–${secMax} с)`}
-            title={`Секунды: ${secMin}–${secMax} · внутри — ближайшие валидные кадры (${min}–${max}, 17n+5, ${fps} fps)`}
+            aria-label={t("Длительность: ручной ввод в секундах ({{p1}}–{{p2}} с)", { p1: secMin, p2: secMax })}
+            title={t("Секунды: {{p1}}–{{p2}} · внутри — ближайшие валидные кадры ({{p3}}–{{p4}}, 17n+5, {{p5}} fps)", { p1: secMin, p2: secMax, p3: min, p4: max, p5: fps })}
             value={draft ?? String(curSec)}
             onChange={(e) => setDraft(e.target.value)}
             onFocus={(e) => {
@@ -198,7 +198,7 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
           <Badge
             variant="secondary"
             className="text-xs"
-            title={`Фактически: ${(clamped / fps).toFixed(2)} с · ${clamped} кадров`}
+            title={t("Фактически: {{p1}} с · {{p2}} кадров", { p1: (clamped / fps).toFixed(2), p2: clamped })}
           >
             {curSec} {' '}{t("с")}
           </Badge>

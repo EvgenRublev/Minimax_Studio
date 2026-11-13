@@ -14,6 +14,7 @@ import { useGenQueue, type QueueItem } from './gen-queue-store'
 import { useUpscaleService, isUpscaleJobActive } from './upscale-service'
 import { toast } from 'sonner'
 import { useGalleryRefresh } from './gallery-refresh-store'
+import { t } from '@/lib/i18n' // (правка 955)
 
 export interface UpscaleTask {
   feature: string
@@ -292,8 +293,8 @@ async function runTask(id: string, task: UpscaleTask): Promise<void> {
     q().setProgress(id, 100, 100)
     useGalleryRefresh.getState().bump()
     toast.success(task.subfolder
-      ? `Upscale готов — видео в папке «${task.subfolder}»`
-      : 'Upscale готов — видео в галерее')
+      ? t("Upscale готов — видео в папке «{{p1}}»", { p1: task.subfolder })
+      : t("Upscale готов — видео в галерее"))
 
     // (правка 264) Время генерации + DLSS-настройки → сайдкар результата.
     // ensureUpscaleMeta создала .meta.json на первом 'done'-полле; finalize

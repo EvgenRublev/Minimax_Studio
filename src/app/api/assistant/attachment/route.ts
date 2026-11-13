@@ -9,6 +9,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 108) Вложения чата ассистента — ИЗОЛИРОВАННОЕ хранилище.
@@ -66,6 +67,8 @@ async function safeAttachPath(filename: string): Promise<string | null> {
 
 /* ─── POST: upload ─── */
 export async function POST(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   let part: MultipartFilePart | null = null
   try {
     const webBody = req.body
@@ -84,7 +87,7 @@ export async function POST(req: NextRequest) {
     if (!ext) {
       part.cancel()
       return NextResponse.json(
-        { error: 'Поддерживаются только изображения и видео (png, jpg, webp, gif, mp4, webm, mov…)' },
+        { error: stT("Поддерживаются только изображения и видео (png, jpg, webp, gif, mp4, webm, mov…)") },
         { status: 400 },
       )
     }
@@ -115,7 +118,7 @@ export async function POST(req: NextRequest) {
       await fs.unlink(dest).catch(() => {})
       if (tooLarge) {
         return NextResponse.json(
-          { error: 'Файл слишком большой (лимит 1 ГБ). Уменьшите видео перед вложением.' },
+          { error: stT("Файл слишком большой (лимит 1 ГБ). Уменьшите видео перед вложением.") },
           { status: 413 },
         )
       }

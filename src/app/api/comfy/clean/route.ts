@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * POST /api/comfy/clean
@@ -43,6 +44,8 @@ async function cleanDirectory(dir: string): Promise<number> {
 }
 
 export async function POST(req: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json()
     const target: unknown = body.target
@@ -73,7 +76,7 @@ export async function POST(req: Request) {
     const dir = target === 'input' ? config.inputDir : config.outputDir
 
     if (!dir) {
-      return NextResponse.json({ error: 'Директория не настроена' }, { status: 400 })
+      return NextResponse.json({ error: st("Директория не настроена") }, { status: 400 })
     }
 
     const deleted = await cleanDirectory(dir)

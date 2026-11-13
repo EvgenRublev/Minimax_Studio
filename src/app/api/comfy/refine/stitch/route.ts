@@ -10,7 +10,8 @@ import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveFfmpeg } from '@/lib/thumb'
 import { probeVideoFile, type VideoProbe } from '@/lib/video-probe'
 import { ffmpegVideoArgs } from '@/lib/video-format'
-import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
+import { getVideoFormatSettings } from '@/lib/video-format-server'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 386)
 
 const execFileAsync = promisify(execFile)
 
@@ -41,6 +42,8 @@ const execFileAsync = promisify(execFile)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as {
       chunkFiles?: Array<{ filename: string; subfolder?: string }>
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
       meta?: Record<string, unknown>
     }
     if (!body?.chunkFiles?.length || !body?.audioSource?.filename) {
-      return NextResponse.json({ error: 'chunkFiles и audioSource обязательны' }, { status: 400 })
+      return NextResponse.json({ error: st("chunkFiles и audioSource обязательны") }, { status: 400 })
     }
 
     const cfg = getAppConfig()
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest) {
 
     const ffmpeg = await resolveFfmpeg()
     if (!ffmpeg) {
-      return NextResponse.json({ error: 'FFmpeg недоступен' }, { status: 500 })
+      return NextResponse.json({ error: st("FFmpeg недоступен") }, { status: 500 })
     }
 
     // Пробы кусков: длительности для офсетов xfade, канва — из первого.

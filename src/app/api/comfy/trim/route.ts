@@ -9,7 +9,8 @@ import { writeMetaSidecar } from '@/lib/pending-meta'
 import { probeVideoFile } from '@/lib/video-probe' // (правка 722) — фактическая геометрия обрезки
 import { resolveFfmpeg } from '@/lib/thumb'
 import { ffmpegVideoArgs } from '@/lib/video-format'
-import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
+import { getVideoFormatSettings } from '@/lib/video-format-server'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 386)
 
 const execFileAsync = promisify(execFile)
 
@@ -28,6 +29,8 @@ const execFileAsync = promisify(execFile)
  * исходника целиком + workflow:'trim', source_video, trim_start/end/duration.
  */
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as {
       filename?: string
@@ -63,7 +66,7 @@ export async function POST(req: NextRequest) {
       await fs.access(sourcePath)
     } catch {
       return NextResponse.json(
-        { error: `Файл не найден: ${safeSub ? safeSub + '/' : ''}${safeName}` },
+        { error: st("Файл не найден: {{p1}}{{p2}}", { p1: safeSub ? safeSub + '/' : '', p2: safeName }) },
         { status: 404 },
       )
     }

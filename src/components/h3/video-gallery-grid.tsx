@@ -56,6 +56,7 @@ import { useFpsTarget } from '@/lib/fps-store'
 import { useExtendTarget } from '@/lib/extend-target-store'
 import { useMontageTarget } from '@/lib/montage-target-store' // (правка 855)
 import { useFaceRefineTarget } from '@/lib/face-refine-target-store'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 
 /** Custom MIME для drag&drop видео из галереи в поле загрузки Upscale. */
@@ -183,6 +184,8 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   onToggleOnlyLiked,
   likedCount,
 }: VideoGalleryGridProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [metaIndex, setMetaIndex] = useState<number | null>(null)
   /** Удаление, ожидающее подтверждения (диалог «Удалить видео?»). */
@@ -373,18 +376,18 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 min-w-0">
           <Badge variant="secondary" className="text-xs shrink-0">
-            {files.length} видео
+            {files.length} {' '}{tt("видео")}
           </Badge>
           {/* (правка 729) Подсказка о сравнении: Ctrl+клик по двум карточкам */}
           {selectedKeys.length === 0 ? (
             <span className="hidden sm:inline text-[10px] text-muted-foreground/70 truncate">
-              Ctrl+клик по двум видео — сравнить
+              {tt("Ctrl+клик по двум видео — сравнить")}
             </span>
           ) : (
             <span className="text-[10px] text-muted-foreground truncate">
               {selectedKeys.length === 1
-                ? 'Выбрано 1 из 2 — выберите ещё одно'
-                : 'Можно сравнить'}
+                ? tt("Выбрано 1 из 2 — выберите ещё одно")
+                : tt("Можно сравнить")}
             </span>
           )}
         </div>
@@ -395,17 +398,17 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               size="sm"
               onClick={openCompare}
               className="h-7 gap-1.5 px-2.5 text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-semibold"
-              title="Открыть сравнение до/после (Enter)"
+              title={tt("Открыть сравнение до/после (Enter)")}
             >
               <ArrowLeftRightIcon className="w-3.5 h-3.5" />
-              Сравнить
+              {' '}{tt("Сравнить")}
             </Button>
           )}
           {selectedKeys.length > 0 && (
             <button
               onClick={() => setSelectedKeys([])}
               className="p-1.5 rounded-lg hover:bg-[var(--surface-3)] text-muted-foreground transition-colors"
-              title="Сбросить выбор (Esc)"
+              title={tt("Сбросить выбор (Esc)")}
             >
               <XIcon className="w-3.5 h-3.5" />
             </button>
@@ -421,17 +424,17 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   ? 'bg-amber-400/15 text-amber-300 border-amber-400/50 font-semibold'
                   : 'text-muted-foreground border-transparent hover:bg-[var(--surface-3)]',
               )}
-              title="Показывать только видео, отмеченные звёздочкой"
+              title={tt("Показывать только видео, отмеченные звёздочкой")}
             >
               <StarIcon className={cn('w-3.5 h-3.5', onlyLiked && 'fill-amber-400 text-amber-400')} />
-              Только избранные{typeof likedCount === 'number' ? ` (${likedCount})` : ''}
+              {' '}{tt("Только избранные")}{typeof likedCount === 'number' ? ` (${likedCount})` : ''}
             </button>
           )}
           {onRefresh && (
             <button
               onClick={() => onRefresh()}
               className="p-1.5 rounded-lg hover:bg-[var(--surface-3)] text-muted-foreground transition-colors"
-              title="Обновить"
+              title={tt("Обновить")}
             >
               <RefreshCcwIcon className="w-3.5 h-3.5" />
             </button>
@@ -514,7 +517,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                           ? 'bg-cyan-500/85 text-black border-cyan-100/80'
                           : 'bg-fuchsia-500/85 text-black border-fuchsia-100/80',
                       )}
-                      title={selIndex === 0 ? 'A — «до» (слева)' : 'B — «после» (справа)'}
+                      title={selIndex === 0 ? tt('A — «до» (слева)') : tt('B — «после» (справа)')}
                     >
                       {selIndex === 0 ? 'A' : 'B'}
                     </span>
@@ -546,7 +549,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                       void onToggleLike(file)
                     }}
                     className="p-1.5 rounded-lg bg-black/60 backdrop-blur-sm hover:bg-black/80 text-white/70 hover:text-amber-300 transition-colors"
-                    title={file.liked ? 'Убрать из избранного' : 'В избранное'}
+                    title={file.liked ? tt("Убрать из избранного") : tt("В избранное")}
                   >
                     <StarIcon className={cn('w-4 h-4', file.liked ? 'fill-amber-400 text-amber-400' : '')} />
                   </button>
@@ -559,7 +562,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     setActionsOpenIndex((prev) => (prev === index ? null : index))
                   }}
                   className="p-1.5 rounded-lg bg-black/60 backdrop-blur-sm hover:bg-black/80 text-white transition-colors"
-                  title="Действия"
+                  title={tt("Действия")}
                 >
                   <MoreVerticalIcon className="w-4 h-4" />
                 </button>
@@ -611,59 +614,59 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                       href={file.url}
                       download={file.filename}
                       onClick={(e) => { e.stopPropagation(); setActionsOpenIndex(null) }}
-                      title="Скачать"
+                      title={tt("Скачать")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors"
                     >
                       <DownloadIcon className="w-4 h-4 shrink-0 text-muted-foreground" />
-                      Скачать
+                      {' '}{tt("Скачать")}
                     </a>
                     <button
                       onClick={() => { setMetaIndex(index); setActionsOpenIndex(null) }}
-                      title="Метаданные"
+                      title={tt("Метаданные")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <InfoIcon className="w-4 h-4 shrink-0 text-muted-foreground" />
-                      Метаданные
+                      {' '}{tt("Метаданные")}
                     </button>
                     <button
                       onClick={() => {
                         void restoreFromMeta(`${file.subfolder}/${file.filename}`)
                         setActionsOpenIndex(null)
                       }}
-                      title="Повторить генерацию"
+                      title={tt("Повторить генерацию")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <RotateCcwIcon className="w-4 h-4 shrink-0 text-cyan-400" />
-                      Повторить генерацию
+                      {' '}{tt("Повторить генерацию")}
                     </button>
                     <button
                       onClick={() => {
                         sendToUpscale(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="Отправить на апскейл (DLSS 5)"
+                      title={tt("Отправить на апскейл (DLSS 5)")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <SparklesIcon className="w-4 h-4 shrink-0 text-violet-400" />
-                      Апскейл (DLSS 5)
+                      {' '}{tt("Апскейл (DLSS 5)")}
                     </button>
                     <button
                       onClick={() => {
                         sendToRefine(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="В Refine (v2v-апскейл)"
+                      title={tt("В Refine (v2v-апскейл)")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <Wand2Icon className="w-4 h-4 shrink-0 text-emerald-400" />
-                      Рефайн (v2v)
+                      {' '}{tt("Рефайн (v2v)")}
                     </button>
                     <button
                       onClick={() => {
                         sendToTileUpscale(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="В Tile Upscale"
+                      title={tt("В Tile Upscale")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <Grid3x3Icon className="w-4 h-4 shrink-0 text-pink-400" />
@@ -674,7 +677,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                         sendToFaceRefine(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="Перерисовать лица (вкладка «Face Refine»)"
+                      title={tt("Перерисовать лица (вкладка «Face Refine»)")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <ScanFaceIcon className="w-4 h-4 shrink-0 text-lime-400" />
@@ -685,33 +688,33 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                         sendToControlNet(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="Использовать как контрольное видео (вкладка «ControlNet»)"
+                      title={tt("Использовать как контрольное видео (вкладка «ControlNet»)")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <WaypointsIcon className="w-4 h-4 shrink-0 text-orange-400" />
-                      ControlNet (движение)
+                      {' '}{tt("ControlNet (движение)")}
                     </button>
                     <button
                       onClick={() => {
                         sendToFps(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="Увеличить FPS"
+                      title={tt("Увеличить FPS")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <GaugeIcon className="w-4 h-4 shrink-0 text-cyan-400" />
-                      Увеличить FPS
+                      {' '}{tt("Увеличить FPS")}
                     </button>
                     <button
                       onClick={() => {
                         sendToExtend(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="Продлить"
+                      title={tt("Продлить")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <FilmIcon className="w-4 h-4 shrink-0 text-cyan-400" />
-                      Продлить
+                      {' '}{tt("Продлить")}
                     </button>
                     {/* (правка 855) «В Монтаж»: открыть монтаж и добавить следующим клипом */}
                     <button
@@ -719,11 +722,11 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                         sendToMontage(file)
                         setActionsOpenIndex(null)
                       }}
-                      title="В Монтаж"
+                      title={tt("В Монтаж")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <ClapperboardIcon className="w-4 h-4 shrink-0 text-[#A78BFA]" />
-                      В Монтаж
+                      {' '}{tt("В Монтаж")}
                     </button>
                     <button
                       onClick={() => {
@@ -731,11 +734,11 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                         setTrimOpen(true)
                         setActionsOpenIndex(null)
                       }}
-                      title="Обрезать"
+                      title={tt("Обрезать")}
                       className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-foreground hover:bg-[var(--surface-3)] transition-colors text-left"
                     >
                       <ScissorsIcon className="w-4 h-4 shrink-0 text-amber-400" />
-                      Обрезать
+                      {' '}{tt("Обрезать")}
                     </button>
                     {onDeleteFile && (
                       <button
@@ -743,11 +746,11 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                           setPendingDelete({ filename: file.filename, subfolder: file.subfolder })
                           setActionsOpenIndex(null)
                         }}
-                        title="Удалить"
+                        title={tt("Удалить")}
                         className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-red-400 hover:bg-red-500/10 transition-colors text-left"
                       >
                         <Trash2Icon className="w-4 h-4 shrink-0" />
-                        Удалить
+                        {' '}{tt("Удалить")}
                       </button>
                     )}
                   </div>, document.body)
@@ -765,7 +768,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 border border-cyan-400/40"
-                      title="Результат апскейла (RTX Video SDK, вкладка «Upscale»)"
+                      title={tt("Результат апскейла (RTX Video SDK, вкладка «Upscale»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Maximize2Icon className="w-2.5 h-2.5" />
@@ -777,7 +780,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-300 border border-fuchsia-400/40"
-                      title="Результат апскейла (вкладка «Upscale»)"
+                      title={tt("Результат апскейла (вкладка «Upscale»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <SparklesIcon className="w-2.5 h-2.5" />
@@ -791,7 +794,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300 border border-emerald-400/40"
-                      title="Генеративный апскейл (вкладка «Refine», v2v)"
+                      title={tt("Генеративный апскейл (вкладка «Refine», v2v)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Wand2Icon className="w-2.5 h-2.5" />
@@ -804,7 +807,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-pink-300 border border-pink-400/40"
-                      title="Tiled latent upscale (вкладка «Tile Upscale»)"
+                      title={tt("Tiled latent upscale (вкладка «Tile Upscale»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Grid3x3Icon className="w-2.5 h-2.5" />
@@ -822,8 +825,8 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-orange-300 border border-orange-400/40"
                       title={twoPass
-                        ? 'Генерация по контрольному видео, два прохода (вкладка «ControlNet»)'
-                        : 'Генерация по контрольному видео (вкладка «ControlNet»)'}
+                        ? tt("Генерация по контрольному видео, два прохода (вкладка «ControlNet»)")
+                        : tt("Генерация по контрольному видео (вкладка «ControlNet»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <WaypointsIcon className="w-2.5 h-2.5" />
@@ -838,7 +841,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-violet-300 border border-violet-400/40"
-                      title="Увеличение FPS (вкладка «FPS», вставка кадров)"
+                      title={tt("Увеличение FPS (вкладка «FPS», вставка кадров)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <GaugeIcon className="w-2.5 h-2.5" />
@@ -852,7 +855,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 border border-cyan-400/40"
-                      title="Результат продления (вкладка «Продление»)"
+                      title={tt("Результат продления (вкладка «Продление»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <FilmIcon className="w-2.5 h-2.5" />
@@ -866,7 +869,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-lime-300 border border-lime-400/40"
-                      title="Перерисованные лица (вкладка «Face Refine»)"
+                      title={tt("Перерисованные лица (вкладка «Face Refine»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ScanFaceIcon className="w-2.5 h-2.5" />
@@ -881,7 +884,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-sky-300 border border-sky-400/40"
-                      title="Смонтировано на вкладке «Монтаж»"
+                      title={tt("Смонтировано на вкладке «Монтаж»")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ClapperboardIcon className="w-2.5 h-2.5" />
@@ -894,7 +897,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 border border-amber-400/40"
-                      title="Отредактировано (обрезка)"
+                      title={tt("Отредактировано (обрезка)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ScissorsIcon className="w-2.5 h-2.5" />
@@ -911,7 +914,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                   return (
                     <span
                       className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-red-300 border border-red-400/40"
-                      title="Драфт: один проход в черновом разрешении (апгрейд — вкладка «Refine»)"
+                      title={tt("Драфт: один проход в черновом разрешении (апгрейд — вкладка «Refine»)")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ZapIcon className="w-2.5 h-2.5" />
@@ -947,7 +950,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     return (
                       <span
                         className="text-[10px] text-cyan-300/80 font-medium shrink-0"
-                        title="Время генерации (из метаданных)"
+                        title={tt("Время генерации (из метаданных)")}
                       >
                         {label}
                       </span>
@@ -1012,16 +1015,15 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Trash2Icon className="w-4 h-4 text-red-400" />
-              Удалить видео?
+              {' '}{tt("Удалить видео?")}
             </DialogTitle>
             <DialogDescription>
-              Файл «{pendingDelete?.filename}» и его метаданные будут удалены
-              безвозвратно. Это действие нельзя отменить.
+              {tt("Файл «")}{pendingDelete?.filename}{tt("» и его метаданные будут удалены безвозвратно. Это действие нельзя отменить.")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-1">
             <Button variant="outline" size="sm" onClick={() => setPendingDelete(null)}>
-              Отмена
+              {tt("Отмена")}
             </Button>
             <Button
               variant="destructive"
@@ -1030,11 +1032,11 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               onClick={() => void confirmPendingDelete()}
             >
               <Trash2Icon className="w-3.5 h-3.5" />
-              Удалить
+              {' '}{tt("Удалить")}
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground/50 text-right -mt-1">
-            Enter — удалить · Esc — отмена
+            {tt("Enter — удалить · Esc — отмена")}
           </p>
         </DialogContent>
       </Dialog>

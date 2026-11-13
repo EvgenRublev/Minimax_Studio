@@ -166,7 +166,7 @@ export function LlmModelSelector() {
         )}
         {LLM_OPTIONS.map((opt) => (
           <option key={opt.id} value={opt.filename}>
-            {opt.label} — {opt.sizeLabel}
+            {t(opt.label)} — {opt.sizeLabel}
           </option>
         ))}
       </select>

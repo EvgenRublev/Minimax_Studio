@@ -94,7 +94,7 @@ export function TileUpscaleView() {
     )
     if (file) {
       setSourceSafe(file as TileUpscaleSource)
-      toast.success(`Источник: ${file.filename}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.filename }))
     } else {
       setSourceSafe({
         url: `/api/comfy/file?filename=${encodeURIComponent(storeTarget.filename)}&subfolder=${encodeURIComponent(storeTarget.subfolder)}`,
@@ -123,7 +123,7 @@ export function TileUpscaleView() {
         subfolder: '',
         inputSource: path,
       })
-      toast.success(`Источник: ${file.name}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.name }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
@@ -185,7 +185,7 @@ export function TileUpscaleView() {
           filename: parsed.filename ?? '',
           subfolder: parsed.subfolder ?? '',
         })
-        toast.success(`Источник: ${parsed.filename}`)
+        toast.success(t("Источник: {{p1}}", { p1: parsed.filename }))
       } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
       return
     }

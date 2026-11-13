@@ -214,8 +214,8 @@ export function FacePickDialog({
           <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
             <span>{fmtTime(time)} / {fmtTime(duration)}</span>
             <span className="text-yellow-400">
-              {tt("кадр")}{' '} {frameOf(time)}{frames > 0 ? ` из ${frames}` : ''}
-              {marker ? ` · точка на кадре ${marker.frame}` : ''}
+              {tt("кадр")}{' '} {frameOf(time)}{frames > 0 ? tt("из {{p1}}", { p1: frames }) : ''}
+              {marker ? tt("· точка на кадре {{p1}}", { p1: marker.frame }) : ''}
             </span>
           </div>
         </div>

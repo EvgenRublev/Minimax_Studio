@@ -151,14 +151,14 @@ export function VoiceSettingsPanel() {
           setProg(name, d)
           if (d.done && !toastShownRef.current.has(`ok:${name}`)) {
             toastShownRef.current.add(`ok:${name}`)
-            toast.success(`Модель ${name} скачана!`)
+            toast.success(tt("Модель {{p1}} скачана!", { p1: name }))
             await refreshRef.current()
           } else if (d.error && !toastShownRef.current.has(`err:${name}`)) {
             toastShownRef.current.add(`err:${name}`)
-            toast.error(`Скачивание ${name}: ${d.error}`)
+            toast.error(tt("Скачивание {{p1}}: {{p2}}", { p1: name, p2: d.error }))
           } else if (d.cancelled && !toastShownRef.current.has(`cxl:${name}`)) {
             toastShownRef.current.add(`cxl:${name}`)
-            toast.info(`Скачивание ${name} отменено`)
+            toast.info(tt("Скачивание {{p1}} отменено", { p1: name }))
           }
         } catch { /* network blip — retry next tick */ }
       }
@@ -240,11 +240,11 @@ export function VoiceSettingsPanel() {
         return
       }
       if (d.already && d.downloaded) {
-        toast.success(`Модель ${name} уже скачана`)
+        toast.success(tt("Модель {{p1}} уже скачана", { p1: name }))
         await refreshRef.current()
         return
       }
-      toast.info(`Скачивание модели ${name} началось…`)
+      toast.info(tt("Скачивание модели {{p1}} началось…", { p1: name }))
       resetToasts(name)
       setProg(name, { name, downloaded: 0, total: 0, done: false, error: null, cancelled: false })
       ensurePolling()
@@ -303,7 +303,7 @@ export function VoiceSettingsPanel() {
       const rd = await rr.json()
       if (rr.ok && rd.ok) {
         toast.success(tt("STT-сервис запущен и готов"), {
-          description: rd.model ? `Модель: ${String(rd.model).split(/[\\/]/).pop()}` : undefined,
+          description: rd.model ? tt("Модель: {{p1}}", { p1: String(rd.model).split(/[\\/]/).pop() }) : undefined,
         })
       } else if (enabled) {
         toast.error(rd.error || 'Не удалось запустить STT-сервис')
@@ -477,7 +477,7 @@ export function VoiceSettingsPanel() {
           <MicIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <Select value={selectedMic || '__default__'} onValueChange={handleMicChange} disabled={micLoading || micDevices.length === 0}>
             <SelectTrigger className="h-8 flex-1 text-xs">
-              <SelectValue placeholder={micLoading ? 'Загрузка…' : 'Системный (по умолчанию)'} />
+              <SelectValue placeholder={micLoading ? tt("Загрузка…") : tt("Системный (по умолчанию)")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">{tt("Системный (по умолчанию)")}</SelectItem>
@@ -583,7 +583,7 @@ export function VoiceSettingsPanel() {
         {service?.error && st?.runtimeFound !== false && (
           <p className="text-xs text-red-300/90 flex items-start gap-1.5">
             <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-            {service.error}
+            {tt(service.error)}
           </p>
         )}
       </div>

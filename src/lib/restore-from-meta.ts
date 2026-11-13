@@ -7,7 +7,8 @@
 import { toast } from 'sonner'
 import { useGenStore, type VideoRefItem } from './gen-store'
 import { FALLBACK_H3_PRESETS, collectResolutionValues } from '@/components/h3/video-shared'
-import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
+import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
+import { t } from '@/lib/i18n' // (правка 955) // (правка 890)
 
 /** (правка 124) Все номиналы пресетов — чтобы «Повторить» вернул режим
  *  пресета, а не свободный MP (иначе итог снова не был бы точным). */
@@ -416,8 +417,8 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
         patch.refs = mapRefs(presentRefs)
       }
       if (missingRefs > 0) {
-        toast.warning(`${missingRefs} реф. не найдены в ComfyUI`, {
-          description: 'Файлы были удалены из input/. Остальные параметры восстановлены.',
+        toast.warning(t("{{p1}} реф. не найдены в ComfyUI", { p1: missingRefs }), {
+          description: t("Файлы были удалены из input/. Остальные параметры восстановлены."),
         })
       }
 
@@ -453,8 +454,8 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
           patch.endFrame = { path: restored.endFrame.path, name: restored.endFrame.name, previewUrl: '' }
         }
         if (missingFrames > 0) {
-          toast.warning(`${missingFrames} кадр(ов) не найдены в ComfyUI`, {
-            description: 'Файлы кадров были удалены из input/. Перетащите их заново, если нужен именно flf-режим.',
+          toast.warning(t("{{p1}} кадр(ов) не найдены в ComfyUI", { p1: missingFrames }), {
+            description: t("Файлы кадров были удалены из input/. Перетащите их заново, если нужен именно flf-режим."),
           })
           // Если стартовый кадр потерян — flf-генерация не может стартовать,
           // деградируем до t2v, чтобы «Повторить» хотя бы запустился.
@@ -468,8 +469,8 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     if (droppedByMode > 0) {
       // Информационный тост: в режиме t2v/flf поддерживаются только аудио,
       // картинки/видео из метаданных отброшены (они были бы молча игнорированы).
-      toast.info('Референсы картинок/видео отброшены', {
-        description: `Режим ${effMode} использует только аудио-референсы. ${droppedByMode} шт. не загружено.`,
+      toast.info(t("Референсы картинок/видео отброшены"), {
+        description: t("Режим {{p1}} использует только аудио-референсы. {{p2}} шт. не загружено.", { p1: effMode, p2: droppedByMode }),
       })
     }
 
@@ -485,14 +486,14 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     const bits: string[] = ['Промпт', 'seed', `режим «${modeShort}»`]
     if (restoredFrames > 0) bits.push(`${restoredFrames} кадр(а)`)
     if (metaRefs.length > 0) bits.push(`${metaRefs.length} реф.`)
-    toast.success('Параметры генерации восстановлены', {
-      description: bits.join(', ') + ' загружены в форму генерации.',
+    toast.success(t("Параметры генерации восстановлены"), {
+      description: t("{{p1}} загружены в форму генерации.", { p1: bits.join(', ') }),
     })
 
     return true
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    toast.error('Не удалось восстановить параметры', { description: msg })
+    toast.error(t("Не удалось восстановить параметры"), { description: msg })
     return false
   }
 }

@@ -7,6 +7,7 @@ import crypto from 'crypto'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * POST /api/extend/import
@@ -41,6 +42,8 @@ function sanitizeName(name: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   let destPath = ''
   try {
     const body = (await req.json().catch(() => null)) as
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest) {
     const subfolder = typeof body?.subfolder === 'string' ? body.subfolder.trim() : ''
     if (!filename) {
       return NextResponse.json(
-        { error: 'Не передано имя файла (ожидается { filename, subfolder? })' },
+        { error: stT("Не передано имя файла (ожидается { filename, subfolder? })") },
         { status: 400 },
       )
     }
@@ -58,7 +61,7 @@ export async function POST(req: NextRequest) {
     const cfg = getAppConfig()
     if (!cfg.outputDir) {
       return NextResponse.json(
-        { error: 'Папка output ComfyUI не найдена (config.ini → [comfy] comfy_dir)' },
+        { error: stT("Папка output ComfyUI не найдена (config.ini → [comfy] comfy_dir)") },
         { status: 500 },
       )
     }
@@ -70,13 +73,13 @@ export async function POST(req: NextRequest) {
     const safeSub = subfolder ? sanitizeFolderPath(subfolder) : ''
     const src = path.resolve(outRoot, safeSub ? path.join(safeSub, safeName) : safeName)
     if (src !== outRoot && !src.startsWith(outRoot + path.sep)) {
-      return NextResponse.json({ error: 'Некорректный путь к файлу' }, { status: 400 })
+      return NextResponse.json({ error: stT("Некорректный путь к файлу") }, { status: 400 })
     }
 
     const ext = path.extname(safeName).toLowerCase()
     if (!VIDEO_EXTS.has(ext)) {
       return NextResponse.json(
-        { error: `Формат ${ext || '(без расширения)'} не поддерживается для продления видео` },
+        { error: stT("Формат {{p1}} не поддерживается для продления видео", { p1: ext || '(без расширения)' }) },
         { status: 400 },
       )
     }
@@ -86,15 +89,15 @@ export async function POST(req: NextRequest) {
       st = await fs.stat(src)
     } catch {
       return NextResponse.json(
-        { error: 'Файл не найден в общей папке output (возможно, он уже удалён)' },
+        { error: stT("Файл не найден в общей папке output (возможно, он уже удалён)") },
         { status: 404 },
       )
     }
     if (!st.isFile()) {
-      return NextResponse.json({ error: 'Это не файл' }, { status: 400 })
+      return NextResponse.json({ error: stT("Это не файл") }, { status: 400 })
     }
     if (st.size > MAX_BYTES) {
-      return NextResponse.json({ error: `Файл больше 32 ГБ — слишком большой для обработки` }, { status: 400 })
+      return NextResponse.json({ error: stT("Файл больше 32 ГБ — слишком большой для обработки") }, { status: 400 })
     }
 
     const dir = path.resolve(cfg.inputDir)
@@ -132,6 +135,6 @@ export async function POST(req: NextRequest) {
       try { unlinkSync(destPath) } catch { /* ignore */ }
     }
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: `Ошибка импорта из галереи: ${msg}` }, { status: 500 })
+    return NextResponse.json({ error: stT("Ошибка импорта из галереи: {{p1}}", { p1: msg }) }, { status: 500 })
   }
 }

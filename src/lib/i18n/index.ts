@@ -78,7 +78,9 @@ export function getLang(): Lang {
  * Перевод вне React (сторы, хуки, императивные тосты).
  * Компоненты используют useTranslation() — он перерисовывает их при смене языка.
  */
-export function t(key: string, options: TOptions = {}): string {
+export function t(key: string | null | undefined, options: TOptions = {}): string {
+  // null/undefined бывает у необязательных подписей из таблиц — показываем пусто
+  if (!key) return ''
   return i18n.t(key, options)
 }
 

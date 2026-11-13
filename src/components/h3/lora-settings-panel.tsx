@@ -295,7 +295,7 @@ export function LoraSettingsPanel() {
                         ? 'text-emerald-400 hover:bg-emerald-500/10'
                         : 'text-muted-foreground/40 hover:bg-muted'
                     }`}
-                    title={lora.enabled ? 'Отключить' : 'Включить'}
+                    title={lora.enabled ? t("Отключить") : t("Включить")}
                   >
                     {lora.enabled ? <PowerIcon className="w-3.5 h-3.5" /> : <PowerOffIcon className="w-3.5 h-3.5" />}
                   </button>

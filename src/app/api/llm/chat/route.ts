@@ -19,7 +19,8 @@ import { REF_LIMITS } from '@/lib/assistant-refs'
 import { existsSync, mkdirSync, unlinkSync, rmdirSync, readdirSync, statSync } from 'fs'
 import path, { join } from 'path'
 import sharp from 'sharp'
-import { stagedPath } from '@/lib/staging' // (правка 697)
+import { stagedPath } from '@/lib/staging'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 697)
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,8 @@ export const dynamic = 'force-dynamic'
  * vision content into the first user message.
  */
 export async function POST(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json()
     const messages = body?.messages as Array<{ role: string; content: string | unknown[]; images?: string[] }> | undefined
@@ -791,7 +794,7 @@ export async function POST(req: NextRequest) {
       // модели или прохода дайджестов) — не запускаем сам стрим в LLM.
       if (req.signal?.aborted) {
         cleanup()
-        return { kind: 'upstream-error' as const, error: 'Запрос отменён' }
+        return { kind: 'upstream-error' as const, error: stT("Запрос отменён") }
       }
 
       // Таймаут только на установку соединения (см. комментарий у fetch).
@@ -911,7 +914,7 @@ export async function POST(req: NextRequest) {
       // (правка 173) Чистый 409 для параллельного запроса — клиент
       // (assistant-stream) парсит { error } и показывает его как есть.
       return new Response(
-        JSON.stringify({ ok: false, error: 'Ассистент уже генерирует другой ответ — дождитесь завершения' }),
+        JSON.stringify({ ok: false, error: stT("Ассистент уже генерирует другой ответ — дождитесь завершения") }),
         { status: 409, headers: { 'Content-Type': 'application/json' } },
       )
     }

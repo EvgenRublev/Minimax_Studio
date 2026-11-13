@@ -19,6 +19,7 @@ import { promisify } from 'util'
 import { existsSync, mkdirSync } from 'fs'
 import path from 'path'
 import { getAppConfig } from './app-config'
+import { st } from '@/lib/i18n/server' // (правка 955)
 
 const execFileAsync = promisify(execFile)
 
@@ -205,7 +206,7 @@ export async function ensureUpscale(opts: { force?: boolean } = {}): Promise<Ups
   // spawn) — stopUpscale, пришедший ВО ВРЕМЯ старта, терялся: процесс всё
   // равно поднимался, хотя пользователь только что нажал «Остановить».
   if (manualStop && !opts.force) {
-    return { ok: false, error: 'Сервис остановлен пользователем — нажмите «Запустить»' }
+    return { ok: false, error: st("Сервис остановлен пользователем — нажмите «Запустить»") }
   }
   if (child && !child.killed && child.exitCode === null && child.signalCode === null) {
     const ok = await healthUp(8000)
@@ -238,7 +239,7 @@ export async function ensureUpscale(opts: { force?: boolean } = {}): Promise<Ups
     try {
       const cfg = getAppConfig()
       if (!cfg.upscaleEnabled) {
-        return { ok: false, error: 'Вкладка Upscale отключена: config.ini → [upscale] enabled=1' }
+        return { ok: false, error: st("Вкладка Upscale отключена: config.ini → [upscale] enabled=1") }
       }
 
       const dir = upscaleDir()
@@ -338,7 +339,7 @@ export async function ensureUpscale(opts: { force?: boolean } = {}): Promise<Ups
       if (manualStop) {
         killTree(proc.pid)
         cleanChild(proc)
-        return { ok: false, error: 'Остановлено пользователем' }
+        return { ok: false, error: st("Остановлено пользователем") }
       }
 
       // Imports + runtime prep + GPU detection: allow 3 minutes.
@@ -348,7 +349,7 @@ export async function ensureUpscale(opts: { force?: boolean } = {}): Promise<Ups
         if (manualStop) {
           killTree(proc.pid)
           cleanChild(proc)
-          return { ok: false, error: 'Остановлено пользователем' }
+          return { ok: false, error: st("Остановлено пользователем") }
         }
         const tail = stderrTail.trim().split(/\r?\n/).slice(-3).join(' | ').slice(0, 400)
         const err = `Upscale не запустился: порт ${port} занят или процесс завершился. ${tail ? `Лог: ${tail}` : 'См. консоль'}`

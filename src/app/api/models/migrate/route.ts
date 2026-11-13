@@ -32,6 +32,7 @@ import { NextResponse } from 'next/server'
 import { existsSync, statSync, readdirSync, renameSync, copyFileSync, unlinkSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative, dirname, resolve, sep } from 'path'
 import { getAppConfig } from '@/lib/app-config'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -505,6 +506,8 @@ function migrateData(sourceDir: string): CategoryResult {
   return result
 }
 export async function POST(request: Request) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   try {
     const body = (await request.json()) as {
       sourceDir?: string
@@ -522,7 +525,7 @@ export async function POST(request: Request) {
 
     if (!sourceDir) {
       return NextResponse.json(
-        { error: 'Укажите путь к папке старой версии программы.' },
+        { error: stT("Укажите путь к папке старой версии программы.") },
         { status: 400 }
       )
     }
@@ -530,13 +533,13 @@ export async function POST(request: Request) {
     // (правка 135) Проверяем, что это именно папка, а не файл.
     if (!existsSync(sourceDir)) {
       return NextResponse.json(
-        { error: `Папка не найдена: ${sourceDir}` },
+        { error: stT("Папка не найдена: {{p1}}", { p1: sourceDir }) },
         { status: 400 }
       )
     }
     if (!statSync(sourceDir).isDirectory()) {
       return NextResponse.json(
-        { error: `Указан файл, а не папка: ${sourceDir}` },
+        { error: stT("Указан файл, а не папка: {{p1}}", { p1: sourceDir }) },
         { status: 400 }
       )
     }
@@ -556,7 +559,7 @@ export async function POST(request: Request) {
     for (const t of targets) {
       if (srcLower === t || srcLower.startsWith(t + '/')) {
         return NextResponse.json(
-          { error: `Невозможно перенести папку в саму себя: ${sourceDir}` },
+          { error: stT("Невозможно перенести папку в саму себя: {{p1}}", { p1: sourceDir }) },
           { status: 400 }
         )
       }
@@ -564,8 +567,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              `Указана папка, внутри которой лежат данные текущей версии программы. ` +
-              `Перенос оттуда работал бы с живыми файлами текущей установки. Укажите папку со СТАРОЙ версией.`,
+              stT("Указана папка, внутри которой лежат данные текущей версии программы. Перенос оттуда работал бы с живыми файлами текущей установки. Укажите папку со СТАРОЙ версией."),
           },
           { status: 400 }
         )
@@ -598,8 +600,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            'Нельзя переносить данные из системной папки или корня диска. ' +
-            'Укажите папку со СТАРОЙ версией программы (например D:\\Minimax_Studio_V6).',
+            stT("Нельзя переносить данные из системной папки или корня диска. Укажите папку со СТАРОЙ версией программы (например D:\\Minimax_Studio_V6)."),
         },
         { status: 400 }
       )
@@ -663,7 +664,7 @@ export async function POST(request: Request) {
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(
-      { error: `Внутренняя ошибка: ${err instanceof Error ? err.message : String(err)}` },
+      { error: stT("Внутренняя ошибка: {{p1}}", { p1: err instanceof Error ? err.message : String(err) }) },
       { status: 500 }
     )
   }

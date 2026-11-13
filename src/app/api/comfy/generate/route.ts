@@ -18,6 +18,7 @@ import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const execFileAsync = promisify(execFile)
 
@@ -32,6 +33,8 @@ const execFileAsync = promisify(execFile)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     // (правка 716) Лимит тела. Везде в проекте загрузки идут потоком с
     // явным лимитом (multipart-stream.ts, 1 ГБ на загрузку), а здесь
@@ -41,7 +44,7 @@ export async function POST(req: NextRequest) {
     const declared = Number(req.headers.get('content-length') || 0)
     if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
       return NextResponse.json(
-        { error: 'Запрос слишком большой (максимум 256 МБ). Загрузите референсы через /api/comfy/upload.' },
+        { error: st("Запрос слишком большой (максимум 256 МБ). Загрузите референсы через /api/comfy/upload.") },
         { status: 413 },
       )
     }
@@ -89,7 +92,7 @@ export async function POST(req: NextRequest) {
       const MAX_REF_IMAGES = 9
       if (body.refImagesBase64.length > MAX_REF_IMAGES) {
         return NextResponse.json(
-          { error: `Слишком много референсов (максимум ${MAX_REF_IMAGES})` },
+          { error: st("Слишком много референсов (максимум {{p1}})", { p1: MAX_REF_IMAGES }) },
           { status: 400 },
         )
       }
@@ -163,7 +166,7 @@ export async function POST(req: NextRequest) {
             refVideosForSubmit.push({ ...v, path: await compressRefVideo480(v.path) })
           } catch (e) {
             return NextResponse.json(
-              { error: `Сжатие видео-референса «${v.path}»: ${e instanceof Error ? e.message : String(e)}` },
+              { error: st("Сжатие видео-референса «{{p1}}»: {{p2}}", { p1: v.path, p2: e instanceof Error ? e.message : String(e) }) },
               { status: 500 },
             )
           }
@@ -210,11 +213,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              `Не найдены файлы в папке input/ ComfyUI: ${list}. ` +
-              'Так бывает, если видео/настройки восстановлены после переустановки ' +
-              'или файлы удалены из input/ ComfyUI вручную. ' +
-              'Уберите эти референсы из списка и загрузите их заново — ' +
-              'либо верните файлы в папку input/ ComfyUI.',
+              st("Не найдены файлы в папке input/ ComfyUI: {{p1}}. Так бывает, если видео/настройки восстановлены после переустановки или файлы удалены из input/ ComfyUI вручную. Уберите эти референсы из списка и загрузите их заново — либо верните файлы в папку input/ ComfyUI.", { p1: list }),
             missingRefs: missing,
           },
           { status: 400 },
@@ -328,7 +327,7 @@ export async function POST(req: NextRequest) {
           const filePath = path.join(cfg.inputDir, name)
           if (!fs.existsSync(filePath)) {
             return NextResponse.json(
-              { error: `Реф продления «${name}» не найден в input/ ComfyUI — удалите его из списка и загрузите заново.` },
+              { error: st("Реф продления «{{p1}}» не найден в input/ ComfyUI — удалите его из списка и загрузите заново.", { p1: name }) },
               { status: 400 },
             )
           }

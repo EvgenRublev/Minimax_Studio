@@ -5,6 +5,8 @@ import { getAppConfig, setConfigValue } from '@/lib/app-config'
 import { llmStatus, stopLlm } from '@/lib/llm-runner'
 import { sttStatus, stopStt } from '@/lib/stt-runner'
 import { writeExtraModelPathsYaml, EXTRA_CATEGORIES } from '@/lib/extra-model-paths'
+import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server' // (правка 955)
 
 /** (правка 262) Папка существует как каталог (для UI-индикатора и валидации). */
 function isExistingDir(p: string): boolean {
@@ -50,25 +52,25 @@ function resolveGgufPath(input: string, kind: 'model' | 'mmproj'): { path: strin
   const label = isModel ? 'Файл модели' : 'mmproj-файл'
   let st
   try { st = statSync(input) } catch {
-    return { error: `${label} не найден: ${input}` }
+    return { error: stT("{{p1}} не найден: {{p2}}", { p1: label, p2: input }) }
   }
 
   if (st.isFile()) {
     const lower = input.toLowerCase()
     const isGguf = lower.endsWith('.gguf') || lower.endsWith('.mmproj')
     if (!isGguf) {
-      return { error: `${label} должен быть файлом .gguf (указано: ${basename(input)})` }
+      return { error: stT("{{p1}} должен быть файлом .gguf (указано: {{p2}})", { p1: label, p2: basename(input) }) }
     }
     // Для модели: mmproj-файл — не модель. Для mmproj: расширение .gguf
     // подходит (реальные проекторы называются mmproj-F16.gguf и т.п.).
     if (isModel && lower.includes('mmproj')) {
-      return { error: 'Это mmproj-файл (проектор зрения), а не модель — укажите .gguf модели' }
+      return { error: stT("Это mmproj-файл (проектор зрения), а не модель — укажите .gguf модели") }
     }
     return { path: resolve(input) }
   }
 
   if (!st.isDirectory()) {
-    return { error: `Путь не является файлом или папкой: ${input}` }
+    return { error: stT("Путь не является файлом или папкой: {{p1}}", { p1: input }) }
   }
 
   // Собираем кандидатов: сначала корень папки, затем подпапки (2 уровня).
@@ -100,8 +102,8 @@ function resolveGgufPath(input: string, kind: 'model' | 'mmproj'): { path: strin
   if (!match) {
     return {
       error: isModel
-        ? `В папке нет .gguf-модели: ${input}`
-        : `В папке нет mmproj-файла: ${input}`,
+        ? stT("В папке нет .gguf-модели: {{p1}}", { p1: input })
+        : stT("В папке нет mmproj-файла: {{p1}}", { p1: input }),
     }
   }
   return { path: resolve(match) }
@@ -178,6 +180,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   try {
     const body = await request.json()
 
@@ -201,7 +205,7 @@ export async function POST(request: Request) {
       const v = body.comfy_dir.trim()
       if (v && !isExistingDir(v)) {
         return NextResponse.json(
-          { error: `Папка ComfyUI не найдена: ${v}` },
+          { error: stT("Папка ComfyUI не найдена: {{p1}}", { p1: v }) },
           { status: 400 },
         )
       }
@@ -210,7 +214,7 @@ export async function POST(request: Request) {
       // путь к python.exe для спавна и roots галерей.
       if (v && !looksLikeComfyRoot(v)) {
         return NextResponse.json(
-          { error: `В указанной папке нет ядра ComfyUI (нет main.py): ${v}. Укажите корень ComfyUI или оставьте пустым для папки рядом с программой.` },
+          { error: stT("В указанной папке нет ядра ComfyUI (нет main.py): {{p1}}. Укажите корень ComfyUI или оставьте пустым для папки рядом с программой.", { p1: v }) },
           { status: 400 },
         )
       }
@@ -221,7 +225,7 @@ export async function POST(request: Request) {
       const v = body.llm_bonsai_dir.trim()
       if (v && !isExistingDir(v)) {
         return NextResponse.json(
-          { error: `Папка Bonsai не найдена: ${v}` },
+          { error: stT("Папка Bonsai не найдена: {{p1}}", { p1: v }) },
           { status: 400 },
         )
       }
@@ -236,7 +240,7 @@ export async function POST(request: Request) {
       const v = body.stt_dir.trim()
       if (v && !isExistingDir(v)) {
         return NextResponse.json(
-          { error: `Папка голосового ввода не найдена: ${v}` },
+          { error: stT("Папка голосового ввода не найдена: {{p1}}", { p1: v }) },
           { status: 400 },
         )
       }
@@ -285,7 +289,7 @@ export async function POST(request: Request) {
         const missing = entries.filter((e) => !isExistingDir(e.path))
         if (missing.length > 0) {
           return NextResponse.json(
-            { error: `Папки не найдены: ${missing.map((e) => e.path).join(', ')}` },
+            { error: stT("Папки не найдены: {{p1}}", { p1: missing.map((e) => e.path).join(', ') }) },
             { status: 400 },
           )
         }

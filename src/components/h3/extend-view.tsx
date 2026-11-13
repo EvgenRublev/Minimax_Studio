@@ -258,7 +258,7 @@ export function ExtendView() {
   const addExtendImageFiles = useCallback(async (files: File[]) => {
     const images = files.filter((f) => detectKind(f.name) === 'image')
     const rejected = files.length - images.length
-    if (rejected > 0) toast.error(`Только картинки — ${rejected} файл(ов) отклонено`)
+    if (rejected > 0) toast.error(t("Только картинки — {{p1}} файл(ов) отклонено", { p1: rejected }))
     if (!images.length) return
     const current = useGenStore.getState().video.extendImageRefs.length
     const available = Math.max(0, 9 - current)
@@ -326,9 +326,9 @@ export function ExtendView() {
       // (правка 363) Файл с диска — не из галереи: папка результата = outputFolder
       patchVideo({ extendSourceVideoPath: data.name, extendSourceDuration: duration, extendSourceSubfolder: null, extendSourceName: null })
       if (duration > 0) {
-        toast.success(`Исходник: ${file.name} (${duration.toFixed(1)} с)`)
+        toast.success(t("Исходник: {{p1}} ({{p2}} с)", { p1: file.name, p2: duration.toFixed(1) }))
       } else {
-        toast.success(`Исходник: ${file.name}`)
+        toast.success(t("Исходник: {{p1}}", { p1: file.name }))
       }
       // (правка 343) Файл уже на сервере — blob-превью больше не нужно,
       // отзываем и переключаемся на серверный URL (если имя совпало с
@@ -435,12 +435,12 @@ export function ExtendView() {
             }
             if (inherited.length > 0) {
               patchVideo({ extendImageRefs: [...prev, ...inherited] })
-              toast.success(`Референсы оригинала: +${inherited.length} из метаданных`)
+              toast.success(t("Референсы оригинала: +{{p1}} из метаданных", { p1: inherited.length }))
             }
           }
         }
       } catch { /* нет сайдкара/сеть — продление просто без наследованных рефов */ }
-      toast.success(dur > 0 ? `Исходное видео: ${filename} (${dur.toFixed(1)} с)` : `Исходное видео: ${filename}`)
+      toast.success(dur > 0 ? t("Исходное видео: {{p1}} ({{p2}} с)", { p1: filename, p2: dur.toFixed(1) }) : t("Исходное видео: {{p1}}", { p1: filename }))
     } catch (e) {
       // (правка 344) Ошибка импорта — сбрасываем превью и путь в store,
       // чтобы карточка не выглядела «выбранной» при отсутствующем файле.
@@ -618,7 +618,7 @@ export function ExtendView() {
       {/* (правка 291) Итоговая длительность: исходник + клипы (если исходник
           известен); иначе только сумма клипов. */}
       <Badge variant="secondary" className="text-[10px]">
-        {totalDuration.toFixed(1)} {' '}{t("с")}{sourceDur > 0 ? ' (исх.' + sourceDur.toFixed(0) + '+' + clipsSum + ')' : ''}
+        {totalDuration.toFixed(1)} {' '}{t("с")}{sourceDur > 0 ? t("(исх.{{p1}}+{{p2}})", { p1: sourceDur.toFixed(0), p2: clipsSum }) : ''}
       </Badge>
       <Badge variant="secondary" className="text-[10px]">{video.extendClips.length} {' '}{t("клип(ов)")}</Badge>
       {extendRefs.length > 0 && (
@@ -774,7 +774,7 @@ export function ExtendView() {
             {sourceVideoPath && (
               <p className="text-[10px] text-muted-foreground/60">
                 {t("Папка результата:")}{' '} {video.extendSourceSubfolder !== null
-                  ? `${video.extendSourceSubfolder || 'общая'} (по оригиналу)`
+                  ? t("{{p1}} (по оригиналу)", { p1: video.extendSourceSubfolder || 'общая' })
                   : (video.outputFolder || 'общая')}
               </p>
             )}
@@ -944,8 +944,8 @@ export function ExtendView() {
               className="text-xs text-muted-foreground"
               title={
                 video.extendTwoPass
-                  ? 'Сначала быстрый черновик каждого клипа, затем доработка до чёткого результата. Дольше, но детальнее.'
-                  : 'Один проход сразу в разрешении исходника — быстрее. Довести до полного качества можно позже во вкладке Refine.'
+                  ? t("Сначала быстрый черновик каждого клипа, затем доработка до чёткого результата. Дольше, но детальнее.")
+                  : t("Один проход сразу в разрешении исходника — быстрее. Довести до полного качества можно позже во вкладке Refine.")
               }
             >
               {t("Качество прохода")}
@@ -1039,15 +1039,15 @@ export function ExtendView() {
                               type="button"
                               onClick={() => patchVideo({ extendClipSteps: undefined })}
                               className="shrink-0 rounded-md border border-cyan-500/40 px-1.5 py-0.5 text-[10px] text-cyan-300 transition-colors hover:bg-cyan-500/10"
-                              title={`Вернуть «авто»: шаги исходника${autoClipSteps != null ? ` (${autoClipSteps})` : ' → как в генерации'}`}
+                              title={t("Вернуть «авто»: шаги исходника{{p1}}", { p1: autoClipSteps != null ? ` (${autoClipSteps})` : ' → как в генерации' })}
                             >
                               {t("авто")}
                             </button>
                           ) : (
                             <span className="text-[10px] text-muted-foreground">
                               {autoClipSteps != null
-                                ? `из исходника · ${autoClipSteps}`
-                                : `как в генерации · ${video.firstSamplerSteps ?? 6}`}
+                                ? t("из исходника · {{p1}}", { p1: autoClipSteps })
+                                : t("как в генерации · {{p1}}", { p1: video.firstSamplerSteps ?? 6 })}
                             </span>
                           )}
                           <span className="text-[10px] text-muted-foreground/70">{MIN_FIRST_PASS_STEPS}–30</span>
@@ -1386,8 +1386,8 @@ export function ExtendView() {
               disabled={!canGenerateNow}
               title={
                 assistantBusy
-                  ? '💬 Ассистент отвечает — дождитесь ответа или прервите его'
-                  : 'Сгенерировать продление (Ctrl+Enter)'
+                  ? t("💬 Ассистент отвечает — дождитесь ответа или прервите его")
+                  : t("Сгенерировать продление (Ctrl+Enter)")
               }
               className="h-11 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-sm font-semibold shadow-lg shadow-cyan-500/20"
             >
@@ -1445,7 +1445,7 @@ export function ExtendView() {
       <PromptFixDialog
         open={fixClip !== null}
         onOpenChange={(v) => { if (!v) setFixClip(null) }}
-        hint={fixClip !== null ? `Промпт клипа ${fixClip + 1} и ваше задание уйдут в чат ассистента вкладки «Продление» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.` : undefined}
+        hint={fixClip !== null ? t("Промпт клипа {{p1}} и ваше задание уйдут в чат ассистента вкладки «Продление» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.", { p1: fixClip + 1 }) : undefined}
         onSubmit={(req) => {
           const n = fixClip
           if (n === null) return

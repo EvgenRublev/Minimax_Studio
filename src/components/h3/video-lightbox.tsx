@@ -379,7 +379,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
                 value={isMuted ? 0 : volume}
                 onChange={handleVolumeChange}
                 className="w-20 h-1 accent-cyan-500 cursor-pointer"
-                title={`Громкость: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                title={t("Громкость: {{p1}}%", { p1: Math.round((isMuted ? 0 : volume) * 100) })}
               />
 
               {/* Time */}
@@ -404,7 +404,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
               <button
                 onClick={toggleFs}
                 className="p-1.5 text-white/70 hover:text-white transition-colors"
-                title={isFs ? 'выйти из полноэкранного режима (F)' : 'просмотр на весь экран (F)'}
+                title={isFs ? t("выйти из полноэкранного режима (F)") : t("просмотр на весь экран (F)")}
               >
                 {isFs ? <Minimize2Icon className="w-4 h-4" /> : <Maximize2Icon className="w-4 h-4" />}
               </button>

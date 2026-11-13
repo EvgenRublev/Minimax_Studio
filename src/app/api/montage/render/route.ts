@@ -51,7 +51,8 @@ import { NextResponse } from 'next/server'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveFfmpeg } from '@/lib/thumb'
-import { dispersionCoeffs } from '@/lib/montage-dispersion' // (правка 898) общая формула дисперсии
+import { dispersionCoeffs } from '@/lib/montage-dispersion'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 898) общая формула дисперсии
 
 export const runtime = 'nodejs'
 
@@ -688,28 +689,30 @@ async function findAllRecursive(root: string, fileName: string, depth: number, l
 }
 
 export async function POST(req: Request) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   let releaseBusy: (() => void) | null = null
   try {
     let body: RenderBody
     try {
       body = await req.json()
     } catch {
-      return NextResponse.json({ error: 'Некорректное тело запроса' }, { status: 400 })
+      return NextResponse.json({ error: stT("Некорректное тело запроса") }, { status: 400 })
     }
     const inputs = Array.isArray(body.inputs) ? body.inputs : []
     // (правка 864) сборка из одного шота — тоже сборка (перекодировка,
     // эффекты, скорость, канва секвенции); ругаемся только на пустой таймлайн
     if (!inputs.length) {
-      return NextResponse.json({ error: 'Добавьте на таймлайн хотя бы один шот' }, { status: 400 })
+      return NextResponse.json({ error: stT("Добавьте на таймлайн хотя бы один шот") }, { status: 400 })
     }
     if (inputs.length > 60) {
-      return NextResponse.json({ error: 'Слишком много шотов (максимум 60)' }, { status: 400 })
+      return NextResponse.json({ error: stT("Слишком много шотов (максимум 60)") }, { status: 400 })
     }
 
     // (правка 834) single-flight: параллельные сборки давали одно имя результата,
     // и ffmpeg с -y перезаписывал чужой файл (гонка existsSync → запись)
     if (renderBusy) {
-      return NextResponse.json({ error: 'Сборка уже выполняется — дождитесь окончания' }, { status: 409 })
+      return NextResponse.json({ error: stT("Сборка уже выполняется — дождитесь окончания") }, { status: 409 })
     }
     renderBusy = true
     releaseBusy = () => { renderBusy = false }
@@ -718,12 +721,12 @@ export async function POST(req: Request) {
     const outputDir = cfg.outputDir
     const outputRoot = path.resolve(outputDir)
     if (!outputDir || !existsSync(outputDir)) {
-      return NextResponse.json({ error: 'Не найдена папка output ComfyUI. Запустите ComfyUI.' }, { status: 500 })
+      return NextResponse.json({ error: stT("Не найдена папка output ComfyUI. Запустите ComfyUI.") }, { status: 500 })
     }
 
     const ffmpeg = await resolveFfmpeg()
     if (!ffmpeg) {
-      return NextResponse.json({ error: 'FFmpeg не найден (runtime/ffmpeg).' }, { status: 500 })
+      return NextResponse.json({ error: stT("FFmpeg не найден (runtime/ffmpeg).") }, { status: 500 })
     }
 
     // ---- resolve + проверка входов (с защитой от path traversal) ----
@@ -748,7 +751,7 @@ export async function POST(req: Request) {
     for (const inp of inputs) {
       const name = String(inp.name || '')
       if (!name || name.includes('..') || /[\\/:]/.test(name)) {
-        return NextResponse.json({ error: 'Некорректное имя файла' }, { status: 400 })
+        return NextResponse.json({ error: stT("Некорректное имя файла") }, { status: 400 })
       }
       const sub = sanitizeFolderPath(inp.subfolder || '')
       const src = path.resolve(outputDir, ...(sub ? sub.split('/') : []), name)
@@ -765,18 +768,18 @@ export async function POST(req: Request) {
         final = hits.find((h) => path.dirname(h) === wantDir) ?? (hits.length === 1 ? hits[0] : null)
         if (!final && hits.length > 1) {
           return NextResponse.json(
-            { error: `Несколько файлов с именем ${name} в разных папках — обновите галерею` },
+            { error: stT("Несколько файлов с именем {{p1}} в разных папках — обновите галерею", { p1: name }) },
             { status: 409 },
           )
         }
       }
       if (!final) {
-        return NextResponse.json({ error: `Файл не найден: ${name}` }, { status: 404 })
+        return NextResponse.json({ error: stT("Файл не найден: {{p1}}", { p1: name }) }, { status: 404 })
       }
       const start = parseSec(inp.trimStart)
       const end = parseSec(inp.trimEnd)
       if (start != null && end != null && end <= start) {
-        return NextResponse.json({ error: `Подрезка конца больше начала в шоте ${name}` }, { status: 400 })
+        return NextResponse.json({ error: stT("Подрезка конца больше начала в шоте {{p1}}", { p1: name }) }, { status: 400 })
       }
       const rawGap = parseSec(inp.gap)
       items.push({
@@ -798,7 +801,7 @@ export async function POST(req: Request) {
     // ---- (правка 874) разбор клипов видео-слоёв (V2+) ----
     const rawLayers = Array.isArray(body.layers) ? body.layers : []
     if (rawLayers.length > 40) {
-      return NextResponse.json({ error: 'Слишком много клипов слоёв (максимум 40)' }, { status: 400 })
+      return NextResponse.json({ error: stT("Слишком много клипов слоёв (максимум 40)") }, { status: 400 })
     }
     const layerItems: Array<{
       src: string
@@ -821,7 +824,7 @@ export async function POST(req: Request) {
     for (const l of rawLayers) {
       const name = String(l?.name || '')
       if (!name || name.includes('..') || /[\\/:]/.test(name)) {
-        return NextResponse.json({ error: 'Некорректное имя файла слоя' }, { status: 400 })
+        return NextResponse.json({ error: stT("Некорректное имя файла слоя") }, { status: 400 })
       }
       const sub = sanitizeFolderPath(l.subfolder || '')
       const src = path.resolve(outputDir, ...(sub ? sub.split('/') : []), name)
@@ -834,7 +837,7 @@ export async function POST(req: Request) {
         final = hits.find((h) => path.dirname(h) === wantDir) ?? (hits.length === 1 ? hits[0] : null)
       }
       if (!final) {
-        return NextResponse.json({ error: `Файл слоя не найден: ${name}` }, { status: 404 })
+        return NextResponse.json({ error: stT("Файл слоя не найден: {{p1}}", { p1: name }) }, { status: 404 })
       }
       const at = typeof l.at === 'number' ? l.at : parseFloat(String(l.at ?? ''))
       const trk = typeof l.track === 'number' ? l.track : parseInt(String(l.track ?? '0'), 10)
@@ -858,7 +861,7 @@ export async function POST(req: Request) {
     // ---- (правка 874) разбор аудиоклипов (A1+): только .montage-audio ----
     const rawAudios = Array.isArray(body.audios) ? body.audios : []
     if (rawAudios.length > 60) {
-      return NextResponse.json({ error: 'Слишком много аудиоклипов (максимум 60)' }, { status: 400 })
+      return NextResponse.json({ error: stT("Слишком много аудиоклипов (максимум 60)") }, { status: 400 })
     }
     const audioItems: Array<{
       src: string
@@ -875,17 +878,17 @@ export async function POST(req: Request) {
     for (const a of rawAudios) {
       const f = String(a?.file || '')
       if (!f || f.includes('..') || /[\\/:]/.test(f)) {
-        return NextResponse.json({ error: 'Некорректное имя аудиофайла' }, { status: 400 })
+        return NextResponse.json({ error: stT("Некорректное имя аудиофайла") }, { status: 400 })
       }
       const cand = path.resolve(path.join(AUDIO_DIR, path.basename(f)))
       if (!cand.startsWith(AUDIO_DIR + path.sep) || !existsSync(cand)) {
-        return NextResponse.json({ error: `Аудиофайл не найден: ${f}` }, { status: 404 })
+        return NextResponse.json({ error: stT("Аудиофайл не найден: {{p1}}", { p1: f }) }, { status: 404 })
       }
       const at = typeof a.at === 'number' ? a.at : parseFloat(String(a.at ?? ''))
       const s0 = parseSec(a.trimStart)
       const e0 = parseSec(a.trimEnd)
       if (s0 != null && e0 != null && e0 <= s0) {
-        return NextResponse.json({ error: `Подрезка конца больше начала в аудио ${f}` }, { status: 400 })
+        return NextResponse.json({ error: stT("Подрезка конца больше начала в аудио {{p1}}", { p1: f }) }, { status: 400 })
       }
       audioItems.push({
         src: cand,
@@ -929,7 +932,7 @@ export async function POST(req: Request) {
         : broken < items.length + layerItems.length
           ? path.basename(layerItems[broken - items.length].src)
           : path.basename(audioItems[broken - items.length - layerItems.length].src)
-      return NextResponse.json({ error: `Не удалось прочитать файл: ${brokenName}` }, { status: 500 })
+      return NextResponse.json({ error: stT("Не удалось прочитать файл: {{p1}}", { p1: brokenName }) }, { status: 500 })
     }
     const infos: ProbeInfo[] = probed as ProbeInfo[]
     const layerInfos: ProbeInfo[] = infos.slice(items.length, items.length + layerItems.length)
@@ -957,7 +960,7 @@ export async function POST(req: Request) {
     const gpuOk = CODEC !== 'cpu' && (await hasNvenc(ffmpeg))
     if (CODEC === 'gpu' && !gpuOk) {
       return NextResponse.json(
-        { error: 'Кодировщик NVENC не найден — выберите «Процессор» или «Авто»' },
+        { error: stT("Кодировщик NVENC не найден — выберите «Процессор» или «Авто»") },
         { status: 400 },
       )
     }
@@ -976,7 +979,7 @@ export async function POST(req: Request) {
       // клипа без звука уходил в минус и ffmpeg падал с техническим текстом.
       if (s >= info.duration - 0.05) {
         return NextResponse.json(
-          { error: `Шот ${path.basename(it.src)}: начало подрезки ${s.toFixed(2)} с за пределами клипа (${info.duration.toFixed(2)} с)` },
+          { error: stT("Шот {{p1}}: начало подрезки {{p2}} с за пределами клипа ({{p3}} с)", { p1: path.basename(it.src), p2: s.toFixed(2), p3: info.duration.toFixed(2) }) },
           { status: 400 },
         )
       }
@@ -993,7 +996,7 @@ export async function POST(req: Request) {
       if ((inD > 0 || outD > 0) && dur <= inD + outD + 0.05) {
         return NextResponse.json(
           {
-            error: `Шот ${path.basename(it.src)}: переходы ${inD.toFixed(2)} с + ${outD.toFixed(2)} с длиннее шота (${dur.toFixed(2)} с)`,
+            error: stT("Шот {{p1}}: переходы {{p2}} с + {{p3}} с длиннее шота ({{p4}} с)", { p1: path.basename(it.src), p2: inD.toFixed(2), p3: outD.toFixed(2), p4: dur.toFixed(2) }),
           },
           { status: 400 },
         )
@@ -1063,7 +1066,7 @@ export async function POST(req: Request) {
       const s = li.start ?? 0
       if (s >= info.duration - 0.05) {
         return NextResponse.json(
-          { error: `Слой ${path.basename(li.src)}: начало подрезки ${s.toFixed(2)} с за пределами клипа (${info.duration.toFixed(2)} с)` },
+          { error: stT("Слой {{p1}}: начало подрезки {{p2}} с за пределами клипа ({{p3}} с)", { p1: path.basename(li.src), p2: s.toFixed(2), p3: info.duration.toFixed(2) }) },
           { status: 400 },
         )
       }
@@ -1210,7 +1213,7 @@ export async function POST(req: Request) {
         const s = ai.start ?? 0
         if (s >= info.duration - 0.05) {
           return NextResponse.json(
-            { error: `Аудио ${path.basename(ai.src)}: начало подрезки ${s.toFixed(2)} с за пределами файла (${info.duration.toFixed(2)} с)` },
+            { error: stT("Аудио {{p1}}: начало подрезки {{p2}} с за пределами файла ({{p3}} с)", { p1: path.basename(ai.src), p2: s.toFixed(2), p3: info.duration.toFixed(2) }) },
             { status: 400 },
           )
         }
@@ -1271,7 +1274,7 @@ export async function POST(req: Request) {
     // (правка 837) сравнение с path.sep: без него проходил бы сосед вроде output_bak
     const destAbs = path.resolve(destDir)
     if (destAbs !== outputRoot && !destAbs.startsWith(outputRoot + path.sep)) {
-      return NextResponse.json({ error: 'Некорректная папка результата' }, { status: 400 })
+      return NextResponse.json({ error: stT("Некорректная папка результата") }, { status: 400 })
     }
     await fs.mkdir(destDir, { recursive: true })
     // (правка 834) имя резервируется атомарным созданием файла ('wx'), а не
@@ -1292,7 +1295,7 @@ export async function POST(req: Request) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
       }
     }
-    if (!outName) return NextResponse.json({ error: 'Слишком много файлов монтажа в выходной папке' }, { status: 500 })
+    if (!outName) return NextResponse.json({ error: stT("Слишком много файлов монтажа в выходной папке") }, { status: 500 })
 
     // ---- один проход: все входы + filter_complex ----
     // (правка 839) -progress pipe:1: прогресс кода времени читаем из stdout
@@ -1336,10 +1339,10 @@ export async function POST(req: Request) {
       // оставались в output и забивали счётчик имён
       await fs.rm(outPath, { force: true }).catch(() => {})
       if ((err as { aborted?: boolean }).aborted) {
-        return NextResponse.json({ error: 'Сборка отменена' }, { status: 499 })
+        return NextResponse.json({ error: stT("Сборка отменена") }, { status: 499 })
       }
       const stderr = (err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err))
-      return NextResponse.json({ error: `Ошибка сборки: ${String(stderr).slice(-500)}` }, { status: 500 })
+      return NextResponse.json({ error: stT("Ошибка сборки: {{p1}}", { p1: String(stderr).slice(-500) }) }, { status: 500 })
     }
     let created = true
     try {
@@ -1349,7 +1352,7 @@ export async function POST(req: Request) {
     }
     if (!created) {
       await fs.rm(outPath, { force: true }).catch(() => {})
-      return NextResponse.json({ error: 'Файл результата не создан' }, { status: 500 })
+      return NextResponse.json({ error: stT("Файл результата не создан") }, { status: 500 })
     }
 
     return NextResponse.json({

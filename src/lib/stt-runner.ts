@@ -13,6 +13,7 @@ import { spawn, execFile, type ChildProcess } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import { getAppConfig } from './app-config'
+import { st } from '@/lib/i18n/server' // (правка 955)
 
 const execFileAsync = promisify(execFile)
 
@@ -152,7 +153,7 @@ export async function ensureStt(): Promise<SttStartResult> {
     try {
       const cfg = getAppConfig()
       if (!cfg.sttEnabled) {
-        return { ok: false, error: 'Голосовой ввод отключён в настройках' }
+        return { ok: false, error: st("Голосовой ввод отключён в настройках") }
       }
 
       // (правка 72) STT-рантайм встроен в проект: стт-папка рядом с tools/ (stt/).
@@ -195,7 +196,7 @@ export async function ensureStt(): Promise<SttStartResult> {
       if (pendingStop) {
         try { proc.kill() } catch { /* ignore */ }
         if (child === proc) child = null
-        return { ok: false, error: 'Остановлено пользователем' }
+        return { ok: false, error: st("Остановлено пользователем") }
       }
 
       // Model load is the slow part (CPU, hundreds of MB) — allow 2 minutes.
@@ -205,7 +206,7 @@ export async function ensureStt(): Promise<SttStartResult> {
         if (pendingStop) {
           try { proc.kill() } catch { /* ignore */ }
           if (child === proc) child = null
-          return { ok: false, error: 'Остановлено пользователем' }
+          return { ok: false, error: st("Остановлено пользователем") }
         }
         // (правка 743) Показываем настоящую причину из stderr дочернего
         // процесса (например, «transcribe.dll не найдена: <путь>»), а не

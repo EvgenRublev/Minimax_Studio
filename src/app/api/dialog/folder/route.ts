@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import path from 'path'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,8 @@ export const dynamic = 'force-dynamic'
  *    TOPMOST + SetForegroundWindow with an ALT-press fallback.
  */
 export async function POST(request: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await request.json().catch(() => ({}))
     const title: string = body.title || 'Выберите папку'
@@ -121,7 +124,7 @@ export async function POST(request: Request) {
 
     if (result.code !== 0) {
       return NextResponse.json(
-        { error: `Не удалось открыть диалог выбора папки: ${result.stderr.trim() || `код ${result.code}`}` },
+        { error: st("Не удалось открыть диалог выбора папки: {{p1}}", { p1: result.stderr.trim() || `код ${result.code}` }) },
         { status: 500 },
       )
     }
@@ -135,7 +138,7 @@ export async function POST(request: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json(
-      { error: `Не удалось открыть диалог выбора папки: ${msg}` },
+      { error: st("Не удалось открыть диалог выбора папки: {{p1}}", { p1: msg }) },
       { status: 500 },
     )
   }

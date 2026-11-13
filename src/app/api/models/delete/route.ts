@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { deleteModel } from '@/lib/model-downloader'
 import { activeLlmModelId, llmBackend } from '@/lib/llm-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -15,12 +16,14 @@ export const dynamic = 'force-dynamic'
  *    удаляется свободно: бэкенд подхватит её, только если PQ2_0 отсутствует.
  */
 export async function POST(request: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await request.json().catch(() => ({}))
     const modelId: string = body.modelId || ''
 
     if (!modelId) {
-      return NextResponse.json({ error: 'Укажите modelId' }, { status: 400 })
+      return NextResponse.json({ error: st("Укажите modelId") }, { status: 400 })
     }
 
     // (правка 164) Лёгкий квант Bonsai (optional) — не блокируем даже когда
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
     // Bonsai выбрана ассистентом: без них бэкенд не запустится.
     if (llmBackend() === 'bonsai' && modelId.startsWith('bonsai_') && !isBonsaiLight) {
       return NextResponse.json(
-        { error: 'Bonsai сейчас выбрана моделью ассистента. Сначала переключите модель ассистента (Настройки → LLM), затем удаляйте.' },
+        { error: st("Bonsai сейчас выбрана моделью ассистента. Сначала переключите модель ассистента (Настройки → LLM), затем удаляйте.") },
         { status: 409 },
       )
     }
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
     // Активная LLM-квантизация (Gemma/Qwen) — под замком.
     if (modelId === activeLlmModelId()) {
       return NextResponse.json(
-        { error: 'Эта модель сейчас выбрана ассистентом. Сначала переключите модель ассистента (Настройки → LLM), затем удаляйте.' },
+        { error: st("Эта модель сейчас выбрана ассистентом. Сначала переключите модель ассистента (Настройки → LLM), затем удаляйте.") },
         { status: 409 },
       )
     }

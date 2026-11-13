@@ -167,7 +167,7 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Ошибка обрезки')
-      toast.success(`Обрезано: ${fmt(trimStart)} → ${fmt(trimEnd)} (${data.duration} с)`)
+      toast.success(tt("Обрезано: {{p1}} → {{p2}} ({{p3}} с)", { p1: fmt(trimStart), p2: fmt(trimEnd), p3: data.duration }))
       // (правка 474) Глобальный сигнал обновления: onDone → load() без
       // include_hot не видел свежий файл — files-роут пропускает «горячие»
       // файлы младше 4 секунд. bump запускает во всех галереях серию

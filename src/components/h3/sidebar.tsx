@@ -219,7 +219,7 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
                     animate={{ opacity: 1 }}
                     className="text-sm font-medium truncate"
                   >
-                    {item.label}
+                    {t(item.label)}
                   </motion.span>
                 )}
               </button>
@@ -230,7 +230,7 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
                 <Tooltip key={item.id}>
                   <TooltipTrigger asChild>{button}</TooltipTrigger>
                   <TooltipContent side="right" className="bg-[var(--surface-3)] border-border text-foreground">
-                    {item.label}
+                    {t(item.label)}
                   </TooltipContent>
                 </Tooltip>
               )

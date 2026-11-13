@@ -13,7 +13,8 @@ import { recordPendingMetaRaw } from '@/lib/pending-meta'
 import { readPromptChain, readPromptChainParts, readMetaImageRefs, readMetaLoop, resolveSourceLatent } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
-import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config' // (правка 483)
+import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 483)
 
 /**
  * POST /api/comfy/refine — генеративный v2v-апскейл готового видео
@@ -117,6 +118,8 @@ function wholeModeMemoryError(
 }
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   // (правка 716) copiedPath вынесен из try — внешний catch должен иметь
   // возможность удалить свежую копию в input/, если что-то упало ДО отправки
   // задачи в ComfyUI. Раньше переменная жила внутри try, и осиротевшие копии
@@ -174,7 +177,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
-      return NextResponse.json({ error: 'sourceFilename (или inputSource) обязателен' }, { status: 400 })
+      return NextResponse.json({ error: st("sourceFilename (или inputSource) обязателен") }, { status: 400 })
     }
 
     // Fast-path 409 (как в /api/comfy/generate): ассистент занят — не тратим
@@ -296,7 +299,7 @@ export async function POST(req: NextRequest) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
-        return NextResponse.json({ error: `Файл не найден в input: ${inName}` }, { status: 404 })
+        return NextResponse.json({ error: st("Файл не найден в input: {{p1}}", { p1: inName }) }, { status: 404 })
       }
       const userPrompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
       // (правка 509) Референсы от пользователя: у файла с диска нет
@@ -307,7 +310,7 @@ export async function POST(req: NextRequest) {
         const name = path.basename(String(raw ?? ''))
         if (!name) continue
         if (!existsSync(path.join(cfg.inputDir, name))) {
-          return NextResponse.json({ error: `Референс не найден в input: ${name}` }, { status: 404 })
+          return NextResponse.json({ error: st("Референс не найден в input: {{p1}}", { p1: name }) }, { status: 404 })
         }
         userRefImages.push({ path: name, role: '' })
       }
@@ -318,7 +321,7 @@ export async function POST(req: NextRequest) {
         probe = await probeVideoFile(inPath)
       } catch (e) {
         return NextResponse.json(
-          { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+          { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
       }
@@ -330,7 +333,7 @@ export async function POST(req: NextRequest) {
         typeof body.target === 'number' &&
         (!Number.isFinite(body.target) || body.target < 144 || body.target > 2160)
       ) {
-        return NextResponse.json({ error: 'Недопустимое целевое разрешение' }, { status: 400 })
+        return NextResponse.json({ error: st("Недопустимое целевое разрешение") }, { status: 400 })
       }
       const target: 'same' | 'x2' | number = effectiveTarget(body, probe.width, probe.height)
       const dims = refineDimensions(probe.width, probe.height, target)
@@ -479,7 +482,7 @@ export async function POST(req: NextRequest) {
 
     const sourcePath = path.join(cfg.outputDir, sub, safeName)
     if (!existsSync(sourcePath)) {
-      return NextResponse.json({ error: `Файл не найден: ${safeName}` }, { status: 404 })
+      return NextResponse.json({ error: st("Файл не найден: {{p1}}", { p1: safeName }) }, { status: 404 })
     }
 
     // ─── Копия output → input (без перезаписи чужих файлов — суффикс при
@@ -507,7 +510,7 @@ export async function POST(req: NextRequest) {
       // число неизвестно (probe.frames = 0) → план был бы пустым/битым.
       if (body.mode === 'chunks') {
         return NextResponse.json(
-          { error: 'Режим «Частями» с реюзом inputName требует свежей копии (нет числа кадров)' },
+          { error: st("Режим «Частями» с реюзом inputName требует свежей копии (нет числа кадров)") },
           { status: 400 },
         )
       }
@@ -543,7 +546,7 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         await fs.unlink(destPath).catch(() => {})
         return NextResponse.json(
-          { error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}` },
+          { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
       }
@@ -556,7 +559,7 @@ export async function POST(req: NextRequest) {
         : 'same'
     if (typeof target === 'number' && (!Number.isFinite(target) || target < 144 || target > 2160)) {
       if (copiedPath) await fs.unlink(copiedPath).catch(() => {})
-      return NextResponse.json({ error: 'Недопустимое целевое разрешение' }, { status: 400 })
+      return NextResponse.json({ error: st("Недопустимое целевое разрешение") }, { status: 400 })
     }
 
     // ─── Промпт: пользовательский > цепочка из меты исходника > дефолт ───

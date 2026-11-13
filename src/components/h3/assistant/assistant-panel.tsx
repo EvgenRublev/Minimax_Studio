@@ -19,8 +19,11 @@ import { ChevronLeftIcon } from 'lucide-react'
 import { useAssistantPanel, ASSISTANT_PANEL_DEFAULT } from '@/lib/assistant-panel-store'
 import { AssistantView } from './assistant-view'
 import type { AssistantChatMode } from '@/lib/assistant-chats-store'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export function AssistantPanel({ mode }: { mode: AssistantChatMode }) {
+  const { t } = useTranslation() // (правка 955)
+
   const width = useAssistantPanel((s) => s.width)
   const collapsed = useAssistantPanel((s) => s.collapsed)
   const setWidth = useAssistantPanel((s) => s.setWidth)
@@ -65,7 +68,7 @@ export function AssistantPanel({ mode }: { mode: AssistantChatMode }) {
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          title="Развернуть ассистента"
+          title={t("Развернуть ассистента")}
           className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-amber-300 hover:bg-[var(--surface-2)] transition-colors"
         >
           <ChevronLeftIcon className="w-4 h-4" />
@@ -74,7 +77,7 @@ export function AssistantPanel({ mode }: { mode: AssistantChatMode }) {
           className="text-[10px] tracking-[0.12em] uppercase text-muted-foreground/60 select-none"
           style={{ writingMode: 'vertical-rl' }}
         >
-          Ассистент
+          {t("Ассистент")}
         </span>
       </div>
     )
@@ -88,7 +91,7 @@ export function AssistantPanel({ mode }: { mode: AssistantChatMode }) {
       {/* Resize-ручка: полоса у левой границы, подсвечивается при hover/drag */}
       <div
         onMouseDown={onResizeStart}
-        title="Тяните, чтобы изменить ширину панели"
+        title={t("Тяните, чтобы изменить ширину панели")}
         className="absolute -left-1 top-0 bottom-0 w-2 cursor-col-resize z-20 group"
       >
         <div className="absolute left-[3px] top-0 bottom-0 w-[2px] rounded-full bg-transparent group-hover:bg-amber-500/50 group-active:bg-amber-500/70 transition-colors" />

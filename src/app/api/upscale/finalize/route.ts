@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { setUpscaleMetaGenerationTime } from '@/lib/upscale-meta'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 264) POST /api/upscale/finalize
@@ -13,6 +14,8 @@ import { setUpscaleMetaGenerationTime } from '@/lib/upscale-meta'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = (await req.json().catch(() => null)) as
       | { path?: unknown; generation_time?: unknown; feature?: unknown; options?: unknown }
@@ -21,7 +24,7 @@ export async function POST(req: NextRequest) {
     const gt = typeof body?.generation_time === 'number' ? body.generation_time : NaN
     if (!p || !Number.isFinite(gt) || gt <= 0) {
       return NextResponse.json(
-        { error: 'Нужны path и generation_time (> 0)' },
+        { error: st("Нужны path и generation_time (> 0)") },
         { status: 400 },
       )
     }
@@ -33,6 +36,6 @@ export async function POST(req: NextRequest) {
     const ok = setUpscaleMetaGenerationTime(p, gt, feature, options)
     return NextResponse.json({ ok })
   } catch {
-    return NextResponse.json({ ok: false, error: 'Не удалось дописать метаданные' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: st("Не удалось дописать метаданные") }, { status: 500 })
   }
 }

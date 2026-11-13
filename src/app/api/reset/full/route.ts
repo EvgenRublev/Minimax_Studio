@@ -8,6 +8,7 @@ import { clearInflight } from '@/lib/inflight-journal'
 import { clearAllMirrors } from '@/lib/settings-mirror' // (правка 804)
 import { stopLlm } from '@/lib/llm-runner'
 import { stopStt } from '@/lib/stt-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -117,6 +118,8 @@ async function removeFile(file: string): Promise<number> {
 }
 
 export async function POST(req: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   // (правка 926) Вторая линия защиты от «drive-by» сброса (первая — CSRF-guard
   // в src/proxy.ts): сервер требует явный токен подтверждения в теле.
   let body: { confirm?: unknown } = {}
@@ -126,7 +129,7 @@ export async function POST(req: Request) {
     /* не JSON — провалим проверку ниже */
   }
   if (body.confirm !== 'RESET') {
-    return NextResponse.json({ error: 'Требуется подтверждение: body confirm="RESET"' }, { status: 400 })
+    return NextResponse.json({ error: st("Требуется подтверждение: body confirm=\"RESET\"") }, { status: 400 })
   }
   const cwd = process.cwd()
   // Конфиг читаем ДО сброса: пути input/output берутся из текущего backend,

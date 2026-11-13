@@ -14,6 +14,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { getAppConfig } from './app-config'
+import { st } from '@/lib/i18n/server' // (правка 955)
 
 /** Максимальная длина имени папки (защита от экзотики в URL/файловой системе). */
 const MAX_NAME_LEN = 60
@@ -91,14 +92,14 @@ export async function listGalleryFolders(): Promise<string[]> {
 /** Создать папку (вложенный путь 'a/b' создаёт всю цепочку). */
 export async function createGalleryFolder(name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const safe = sanitizeFolderPath(name)
-  if (!safe) return { ok: false, error: 'Введите имя папки' }
+  if (!safe) return { ok: false, error: st("Введите имя папки") }
   if (safe.split('/').some((s) => s.toLowerCase() === 'latents')) {
-    return { ok: false, error: 'Имя «latents» зарезервировано (служебная папка)' }
+    return { ok: false, error: st("Имя «latents» зарезервировано (служебная папка)") }
   }
   const dir = folderPath(safe)
   try {
     await fs.access(dir)
-    return { ok: false, error: `Папка «${safe}» уже существует` }
+    return { ok: false, error: st("Папка «{{p1}}» уже существует", { p1: safe }) }
   } catch { /* не существует — создаём */ }
   try {
     await fs.mkdir(dir, { recursive: true })
@@ -118,25 +119,25 @@ export async function renameGalleryFolder(
   newName: string,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const fromSafe = sanitizeFolderPath(oldName)
-  if (!fromSafe) return { ok: false, error: 'Неверное имя папки' }
+  if (!fromSafe) return { ok: false, error: st("Неверное имя папки") }
   let toSafe = sanitizeFolderPath(newName)
-  if (!toSafe) return { ok: false, error: 'Введите новое имя папки' }
+  if (!toSafe) return { ok: false, error: st("Введите новое имя папки") }
   if (!toSafe.includes('/')) {
     const parent = fromSafe.includes('/') ? fromSafe.slice(0, fromSafe.lastIndexOf('/')) : ''
     toSafe = parent ? `${parent}/${toSafe}` : toSafe
   }
   if (fromSafe === toSafe) return { ok: true, name: toSafe }
   if (toSafe.startsWith(fromSafe + '/')) {
-    return { ok: false, error: 'Нельзя перенести папку внутрь самой себя' }
+    return { ok: false, error: st("Нельзя перенести папку внутрь самой себя") }
   }
   if (toSafe.split('/').some((s) => s.toLowerCase() === 'latents')) {
-    return { ok: false, error: 'Имя «latents» зарезервировано (служебная папка)' }
+    return { ok: false, error: st("Имя «latents» зарезервировано (служебная папка)") }
   }
   const srcDir = folderPath(fromSafe)
   const dstDir = folderPath(toSafe)
   try {
     await fs.access(dstDir)
-    return { ok: false, error: `Папка «${toSafe}» уже существует` }
+    return { ok: false, error: st("Папка «{{p1}}» уже существует", { p1: toSafe }) }
   } catch { /* целевой папки нет — ок */ }
   try {
     await fs.mkdir(path.dirname(dstDir), { recursive: true })
@@ -144,9 +145,9 @@ export async function renameGalleryFolder(
     return { ok: true, name: toSafe }
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return { ok: false, error: `Папка «${fromSafe}» не найдена` }
+    if (code === 'ENOENT') return { ok: false, error: st("Папка «{{p1}}» не найдена", { p1: fromSafe }) }
     if (code === 'ENOTEMPTY' || code === 'EEXIST' || code === 'EPERM') {
-      return { ok: false, error: `Папка «${toSafe}» уже существует` }
+      return { ok: false, error: st("Папка «{{p1}}» уже существует", { p1: toSafe }) }
     }
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
@@ -155,7 +156,7 @@ export async function renameGalleryFolder(
 /** Удалить папку (только пустую — видео и подпапки не теряются молча). */
 export async function deleteGalleryFolder(name: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const safe = sanitizeFolderPath(name)
-  if (!safe) return { ok: false, error: 'Неверное имя папки' }
+  if (!safe) return { ok: false, error: st("Неверное имя папки") }
   const dir = folderPath(safe)
   try {
     const entries = await fs.readdir(dir)
@@ -164,7 +165,7 @@ export async function deleteGalleryFolder(name: string): Promise<{ ok: true } | 
     // считаем: сначала удалите/переместите их.
     const visible = entries.filter((e) => !e.startsWith('.') && !e.endsWith('.meta.json'))
     if (visible.length > 0) {
-      return { ok: false, error: `Папка «${safe}» не пуста (${visible.length} файлов/папок). Переместите или удалите их.` }
+      return { ok: false, error: st("Папка «{{p1}}» не пуста ({{p2}} файлов/папок). Переместите или удалите их.", { p1: safe, p2: visible.length }) }
     }
     await fs.rm(dir, { recursive: true })
     return { ok: true }
@@ -185,7 +186,7 @@ export async function moveOutputFile(
   to: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const safeName = path.basename(String(filename ?? ''))
-  if (!safeName || safeName.startsWith('.')) return { ok: false, error: 'Неверное имя файла' }
+  if (!safeName || safeName.startsWith('.')) return { ok: false, error: st("Неверное имя файла") }
   const fromSafe = sanitizeFolderPath(from)
   const toSafe = sanitizeFolderPath(to)
   if (fromSafe === toSafe) return { ok: true }

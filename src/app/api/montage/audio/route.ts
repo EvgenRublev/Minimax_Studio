@@ -23,6 +23,7 @@ import {
 import { resolveFfprobe } from '@/lib/video-probe'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const execFileAsync = promisify(execFile)
 
@@ -66,24 +67,26 @@ async function probeAudioDuration(file: string): Promise<number> {
 }
 
 export async function POST(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   let part: MultipartFilePart | null = null
   let destPath: string | null = null
   try {
     const webBody = req.body
     if (!webBody) {
-      return NextResponse.json({ error: 'Пустой запрос' }, { status: 400 })
+      return NextResponse.json({ error: stT("Пустой запрос") }, { status: 400 })
     }
     part = await readFirstMultipartPart(webBody, req.headers.get('content-type'))
     if (!part.filename) {
       part.cancel()
-      return NextResponse.json({ error: 'Файл не передан' }, { status: 400 })
+      return NextResponse.json({ error: stT("Файл не передан") }, { status: 400 })
     }
     const safeName = (path.basename(part.filename).replace(UNSAFE_CHARS, '_') || 'audio').slice(0, 200)
     const ext = path.extname(safeName).toLowerCase()
     if (!AUDIO_EXT.has(ext)) {
       part.cancel()
       return NextResponse.json(
-        { error: `Не звуковой формат: ${ext || 'без расширения'}. Поддержаны mp3, wav, m4a, ogg, flac, opus` },
+        { error: stT("Не звуковой формат: {{p1}}. Поддержаны mp3, wav, m4a, ogg, flac, opus", { p1: ext || 'без расширения' }) },
         { status: 400 },
       )
     }
@@ -113,7 +116,7 @@ export async function POST(req: NextRequest) {
       destPath = null
       if (tooLarge) {
         part.cancel()
-        return NextResponse.json({ error: 'Файл слишком большой (лимит 512 МБ)' }, { status: 413 })
+        return NextResponse.json({ error: stT("Файл слишком большой (лимит 512 МБ)") }, { status: 413 })
       }
       throw e
     }
@@ -137,14 +140,16 @@ export async function POST(req: NextRequest) {
 
 /** (правка 874) GET с Range — <audio> в превью требует seek по звуку. */
 export async function GET(req: NextRequest) {
+  const { t: stT } = useTranslation() // (правка 955)
+
   const f = req.nextUrl.searchParams.get('f') || ''
-  if (!f) return NextResponse.json({ error: 'Не указано f' }, { status: 400 })
+  if (!f) return NextResponse.json({ error: stT("Не указано f") }, { status: 400 })
   const target = path.resolve(path.join(AUDIO_DIR, path.basename(f)))
   if (!target.startsWith(AUDIO_DIR + path.sep) || !existsSync(target)) {
-    return NextResponse.json({ error: 'Файл не найден' }, { status: 404 })
+    return NextResponse.json({ error: stT("Файл не найден") }, { status: 404 })
   }
   const st = fsSync.statSync(target)
-  if (!st.isFile()) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 })
+  if (!st.isFile()) return NextResponse.json({ error: stT("Файл не найден") }, { status: 404 })
 
   const ext = path.extname(target).toLowerCase()
   const mime = MIME[ext] || 'application/octet-stream'

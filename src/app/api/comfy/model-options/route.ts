@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * GET /api/comfy/model-options?model_type=minimax_h3_ref2va
@@ -7,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const { searchParams } = new URL(req.url)
   const modelType = searchParams.get('model_type') || ''
 
@@ -72,7 +75,7 @@ export async function GET(req: NextRequest) {
     },
     resolution_preset_order: ['480p', '720p', '1080p'],
     minimax_h3_text_encoder_choices: [
-      { value: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', label: 'Qwen3VL 32B (рекомендуется)' },
+      { value: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', label: st("Qwen3VL 32B (рекомендуется)") },
     ],
     minimax_h3_text_encoder_default: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
     omni_reference_limits: { image: 9, video: 3, audio: 3, total: 15 },

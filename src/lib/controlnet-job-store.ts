@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenQueue } from '@/lib/gen-queue-store' // (правка 512) общая очередь
 import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
+import { t } from '@/lib/i18n' // (правка 955)
 
 export type ControlNetPhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -261,7 +262,7 @@ async function pollOnce() {
       if (unknownStreak >= 10) {
         useControlNetJob.setState({
           phase: 'error',
-          error: 'ComfyUI не отвечает (сервер остановлен или перезапущен) — отслеживание остановлено',
+          error: t("ComfyUI не отвечает (сервер остановлен или перезапущен) — отслеживание остановлено"),
           busy: false,
         })
         stopPolling()
@@ -317,7 +318,7 @@ async function pollOnce() {
       if (unknownStreak >= 10) {
         useControlNetJob.setState({
           phase: 'error',
-          error: 'Задача не найдена в ComfyUI (сервер был перезапущен) — отслеживание остановлено',
+          error: t("Задача не найдена в ComfyUI (сервер был перезапущен) — отслеживание остановлено"),
           busy: false,
         })
         stopPolling()

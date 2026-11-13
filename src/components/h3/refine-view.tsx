@@ -219,7 +219,7 @@ export function RefineView() {
         subfolder: '',
         inputSource: path,
       })
-      toast.success(`Источник: ${file.name}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.name }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
@@ -235,7 +235,7 @@ export function RefineView() {
     if (!images.length) { toast.error(t("Референсы — только картинки (png, jpg, webp)")); return }
     const room = 8 - useRefineTarget.getState().userRefs.length
     if (room <= 0) { toast.error(t("Максимум 8 картинок-референсов")); return }
-    if (images.length > room) toast.error(`Максимум 8 референсов — добавлено ${room}`)
+    if (images.length > room) toast.error(t("Максимум 8 референсов — добавлено {{p1}}", { p1: room }))
     setUploadingRefs(true)
     try {
       for (const file of images.slice(0, room)) {
@@ -319,7 +319,7 @@ export function RefineView() {
     revokeSourceUrl(sourceRef.current) // (правка 345)
     if (file) {
       setSource(file)
-      toast.success(`Источник: ${file.filename}`)
+      toast.success(t("Источник: {{p1}}", { p1: file.filename }))
     } else {
       // файл может быть ещё не в списке — берём как есть (url соберём сами)
       setSource({
@@ -410,7 +410,7 @@ export function RefineView() {
       }),
     }
     enqueueRefine(task)
-    toast.info(`Refine поставлен в очередь: ${src.filename}`)
+    toast.info(t("Refine поставлен в очередь: {{p1}}", { p1: src.filename }))
   }, [mode, target, targetMp, steps, strength, prompt, chunkSec, uploadingSrc, refDetail, userRefs])
 
   const cancel = useCallback(async () => {
@@ -459,7 +459,7 @@ export function RefineView() {
                         filename: parsed.filename ?? '',
                         subfolder: parsed.subfolder ?? '',
                       })
-                      toast.success(`Источник: ${parsed.filename}`)
+                      toast.success(t("Источник: {{p1}}", { p1: parsed.filename }))
                     } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
                     return
                   }
@@ -534,7 +534,7 @@ export function RefineView() {
                         filename: parsed.filename ?? '',
                         subfolder: parsed.subfolder ?? '',
                       })
-                      toast.success(`Источник: ${parsed.filename}`)
+                      toast.success(t("Источник: {{p1}}", { p1: parsed.filename }))
                     } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
                     return
                   }
@@ -574,7 +574,7 @@ export function RefineView() {
               в папку оригинала (правка 366); файл с диска — общая папка. */}
           {source && (
             <p className="text-[10px] text-muted-foreground/60 -mt-2">
-              {t("Папка результата:")}{' '} {source.inputSource ? t("общая") : `${source.subfolder || 'общая'} (по оригиналу)`}
+              {t("Папка результата:")}{' '} {source.inputSource ? t("общая") : t("{{p1}} (по оригиналу)", { p1: source.subfolder || 'общая' })}
             </p>
           )}
 
@@ -585,8 +585,8 @@ export function RefineView() {
             <p
               className="text-[10px] -mt-1 flex items-center gap-1.5 text-violet-300/90"
               title={mode === 'whole'
-                ? 'Исходник помечен как зацикленный: рефайн добавит 5 кадров хвоста, сэмплер получит обёрнутый контекст, а декод отдаст ровно один цикл — стык «конец → начало» сохранится.'
-                : 'В режиме «Частями» цикл не поддерживается: окна режутся независимо, стык не собрать. Рефайн пойдёт обычным проходом.'}
+                ? t("Исходник помечен как зацикленный: рефайн добавит 5 кадров хвоста, сэмплер получит обёрнутый контекст, а декод отдаст ровно один цикл — стык «конец → начало» сохранится.")
+                : t("В режиме «Частями» цикл не поддерживается: окна режутся независимо, стык не собрать. Рефайн пойдёт обычным проходом.")}
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
               {mode === 'whole'
@@ -620,8 +620,8 @@ export function RefineView() {
               className="text-[10px] -mt-1 flex items-center gap-1.5 text-emerald-400/90"
               title={
                 mode === 'whole'
-                  ? 'Рефайн стартует с первозданного латента генерации — без потерь от h264 и повторного VAE-кодирования'
-                  : 'Окна режима «Частями» режутся токенами прямо из латента генерации — без потерь на кодировании'
+                  ? t("Рефайн стартует с первозданного латента генерации — без потерь от h264 и повторного VAE-кодирования")
+                  : t("Окна режима «Частями» режутся токенами прямо из латента генерации — без потерь на кодировании")
               }
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -741,7 +741,7 @@ export function RefineView() {
                       <button
                         onClick={() => removeRef(r.id)}
                         className="absolute right-0.5 top-0.5 p-0.5 rounded bg-black/70 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title={`Удалить (${r.name})`}
+                        title={t("Удалить ({{p1}})", { p1: r.name })}
                       >
                         <XIcon className="w-3 h-3" />
                       </button>
@@ -843,10 +843,10 @@ export function RefineView() {
               className="text-xs text-muted-foreground font-medium"
               title={
                 target === 'same'
-                  ? 'Размер не меняется — видео просто становится чётче и детальнее.'
+                  ? t("Размер не меняется — видео просто становится чётче и детальнее.")
                   : target === 'free'
-                    ? 'Точный размер результата в мегапикселях (как во вкладке «Генерация»), пропорции исходника сохраняются. Максимум 8.3 Мп = 4K.'
-                    : `Короткая сторона результата — ${target}p, пропорции исходника сохраняются.`
+                    ? t("Точный размер результата в мегапикселях (как во вкладке «Генерация»), пропорции исходника сохраняются. Максимум 8.3 Мп = 4K.")
+                    : t("Короткая сторона результата — {{p1}}p, пропорции исходника сохраняются.", { p1: target })
               }
             >
               {t("Целевое разрешение")}
@@ -946,8 +946,8 @@ export function RefineView() {
               className="text-xs text-muted-foreground font-medium"
               title={
                 steps === '2'
-                  ? 'Лёгкая доработка: модель только слегка дорисовывает детали, почти не меняя картинку.'
-                  : 'Сколько шагов делает проход улучшения. 3 — проверенный баланс скорости и чёткости; больше — детальнее, но медленнее.'
+                  ? t("Лёгкая доработка: модель только слегка дорисовывает детали, почти не меняя картинку.")
+                  : t("Сколько шагов делает проход улучшения. 3 — проверенный баланс скорости и чёткости; больше — детальнее, но медленнее.")
               }
             >
               {t("Проход (шаги)")}
@@ -1010,7 +1010,7 @@ export function RefineView() {
                     strength: REFINE_PASS2_SIGMA,
                   })
                 }
-                title={`Как Pass 2 генерации: ${REFINE_PASS2_STEPS} шага, старт σ ${REFINE_PASS2_SIGMA} — точное совпадение лестницы.`}
+                title={t("Как Pass 2 генерации: {{p1}} шага, старт σ {{p2}} — точное совпадение лестницы.", { p1: REFINE_PASS2_STEPS, p2: REFINE_PASS2_SIGMA })}
                 className={
                   steps === String(REFINE_PASS2_STEPS) &&
                   Math.abs(strength - REFINE_PASS2_SIGMA) < 1e-6

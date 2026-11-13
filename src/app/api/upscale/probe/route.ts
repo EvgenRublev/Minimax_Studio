@@ -3,6 +3,7 @@ import path from 'path'
 import { bridgeUrl, ensureUpscale } from '@/lib/upscale-runner'
 import { isPathInsideRoots } from '@/lib/local-file'
 import { upscaleAllowedRoots } from '@/lib/upscale-paths'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) POST /api/upscale/probe
@@ -14,18 +15,20 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = (await req.json().catch(() => null)) as { input?: string } | null
     const input = body?.input
     if (!input) {
-      return NextResponse.json({ error: 'Не указан файл (input)' }, { status: 400 })
+      return NextResponse.json({ error: st("Не указан файл (input)") }, { status: 400 })
     }
     // (правка 716) Путь проверяется по разрешённым корням: иначе /probe
     // раскрывал метаданные (размер, разрешение, кодек, длительность) любого
     // локального файла по произвольному пути.
     if (!isPathInsideRoots(path.resolve(input), upscaleAllowedRoots())) {
       return NextResponse.json(
-        { error: 'Путь вне разрешённых папок (выход и/или загрузка)' },
+        { error: st("Путь вне разрешённых папок (выход и/или загрузка)") },
         { status: 400 },
       )
     }

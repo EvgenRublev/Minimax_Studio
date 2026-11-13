@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bridgeUrl } from '@/lib/upscale-runner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * (правка 74) POST /api/upscale/cancel?id=<jobId>
@@ -8,9 +9,11 @@ import { bridgeUrl } from '@/lib/upscale-runner'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const id = new URL(req.url).searchParams.get('id')
   if (!id) {
-    return NextResponse.json({ error: 'Не указан id' }, { status: 400 })
+    return NextResponse.json({ error: st("Не указан id") }, { status: 400 })
   }
   try {
     const r = await fetch(bridgeUrl(`/jobs/${encodeURIComponent(id)}/cancel`), {
@@ -23,6 +26,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, message: data.message ?? 'Отмена отправлена' })
   } catch {
-    return NextResponse.json({ error: 'Upscale-сервис не отвечает' }, { status: 503 })
+    return NextResponse.json({ error: st("Upscale-сервис не отвечает") }, { status: 503 })
   }
 }

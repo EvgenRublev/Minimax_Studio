@@ -408,7 +408,7 @@ function ModelRow({
       {/* Label + size */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs truncate">{model.label}</span>
+          <span className="text-xs truncate">{t(model.label)}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">{model.sizeLabel}</span>
           {/* (правка 720) Пометка «опционально» — чтобы было видно, почему
               эта модель не входит в счётчик и «Скачать все» её не качает. */}
@@ -443,7 +443,7 @@ function ModelRow({
 
         {/* Error */}
         {model.status === 'error' && model.error && (
-          <p className="text-[10px] text-red-400 mt-0.5 truncate">{model.error}</p>
+          <p className="text-[10px] text-red-400 mt-0.5 truncate">{t(model.error)}</p>
         )}
       </div>
 

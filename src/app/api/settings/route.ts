@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { readMirror, readAllMirrors, writeMirror, deleteMirror, clearAllMirrors } from '@/lib/settings-mirror'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export const dynamic = 'force-dynamic'
 
@@ -23,11 +24,13 @@ function validKey(key: unknown): key is string {
 }
 
 export async function GET(req: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const url = new URL(req.url)
   const single = url.searchParams.get('key')
   if (single !== null) {
     if (!validKey(single)) {
-      return NextResponse.json({ ok: false, error: 'Некорректный ключ настроек' }, { status: 400 })
+      return NextResponse.json({ ok: false, error: st("Некорректный ключ настроек") }, { status: 400 })
     }
     return NextResponse.json({ ok: true, snapshot: readMirror(single) })
   }
@@ -35,34 +38,38 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   let body: unknown
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ ok: false, error: 'Ожидался JSON' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: st("Ожидался JSON") }, { status: 400 })
   }
   const { key, data } = (body ?? {}) as { key?: unknown; data?: unknown }
   if (!validKey(key)) {
-    return NextResponse.json({ ok: false, error: 'Некорректный ключ настроек' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: st("Некорректный ключ настроек") }, { status: 400 })
   }
   if (data === undefined || data === null) {
-    return NextResponse.json({ ok: false, error: 'Нет данных настроек' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: st("Нет данных настроек") }, { status: 400 })
   }
   const written = writeMirror(key, data)
   if (!written) {
-    return NextResponse.json({ ok: false, error: 'Настройки слишком большие для зеркала' }, { status: 413 })
+    return NextResponse.json({ ok: false, error: st("Настройки слишком большие для зеркала") }, { status: 413 })
   }
   return NextResponse.json({ ok: true, updatedAt: written.updatedAt })
 }
 
 export async function DELETE(req: Request) {
+  const { t: st } = useTranslation() // (правка 955)
+
   const url = new URL(req.url)
   if (url.searchParams.get('all') === '1') {
     return NextResponse.json({ ok: true, removed: clearAllMirrors() })
   }
   const key = url.searchParams.get('key')
   if (!validKey(key)) {
-    return NextResponse.json({ ok: false, error: 'Некорректный ключ настроек' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: st("Некорректный ключ настроек") }, { status: 400 })
   }
   return NextResponse.json({ ok: true, removed: deleteMirror(key) ? 1 : 0 })
 }

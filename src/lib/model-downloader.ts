@@ -7,6 +7,7 @@ import { basename, dirname, join } from 'path'
 import { Readable } from 'stream'
 import { MODELS, type ModelDef } from './models-config'
 import { getAppConfig } from './app-config'
+import { st as stT } from '@/lib/i18n/server' // (правка 955)
 
 export interface DownloadState {
   modelId: string
@@ -408,7 +409,7 @@ export async function startDownload(modelId: string): Promise<{ ok: boolean; err
     if (free < needed) {
       return {
         ok: false,
-        error: `Недостаточно места на диске: свободно ${(Number(free) / 1024 ** 3).toFixed(1)} ГБ, нужно ~${(model.sizeBytes / 1024 ** 3).toFixed(1)} ГБ`,
+        error: stT("Недостаточно места на диске: свободно {{p1}} ГБ, нужно ~{{p2}} ГБ", { p1: (Number(free) / 1024 ** 3).toFixed(1), p2: (model.sizeBytes / 1024 ** 3).toFixed(1) }),
       }
     }
   } catch {
@@ -730,7 +731,7 @@ async function doDownload(
 export function cancelDownload(modelId: string): { ok: boolean; error?: string } {
   const controller = abortControllers.get(modelId)
   if (!controller) {
-    return { ok: false, error: 'Нет активного скачивания' }
+    return { ok: false, error: stT("Нет активного скачивания") }
   }
   // Abort действует и на задачу, ещё стоящую в очереди: doDownload увидит
   // уже отменённый signal на первом же fetch и завершится как «cancelled».
@@ -749,7 +750,7 @@ export function deleteModel(modelId: string): { ok: boolean; error?: string } {
   if (!model) return { ok: false, error: 'Unknown model' }
   const active = activeDownloads.get(modelId)
   if (active?.status === 'downloading') {
-    return { ok: false, error: 'Скачивание ещё идёт — сначала отмените его' }
+    return { ok: false, error: stT("Скачивание ещё идёт — сначала отмените его") }
   }
   const absPath = modelAbsPath(model)
   try {
@@ -780,7 +781,7 @@ export function deleteModel(modelId: string): { ok: boolean; error?: string } {
     activeDownloads.delete(modelId)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: `Не удалось удалить файл: ${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, error: stT("Не удалось удалить файл: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) }
   }
 }
 

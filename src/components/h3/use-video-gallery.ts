@@ -17,6 +17,7 @@ import { useGenProgress } from '@/lib/gen-progress-store'
 import { useGenQueue } from '@/lib/gen-queue-store'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import type { VideoGalleryFile } from './video-gallery-grid'
+import { t } from '@/lib/i18n' // (правка 955)
 
 const ACTIVE_PHASES = new Set(['submitting', 'queued', 'running'])
 const ACTIVE_POLL_MS = 2500
@@ -291,7 +292,7 @@ export function useVideoGallery(opts?: {
       setFiles((prev) => prev.map((f) =>
         `${f.subfolder}/${f.filename}` === key ? { ...f, liked: prevLiked } : f,
       ))
-      toast.error('Не удалось сохранить отметку «избранное»')
+      toast.error(t("Не удалось сохранить отметку «избранное»"))
     }
   }, [])
 
@@ -303,17 +304,17 @@ export function useVideoGallery(opts?: {
         body: JSON.stringify({ filename, subfolder }),
       })
       if (res.ok) {
-        toast.success('Видео удалено')
+        toast.success(t("Видео удалено"))
         // (правка 587) Дисквалифицируем загрузки, стартовавшие ДО удаления:
         // их ответ ещё содержит удалённый файл, и без этого «воскресший»
         // элемент оставался бы в сетке до следующего тика опроса.
         loadSeq.current += 1
         setFiles((prev) => prev.filter((f) => !(f.filename === filename && f.subfolder === subfolder)))
       } else {
-        toast.error('Не удалось удалить файл')
+        toast.error(t("Не удалось удалить файл"))
       }
     } catch {
-      toast.error('Ошибка удаления')
+      toast.error(t("Ошибка удаления"))
     }
   }, [])
 

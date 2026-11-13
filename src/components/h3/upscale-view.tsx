@@ -261,7 +261,7 @@ function OptSelect({ label, value, items, onChange }: {
         <SelectContent className="bg-[var(--surface-3)] border-border">
           {items.map((it) => (
             <SelectItem key={String(it.value)} value={String(it.value)}>
-              {it.label}
+              {tt(it.label)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -480,7 +480,7 @@ export function UpscaleView() {
   /** Общая часть после появления файла (загрузка ИЛИ импорт из галереи). */
   const applyLoadedFile = useCallback(async (d: UploadResp) => {
     setFile(d)
-    toast.success(`Файл загружен: ${d.name}`)
+    toast.success(tt("Файл загружен: {{p1}}", { p1: d.name }))
     // Метаданные (нужен bridge).
     try {
       const p = await fetch('/api/upscale/probe', {
@@ -495,7 +495,7 @@ export function UpscaleView() {
       } else if (pd.error) {
         // Метаданные не критичны для рендера, но молча глотать причину
         // (например «сервис остановлен пользователем») — плохой UX.
-        toast.warning(`Метаданные недоступны: ${pd.error}`)
+        toast.warning(tt("Метаданные недоступны: {{p1}}", { p1: pd.error }))
       }
     } catch {
       /* без метаданных тоже можно — рендер не зависит от probe */
@@ -618,7 +618,7 @@ export function UpscaleView() {
       // (правка 727) Результат — в папку исходника из галереи.
       subfolder: file.subfolder || '',
     })
-    toast.info(`Upscale поставлен в очередь: ${file.name}`)
+    toast.info(tt("Upscale поставлен в очередь: {{p1}}", { p1: file.name }))
   }, [canRun, file, featureKey, opts])
 
   const cancel = useCallback(() => {
@@ -651,7 +651,7 @@ export function UpscaleView() {
       return (
         <OptSelect
           key={c.key}
-          label={c.label}
+          label={tt(c.label)}
           items={c.items ?? []}
           value={(optsFor[c.key] as string | number) ?? ''}
           onChange={(v) => setOptValue(featureKey, c.key, v)}
@@ -662,7 +662,7 @@ export function UpscaleView() {
       return (
         <OptToggle
           key={c.key}
-          label={c.label}
+          label={tt(c.label)}
           checked={!!optsFor[c.key]}
           onChange={(v) => setOptValue(featureKey, c.key, v)}
         />
@@ -672,7 +672,7 @@ export function UpscaleView() {
       return (
         <OptNumber
           key={c.key}
-          label={c.label}
+          label={tt(c.label)}
           value={(optsFor[c.key] as number) ?? (c.min ?? 0)}
           min={c.min ?? 0}
           max={c.max ?? 16384}
@@ -685,7 +685,7 @@ export function UpscaleView() {
     return (
       <SettingSlider
         key={c.key}
-        label={c.label}
+        label={tt(c.label)}
         value={(optsFor[c.key] as number) ?? (c.min ?? 0)}
         min={c.min ?? 0}
         max={c.max ?? 100}
@@ -761,7 +761,7 @@ export function UpscaleView() {
                   className="h-8 w-8"
                   onClick={() => void stop()}
                   disabled={(!svcRunning && !svcStarting) || isBusy}
-                  title={isBusy ? 'Дождитесь окончания обработки или отмените её' : 'Остановить DLSS-мост'}
+                  title={isBusy ? tt("Дождитесь окончания обработки или отмените её") : tt("Остановить DLSS-мост")}
                 >
                   <PowerOffIcon className="w-3.5 h-3.5" />
                 </Button>
@@ -866,8 +866,8 @@ export function UpscaleView() {
                 />
               </div>
               {job?.message && (
-                <p className="text-xs text-muted-foreground truncate" title={job.message}>
-                  {job.message}
+                <p className="text-xs text-muted-foreground truncate" title={tt(job.message)}>
+                  {tt(job.message)}
                 </p>
               )}
               <div className="flex items-center justify-between gap-2">
@@ -893,7 +893,7 @@ export function UpscaleView() {
               <div className="flex items-center gap-2 text-sm font-medium text-red-300">
                 <AlertTriangleIcon className="w-4 h-4" /> {' '}{tt("Ошибка")}
               </div>
-              <p className="text-xs text-red-300/80 break-words">{job.error}</p>
+              <p className="text-xs text-red-300/80 break-words">{tt(job.error ?? '')}</p>
             </div>
           ) : job?.status === 'cancelled' ? (
             <p className="text-xs text-muted-foreground">{tt("Обработка отменена.")}</p>
@@ -941,9 +941,9 @@ export function UpscaleView() {
                 )}
               >
                 <div className={cn('text-sm font-medium', tab === m.id ? 'text-violet-200' : 'text-foreground/90')}>
-                  {m.label}
+                  {tt(m.label)}
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">{m.hint}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{tt(m.hint)}</div>
               </button>
             ))}
           </div>
@@ -1018,7 +1018,7 @@ export function UpscaleView() {
                     {probe?.hdr ? <span className="text-amber-300">HDR</span> : null}
                     {/* (правка 727) Куда ляжет результат: папка источника. */}
                     <span className="text-violet-300/90">
-                      {tt("Результат:")}{' '} {file.subfolder ? `папка «${file.subfolder}»` : tt("общая папка")}
+                      {tt("Результат:")}{' '} {file.subfolder ? tt("папка «{{p1}}»", { p1: file.subfolder }) : tt("общая папка")}
                     </span>
                   </div>
                 </div>
@@ -1087,10 +1087,10 @@ export function UpscaleView() {
               disabled={!canRun}
               title={
                 isBusy
-                  ? 'Идёт обработка'
+                  ? tt("Идёт обработка")
                   : file
-                    ? 'Запустить обработку (DLSS 5)'
-                    : 'Сначала загрузите видео'
+                    ? tt("Запустить обработку (DLSS 5)")
+                    : tt("Сначала загрузите видео")
               }
               className="h-11 px-6 bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white border-0 text-sm font-semibold shadow-lg shadow-violet-500/20"
             >

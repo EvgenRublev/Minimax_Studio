@@ -37,21 +37,30 @@ export function isDataUse(node) {
   return false
 }
 
-/** В файле есть локальная переменная с именем `t` (например таймлайн: map((t) => …)).
- * Тогда переводчику нужно другое имя, иначе вызов t("…) разобьется на t("…") как вызов числа. */
-export function hasTBinding(sf) {
+/** В файле есть локальная переменная с именем `name` (например `const st = fs.statSync`
+ * или таймлайн map((t) => …)). Имя переводчика тогда берём другое. */
+export function hasBinding(sf, name = 't') {
   let clash = false
   const visit = (n) => {
-    if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n)) && n.name && n.name.getText() === 't') {
+    if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n)) && n.name && n.name.getText() === name) {
       const init = ts.isVariableDeclaration(n) ? (n.initializer?.getText() ?? '') : (ts.isBindingElement(n) ? (n.parent?.parent?.getText?.() ?? '') : '')
       if (!init.includes('useTranslation')) clash = true
     }
-    if (ts.isShorthandPropertyAssignment(n) && n.name.text === 't') clash = true
+    if (ts.isShorthandPropertyAssignment(n) && n.name.text === name) clash = true
     if (!clash) ts.forEachChild(n, visit)
   }
   ts.forEachChild(sf, visit)
   return clash
 }
+
+/** Имя переводчика, свободное в этом файле: t → tt → tT; st → stT. */
+export function pickFnName(sf, base) {
+  const candidates = base === 't' ? ['t', 'tt', 'tT'] : [base, `${base}T`, `${base}X`]
+  for (const c of candidates) if (!hasBinding(sf, c)) return c
+  return candidates[candidates.length - 1]
+}
+
+export const hasTBinding = (sf) => hasBinding(sf, 't')
 
 /** Показной ли текст в этой позиции: JSX-атрибут, свойство label/title, toast(), JSX-выражение, label-объект. */
 export function isDisplayPosition(node, depth = 0) {
@@ -63,10 +72,8 @@ export function isDisplayPosition(node, depth = 0) {
   }
   if (ts.isJsxExpression(p)) {
     const g = p.parent
-    if (g && ts.isJsxAttributes(g)) {
-      const a = g.parent
-      return !!a && DISPLAY_ATTRS.has(a.attributeName.getText())
-    }
+    // title={cond ? 'a' : 'b'} / onClick-атрибут со сложным выражением
+    if (g && ts.isJsxAttribute(g)) return DISPLAY_ATTRS.has(g.name.getText())
     // {...} прямо в детях JSX — это отрендеренный текст
     if (g && (ts.isJsxElement(g) || ts.isJsxFragment(g))) return true
     return false
@@ -91,6 +98,21 @@ export function isDisplayPosition(node, depth = 0) {
   return false
 }
 
+/** Имя функции: объявление, `const X = () =>`, либо аргумент обёртки
+ * (`memo(function X(){})`, `forwardRef(function X(){})`) — иначе компонент
+ * с анонимной функцией внутри memo считался бы «уровнем модуля». */
+function fnName(p) {
+  if (ts.isFunctionDeclaration(p) && p.name) return p.name.text
+  if (ts.isMethodDeclaration(p) && p.name) return p.name.getText()
+  const parent = p.parent
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text
+  if (parent && ts.isCallExpression(parent)) {
+    const gp = parent.parent
+    if (gp && ts.isVariableDeclaration(gp) && ts.isIdentifier(gp.name)) return gp.name.text
+  }
+  return ''
+}
+
 /** Хост для перевода: внешняя ИМЕНОВАННАЯ функция, в которую ставим хук (или
  * которая должна получить импорт t). Анонимные стрелки внутри компонента
  * накрываются хуком компонента — иначе в файле появляется неиспользуемый импорт.
@@ -103,14 +125,7 @@ export function enclosingFunction(node) {
   let p = node.parent
   while (p) {
     if (ts.isArrowFunction(p) || ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isMethodDeclaration(p)) {
-      let name = ''
-      if (ts.isFunctionDeclaration(p) && p.name) name = p.name.text
-      else if (ts.isMethodDeclaration(p) && p.name) name = p.name.getText()
-      else {
-        const vd = p.parent
-        if (vd && ts.isVariableDeclaration(vd) && ts.isIdentifier(vd.name)) name = vd.name.text
-      }
-      fns.push({ fn: p, name })
+      fns.push({ fn: p, name: fnName(p) })
     }
     if (ts.isSourceFile(p)) break
     p = p.parent

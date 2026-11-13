@@ -21,6 +21,7 @@ import { compressRefVideo480 } from '@/lib/ref-video-compress'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
 import { videoSamplerStages, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /**
  * POST /api/comfy/controlnet — генерация H3 по контрольному видео
@@ -55,6 +56,8 @@ import { videoSamplerStages, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const { t: st } = useTranslation() // (правка 955)
+
   try {
     const body = await req.json() as {
       sourceFilename?: string
@@ -102,7 +105,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
-      return NextResponse.json({ error: 'sourceFilename (или inputSource) обязателен' }, { status: 400 })
+      return NextResponse.json({ error: st("sourceFilename (или inputSource) обязателен") }, { status: 400 })
     }
 
     const quickBlock = assertGenerationAllowed()
@@ -181,10 +184,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              `Референс «${name}» не найден в папке input/ ComfyUI. ` +
-              'Так бывает, если настройки восстановлены после переустановки ' +
-              'или файл удалён из input/ вручную. Уберите референс из списка ' +
-              'и загрузите его заново.',
+              st("Референс «{{p1}}» не найден в папке input/ ComfyUI. Так бывает, если настройки восстановлены после переустановки или файл удалён из input/ вручную. Уберите референс из списка и загрузите его заново.", { p1: name }),
           },
           { status: 404 },
         )
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
           return {
             run: {
               ok: false as const,
-              error: `Не удалось сжать видео: ${e instanceof Error ? e.message : String(e)}`,
+              error: st("Не удалось сжать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }),
               status: 500,
             },
           }
@@ -225,7 +225,7 @@ export async function POST(req: NextRequest) {
         return {
           run: {
             ok: false as const,
-            error: `Не удалось прочитать видео: ${e instanceof Error ? e.message : String(e)}`,
+            error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }),
             status: 400,
           },
         }
@@ -429,7 +429,7 @@ export async function POST(req: NextRequest) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
-        return NextResponse.json({ error: `Файл не найден в input: ${inName}` }, { status: 404 })
+        return NextResponse.json({ error: st("Файл не найден в input: {{p1}}", { p1: inName }) }, { status: 404 })
       }
       const r = await submit({ inputName: inName, inputPath: inPath, gallerySub: null, galleryName: null, outSub: outSub ?? '' })
       if ('response' in r && r.response) return NextResponse.json(r.response)
@@ -445,7 +445,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
     }
     if (!existsSync(sourcePath)) {
-      return NextResponse.json({ error: `Файл не найден: ${safeName}` }, { status: 404 })
+      return NextResponse.json({ error: st("Файл не найден: {{p1}}", { p1: safeName }) }, { status: 404 })
     }
 
     await fs.mkdir(cfg.inputDir, { recursive: true })
