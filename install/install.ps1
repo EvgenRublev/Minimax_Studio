@@ -1869,6 +1869,28 @@ if (-not $SkipApp) {
         try { $buildVer = ((Get-Content '.next\H3_APP_VERSION' -Raw) -as [string]).Trim() } catch { }
         $buildFresh = ((Test-Path '.next\BUILD_ID') -and $appVer -and ($buildVer -eq $appVer))
         if (-not $buildFresh) {
+            # (правка 956) Пересборка из исходников требует ВСЕХ зависимостей из
+            # package.json в node_modules. После апдейта из update-zip (он пакетов
+            # не тащит) новых зависимостей может не быть — сборка падала, а .next
+            # к тому моменту уже снесён: студия не запускалась вовсе. Сначала
+            # сверяем и, если чего-то нет, восстанавливаем зависимости.
+            $missingDep = $null
+            try {
+                $pkgDeps = (Get-Content 'package.json' -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies
+                foreach ($p in $pkgDeps.PSObject.Properties) {
+                    $depPath = Join-Path 'node_modules' ($p.Name -replace '/', '\')
+                    if (-not (Test-Path -LiteralPath $depPath)) { $missingDep = $p.Name; break }
+                }
+            } catch { }
+            if ($missingDep) {
+                Info ('в node_modules нет зависимости "' + $missingDep + '" - сначала восстанавливаю зависимости (нужен интернет)')
+                $rc = Run-AppStep 'npm ci --no-audit --no-fund' 'npm ci'
+                if ($rc -ne 0) {
+                    Warn 'npm ci не удался, пробую npm install'
+                    $rc = Run-AppStep 'npm install --no-audit --no-fund' 'npm install'
+                    if ($rc -ne 0) { throw 'не удалось восстановить зависимости (npm ci / npm install): нет доступа к npm-реестра.' }
+                }
+            }
             if (Test-Path '.next') {
                 # (правка 792) без скобок вокруг всей строки Info получал кучу
                 # отдельных аргументов и падал на повторном ремонте установки.
