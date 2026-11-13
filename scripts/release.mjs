@@ -110,6 +110,12 @@ for (const t of ['scripts/installer-integrity-test.ps1', 'scripts/installer-hear
   if (!run(`installer behavior test: ${t}`, powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', t])) process.exit(1);
 }
 
+// (правка 961) Логика пути установки проверяется на реальном installer.nsi:
+// страница выбора папки дописывает «Minimax Studio», NormalizeInstDir убирает
+// задвоение и не пускает установку в корень диска. Нужен makensis; без него
+// тест сам печатает SKIP и не валит релиз.
+if (!run('installer install-path test', process.execPath, ['scripts/installer-dir-test.mjs'])) process.exit(1);
+
 const checks = [];
 const check = (ok, label, hint) => checks.push({ ok, label, hint });
 

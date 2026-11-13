@@ -306,6 +306,24 @@ if (!nsi) {
   ok(nsi[0] === 0xef && nsi[1] === 0xbb && nsi[2] === 0xbf,
     'install/installer.nsi: нет UTF-8 BOM — makensis прочитает кириллицу как ANSI, в setup.exe будут кракозябры')
   ok(!nsi.toString('utf8').includes('\ufffd'), 'install/installer.nsi: содержимое не является корректным UTF-8')
+
+  // (правка 961) Путь установки: дефолт без версии в имени (иначе после
+  // обновления из программы папка продолжает называться старой версией), и
+  // без хвостового "\" — иначе страница выбора папки не дописывает
+  // «Minimax Studio» к выбранному пути и юзеру приходится вписывать имя сам.
+  const nsiText = nsi.toString('utf8')
+  const instDir = /^InstallDir\s+"([^"]*)"\s*$/m.exec(nsiText)
+  if (!instDir) {
+    fails.push('install/installer.nsi: не найдена строка InstallDir')
+  } else {
+    const val = instDir[1]
+    ok(!val.endsWith('\\'), 'install/installer.nsi: InstallDir кончается "\" — страница выбора папки не допишет «Minimax Studio» к выбранному пути')
+    ok(!/7\.\d/.test(val) && !val.includes('${APP_VERSION}'), `install/installer.nsi: в InstallDir зашита версия (${val}) — папка будет называться старой версией после обновления`)
+  }
+  ok(!/^InstallDirRegKey/m.test(nsiText),
+    'install/installer.nsi: InstallDirRegKey подставит старый путь из реестра (часто с версией в имени) — путь читает .onInit')
+  ok(/^Function NormalizeInstDir$/m.test(nsiText) && /Section "Программа" SecMain[\s\S]{0,600}?Call NormalizeInstDir/.test(nsiText),
+    'install/installer.nsi: нет NormalizeInstDir/его вызова — путь задвоится или файлы вывалятся в корень диска')
 }
 
 // ─── 6) переносы строк во всех .ps1 ────────────────────────────────────────
