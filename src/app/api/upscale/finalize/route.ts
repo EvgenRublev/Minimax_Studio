@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { setUpscaleMetaGenerationTime } from '@/lib/upscale-meta'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 264) POST /api/upscale/finalize
@@ -14,7 +14,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = (await req.json().catch(() => null)) as

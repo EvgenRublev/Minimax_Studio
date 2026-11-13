@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 import { cancelDownload } from '@/lib/model-downloader'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await request.json().catch(() => ({}))

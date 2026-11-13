@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { readMirror, readAllMirrors, writeMirror, deleteMirror, clearAllMirrors } from '@/lib/settings-mirror'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +24,6 @@ function validKey(key: unknown): key is string {
 }
 
 export async function GET(req: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const url = new URL(req.url)
   const single = url.searchParams.get('key')
@@ -38,7 +37,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   let body: unknown
   try {
@@ -61,7 +59,6 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const url = new URL(req.url)
   if (url.searchParams.get('all') === '1') {

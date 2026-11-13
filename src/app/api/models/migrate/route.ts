@@ -32,7 +32,7 @@ import { NextResponse } from 'next/server'
 import { existsSync, statSync, readdirSync, renameSync, copyFileSync, unlinkSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative, dirname, resolve, sep } from 'path'
 import { getAppConfig } from '@/lib/app-config'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -506,7 +506,6 @@ function migrateData(sourceDir: string): CategoryResult {
   return result
 }
 export async function POST(request: Request) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   try {
     const body = (await request.json()) as {

@@ -13,7 +13,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/upload
@@ -37,7 +37,6 @@ const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 const UNSAFE_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   let tmpPath: string | null = null
   let part: MultipartFilePart | null = null

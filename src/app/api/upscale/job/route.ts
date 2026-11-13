@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import path from 'path'
 import { fetchUpscaleHealth, bridgeUrl } from '@/lib/upscale-runner'
 import { ensureUpscaleMeta } from '@/lib/upscale-meta'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 74) GET /api/upscale/job?id=<jobId>
@@ -16,7 +16,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const id = new URL(req.url).searchParams.get('id')
   if (!id) {

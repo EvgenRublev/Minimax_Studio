@@ -23,7 +23,7 @@ import {
 import { resolveFfprobe } from '@/lib/video-probe'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
 
@@ -67,7 +67,6 @@ async function probeAudioDuration(file: string): Promise<number> {
 }
 
 export async function POST(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   let part: MultipartFilePart | null = null
   let destPath: string | null = null
@@ -140,7 +139,6 @@ export async function POST(req: NextRequest) {
 
 /** (правка 874) GET с Range — <audio> в превью требует seek по звуку. */
 export async function GET(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   const f = req.nextUrl.searchParams.get('f') || ''
   if (!f) return NextResponse.json({ error: stT("Не указано f") }, { status: 400 })

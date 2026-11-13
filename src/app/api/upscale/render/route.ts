@@ -3,7 +3,7 @@ import path from 'path'
 import { ensureUpscale, fetchUpscaleHealth, bridgeUrl } from '@/lib/upscale-runner'
 import { isPathInsideRoots } from '@/lib/local-file'
 import { upscaleAllowedRoots } from '@/lib/upscale-paths'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 74) POST /api/upscale/render
@@ -17,7 +17,6 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = (await req.json().catch(() => null)) as {

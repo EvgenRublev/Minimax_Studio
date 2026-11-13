@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, unlinkSync, rmdirSync, readdirSync, statSync } f
 import path, { join } from 'path'
 import sharp from 'sharp'
 import { stagedPath } from '@/lib/staging'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 697)
+import { st as stT } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +39,6 @@ export const dynamic = 'force-dynamic'
  * vision content into the first user message.
  */
 export async function POST(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json()

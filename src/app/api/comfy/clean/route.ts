@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/clean
@@ -44,7 +44,6 @@ async function cleanDirectory(dir: string): Promise<number> {
 }
 
 export async function POST(req: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json()

@@ -21,7 +21,7 @@ import { compressRefVideo480 } from '@/lib/ref-video-compress'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
 import { videoSamplerStages, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/controlnet — генерация H3 по контрольному видео
@@ -56,7 +56,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json() as {
