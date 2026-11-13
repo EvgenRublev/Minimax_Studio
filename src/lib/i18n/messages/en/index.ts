@@ -14,10 +14,12 @@ import common from './common.json'
 import settings from './settings.json'
 import views from './views.json'
 import api from './api.json'
+import ui from './ui.json' // (правка 955) строки из компонентов (tt-обёртки), собранная партия
 
 export const enMessages: Record<string, string> = {
   ...common,
   ...settings,
   ...views,
   ...api,
+  ...ui,
 }

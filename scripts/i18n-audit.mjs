@@ -44,7 +44,7 @@ for (const f of files) {
   const text = fs.readFileSync(f, 'utf8')
   const sf = ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const visit = (n) => {
-    if ((ts.isCallExpression(n) || ts.isTaggedTemplateExpression(n)) && ts.isIdentifier(n.expression) && /^(t|st|stLang)$/.test(n.expression.text)) {
+    if ((ts.isCallExpression(n) || ts.isTaggedTemplateExpression(n)) && ts.isIdentifier(n.expression) && /^(t|tt|tT|st|stT|stX)$/.test(n.expression.text)) {
       const a = n.arguments[0]
       if (a && ts.isStringLiteral(a)) { used.add(a.text); if (!codeKeys.has(a.text)) codeKeys.set(a.text, []); codeKeys.get(a.text).push(path.relative('.', f)) }
     }
