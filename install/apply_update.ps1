@@ -206,48 +206,32 @@ try {
 } catch { }
 Log ('deps changed: ' + $deps)
 
-# (fix 960) If the shipped .next carries a matching version stamp, the app will
-# run on the prebuilt bundle and never rebuild from sources, so npm packages are
-# not needed at all - skip the dependency installer entirely.
-if ($deps) {
+# (fix 963) Always probe the staged dependencies against node_modules.
+# A matching .next stamp only means "no rebuild needed" - it must NOT skip the
+# npm step. 7.1.24 added i18next/react-i18next; updates that trusted the stamp
+# skipped the installer and left users with missing packages and a broken app.
+# Probe is cheap (require.resolve per dependency) and runs on every update.
+$probeNode = Join-Path $Root 'runtime\node.exe'
+if (Test-Path -LiteralPath $probeNode) {
     try {
-        $stampPath = Join-Path $staging '.next\H3_APP_VERSION'
-        if (Test-Path -LiteralPath $stampPath) {
-            $stamp = ((Get-Content -LiteralPath $stampPath -Raw -Encoding UTF8) -as [string]).Trim()
-            $stagedVer = (Get-Content -LiteralPath (Join-Path $staging 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
-            if ($stamp -and ($stamp -eq $stagedVer)) {
+        $stagedDeps = (Get-Content -LiteralPath (Join-Path $staging 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies
+        $names = @($stagedDeps.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($names.Count -gt 0) {
+            $namesJson = '["' + ($names -join '","') + '"]'
+            $probe = 'var n=' + $namesJson + ';var m=[];for(var i=0;i<n.length;i++){try{require.resolve(n[i])}catch(e){m.push(n[i])}}process.stdout.write(m.join(","))'
+            Push-Location $Root
+            try { $missing = (& $probeNode -e $probe 2>$null) -join '' } finally { Pop-Location }
+            if (-not $missing) {
+                if ($deps) { Log 'all staged dependencies resolve - dependency installer skipped' }
                 $deps = $false
-                Log 'staging build has a matching version stamp - dependency installer skipped'
+            } else {
+                $deps = $true
+                Log ('missing staged dependencies: ' + $missing)
             }
         }
-    } catch { Log ('stamp check failed: ' + $_.Exception.Message) }
-}
-
-# (fix 958) A changed lock hash does not always mean the dependency installer is
-# needed: build-only packages (i18next) may be missing while the app starts fine,
-# and npm ci wipes node_modules. Probe the staged package.json against
-# node_modules with the bundled node; when every package resolves, skip the
-# installer and relaunch the app immediately.
-if ($deps) {
-    $probeNode = Join-Path $Root 'runtime\node.exe'
-    if (Test-Path -LiteralPath $probeNode) {
-        try {
-            $stagedDeps = (Get-Content -LiteralPath (Join-Path $staging 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies
-            $names = @($stagedDeps.PSObject.Properties | ForEach-Object { $_.Name })
-            if ($names.Count -gt 0) {
-                $namesJson = '["' + ($names -join '","') + '"]'
-                $probe = 'var n=' + $namesJson + ';var m=[];for(var i=0;i<n.length;i++){try{require.resolve(n[i])}catch(e){m.push(n[i])}}process.stdout.write(m.join(","))'
-                Push-Location $Root
-                try { $missing = (& $probeNode -e $probe 2>$null) -join '' } finally { Pop-Location }
-                if (-not $missing) {
-                    $deps = $false
-                    Log 'all staged dependencies resolve - dependency installer skipped'
-                } else {
-                    Log ('missing staged dependencies: ' + $missing)
-                }
-            }
-        } catch { Log ('dependency probe failed: ' + $_.Exception.Message) }
-    }
+    } catch { Log ('dependency probe failed: ' + $_.Exception.Message) }
+} else {
+    Log 'runtime\node.exe not found - cannot probe dependencies, keeping deps flag'
 }
 
 # ------------------------------- 3b. undo leftovers of an interrupted run ---

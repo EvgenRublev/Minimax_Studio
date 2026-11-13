@@ -173,7 +173,7 @@ makensis прочитает кириллицу как ANSI, и в setup.exe бу
 3. Установите NSIS (`winget install --id NSIS.NSIS -e`) и выполните из папки
    сборки: `makensis installer.nsi`.
 
-Результат — `Minimax_H3_Studio_7.1.24_setup.exe`: **~835 МБ** с заполненным
+Результат — `Minimax_H3_Studio_7.1.26_setup.exe`: **~835 МБ** с заполненным
 `install\cache\` (офлайн-архивы node, electron, ComfyUI 0.44.0, python-embed, uv,
 22 ноды) — установка тогда не качает их из сети; ~450 МБ с пустым кэшем.
 Версия файла (Explorer → Свойства → Подробно) задаётся в `installer.nsi`
