@@ -15,6 +15,8 @@
  *      движок распаковки (Expand-Archive) и Remove-StaleCacheFile;
  *   5) кодировки: install.ps1 и install_gui.ps1 — UTF-8 с BOM (PowerShell 5.1
  *      без BOM читает UTF-8 как ANSI и русские сообщения превращает в кракозябры),
+ *      installer.nsi — UTF-8 с BOM (makensis без BOM читает скрипт как ANSI и
+ *      печатает кракозябры уже в готовом setup.exe — правка 957),
  *      apply_update.ps1 — только ASCII (его гоняет апдейтер из любого места);
  *   6) во всех .ps1 нет одиночных LF (git/Windows-смешание переносов).
  *
@@ -293,6 +295,17 @@ if (au) {
   ok(nonAscii === 0, `apply_update.ps1: ${nonAscii} не-ASCII байт (апдейтер должен работать на любой кодировке консоли)`)
 } else {
   fails.push('install/apply_update.ps1: файл не найден')
+}
+// (правка 957) makensis в Unicode-режиме читает скрипт без BOM как системный ANSI:
+// UTF-8 кириллица превращается в кракозябры ещё на этапе компиляции — в готовом
+// setup.exe (так вышло в 7.1.22: BOM потерялся при правке версии).
+const nsi = readBytes(join(ROOT, 'install', 'installer.nsi'))
+if (!nsi) {
+  fails.push('install/installer.nsi: файл не найден')
+} else {
+  ok(nsi[0] === 0xef && nsi[1] === 0xbb && nsi[2] === 0xbf,
+    'install/installer.nsi: нет UTF-8 BOM — makensis прочитает кириллицу как ANSI, в setup.exe будут кракозябры')
+  ok(!nsi.toString('utf8').includes('\ufffd'), 'install/installer.nsi: содержимое не является корректным UTF-8')
 }
 
 // ─── 6) переносы строк во всех .ps1 ────────────────────────────────────────
