@@ -27,7 +27,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
@@ -74,6 +74,14 @@ if (refVer !== pkgVer) {
 
 console.log('[update-zip] копирование .next в дерево...')
 cpSync(join(ROOT, '.next'), join(TMP, '.next'), { recursive: true })
+
+// (правка 955) Штамп версии для install.ps1: без .next\H3_APP_VERSION установщик
+// считает собранную из архива сборку «устаревшей», сносит её и пересобирает из
+// исходников на машине юзера — а там npm-зависимостей может не быть (update-zip
+// их не тащит), сборка падает и приложение остаётся без .next. Пишем штамп —
+// установщик увидит совпадение с package.json и оставит нашу сборку в покое.
+writeFileSync(join(TMP, '.next', 'H3_APP_VERSION'), refVer, 'utf-8')
+console.log(`[update-zip] штамп .next\\H3_APP_VERSION = ${refVer}`)
 
 if (existsSync(OUT)) rmSync(OUT, { force: true })
 console.log('[update-zip] упаковка...')
