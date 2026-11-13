@@ -206,6 +206,23 @@ try {
 } catch { }
 Log ('deps changed: ' + $deps)
 
+# (fix 960) If the shipped .next carries a matching version stamp, the app will
+# run on the prebuilt bundle and never rebuild from sources, so npm packages are
+# not needed at all - skip the dependency installer entirely.
+if ($deps) {
+    try {
+        $stampPath = Join-Path $staging '.next\H3_APP_VERSION'
+        if (Test-Path -LiteralPath $stampPath) {
+            $stamp = ((Get-Content -LiteralPath $stampPath -Raw -Encoding UTF8) -as [string]).Trim()
+            $stagedVer = (Get-Content -LiteralPath (Join-Path $staging 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
+            if ($stamp -and ($stamp -eq $stagedVer)) {
+                $deps = $false
+                Log 'staging build has a matching version stamp - dependency installer skipped'
+            }
+        }
+    } catch { Log ('stamp check failed: ' + $_.Exception.Message) }
+}
+
 # (fix 958) A changed lock hash does not always mean the dependency installer is
 # needed: build-only packages (i18next) may be missing while the app starts fine,
 # and npm ci wipes node_modules. Probe the staged package.json against
