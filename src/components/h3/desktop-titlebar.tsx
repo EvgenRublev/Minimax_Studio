@@ -18,6 +18,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { MinusIcon, SquareIcon, XIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const isElectron = () =>
   typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent)
@@ -52,6 +53,8 @@ function CaptionButton({
 }
 
 export function DesktopTitleBar() {
+  const { t } = useTranslation() // (правка 955)
+
   // SSR/гидратация: userAgent на сервере не Electron → рендерим после mount.
   const [show, setShow] = useState(false)
   useEffect(() => setShow(isElectron()), [])
@@ -83,7 +86,7 @@ export function DesktopTitleBar() {
         <button
           type="button"
           onClick={() => api.close()}
-          title="Закрыть"
+          title={t("Закрыть")}
           className="h3-no-drag h-7 w-8 mr-1 flex items-center justify-center rounded-md text-[#8b8b94] hover:bg-red-500/80 hover:text-white transition-colors"
         >
           <XIcon className="w-3.5 h-3.5" />
@@ -91,13 +94,13 @@ export function DesktopTitleBar() {
       ) : (
         /* Приложение: свернуть / развернуть / закрыть. */
         <div className="h-full flex items-stretch">
-          <CaptionButton onClick={() => api.minimize()} title="Свернуть">
+          <CaptionButton onClick={() => api.minimize()} title={t("Свернуть")}>
             <MinusIcon className="w-3.5 h-3.5" />
           </CaptionButton>
-          <CaptionButton onClick={() => api.maximizeToggle()} title="Развернуть / восстановить">
+          <CaptionButton onClick={() => api.maximizeToggle()} title={t("Развернуть / восстановить")}>
             <SquareIcon className="w-3 h-3" />
           </CaptionButton>
-          <CaptionButton onClick={() => api.close()} title="Закрыть" danger>
+          <CaptionButton onClick={() => api.close()} title={t("Закрыть")} danger>
             <XIcon className="w-4 h-4" />
           </CaptionButton>
         </div>

@@ -20,6 +20,7 @@ import {
   WaypointsIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955) перевод интерфейса
 import { SystemStatsBar } from '@/components/h3/system-stats-bar'
 import { ConsoleDialog } from '@/components/h3/console-dialog' // (правка 567)
 import {
@@ -40,18 +41,20 @@ interface SidebarProps {
   onOpenSettings?: () => void
 }
 
-const navItems = [
-  { id: 'generate' as TabType, label: 'Генерация', icon: ClapperboardIcon, color: '#06B6D4' },
-  { id: 'extend' as TabType, label: 'Продление', icon: FilmIcon, color: '#06B6D4' },
+// (правка 955) Подписи вкладов строятся при рендере: модульный const зафиксировал бы
+// язык на моменте импорта, и переключение языка в настройках не подействовало бы.
+const navItems = (t: (key: string) => string) => [
+  { id: 'generate' as TabType, label: t('Генерация'), icon: ClapperboardIcon, color: '#06B6D4' },
+  { id: 'extend' as TabType, label: t('Продление'), icon: FilmIcon, color: '#06B6D4' },
   { id: 'refine' as TabType, label: 'Refine', icon: Wand2Icon, color: '#10B981' },
   { id: 'controlnet' as TabType, label: 'ControlNet', icon: WaypointsIcon, color: '#FB923C' },
   { id: 'tile-upscale' as TabType, label: 'Tile Upscale', icon: Grid3x3Icon, color: '#EC4899' },
   { id: 'fps' as TabType, label: 'FPS', icon: GaugeIcon, color: '#22D3EE' },
   { id: 'face-refine' as TabType, label: 'Face Refine', icon: ScanFaceIcon, color: '#FACC15' },
   { id: 'upscale' as TabType, label: 'DLSS', icon: SparklesIcon, color: '#F472B6' },
-  { id: 'gallery' as TabType, label: 'Галерея', icon: FolderOpenIcon, color: '#8B5CF6' },
-  { id: 'montage' as TabType, label: 'Монтаж', icon: ScissorsIcon, color: '#A78BFA' }, // (правка 720)
-  { id: 'learn' as TabType, label: 'Обучение', icon: GraduationCapIcon, color: '#10B981' },
+  { id: 'gallery' as TabType, label: t('Галерея'), icon: FolderOpenIcon, color: '#8B5CF6' },
+  { id: 'montage' as TabType, label: t('Монтаж'), icon: ScissorsIcon, color: '#A78BFA' }, // (правка 720)
+  { id: 'learn' as TabType, label: t('Обучение'), icon: GraduationCapIcon, color: '#10B981' },
 ]
 
 /* ────────────────────────────────────────────────────────────────
@@ -60,6 +63,7 @@ const navItems = [
  * ──────────────────────────────────────────────────────────────── */
 
 function ComfyHealthDot({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation() // (правка 955)
   const [state, setState] = useState<'checking' | 'up' | 'down'>('checking')
   /** (правка 54) счётчик СОБСТВЕННЫХ сбоев — для grace-периода. */
   const failCount = useRef(0)
@@ -122,7 +126,7 @@ function ComfyHealthDot({ collapsed }: { collapsed: boolean }) {
           <div className="flex items-center justify-center py-1.5">{dot}</div>
         </TooltipTrigger>
         <TooltipContent side="right" className="bg-[var(--surface-3)] border-border text-foreground">
-          {state === 'up' ? 'ComfyUI подключен' : state === 'down' ? 'ComfyUI недоступен' : 'Проверка…'}
+          {state === 'up' ? t('ComfyUI подключен') : state === 'down' ? t('ComfyUI недоступен') : t('Проверка…')}
         </TooltipContent>
       </Tooltip>
     )
@@ -131,7 +135,7 @@ function ComfyHealthDot({ collapsed }: { collapsed: boolean }) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
       {dot}
-      <span>{state === 'up' ? 'ComfyUI подключен' : state === 'down' ? 'ComfyUI недоступен' : 'Проверка…'}</span>
+      <span>{state === 'up' ? t('ComfyUI подключен') : state === 'down' ? t('ComfyUI недоступен') : t('Проверка…')}</span>
     </div>
   )
 }
@@ -141,6 +145,7 @@ function ComfyHealthDot({ collapsed }: { collapsed: boolean }) {
  * ──────────────────────────────────────────────────────────────── */
 
 export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: SidebarProps) {
+  const { t } = useTranslation() // (правка 955)
   const [collapsed, setCollapsed] = useState(false)
   // (правка 567) панель «Консоль» — весь вывод приложения внутри UI
   const [consoleOpen, setConsoleOpen] = useState(false)
@@ -176,7 +181,7 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
 
         {/* Navigation */}
         <nav className="flex-1 py-3 px-2 space-y-1">
-          {navItems.map((item) => {
+          {navItems(t).map((item) => {
             const isActive = activeTab === item.id
             const Icon = item.icon
 
@@ -253,12 +258,12 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
                 )}
               >
                 <TerminalIcon className="w-[18px] h-[18px] shrink-0" />
-                {!collapsed && <span className="text-sm font-medium">Консоль</span>}
+                {!collapsed && <span className="text-sm font-medium">{t('Консоль')}</span>}
               </button>
             </TooltipTrigger>
             {collapsed && (
               <TooltipContent side="right" className="bg-[var(--surface-3)] border-border text-foreground">
-                Консоль
+                {t('Консоль')}
               </TooltipContent>
             )}
           </Tooltip>
@@ -272,12 +277,12 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
                 )}
               >
                 <SettingsIcon className="w-[18px] h-[18px] shrink-0" />
-                {!collapsed && <span className="text-sm font-medium">Настройки</span>}
+                {!collapsed && <span className="text-sm font-medium">{t('Настройки')}</span>}
               </button>
             </TooltipTrigger>
             {collapsed && (
               <TooltipContent side="right" className="bg-[var(--surface-3)] border-border text-foreground">
-                Настройки
+                {t('Настройки')}
               </TooltipContent>
             )}
           </Tooltip>

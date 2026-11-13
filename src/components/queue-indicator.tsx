@@ -27,6 +27,7 @@ import { useGenProgress } from '@/lib/gen-progress-store' // (правка 931) 
 import { useAssistantPanel } from '@/lib/assistant-panel-store' // (правка 442) отступ от панели ассистента
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ──────────────────── Icon Map ──────────────────── */
 
@@ -325,6 +326,8 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
 /* ──────────────────── Component ──────────────────── */
 
 export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
+  const { t } = useTranslation() // (правка 955)
+
   const [expanded, setExpanded] = useState(false)
   // The queue store is persisted — on first client render it may already
   // contain items while SSR rendered none → hydration mismatch (React #418).
@@ -416,9 +419,9 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             <span className="text-xs font-medium text-foreground leading-tight">
               {activeCount > 0
                 ? currentRunning
-                  ? `${TYPE_LABEL[currentRunning.type]}: ${STATUS_LABEL[currentRunning.status]}`
-                  : `${activeCount} в очереди`
-                : 'Очередь пуста'}
+                  ? `${t(TYPE_LABEL[currentRunning.type])}: ${t(STATUS_LABEL[currentRunning.status])}`
+                  : t("{{p1}} в очереди", { p1: activeCount })
+                : t("Очередь пуста")}
             </span>
             {/* Real-time message from WanGP (e.g. "Downloading model...") */}
             {currentRunning?.message && (
@@ -474,14 +477,14 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
               <span className="text-xs font-semibold text-foreground">
-                Очередь генераций
+                Очередь генераций{t("Очередь генераций")}
               </span>
               <div className="flex items-center gap-1">
                 {items.some((it) => it.status === 'done' || it.status === 'error' || it.status === 'cancelled') && (
                   <button
                     onClick={clearFinished}
                     className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-[var(--surface-3)] transition-colors"
-                    title="Очистить завершённые"
+                    title={t("Очистить завершённые")}
                   >
                     <Trash2Icon className="w-3 h-3" />
                   </button>
@@ -541,7 +544,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] text-muted-foreground">
-                          {isDownloading(item.message) ? 'Скачивание модели…' : STATUS_LABEL[item.status]}
+                          {isDownloading(item.message) ? t("Скачивание модели…") : t(STATUS_LABEL[item.status])}
                         </span>
                         {isActive && item.progressMax > 0 && (
                           <span className="text-[10px] text-muted-foreground font-mono">
@@ -590,7 +593,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
                       <button
                         onClick={() => cancelQueueItem(item)}
                         className="p-1 rounded-md text-muted-foreground/50 hover:text-red-400 hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
-                        title="Отменить"
+                        title={t("Отменить")}
                       >
                         <XCircleIcon className="w-3.5 h-3.5" />
                       </button>
@@ -614,7 +617,7 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             {activeCount > 0 && (
               <div className="px-3 py-2 border-t border-border">
                 <p className="text-[10px] text-muted-foreground text-center">
-                  {activeCount} {activeCount === 1 ? 'задача' : activeCount < 5 ? 'задачи' : 'задач'} в очереди
+                  {activeCount} {activeCount === 1 ? t("задача") : activeCount < 5 ? t("задачи") : t("задач")} в{' '}{t("в очереди")}
                 </p>
               </div>
             )}

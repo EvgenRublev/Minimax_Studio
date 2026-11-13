@@ -67,6 +67,7 @@ import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
 import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { useFpsJob } from '@/lib/fps-job-store'
 import { SettingSlider } from './setting-slider'
+import { LanguageSwitcher } from './language-switcher' // (правка 955)
 import { UpdatePanel } from './update-panel' // (правка 790)
 
 /* (правка 791) Метка версии динамическая: берётся с сервера (package.json),
@@ -730,6 +731,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {/* (правка 445) Масштаб интерфейса (как zoom в браузере) */}
             <UiScaleSwitcher />
+
+            {/* (правка 955) Язык интерфейса: Русский / English */}
+            <LanguageSwitcher />
 
             {/* (правка 111) Звук при завершении — вынесено из «Общих» */}
             <div className="flex items-center justify-between pt-2 border-t border-border">

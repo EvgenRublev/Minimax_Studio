@@ -21,6 +21,7 @@ export const PREFS_MIRROR_KEY = 'h3-simple-prefs'
 const PREF_KEYS = [
   'theme', // next-themes
   'h3-ui-scale', // масштаб UI (правка 445/451)
+  'h3-ui-lang', // язык интерфейса (правка 955)
   'h3-selectable-text', // выделение текста (правка 739)
   'minimax.lightbox.volume', // громкость в лайтбоксе
   'h3_welcome_seen_v1', // окно приветствия показано
@@ -89,6 +90,15 @@ export function pushPrefs(): void {
   } catch { /* приватный режим */ }
   if (pushTimer) return
   pushTimer = setTimeout(pushNow, PUSH_DEBOUNCE_MS)
+}
+
+/**
+ * Немедленно отправляет снимок сервера (без дебаунса). Нужен там, где сервер
+ * должен узнать настройку СРАЗУ: язык интерфейса читают API-роуты (i18n/server.ts),
+ * и отвечать они должны уже на новом языке.
+ */
+export function flushPrefs(): void {
+  pushNow()
 }
 
 if (typeof window !== 'undefined') {
