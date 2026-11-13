@@ -15,7 +15,7 @@
  * исполнения ComfyUI обеспечивает `comfy-turn.ts`.
  */
 import { useGenQueue, type QueueItem } from './gen-queue-store'
-import { acquireComfyTurn, isComfyTurnActive } from './comfy-turn'
+import { acquireComfyTurn, isComfyTurnActive, stallLabel } from './comfy-turn'
 import { useGalleryRefresh } from './gallery-refresh-store'
 import { useMontageReturn } from './montage-return-store' // (правка 857)
 
@@ -179,14 +179,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /**
  * (правка 952) Сторож раннера Refine.
  *
- * Глобальный comfy-turn отпускает ХОД очереди через 30 минут без прогресса,
+ * Глобальный comfy-turn отпускает ХОД очереди через 3 часа без прогресса,
  * но раннер Refine сериализован собственным флагом `running` + `runTask()`:
  * если ComfyUI залип на задаче (бесконечный сэмплер, дедлок ноды), этот
  * цикл опроса крутился вечно, и ВСЕ следующие рефайны стояли в очереди, хотя
- * шлюз уже был свободен. Теперь 30 минут без изменения процента у running-
+ * шлюз уже был свободен. Теперь 3 часа без изменения процента у running-
  * задачи — честная ошибка, раннер переходит к следующей.
+ *
+ * (правка 962) 30 минут → 3 часа — вместе с HOLDER_STALL_MS: «Частями» на
+ * 4K и длинные montage считают дольше получаса, и сторож обрывал живую
+ * задачу, хотя прогресс в ComfyUI шёл.
  */
-const REFINE_STALL_MS = 30 * 60 * 1000
+const REFINE_STALL_MS = 3 * 60 * 60 * 1000
 
 async function runTask(id: string, task: RefineTask): Promise<void> {
   const q = () => useGenQueue.getState()
@@ -319,10 +323,10 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
           }
         }
       } catch { /* non-critical */ }
-      // (правка 952) ComfyUI отвечает 'running', но прогресса нет 30 минут:
+      // (правка 952) ComfyUI отвечает 'running', но прогресса нет 3 часа:
       // не держим очередь рефайна вечно (остальные задачи ждут этот runTask).
       if (s.status === 'running' && Date.now() - lastAdvance > REFINE_STALL_MS) {
-        const msg = 'Нет прогресса 30 минут — задача снята с очереди рефайна ' +
+        const msg = `Нет прогресса ${stallLabel(REFINE_STALL_MS)} — задача снята с очереди рефайна ` +
           '(подробности в «Консоли»; ComfyUI мог ещё работать)'
         console.warn(`[refine] ${msg} prompt=${promptId.slice(0, 8)}`)
         throw new Error(msg)
@@ -554,7 +558,7 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
           }
         } catch { /* non-critical */ }
         if (s.status === 'running' && Date.now() - lastAdvance > REFINE_STALL_MS) {
-          q().setStatus(item.id, 'error', 'Нет прогресса 30 минут после перезагрузки — отслеживание остановлено')
+          q().setStatus(item.id, 'error', `Нет прогресса ${stallLabel(REFINE_STALL_MS)} после перезагрузки — отслеживание остановлено`)
           return
         }
         continue

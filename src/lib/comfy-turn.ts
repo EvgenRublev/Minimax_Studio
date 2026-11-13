@@ -64,10 +64,28 @@ let verifyingHolderId: string | null = null
  * хода — одна залипшая карточка блокировала очередь до перезапуска, а долгая
  * легитимная генерация не отличалась от зависшей. Теперь таймер
  * ПРОГРЕСС-зависимый: любое обновление прогресса/сообщения задачи
- * перезапускает отсчёт. 30 минут без единого шага — задача снимается с
+ * перезапускает отсчёт. 3 часа без единого шага — задача снимается с
  * очереди (сама генерация в ComfyUI при этом не отменяется).
+ *
+ * (правка 962) 30 минут → 3 часа: долгие легитимные задачи (4K-рефайн
+ * частями, длинные montage/extend) стояли в одной точке дольше порога —
+ * сторож снимал ход и в очереди начинали расти ошибки, хотя ComfyUI
+ * продолжал считать.
  */
-const HOLDER_STALL_MS = 30 * 60 * 1000
+const HOLDER_STALL_MS = 3 * 60 * 60 * 1000
+
+/**
+ * Длительность сторожа словами — для сообщений и лога («3 часа», «30 минут»),
+ * чтобы текст не расходился с константой при её правке.
+ */
+export function stallLabel(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000))
+  const plural = (n: number, one: string, few: string, many: string) =>
+    n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many
+  if (min % 60 !== 0) return `${min} ${plural(min, 'минуту', 'минуты', 'минут')}`
+  const h = min / 60
+  return `${h} ${plural(h, 'час', 'часа', 'часов')}`
+}
 
 function itemById(id: string): QueueItem | undefined {
   return useGenQueue.getState().items.find((item) => item.id === id)
@@ -137,14 +155,14 @@ function armHolderTimer() {
     const item = itemById(stalled)
     // Снимаем ход, но НЕ отменяем задачу и не рушим её карточку: ComfyUI мог
     // ещё работать. Следующая задача встанет за ней в очередь ComfyUI.
-    console.warn(`[comfy-turn] нет прогресса ${HOLDER_STALL_MS / 60000} мин — снимаю ход ${stalled}`)
+    console.warn(`[comfy-turn] нет прогресса ${stallLabel(HOLDER_STALL_MS)} — снимаю ход ${stalled}`)
     releaseHolder('stalled')
     if (item) {
       useGenQueue
         .getState()
         .setMessage(
           stalled,
-          `Нет прогресса ${HOLDER_STALL_MS / 60000} мин — задача снята с очереди ` +
+          `Нет прогресса ${stallLabel(HOLDER_STALL_MS)} — задача снята с очереди ` +
           '(в ComfyUI генерация могла ещё идти, подробности — в «Консоли»)',
         )
     }
@@ -215,7 +233,7 @@ function ensureSubscription() {
       }
       // (правка 950) прогресс/статус-сообщение обновились — сторож заново.
       // Так долгая, но ЖИВАЯ генерация не снимается с очереди, а зависшая
-      // без единого шага за 30 минут — снимается.
+      // без единого шага за 3 часа (правка 962) — снимается.
       const key = holderProgressKey(item)
       if (key !== lastHolderKey) {
         lastHolderKey = key
