@@ -135,12 +135,15 @@ export function enclosingFunction(node) {
   if (!named.length) return null
   const innermost = named[named.length - 1]
   const hasOuterFn = fns.length > (fns.indexOf(innermost) + 1)
-  if (!hasOuterFn) return { fn: innermost.fn, name: innermost.name, isComponent: /^[A-Z]/.test(innermost.name) }
+  // хук-функции (`useSomething`) живут по правилам компонентов: хук useTranslation
+  // в них законен, импортный t() оставлял бы текст «замороженным» до перерисовки
+  const isHookOrComponent = (name) => /^[A-Z]/.test(name) || /^use[A-Z]/.test(name)
+  if (!hasOuterFn) return { fn: innermost.fn, name: innermost.name, isComponent: isHookOrComponent(innermost.name) }
   // вложенная: ищем самый внешний компонент — хук ставим ему
   const outer = named[0]
-  const anyComponent = named.some((f) => /^[A-Z]/.test(f.name))
+  const anyComponent = named.some((f) => isHookOrComponent(f.name))
   if (anyComponent) {
-    const host = named.find((f) => /^[A-Z]/.test(f.name))
+    const host = named.find((f) => isHookOrComponent(f.name))
     return { fn: host.fn, name: host.name, isComponent: true }
   }
   return { fn: outer.fn, name: outer.name, isComponent: false }

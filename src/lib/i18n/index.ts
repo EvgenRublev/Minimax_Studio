@@ -24,7 +24,7 @@
 import i18n from 'i18next'
 import type { TOptions } from 'i18next'
 import { initReactI18next } from 'react-i18next'
-import { DEFAULT_LANG, LANG_KEY, normalizeLang, type Lang } from './config'
+import { DEFAULT_LANG, LANG_KEY, getServerRenderLang, normalizeLang, type Lang } from './config'
 import { enMessages } from './messages/en'
 
 const GUARD = '__h3i18nInit' as const
@@ -37,16 +37,40 @@ function stored(): Storage | null {
   }
 }
 
-/** Язык, который выбрал пользователь (localStorage); DEFAULT_LANG — если его нет. */
+/**
+ * Язык стартового рендера. Порядок:
+ *   1) window.__h3lang — значение, подставленное инлайн-скриптом layout.tsx
+ *      (оно же использовалось при SSR из зеркала настроек) — тогда клиентский
+ *      первый рендер совпадает с серверной разметкой, гидратация чистая;
+ *   2) localStorage — быстрый путь, когда сервер ещё не ответил;
+ *   3) заводской язык.
+ */
+declare global {
+  interface Window {
+    __h3lang?: string
+  }
+}
 export function readStoredLang(): Lang {
-  return normalizeLang(stored()?.getItem(LANG_KEY))
+  // localStorage — первее: это прямой выбор пользователя в этом браузере.
+  // window.__h3lang (из зеркала, вшитого сервером) — фолбэк, когда локального
+  // значения ещё нет. Важно для статически отрендеренной «/»: в её HTML язык
+  // зафиксирован на сборке и может устареть.
+  const local = stored()?.getItem(LANG_KEY)
+  if (local) return normalizeLang(local)
+  if (typeof window !== 'undefined' && typeof window.__h3lang === 'string') {
+    return normalizeLang(window.__h3lang)
+  }
+  return DEFAULT_LANG
 }
 
 /** Синхронная инициализация; безопасна при повторных вызовах (hot reload). */
 export function ensureI18n(): typeof i18n {
   if (!(globalThis as Record<string, unknown>)[GUARD]) {
     void i18n.use(initReactI18next).init({
-      lng: DEFAULT_LANG,
+      // SSR клиентских компонентов: язык из зеркала (его задал layout.tsx),
+      // в браузере: подставленный инлайн-скриптом / localStorage. Иначе
+      // серверная разметка русская, клиентская английская — рассинхрон гидратации.
+      lng: typeof window === 'undefined' ? getServerRenderLang() : readStoredLang(),
       fallbackLng: DEFAULT_LANG,
       supportedLngs: ['ru', 'en'],
       resources: {

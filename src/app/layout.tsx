@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { I18nBridge } from "@/components/h3/i18n-bridge"; // (правка 955) язык интерфейса
+import { AppLangKey } from "@/components/h3/app-lang-key"; // (правка 955) перемонтаж при смене языка
+import { serverLang } from "@/lib/i18n/server"; // (правка 955) язык для SSR из зеркала настроек
+import { setServerRenderLang } from "@/lib/i18n/config"; // (правка 955) тот же язык в i18n-инициализацию
 // (правка 562) тонкая шапка окна в Electron-режиме (в браузере не рендерится)
 import { DesktopTitleBar } from "@/components/h3/desktop-titlebar";
 import "./globals.css";
@@ -22,8 +25,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // (правка 955) Язык из зеркала настроек: SSR-разметка отдаётся сразу на нём,
+  // клиент инициирует i18next тем же значением (window.__h3lang) — без вспышки
+  // русским и без рассинхрона гидратации.
+  const lang = serverLang()
+  setServerRenderLang(lang) // i18n клиентских компонентов на сервере рендерит этим языком
   return (
-    <html lang="ru" suppressHydrationWarning>
+    <html lang={lang} suppressHydrationWarning>
       <body className="antialiased bg-background text-foreground flex flex-col">
         {/* (правка 562) Electron: шапка окна + контент колонкой. В браузере
             шапка не рендерится, обёртка flex-1 занимает всю высоту как раньше. */}
@@ -40,12 +48,15 @@ export default function RootLayout({
           <script
             suppressHydrationWarning
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null)?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=(p===100?'':p+'%');}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}try{var lg=localStorage.getItem('h3-ui-lang');if(lg==='en'||lg==='ru')document.documentElement.setAttribute('lang',lg);}catch(e){}})();`,
+              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null)?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=(p===100?'':p+'%');}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}try{var lg=${JSON.stringify(lang)};window.__h3lang=lg;document.documentElement.setAttribute('lang',lg);}catch(e){}})();`,
             }}
           />
           {/* (правка 955) применяет сохранённый язык сразу после гидратации */}
           <I18nBridge />
-          {children}
+          {/* (правка 955) при смене языка контент перемонтируется целиком:
+              тексты, полученные импортированным t() (сторы, утилиты), обновляются
+              сразу, а не при следующем перерисовывающем действии */}
+          <AppLangKey>{children}</AppLangKey>
           </ThemeProvider>
           <Toaster position="bottom-center" richColors closeButton />
         </div>

@@ -27,6 +27,21 @@ export function normalizeLang(v: unknown): Lang {
   return DEFAULT_LANG
 }
 
+/**
+ * Язык для SSR-рендера клиентских компонентов (задаёт layout.tsx из зеркала
+ * настроек; читает i18n-инициализация при работе на сервере). Без этого SSR
+ * отдавал бы русскую разметку при сохранённом английском — рассинхрон гидратации.
+ * Хранится на globalThis, чтобы config.ts не тянул fs-модули в браузерный бандл.
+ */
+export function setServerRenderLang(lang: Lang): void {
+  ;(globalThis as Record<string, unknown>)[GSRK] = lang
+}
+export function getServerRenderLang(): Lang {
+  const v = (globalThis as Record<string, unknown>)[GSRK]
+  return typeof v === 'string' ? normalizeLang(v) : DEFAULT_LANG
+}
+const GSRK = '__h3serverLang'
+
 /** Название языка для переключателя — всегда на своём языке, не переводится. */
 export const LANG_NAMES: Record<Lang, string> = {
   ru: 'Русский',
