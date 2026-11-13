@@ -1864,9 +1864,9 @@ if (-not $SkipApp) {
         # версия совпадает с версией из package.json; после успешной сборки
         # версия пишется в .next\H3_APP_VERSION.
         $appVer = $null
-        try { $appVer = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version } catch { }
+        try { $appVer = (Get-Content 'package.json' -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { }
         $buildVer = $null
-        try { $buildVer = ((Get-Content '.next\H3_APP_VERSION' -Raw) -as [string]).Trim() } catch { }
+        try { $buildVer = ((Get-Content '.next\H3_APP_VERSION' -Raw -Encoding UTF8) -as [string]).Trim() } catch { }
         $buildFresh = ((Test-Path '.next\BUILD_ID') -and $appVer -and ($buildVer -eq $appVer))
         if (-not $buildFresh) {
             # (правка 956) Пересборка из исходников требует ВСЕХ зависимостей из
@@ -1884,12 +1884,27 @@ if (-not $SkipApp) {
             } catch { }
             if ($missingDep) {
                 Info ('в node_modules нет зависимости "' + $missingDep + '" - сначала восстанавливаю зависимости (нужен интернет)')
-                $rc = Run-AppStep 'npm ci --no-audit --no-fund' 'npm ci'
-                if ($rc -ne 0) {
-                    Warn 'npm ci не удался, пробую npm install'
+                # (правка 958) npm ci сносит node_modules целиком: при обрыве сети
+                # студия осталась бы вообще без зависимостей. Если папка уже есть —
+                # только доустанавливаем недостающее (обычно это пара пакетов).
+                if (Test-Path 'node_modules') {
                     $rc = Run-AppStep 'npm install --no-audit --no-fund' 'npm install'
-                    if ($rc -ne 0) { throw 'не удалось восстановить зависимости (npm ci / npm install): нет доступа к npm-реестра.' }
+                } else {
+                    $rc = Run-AppStep 'npm ci --no-audit --no-fund' 'npm ci'
+                    if ($rc -ne 0) {
+                        Warn 'npm ci не удался, пробую npm install'
+                        $rc = Run-AppStep 'npm install --no-audit --no-fund' 'npm install'
+                    }
                 }
+                if ($rc -ne 0) { throw ('не удалось восстановить зависимости (нет "' + $missingDep + '"): npm не смог достучаться до реестра. Проверьте интернет и запустите установку ещё раз — старая сборка .next не тронута.') }
+                $still = $null
+                try {
+                    $pkgDeps = (Get-Content 'package.json' -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies
+                    foreach ($p in $pkgDeps.PSObject.Properties) {
+                        if (-not (Test-Path -LiteralPath (Join-Path 'node_modules' ($p.Name -replace '/', '\')))) { $still = $p.Name; break }
+                    }
+                } catch { }
+                if ($still) { throw ('после npm install в node_modules всё ещё нет "' + $still + '": сборку не запускаю, чтобы не остаться без .next.') }
             }
             if (Test-Path '.next') {
                 # (правка 792) без скобок вокруг всей строки Info получал кучу

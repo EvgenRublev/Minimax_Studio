@@ -206,6 +206,33 @@ try {
 } catch { }
 Log ('deps changed: ' + $deps)
 
+# (fix 958) A changed lock hash does not always mean the dependency installer is
+# needed: build-only packages (i18next) may be missing while the app starts fine,
+# and npm ci wipes node_modules. Probe the staged package.json against
+# node_modules with the bundled node; when every package resolves, skip the
+# installer and relaunch the app immediately.
+if ($deps) {
+    $probeNode = Join-Path $Root 'runtime\node.exe'
+    if (Test-Path -LiteralPath $probeNode) {
+        try {
+            $stagedDeps = (Get-Content -LiteralPath (Join-Path $staging 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies
+            $names = @($stagedDeps.PSObject.Properties | ForEach-Object { $_.Name })
+            if ($names.Count -gt 0) {
+                $namesJson = '["' + ($names -join '","') + '"]'
+                $probe = 'var n=' + $namesJson + ';var m=[];for(var i=0;i<n.length;i++){try{require.resolve(n[i])}catch(e){m.push(n[i])}}process.stdout.write(m.join(","))'
+                Push-Location $Root
+                try { $missing = (& $probeNode -e $probe 2>$null) -join '' } finally { Pop-Location }
+                if (-not $missing) {
+                    $deps = $false
+                    Log 'all staged dependencies resolve - dependency installer skipped'
+                } else {
+                    Log ('missing staged dependencies: ' + $missing)
+                }
+            }
+        } catch { Log ('dependency probe failed: ' + $_.Exception.Message) }
+    }
+}
+
 # ------------------------------- 3b. undo leftovers of an interrupted run ---
 if (Test-Path -LiteralPath $backup) {
     Log 'previous backup found - restoring it first (interrupted update)'
