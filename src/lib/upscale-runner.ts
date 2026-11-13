@@ -247,7 +247,7 @@ export async function ensureUpscale(opts: { force?: boolean } = {}): Promise<Ups
       const entry = path.join(dir, 'bridge.py')
 
       if (!existsSync(pythonExe)) {
-        const msg = 'Не найден встроенный рантайм Upscale (upscale/bin/…). Папка upscale/ должна лежать рядом с start.bat.'
+        const msg = st("Не найден встроенный рантайм Upscale (upscale/bin/…). Папка upscale/ должна лежать рядом с start.bat.")
         lastError = msg
         return { ok: false, error: msg }
       }

@@ -383,7 +383,7 @@ export function VoiceSettingsPanel() {
               <div key={m.name} className="flex items-center gap-2 rounded-md border border-border bg-[var(--surface-2)] px-3 py-2">
                 <div className="flex-1 min-w-0">
                   <span className="text-xs font-medium text-foreground">{m.name}</span>
-                  <span className="text-[10px] text-muted-foreground ml-2">{m.sizeLabel} · {m.quality}</span>
+                  <span className="text-[10px] text-muted-foreground ml-2">{tt(m.sizeLabel)} · {tt(m.quality)}</span>
                 </div>
                 {downloaded ? (
                   <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px] shrink-0">

@@ -810,7 +810,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <button
                     key={id}
                     type="button"
-                    title={title}
+                    title={tt(title)}
                     onClick={() => setLlmDevice(id)}
                     className={cn(
                       'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
@@ -819,7 +819,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         : 'text-muted-foreground border border-transparent hover:text-foreground',
                     )}
                   >
-                    {label}
+                    {tt(label)}
                   </button>
                 ))}
               </div>
@@ -864,7 +864,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <button
                     key={id}
                     type="button"
-                    title={title}
+                    title={tt(title)}
                     onClick={() => setLlmKvCache(id)}
                     className={cn(
                       'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
@@ -873,7 +873,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         : 'text-muted-foreground border border-transparent hover:text-foreground',
                     )}
                   >
-                    {label}
+                    {tt(label)}
                   </button>
                 ))}
               </div>
@@ -1435,8 +1435,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     <p className={cn(
                       'text-xs font-medium',
                       videoCodec === id ? 'text-cyan-300' : 'text-foreground',
-                    )}>{label}</p>
-                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{hint}</p>
+                    )}>{tt(label)}</p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{tt(hint)}</p>
                   </button>
                 ))}
               </div>
@@ -1456,7 +1456,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   step={1}
                   onChange={(v) => setVideoCrf(Math.round(v))}
                   formatValue={(v) =>
-                    v <= 14 ? `${v} — максимум` : v <= 19 ? `${v} — высокое` : v <= 25 ? `${v} — стандарт` : `${v} — компакт`
+                    v <= 14 ? tt("{{p1}} — максимум", { p1: v }) : v <= 19 ? tt("{{p1}} — высокое", { p1: v }) : v <= 25 ? tt("{{p1}} — стандарт", { p1: v }) : tt("{{p1}} — компакт", { p1: v })
                   }
                 />
                 <p className="text-[10px] leading-snug text-muted-foreground">
@@ -1930,7 +1930,7 @@ function ManualDownloadPanel() {
   const copy = async (text: string, what: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      toast.success(tt("{{p1}} скопирован", { p1: what }))
+      toast.success(tt("{{p1}} скопирован", { p1: tt(what) }))
     } catch {
       toast.error(tt("Не удалось скопировать"))
     }
@@ -1983,7 +1983,7 @@ function ManualDownloadPanel() {
         if (!models.length) return null
         return (
           <div key={key} className="space-y-1.5 pt-2 border-t border-border">
-            <div className="text-xs font-medium text-foreground/80">{label}</div>
+            <div className="text-xs font-medium text-foreground/80">{tt(label)}</div>
             {models.map((m) => {
               const isBonsai = m.target === 'bonsai'
               // (правка 905) модели кастомных нод (VFI, controlnet_aux) лежат
@@ -2006,7 +2006,7 @@ function ManualDownloadPanel() {
                   <span className="text-xs text-foreground/90 truncate" title={tt(m.label)}>
                     {tt(m.label)}
                   </span>
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{m.sizeLabel}</Badge>
+                  <Badge variant="secondary" className="text-[10px] shrink-0">{tt(m.sizeLabel)}</Badge>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <code className="flex-1 min-w-0 text-[10px] font-mono text-cyan-300/80 truncate" title={fullPath}>

@@ -5149,7 +5149,7 @@ export function MontageView() {
                       backgroundPosition: 'center',
                       backgroundRepeat: 'no-repeat',
                     }}
-                    title={tt("{{p1}} · старт {{p2}} с · длина {{p3}} с{{p4}}", { p1: row.shot.name, p2: row.offset.toFixed(2), p3: row.len.toFixed(1), p4: row.gap >= 0.02 ? ` · пауза перед клипом ${row.gap.toFixed(2)} с` : '' })}
+                    title={tt("{{p1}} · старт {{p2}} с · длина {{p3}} с{{p4}}", { p1: row.shot.name, p2: row.offset.toFixed(2), p3: row.len.toFixed(1), p4: row.gap >= 0.02 ? tt(" · пауза перед клипом {{p1}} с", { p1: row.gap.toFixed(2) }) : '' })}
                   >
                     {!strip && (
                       <img
@@ -5347,7 +5347,7 @@ export function MontageView() {
                 )}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
-                {label}
+                {tt(label)}
                 {id === 'fx' && fxTarget && hasFx(fxTarget.fx) && (
                   <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 )}

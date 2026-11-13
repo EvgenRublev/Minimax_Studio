@@ -15,6 +15,7 @@ import settings from './settings.json'
 import views from './views.json'
 import api from './api.json'
 import ui from './ui.json' // (правка 955) строки из компонентов (tt-обёртки), собранная партия
+import extra from './extra.json' // (правка 955) добрано по DOM-пробегке: незавернутые литералы + лейблы моделей
 
 export const enMessages: Record<string, string> = {
   ...common,
@@ -22,4 +23,5 @@ export const enMessages: Record<string, string> = {
   ...views,
   ...api,
   ...ui,
+  ...extra,
 }

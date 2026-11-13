@@ -505,7 +505,7 @@ export function ControlNetView() {
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
               <AlertTriangleIcon className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-300">
-                {tt("Для режима ControlNet нужно скачать модели:")}{' '} {missingModels.join(', ')} {' '}{tt("— Настройки → Модели (категория Препроцессоры)")}
+                {tt("Для режима ControlNet нужно скачать модели:")}{' '} {missingModels.map((l) => tt(l)).join(', ')} {' '}{tt("— Настройки → Модели (категория Препроцессоры)")}
               </p>
             </div>
           )}
@@ -539,7 +539,7 @@ export function ControlNetView() {
                   <button
                     key={v}
                     type="button"
-                    title={v === 'map' && params.controlType === 'direct' ? tt("Недоступно в режиме «Прямой»") : hint}
+                    title={v === 'map' && params.controlType === 'direct' ? tt("Недоступно в режиме «Прямой»") : tt(hint)}
                     disabled={mapDisabled}
                     onClick={() => patchParams(
                       v === 'map'
@@ -554,7 +554,7 @@ export function ControlNetView() {
                         : 'bg-[var(--surface-2)] border-border text-muted-foreground hover:border-orange-500/30',
                     )}
                   >
-                    {label}
+                    {tt(label)}
                   </button>
                 )
               })}
@@ -814,7 +814,7 @@ export function ControlNetView() {
               max={30}
               step={1}
               onChange={(v) => patchParams({ duration: Math.round(v) })}
-              formatValue={(v) => `${v} с`}
+              formatValue={(v) => tt("{{p1}} с", { p1: v })}
             />
             <p className="text-[10px] text-muted-foreground/60">
               {tt("Если контрольное видео короче — длительность обрежется под него.")}

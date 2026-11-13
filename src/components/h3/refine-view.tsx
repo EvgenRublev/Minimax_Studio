@@ -900,7 +900,7 @@ export function RefineView() {
                 <button
                   key={m}
                   type="button"
-                  title={hint}
+                  title={t(hint)}
                   // (правка 698) При переключении режима — дефолтное влияние
                   // Refine для этого режима (Целый 90% / Частями 80%).
                   // Перезаписываем ТОЛЬКО при смене режима; если пользователь
@@ -917,7 +917,7 @@ export function RefineView() {
                       : 'bg-[var(--surface-2)] border-border text-muted-foreground hover:border-cyan-500/30',
                   )}
                 >
-                  {label}
+                  {t(label)}
                 </button>
               ))}
             </div>

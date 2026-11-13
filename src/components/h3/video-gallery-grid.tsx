@@ -351,7 +351,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-12">
         <VideoIcon className="w-10 h-10 text-muted-foreground/30 mb-3" />
-        <p className="text-sm text-muted-foreground">{emptyHint}</p>
+        <p className="text-sm text-muted-foreground">{tt(emptyHint)}</p>
       </div>
     )
   }

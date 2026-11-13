@@ -127,10 +127,10 @@ export function ModelsWarningBanner({ onOpenSettings }: ModelsWarningBannerProps
 
   const label =
     missing.length === 1
-      ? `Не скачана модель: ${missing[0].label}`
+      ? tt("Не скачана модель: {{p1}}", { p1: tt(missing[0].label) })
       : missing.length === 2
-        ? `Не скачаны модели: ${missing.map((m) => m.label).join(', ')}`
-        : `Не скачано моделей: ${missing.length}. Генерация будет работать некорректно.`
+        ? tt("Не скачаны модели: {{p1}}", { p1: missing.map((m) => tt(m.label)).join(', ') })
+        : tt("Не скачано моделей: {{p1}}. Генерация будет работать некорректно.", { p1: missing.length })
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 shrink-0">

@@ -223,10 +223,10 @@ export function UpdatePanel() {
     : (data.latest?.version === data.current ? data.latest : undefined)
   const notes = notesSource?.notes?.trim() ?? ''
   const notesTitle = !pendingVersion
-    ? `Что нового в v${data.current}`
+    ? t("Что нового в v{{p1}}", { p1: data.current })
     : data.armed || data.downloadedVersion
-      ? `Скачано v${pendingVersion} — что внутри`
-      : `Доступно v${pendingVersion} — что внутри`
+      ? t("Скачано v{{p1}} — что внутри", { p1: pendingVersion })
+      : t("Доступно v{{p1}} — что внутри", { p1: pendingVersion })
 
   // Приложения «взведено» — ждём только перезапуска.
   if (data.armed && !dlActive) {

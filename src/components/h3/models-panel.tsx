@@ -220,7 +220,7 @@ export function ModelsPanel() {
   // которая сейчас выбрана ассистентом.
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const remove = useCallback(async (model: ModelStatus) => {
-    if (!window.confirm(`Удалить файлы модели с диска?\n\n«${model.label}» (${model.sizeLabel})\n\nПри необходимости её можно скачать снова.`)) return
+    if (!window.confirm(t("Удалить файлы модели с диска?\n\n«{{p1}}» ({{p2}})\n\nПри необходимости её можно скачать снова.", { p1: t(model.label), p2: model.sizeLabel }))) return
     setDeletingId(model.id)
     try {
       const res = await fetch('/api/models/delete', {

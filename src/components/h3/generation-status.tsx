@@ -309,12 +309,12 @@ export function GenerationStatus({
                     : 'text-muted-foreground',
           )}
         >
-          {phase === 'idle' && 'Готов к генерации'}
-          {phase === 'submitting' && 'Отправка…'}
-          {phase === 'queued' && 'В очереди…'}
-          {phase === 'running' && (progressPercent > 0 ? `Генерация… ${progressPercent}%` : 'Генерация идёт…')}
-          {phase === 'done' && 'Готово ✓'}
-          {phase === 'error' && 'Ошибка'}
+          {phase === 'idle' && tt("Готов к генерации")}
+          {phase === 'submitting' && tt("Отправка…")}
+          {phase === 'queued' && tt("В очереди…")}
+          {phase === 'running' && (progressPercent > 0 ? tt("Генерация… {{p1}}%", { p1: progressPercent }) : tt("Генерация идёт…"))}
+          {phase === 'done' && tt("Готово ✓")}
+          {phase === 'error' && tt("Ошибка")}
         </span>
         <div className="flex items-center gap-2 min-w-0">
           {startedAt && isGenerating && <ElapsedTimer startedAt={startedAt} />}

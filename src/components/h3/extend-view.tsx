@@ -958,7 +958,7 @@ export function ExtendView() {
                 <button
                   key={label}
                   type="button"
-                  title={hint}
+                  title={t(hint)}
                   onClick={() => patchVideo({ extendTwoPass: tp })}
                   className={cn(
                     'h-8 rounded-md border text-xs font-medium transition-all',
@@ -967,7 +967,7 @@ export function ExtendView() {
                       : 'bg-[var(--surface-2)] border-border text-muted-foreground hover:border-emerald-500/30',
                   )}
                 >
-                  {label}
+                  {t(label)}
                 </button>
               ))}
             </div>
@@ -1339,8 +1339,8 @@ export function ExtendView() {
                         const srcD = typeof video.extendSourceDuration === 'number' && video.extendSourceDuration > 0
                           ? video.extendSourceDuration : 0
                         return srcD > 0
-                          ? `${sumUpTo} с · итог ~${(srcD + sumUpTo).toFixed(0)} с`
-                          : `${sumUpTo} с (итого клипов: ${video.extendClips.reduce((s, c) => s + c.duration, 0)} с)`
+                          ? t("{{p1}} с · итог ~{{p2}} с", { p1: sumUpTo, p2: (srcD + sumUpTo).toFixed(0) })
+                          : t("{{p1}} с (итого клипов: {{p2}} с)", { p1: sumUpTo, p2: video.extendClips.reduce((s, c) => s + c.duration, 0) })
                       })()}
                     </span>
                     {/* (правка 454) Кнопка полноэкранного редактора промпта

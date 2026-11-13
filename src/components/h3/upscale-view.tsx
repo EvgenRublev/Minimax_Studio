@@ -346,7 +346,7 @@ function humanDuration(sec?: number): string {
   const s = Math.round(sec)
   const m = Math.floor(s / 60)
   const r = s % 60
-  return m > 0 ? `${m} мин ${r} с` : `${r} с`
+  return m > 0 ? tt("{{p1}} мин {{p2}} с", { p1: m, p2: r }) : tt("{{p1}} с", { p1: r })
 }
 
 /* ────────────────────────────────────────────────────────────────
@@ -773,7 +773,7 @@ export function UpscaleView() {
               <p className="text-xs text-amber-300/80 flex items-start gap-1.5 min-w-0">
                 <Loader2Icon className="w-3.5 h-3.5 shrink-0 animate-spin" />
                 <span className="truncate" title={startLog ?? undefined}>
-                  {startLog ?? 'Подготовка рантайма DLSS…'}
+                  {startLog ?? tt("Подготовка рантайма DLSS…")}
                 </span>
               </p>
             )}
@@ -814,7 +814,7 @@ export function UpscaleView() {
           {/* (правка 77) Сворачиваемый блок: параметры режима */}
           <div className="space-y-1.5">
             {collapseHeader(
-              `${tab === 'nr' ? 'Neural Rendering' : 'RTX VSR'} — параметры`,
+              tt("{{p1}} — параметры", { p1: tab === 'nr' ? 'Neural Rendering' : 'RTX VSR' }),
               showMode,
               () => setShowMode(!showMode),
             )}

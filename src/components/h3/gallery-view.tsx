@@ -451,8 +451,8 @@ export function GalleryView() {
         )}
 
         <div className="flex-1 overflow-y-auto">
-          {folderItem('__all__', <LayersIcon className="w-3.5 h-3.5" />, 'Все видео')}
-          {folderItem('', <FilmIcon className="w-3.5 h-3.5" />, 'Общая', { onAddChild: true })}
+          {folderItem('__all__', <LayersIcon className="w-3.5 h-3.5" />, t("Все видео"))}
+          {folderItem('', <FilmIcon className="w-3.5 h-3.5" />, t("Общая"), { onAddChild: true })}
           {/* (правка 495) Папки приходят отсортированными (родитель раньше
               детей) — рисуем дерево отступами по глубине пути. */}
           {folders.map((f) =>

@@ -1212,7 +1212,7 @@ export function GenerateView() {
                 <button
                   key={m}
                   type="button"
-                  title={hint}
+                  title={tt(hint)}
                   onClick={() => patchVideo({ mode: m })}
                   className={cn(
                     'h-8 rounded-md border px-1 text-xs font-medium transition-all min-w-0 truncate text-center',
@@ -1221,7 +1221,7 @@ export function GenerateView() {
                       : 'bg-[var(--surface-2)] border-border text-muted-foreground hover:border-cyan-500/30',
                   )}
                 >
-                  {label}
+                  {tt(label)}
                 </button>
               ))}
             </div>
@@ -1325,7 +1325,7 @@ export function GenerateView() {
                 <button
                   key={pl}
                   type="button"
-                  title={hint}
+                  title={tt(hint)}
                   onClick={() => patchVideo({ pipeline: pl })}
                   disabled={video.mode === 'extend'}
                   className={cn(
@@ -1336,7 +1336,7 @@ export function GenerateView() {
                     video.mode === 'extend' && 'opacity-50 cursor-not-allowed',
                   )}
                 >
-                  {label}
+                  {tt(label)}
                 </button>
               ))}
             </div>
@@ -2395,8 +2395,8 @@ export function GenerateView() {
             onToggleLike={toggleLike}
             emptyHint={
               outputFolder
-                ? `В папке «${outputFolder}» пока нет видео. Новые генерации лягут в неё.`
-                : 'Здесь появятся сгенерированные видео. Опишите сцену, добавьте референс-изображение и нажмите «Сгенерировать видео».'
+                ? tt("В папке «{{p1}}» пока нет видео. Новые генерации лягут в неё.", { p1: outputFolder })
+                : tt("Здесь появятся сгенерированные видео. Опишите сцену, добавьте референс-изображение и нажмите «Сгенерировать видео».")
             }
           />
         </div>
