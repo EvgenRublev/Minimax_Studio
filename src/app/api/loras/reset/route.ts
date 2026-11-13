@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resetLorasToDefaults } from '@/lib/loras-config'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/loras/reset — (правка 130) Заводской сброс настроек LoRA.
@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
  * состоянием. Вызывается из «Заводской сброс» в настройках.
  */
 export async function POST() {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const defaults = resetLorasToDefaults()

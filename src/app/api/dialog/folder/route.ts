@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import path from 'path'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +30,6 @@ export const dynamic = 'force-dynamic'
  *    TOPMOST + SetForegroundWindow with an ALT-press fallback.
  */
 export async function POST(request: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await request.json().catch(() => ({}))

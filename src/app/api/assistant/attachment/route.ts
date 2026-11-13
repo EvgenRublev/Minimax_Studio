@@ -9,7 +9,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 /**
  * (правка 108) Вложения чата ассистента — ИЗОЛИРОВАННОЕ хранилище.
@@ -67,7 +67,6 @@ async function safeAttachPath(filename: string): Promise<string | null> {
 
 /* ─── POST: upload ─── */
 export async function POST(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   let part: MultipartFilePart | null = null
   try {

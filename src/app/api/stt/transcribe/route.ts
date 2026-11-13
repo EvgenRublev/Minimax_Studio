@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ensureStt, STT_PORT } from '@/lib/stt-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 65) POST /api/stt/transcribe
@@ -11,7 +11,6 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(request: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   let started: { ok: boolean; error?: string }
   try {

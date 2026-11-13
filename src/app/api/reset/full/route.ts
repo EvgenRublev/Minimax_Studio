@@ -8,7 +8,7 @@ import { clearInflight } from '@/lib/inflight-journal'
 import { clearAllMirrors } from '@/lib/settings-mirror' // (правка 804)
 import { stopLlm } from '@/lib/llm-runner'
 import { stopStt } from '@/lib/stt-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -118,7 +118,6 @@ async function removeFile(file: string): Promise<number> {
 }
 
 export async function POST(req: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   // (правка 926) Вторая линия защиты от «drive-by» сброса (первая — CSRF-guard
   // в src/proxy.ts): сервер требует явный токен подтверждения в теле.

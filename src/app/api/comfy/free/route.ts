@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 const COMFY_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/+$/, '')
 
@@ -9,7 +9,6 @@ const COMFY_URL = (process.env.COMFY_URL || 'http://127.0.0.1:8188').replace(/\/
  * This version of ComfyUI expects: { unload_models: true, free_memory: true }
  */
 export async function POST() {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const res = await fetch(`${COMFY_URL}/free`, {

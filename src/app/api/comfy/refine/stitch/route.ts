@@ -11,7 +11,7 @@ import { resolveFfmpeg } from '@/lib/thumb'
 import { probeVideoFile, type VideoProbe } from '@/lib/video-probe'
 import { ffmpegVideoArgs } from '@/lib/video-format'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 386)
+import { st } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
 
@@ -42,7 +42,6 @@ const execFileAsync = promisify(execFile)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json() as {

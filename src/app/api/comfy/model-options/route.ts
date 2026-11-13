@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * GET /api/comfy/model-options?model_type=minimax_h3_ref2va
@@ -8,7 +8,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const { searchParams } = new URL(req.url)
   const modelType = searchParams.get('model_type') || ''

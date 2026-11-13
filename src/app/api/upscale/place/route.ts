@@ -5,7 +5,7 @@ import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders'
 import { ensureUpscaleMeta } from '@/lib/upscale-meta'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 727) POST /api/upscale/place
@@ -25,7 +25,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = (await req.json().catch(() => null)) as

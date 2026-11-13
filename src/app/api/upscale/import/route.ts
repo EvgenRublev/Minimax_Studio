@@ -6,7 +6,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 495)
+import { st as stT } from '@/lib/i18n/server'
 
 /**
  * POST /api/upscale/import
@@ -44,7 +44,6 @@ function sanitizeName(name: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   let destPath = ''
   try {

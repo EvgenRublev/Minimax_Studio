@@ -18,7 +18,7 @@ import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
 
@@ -33,7 +33,6 @@ const execFileAsync = promisify(execFile)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     // (правка 716) Лимит тела. Везде в проекте загрузки идут потоком с

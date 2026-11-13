@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { bridgeUrl } from '@/lib/upscale-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 74) GET /api/upscale/schema
@@ -9,7 +9,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const r = await fetch(bridgeUrl('/schema'), { signal: AbortSignal.timeout(8000) })

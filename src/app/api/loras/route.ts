@@ -14,7 +14,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 /**
  * GET /api/loras
@@ -191,7 +191,6 @@ function abortUpload(part: MultipartFilePart | null): void {
  * повторном включении. Сброс идёт в фоне — не блокирует ответ.
  */
 export async function PUT(req: NextRequest) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json()

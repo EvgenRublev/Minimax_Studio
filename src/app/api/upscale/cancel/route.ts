@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bridgeUrl } from '@/lib/upscale-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 74) POST /api/upscale/cancel?id=<jobId>
@@ -9,7 +9,6 @@ import { useTranslation } from 'react-i18next' // (правка 955)
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const id = new URL(req.url).searchParams.get('id')
   if (!id) {

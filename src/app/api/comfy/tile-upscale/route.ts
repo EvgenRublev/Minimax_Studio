@@ -13,7 +13,7 @@ import { readPromptChain, readMetaImageRefs, resolveSourceLatent } from '@/lib/r
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 483)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/tile-upscale — tiled latent upscale (MMH3UltimateUpscale).
@@ -38,7 +38,6 @@ import { useTranslation } from 'react-i18next' // (правка 955) // (пра�
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json() as {

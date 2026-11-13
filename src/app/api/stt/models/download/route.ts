@@ -4,7 +4,7 @@ import { join } from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { sttStatus } from '@/lib/stt-runner'
 import { stopStt } from '@/lib/stt-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 /**
  * (правка 72) STT-модели: скачивание, прогресс, отмена.
@@ -102,7 +102,6 @@ export async function GET(request: Request) {
 
 /* ─── POST /api/stt/models/download ─── */
 export async function POST(request: Request) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   let body: Record<string, unknown>
   try {
@@ -163,7 +162,6 @@ export async function POST(request: Request) {
 
 /* ─── DELETE /api/stt/models/download?name=small ─── */
 export async function DELETE(request: Request) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   const url = new URL(request.url)
   const name = (url.searchParams.get('name') || '').trim()

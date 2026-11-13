@@ -90,6 +90,11 @@ if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.m
 // этой проверки не выпускаем. Суммы: `node scripts/make-installer-cache.mjs`.
 if (!run('installer integrity check', process.execPath, ['scripts/check-installer.mjs'])) process.exit(1);
 
+// (правка 959) Клиентские i18n-хуки не должны попадать в серверные модули:
+// на сервере react-i18next не отдаёт useTranslation, каждый такой роут падал
+// с HTTP 500 (ошибка сохранения настроек, мёртвый ассистент в 7.1.23).
+if (!run('server i18n hooks check', process.execPath, ['scripts/check-server-i18n.mjs'])) process.exit(1);
+
 // (правка 941) Поведенческие тесты установщика на реальном коде install.ps1:
 // распаковка битых архивов (обрезанный zip, HTML вместо архива, осколки докачки)
 // и heartbeat статуса (заставка не должна считать долгий шаг мёртвым). Сеть,

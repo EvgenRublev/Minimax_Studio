@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { deleteModel } from '@/lib/model-downloader'
 import { activeLlmModelId, llmBackend } from '@/lib/llm-runner'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +16,6 @@ export const dynamic = 'force-dynamic'
  *    удаляется свободно: бэкенд подхватит её, только если PQ2_0 отсутствует.
  */
 export async function POST(request: Request) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await request.json().catch(() => ({}))

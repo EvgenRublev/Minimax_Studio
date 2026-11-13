@@ -12,7 +12,7 @@ import { recordPendingMetaRaw } from '@/lib/pending-meta'
 import { readPromptChain, readMetaImageRefs } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 386)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/fps — frame interpolation (VFI): RIFE VFI / FILM VFI. (правка 268)
@@ -38,7 +38,6 @@ import { useTranslation } from 'react-i18next' // (правка 955) // (пра�
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json() as {

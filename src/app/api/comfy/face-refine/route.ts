@@ -22,7 +22,7 @@ import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { resolveFaceDetectors } from '@/lib/comfy/face-detectors'
 import { enabledCustomLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * POST /api/comfy/face-refine — перерисовка мелких лиц в готовом видео
@@ -88,7 +88,6 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   try {
     const body = await req.json() as {

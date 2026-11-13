@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createWriteStream, mkdirSync, renameSync, unlinkSync } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * (правка 74) POST /api/upscale/upload
@@ -194,7 +194,6 @@ async function streamMultipartFile(
 }
 
 export async function POST(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   let destPath = ''
   try {

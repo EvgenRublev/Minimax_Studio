@@ -5,8 +5,7 @@ import { getAppConfig, setConfigValue } from '@/lib/app-config'
 import { llmStatus, stopLlm } from '@/lib/llm-runner'
 import { sttStatus, stopStt } from '@/lib/stt-runner'
 import { writeExtraModelPathsYaml, EXTRA_CATEGORIES } from '@/lib/extra-model-paths'
-import { useTranslation } from 'react-i18next' // (правка 955)
-import { st as stT } from '@/lib/i18n/server' // (правка 955)
+import { st as stT } from '@/lib/i18n/server'
 
 /** (правка 262) Папка существует как каталог (для UI-индикатора и валидации). */
 function isExistingDir(p: string): boolean {
@@ -180,7 +179,6 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   try {
     const body = await request.json()

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { getAppConfig } from '@/lib/app-config'
 import { listGalleryFolders } from '@/lib/gallery-folders'
-import { useTranslation } from 'react-i18next' // (правка 955)
+import { st } from '@/lib/i18n/server'
 
 /**
  * GET /api/comfy/files?type=all|video|image
@@ -119,7 +119,6 @@ async function listDir(
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const { t: st } = useTranslation() // (правка 955)
 
   const { searchParams } = new URL(req.url)
   const typeFilter = searchParams.get('type') || 'all'

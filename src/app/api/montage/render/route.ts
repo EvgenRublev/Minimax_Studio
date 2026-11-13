@@ -52,7 +52,7 @@ import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveFfmpeg } from '@/lib/thumb'
 import { dispersionCoeffs } from '@/lib/montage-dispersion'
-import { useTranslation } from 'react-i18next' // (правка 955) // (правка 898) общая формула дисперсии
+import { st as stT } from '@/lib/i18n/server'
 
 export const runtime = 'nodejs'
 
@@ -689,7 +689,6 @@ async function findAllRecursive(root: string, fileName: string, depth: number, l
 }
 
 export async function POST(req: Request) {
-  const { t: stT } = useTranslation() // (правка 955)
 
   let releaseBusy: (() => void) | null = null
   try {
