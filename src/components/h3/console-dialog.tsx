@@ -25,10 +25,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const RENDERER_CAP = 1_500_000
 
 export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [text, setText] = useState('')
   const [available, setAvailable] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
@@ -84,7 +87,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       await navigator.clipboard.writeText(text)
       toast.success(`Скопировано: ${lineCount} строк лога`)
     } catch {
-      toast.error('Не удалось скопировать в буфер обмена')
+      toast.error(tt("Не удалось скопировать в буфер обмена"))
     }
   }
 
@@ -125,14 +128,14 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       const res = await fetch('/api/comfy/purge-queue', { method: 'POST' })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data) {
-        toast.error('Не удалось сбросить очередь ComfyUI')
+        toast.error(tt("Не удалось сбросить очередь ComfyUI"))
       } else if (data.error) {
         toast.warning(`Очередь сброшена с замечанием: ${data.error}`)
       } else {
-        toast.success('Очередь ComfyUI очищена')
+        toast.success(tt("Очередь ComfyUI очищена"))
       }
     } catch {
-      toast.error('Не удалось сбросить очередь ComfyUI')
+      toast.error(tt("Не удалось сбросить очередь ComfyUI"))
     } finally {
       setBusyAction(null)
     }
@@ -148,16 +151,16 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     if (busyAction) return
     const api = window.h3desktop?.comfy
     if (!api?.restart) {
-      toast.error('Перезапуск ComfyUI доступен только в оконном режиме приложения')
+      toast.error(tt("Перезапуск ComfyUI доступен только в оконном режиме приложения"))
       return
     }
     setBusyAction('restart')
     try {
       const r = await api.restart()
-      if (r.ok) toast.success('ComfyUI перезапущен')
+      if (r.ok) toast.success(tt("ComfyUI перезапущен"))
       else toast.error(r.error || 'Не удалось перезапустить ComfyUI')
     } catch {
-      toast.error('Не удалось перезапустить ComfyUI')
+      toast.error(tt("Не удалось перезапустить ComfyUI"))
     } finally {
       setBusyAction(null)
     }
@@ -174,9 +177,9 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       >
         <DialogHeader className="shrink-0 flex-row items-center justify-between gap-3 border-b border-border px-4 py-2 pr-12 text-left">
           <div className="flex min-w-0 flex-1 items-baseline gap-3">
-            <DialogTitle className="shrink-0 text-base font-semibold">Консоль</DialogTitle>
+            <DialogTitle className="shrink-0 text-base font-semibold">{tt("Консоль")}</DialogTitle>
             <DialogDescription className="min-w-0 truncate text-xs">
-              Весь вывод приложения: веб-сервер, ComfyUI и процесс окна
+              {tt("Весь вывод приложения: веб-сервер, ComfyUI и процесс окна")}{' '}
               {lineCount > 0 && ` · ${lineCount.toLocaleString('ru-RU')} строк`}
             </DialogDescription>
           </div>
@@ -188,10 +191,10 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               onClick={() => void purgeQueue()}
               disabled={busyAction !== null}
               className="gap-1.5 text-xs"
-              title="Снять выполняющуюся задачу (interrupt) и удалить все ожидающие из очереди ComfyUI"
+              title={tt("Снять выполняющуюся задачу (interrupt) и удалить все ожидающие из очереди ComfyUI")}
             >
               {busyAction === 'purge' ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <ListXIcon className="w-3.5 h-3.5" />}
-              Очистить очередь
+              {' '}{tt("Очистить очередь")}
             </Button>
             <Button
               variant="outline"
@@ -199,10 +202,10 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               onClick={() => void restartComfy()}
               disabled={busyAction !== null || available === false}
               className="gap-1.5 text-xs"
-              title="Убить процесс ComfyUI и запустить заново (лечит по-настоящему зависший сэмплер)"
+              title={tt("Убить процесс ComfyUI и запустить заново (лечит по-настоящему зависший сэмплер)")}
             >
               {busyAction === 'restart' ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <RefreshCwIcon className="w-3.5 h-3.5" />}
-              Перезапустить ComfyUI
+              {' '}{tt("Перезапустить ComfyUI")}
             </Button>
             <Button
               variant="outline"
@@ -212,7 +215,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               className="gap-1.5 text-xs"
             >
               <CopyIcon className="w-3.5 h-3.5" />
-              Скопировать всё
+              {' '}{tt("Скопировать всё")}
             </Button>
             <Button
               variant="outline"
@@ -222,7 +225,7 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               className="gap-1.5 text-xs"
             >
               {saving ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <SaveIcon className="w-3.5 h-3.5" />}
-              Сохранить в файл…
+              {' '}{tt("Сохранить в файл…")}
             </Button>
           </div>
         </DialogHeader>
@@ -231,10 +234,10 @@ export function ConsoleDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           <div className="flex-1 flex items-center justify-center p-6">
             <div className="max-w-md text-center space-y-2">
               <p className="text-sm text-muted-foreground">
-                Консоль доступна в оконном режиме приложения (Electron).
+                {tt("Консоль доступна в оконном режиме приложения (Electron).")}
               </p>
               <p className="text-xs text-muted-foreground/70">
-                В браузерном фолбэке логи смотрите в консоли запуска (start.bat).
+                {tt("В браузерном фолбэке логи смотрите в консоли запуска (start.bat).")}
               </p>
             </div>
           </div>

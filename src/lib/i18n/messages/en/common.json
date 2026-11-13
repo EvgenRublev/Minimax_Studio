@@ -21,5 +21,16 @@
   "задача": "task",
   "задачи": "tasks",
   "задач": "tasks",
-  "Скачивание модели…": "Downloading model…"
+  "Скачивание модели…": "Downloading model…",
+  "{{p1}}-е лицо": "Face {{p1}}",
+  "Загрузить промпт и seed в форму генерации": "Load the prompt and seed into the generation form",
+  "Загрузить фото человека — клик или перетащите файл": "Load a photo of a person — click or drop a file",
+  "Кадры (fl2va)": "Frames (fl2va)",
+  "Кадры без лица": "Frames without a face",
+  "Каждый клип продолжает предыдущий — вместе они склеиваются с исходником в один ролик.": "Each clip continues the previous one — together they merge with the source into a single video.",
+  "Нет кастомных LoRAs. Добавьте файл .safetensors.": "No custom LoRAs. Add a .safetensors file.",
+  "Очистить поле промпта": "Clear the prompt field",
+  "Очистить промпт клипа": "Clear the clip prompt",
+  "Референс лица загружен — точка на кадре снята": "Face reference loaded — the point on the frame was cleared",
+  "Фото конкретного человека. Трекер сопоставляет лица по эмбеддингу (insightface) и ведёт этого человека через весь ролик. Требует buffalo_l и пакет insightface.": "A photo of a specific person. The tracker matches faces by embedding (insightface) and follows that person through the whole video. Requires buffalo_l and the insightface package."
 }

@@ -40,6 +40,7 @@ import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useFpsTarget, type FpsSource, type FpsMode } from '@/lib/fps-store'
 import { useFpsJob } from '@/lib/fps-job-store' // (правка 554)
 import { uploadInputFile } from '@/lib/upload'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /** (правка 268) Два режима VFI — кнопки-карточки (паттерн MODES из upscale-view). */
 const MODES: Array<{ id: FpsMode; label: string; hint: string; icon: typeof ZapIcon }> = [
@@ -48,6 +49,8 @@ const MODES: Array<{ id: FpsMode; label: string; hint: string; icon: typeof ZapI
 ]
 
 export function FpsView() {
+  const { t } = useTranslation() // (правка 955)
+
   const storeTarget = useFpsTarget((s) => s.target)
   const clearStoreTarget = useFpsTarget((s) => s.clear)
   const source = useFpsTarget((s) => s.source)
@@ -130,7 +133,7 @@ export function FpsView() {
       })
       toast.success(`Источник: ${file.name}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки видео')
+      toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
       setUploadingSrc(false)
     }
@@ -143,11 +146,11 @@ export function FpsView() {
   const start = useCallback(async () => {
     const src = sourceRef.current
     if (!src) {
-      toast.error('Сначала выберите видео-источник')
+      toast.error(t("Сначала выберите видео-источник"))
       return
     }
     if (uploadingSrc) {
-      toast.error('Видео ещё загружается')
+      toast.error(t("Видео ещё загружается"))
       return
     }
 
@@ -196,12 +199,12 @@ export function FpsView() {
           subfolder: parsed.subfolder ?? '',
         })
         toast.success(`Источник: ${parsed.filename}`)
-      } catch { toast.error('Не удалось прочитать перетащенное видео') }
+      } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
       return
     }
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadLocalFile(f)
-    else toast.error('Нужно видео')
+    else toast.error(t("Нужно видео"))
   }
 
   const isRife = params.mode === 'rife'
@@ -215,7 +218,7 @@ export function FpsView() {
             <GaugeIcon className="w-4 h-4 text-cyan-400" />
             <h2
               className="text-sm font-semibold text-foreground"
-              title="Повышение плавности: между кадрами видео вставляются промежуточные. Скорость воспроизведения и звук не меняются."
+              title={t("Повышение плавности: между кадрами видео вставляются промежуточные. Скорость воспроизведения и звук не меняются.")}
             >
               FPS
             </h2>
@@ -223,7 +226,7 @@ export function FpsView() {
 
           {/* Источник */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Источник</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Источник")}</Label>
             {source ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -245,7 +248,7 @@ export function FpsView() {
                   name={source.filename}
                   url={source.url}
                   className="w-20 h-12 rounded object-cover bg-black shrink-0"
-                  title="Открыть исходное видео во весь экран"
+                  title={t("Открыть исходное видео во весь экран")}
                 >
                   <video
                     src={source.url}
@@ -258,12 +261,12 @@ export function FpsView() {
                 </RefPreviewThumb>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-foreground truncate">{source.filename}</p>
-                  {uploadingSrc && <p className="text-[10px] text-cyan-400">загрузка…</p>}
+                  {uploadingSrc && <p className="text-[10px] text-cyan-400">{t("загрузка…")}</p>}
                 </div>
                 {!busy && (
                   <button onClick={() => setSourceSafe(null)}
                     className="text-[10px] text-muted-foreground hover:text-foreground shrink-0">
-                    убрать
+                    {t("убрать")}
                   </button>
                 )}
               </div>
@@ -283,7 +286,7 @@ export function FpsView() {
                 )}
               >
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
-                <span>Кликните для выбора, перетащите карточку из галереи или файл с диска</span>
+                <span>{t("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
             )}
             {/* (правка 274) Скрытый input — клик-выбор видео с диска */}
@@ -306,7 +309,7 @@ export function FpsView() {
                 text-xs text-muted-foreground font-medium, сырые <select>
                 заменены на общий Select, segmented-кнопки — h-8 rounded-md
                 grid-cols-N gap-1.5 с активной bg-cyan-500/15. */}
-            <Label className="text-xs text-muted-foreground font-medium">Режим</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Режим")}</Label>
             <div className="grid grid-cols-2 gap-2">
               {MODES.map((m) => (
                 <button
@@ -334,7 +337,7 @@ export function FpsView() {
           {/* Множитель FPS */}
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground font-medium">
-              Множитель FPS
+              {t("Множитель FPS")}{' '}
               <span className="ml-1 text-[10px] text-muted-foreground">(24 → {24 * params.multiplier} fps)</span>
             </Label>
             <div className="grid grid-cols-3 gap-1.5">
@@ -368,7 +371,7 @@ export function FpsView() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-cyan-500/30 transition-all text-left"
             >
-              <span className="text-xs font-medium text-muted-foreground">Дополнительные параметры</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Дополнительные параметры")}</span>
               <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvanced && 'rotate-180')}>▼</span>
             </button>
 
@@ -397,7 +400,7 @@ export function FpsView() {
 
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Scale (качество)</Label>
+                        <Label className="text-xs text-muted-foreground">{t("Scale (качество)")}</Label>
                         <Select
                           value={String(params.rifeScale)}
                           onValueChange={(v) => patchParams({ rifeScale: parseFloat(v) })}
@@ -407,11 +410,11 @@ export function FpsView() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
-                            <SelectItem value="0.25">0.25 (быстрее, меньше VRAM)</SelectItem>
-                            <SelectItem value="0.5">0.5 (сбалансировано)</SelectItem>
-                            <SelectItem value="1">1.0 (качество)</SelectItem>
-                            <SelectItem value="2">2.0 (эксперимент)</SelectItem>
-                            <SelectItem value="4">4.0 (эксперимент)</SelectItem>
+                            <SelectItem value="0.25">{t("0.25 (быстрее, меньше VRAM)")}</SelectItem>
+                            <SelectItem value="0.5">{t("0.5 (сбалансировано)")}</SelectItem>
+                            <SelectItem value="1">{t("1.0 (качество)")}</SelectItem>
+                            <SelectItem value="2">{t("2.0 (эксперимент)")}</SelectItem>
+                            <SelectItem value="4">{t("4.0 (эксперимент)")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -426,9 +429,9 @@ export function FpsView() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
-                            <SelectItem value="float16">float16 (экономия VRAM)</SelectItem>
+                            <SelectItem value="float16">{t("float16 (экономия VRAM)")}</SelectItem>
                             <SelectItem value="bfloat16">bfloat16</SelectItem>
-                            <SelectItem value="float32">float32 (качество)</SelectItem>
+                            <SelectItem value="float32">{t("float32 (качество)")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -466,9 +469,9 @@ export function FpsView() {
                 <div className="space-y-1">
                   <Label
                     className="text-xs text-muted-foreground"
-                    title="Как часто очищать видеопамять во время обработки. Меньше значение — меньше шанс нехватки памяти, но медленнее."
+                    title={t("Как часто очищать видеопамять во время обработки. Меньше значение — меньше шанс нехватки памяти, но медленнее.")}
                   >
-                    Анти-OOM (кадров между очисткой кэша)
+                    {t("Анти-OOM (кадров между очисткой кэша)")}
                   </Label>
                   <Select
                     value={String(params.clearCacheAfterNFrames)}
@@ -491,7 +494,7 @@ export function FpsView() {
           <div className="flex gap-2 pt-1">
             <Button onClick={start} disabled={!source || uploadingSrc} className="flex-1 gap-1.5">
               <PlayIcon className="w-4 h-4" />
-              {busy ? 'Ещё в очередь' : 'Запустить FPS'}
+              {busy ? t("Ещё в очередь") : t("Запустить FPS")}
             </Button>
           </div>
 

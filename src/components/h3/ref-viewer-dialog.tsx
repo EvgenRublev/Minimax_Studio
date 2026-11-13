@@ -33,6 +33,7 @@ export type { CropRect } from '@/lib/crop'
 // (правка 909) Полноразмерный адрес: вкладки ControlNet/Refine передают сюда
 // миниатюру (`...&width=200`) — во весь экран открывалась она же, крошечная.
 import { fullSizeRefUrl } from '@/lib/ref-url'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export interface RefViewerData {
   kind: 'image' | 'video' | 'audio'
@@ -79,6 +80,8 @@ function AudioTrimEditor({
   volume?: number
   onVolumeChange?: (v: number) => void
 }) {
+  const { t } = useTranslation() // (правка 955)
+
   const audioRef = useRef<HTMLAudioElement>(null)
   const [duration, setDuration] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -166,7 +169,7 @@ function AudioTrimEditor({
             onClick={() => onTrimChange?.(0, null)}
             className="ml-auto text-[10px] text-red-300 hover:text-red-200 transition-colors"
           >
-            Сбросить обрезку
+            {t("Сбросить обрезку")}
           </button>
         )}
       </div>
@@ -177,7 +180,7 @@ function AudioTrimEditor({
         <div className="w-full space-y-2 px-4">
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>Начало</span>
+              <span>{t("Начало")}</span>
               <span className="font-mono text-emerald-300">{fmt(start)}</span>
             </div>
             <input
@@ -192,7 +195,7 @@ function AudioTrimEditor({
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>Конец</span>
+              <span>{t("Конец")}</span>
               <span className="font-mono text-emerald-300">{trimEnd == null ? `${fmt(duration)} (до конца)` : fmt(end)}</span>
             </div>
             <input
@@ -210,7 +213,7 @@ function AudioTrimEditor({
               идёт со 100% (иначе приглушённый звук плохо вёл липсинк). */}
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>Громкость (прослушивание)</span>
+              <span>{t("Громкость (прослушивание)")}</span>
               <span className="font-mono text-emerald-300">{Math.round(volume * 100)}%</span>
             </div>
             <input
@@ -224,9 +227,7 @@ function AudioTrimEditor({
             />
           </div>
           <p className="text-[10px] text-muted-foreground/60">
-            В референс пойдёт фрагмент {fmt(start)} → {fmt(end || duration)} ({fmt(Math.max(0, (end || duration) - start))}).
-            Обрезка виртуальная — копий файла не создаётся. Громкость со 100%:
-            ползунок нужен только слушать потише, на генерацию не влияет.
+            {t("В референс пойдёт фрагмент")}{' '} {fmt(start)} → {fmt(end || duration)} ({fmt(Math.max(0, (end || duration) - start))}{t("). Обрезка виртуальная — копий файла не создаётся. Громкость со 100%: ползунок нужен только слушать потише, на генерацию не влияет.")}
           </p>
         </div>
       )}
@@ -289,6 +290,8 @@ function CropOverlay({
   onApply: (rect: CropRect, blob: Blob) => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation() // (правка 955)
+
   const wrapRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const dragRef = useRef<{ mode: string; startX: number; startY: number; rect: CropRect } | null>(null)
@@ -376,7 +379,7 @@ function CropOverlay({
             <div
               key={h.dir}
               onPointerDown={(e) => onDown(e, h.dir)}
-              title="Тяните, чтобы изменить рамку"
+              title={t("Тяните, чтобы изменить рамку")}
               className="absolute w-3 h-3 rounded-sm bg-white border border-black/40"
               style={{ left: h.left, top: h.top, cursor: h.cursor, transform: 'translate(-50%, -50%)' }}
             />
@@ -390,17 +393,17 @@ function CropOverlay({
           disabled={busy}
           className="px-4 py-1.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-black text-sm font-medium disabled:opacity-50"
         >
-          Применить кроп
+          {t("Применить кроп")}
         </button>
         <button
           type="button"
           onClick={onCancel}
           className="px-4 py-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white text-sm"
         >
-          Отмена
+          {t("Отмена")}
         </button>
         <span className="text-xs text-white/60 hidden sm:inline">
-          тяните рамку · ручки по краям масштабируют
+          {t("тяните рамку · ручки по краям масштабируют")}
         </span>
       </div>
     </div>
@@ -425,6 +428,8 @@ export function RefViewerDialog({
    *  нет, кнопка «Обрезать» не показывается (просмотр только). */
   onCropChange?: (rect: CropRect, blob: Blob) => void
 }) {
+  const { t } = useTranslation() // (правка 955)
+
   // (правка 909) Просмотр всегда полноразмерный: адрес миниатюры
   // (`/api/comfy/file?...&width=200`) приходит сюда с ControlNet и Refine —
   // снимаем `width`, иначе во весь экран открывалась картинка 200 px.
@@ -608,17 +613,17 @@ export function RefViewerDialog({
                   type="button"
                   onClick={() => setCropMode(true)}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs transition-colors"
-                  title="Обрезать изображение"
+                  title={t("Обрезать изображение")}
                 >
                   <CropIcon className="w-4 h-4" />
-                  <span>Обрезать</span>
+                  <span>{t("Обрезать")}</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={close}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors shrink-0"
-                title="Закрыть (Esc)"
+                title={t("Закрыть (Esc)")}
               >
                 <XIcon className="w-4 h-4" />
               </button>

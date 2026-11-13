@@ -26,6 +26,7 @@ import { MicIcon, Loader2Icon, SquareIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useVoiceDictation } from '@/lib/use-voice-dictation'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ─── (правка 118) Горячая клавиша: R (англ.) / К (рус.) ───
  * R и К — ОДНА физическая клавиша → ловим e.code === 'KeyR'
@@ -94,6 +95,8 @@ export function VoiceInputButton({
   variant = 'overlay',
   hotkey = false,
 }: VoiceInputButtonProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const { state, start, stop } = useVoiceDictation()
   // (правка 65) Переключатель «Голосовой ввод» в настройках (stt.enabled):
   // раньше кнопки диктовки рисовались всегда, и при выключенном вводе
@@ -117,7 +120,7 @@ export function VoiceInputButton({
       const { text, error: stopError } = await stop()
       if (text) {
         onText(text)
-        toast.success('Голосовой ввод: текст добавлен')
+        toast.success(tt("Голосовой ввод: текст добавлен"))
       } else if (stopError) {
         toast.error(stopError)
       }
@@ -171,7 +174,7 @@ export function VoiceInputButton({
             ? 'Распознавание…'
             : `Голосовой ввод — нажмите и говорите${hk ? ` (горячая клавиша ${hk.trim()})` : ''}`)
       }
-      aria-label="Голосовой ввод"
+      aria-label={tt("Голосовой ввод")}
       className={cn(
         'inline-flex items-center justify-center rounded-full border transition-all select-none',
         variant === 'overlay'

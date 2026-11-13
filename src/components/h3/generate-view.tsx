@@ -70,7 +70,8 @@ import { RefPreviewThumb } from './ref-preview-thumb'
 // (правка 908) Общий кроп референсов: загрузка обрезанного PNG + поля оригинала.
 import { applyCropToRef, comfyInputUrl, cropOriginalSrc, isCropped, readImageDims } from '@/lib/crop'
 import { useVideoGallery } from './use-video-gallery'
-import { AssistantPanel } from './assistant/assistant-panel' // (правка 442) ассистент — правая панель вкладки
+import { AssistantPanel } from './assistant/assistant-panel'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 442) ассистент — правая панель вкладки
 
 /* ──────────────── Constants ──────────────── */
 
@@ -145,6 +146,8 @@ function AudioRefsBlock({
   counts: string
   hint: string
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -161,12 +164,12 @@ function AudioRefsBlock({
       )}
     >
       {uploading ? (
-        <p className="text-xs text-cyan-400">Загрузка аудио…</p>
+        <p className="text-xs text-cyan-400">{tt("Загрузка аудио…")}</p>
       ) : (
         <>
           <AudioLinesIcon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
           <p className="text-xs text-muted-foreground">
-            Аудио-референсы <span className="text-[10px] text-muted-foreground/60">({counts})</span>
+            {tt("Аудио-референсы")}{' '} <span className="text-[10px] text-muted-foreground/60">({counts})</span>
           </p>
           <p className="text-[10px] text-muted-foreground/60 mt-0.5">{hint}</p>
         </>
@@ -220,6 +223,8 @@ function rewritePromptTags(
 /* ──────────────── Component ──────────────── */
 
 export function GenerateView() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const { phase, error, progressValue, progressMax, statusMessage, promptId, executingTitle, nodeStep, nodeTotal, nodeElapsedMs, generate, interrupt, reset } = useVideoGen()
   const videoStartedAt = useGenProgress((s) => s.video.startedAt)
 
@@ -334,7 +339,7 @@ export function GenerateView() {
       if (mode !== 'ref') {
         const nonAudio = files.find((f) => detectKind(f.name) !== 'audio')
         if (nonAudio) {
-          toast.error(mode === 't2v' ? 'В режиме «Текст» картинки и видео не используются' : 'В режиме «Кадры» картинки задаются полями «Первый/Последний кадр»')
+          toast.error(mode === 't2v' ? tt("В режиме «Текст» картинки и видео не используются") : tt("В режиме «Кадры» картинки задаются полями «Первый/Последний кадр»"))
         }
         files = files.filter((f) => detectKind(f.name) === 'audio')
         if (!files.length) return
@@ -378,7 +383,7 @@ export function GenerateView() {
           const noAudio = kind === 'video' && hasAudio === false
           if (noAudio) {
             toast.info(`В видео «${file.name}» нет аудиодорожки`, {
-              description: 'Галочка «использовать звук» снята автоматически.',
+              description: tt("Галочка «использовать звук» снята автоматически."),
             })
           }
           items.push({
@@ -409,8 +414,8 @@ export function GenerateView() {
         if (items.length) addRefs(items)
       }
       if (anyStaged) {
-        toast.info('ComfyUI недоступен — референсы сохранены локально', {
-          description: 'Они будут автоматически отправлены в ComfyUI при генерации.',
+        toast.info(tt("ComfyUI недоступен — референсы сохранены локально"), {
+          description: tt("Они будут автоматически отправлены в ComfyUI при генерации."),
         })
       }
     },
@@ -422,7 +427,7 @@ export function GenerateView() {
    * (правка 152) Получаем размеры изображения для aspect ratio. */
   const addFrameFile = useCallback(async (file: File, slot: 'start' | 'end') => {
     if (detectKind(file.name) !== 'image') {
-      toast.error('Первый/последний кадр — только картинка')
+      toast.error(tt("Первый/последний кадр — только картинка"))
       return
     }
     setUploadingRefs(true)
@@ -446,8 +451,8 @@ export function GenerateView() {
       if (slot === 'start') setVideoStartFrame(item)
       else setVideoEndFrame(item)
       if (staged) {
-        toast.info('ComfyUI недоступен — кадр сохранён локально', {
-          description: 'Он будет автоматически отправлен в ComfyUI при генерации.',
+        toast.info(tt("ComfyUI недоступен — кадр сохранён локально"), {
+          description: tt("Он будет автоматически отправлен в ComfyUI при генерации."),
         })
       }
     } catch (err) {
@@ -608,8 +613,8 @@ export function GenerateView() {
       setPrompt(text)
       setExamplesOpen(false)
       if (old.trim()) {
-        toast.success('Пример вставлен (прежний промпт заменён)', {
-          action: { label: 'Отменить', onClick: () => setPrompt(old) },
+        toast.success(tt("Пример вставлен (прежний промпт заменён)"), {
+          action: { label: tt("Отменить"), onClick: () => setPrompt(old) },
         })
       }
     },
@@ -686,7 +691,7 @@ export function GenerateView() {
             lockReleasedRef.current = true
             firstBusyAtRef.current = null
             setAssistantBusy(false)
-            toast.warning('Ассистент', { description: 'Блокировка снята принудительно (засела после ответа). Кнопка «Сгенерировать» снова доступна.' })
+            toast.warning(tt("Ассистент"), { description: tt("Блокировка снята принудительно (засела после ответа). Кнопка «Сгенерировать» снова доступна.") })
           }
         } else {
           firstBusyAtRef.current = null
@@ -720,19 +725,19 @@ export function GenerateView() {
     // Единый guard для всех путей запуска (кнопка, Ctrl+Enter, диалог
     // «сохранить и запустить»): ассистент занят — vram-arbiter вернёт 409
     if (assistantBusy) {
-      toast.error('Ассистент отвечает — дождитесь ответа или прервите его')
+      toast.error(tt("Ассистент отвечает — дождитесь ответа или прервите его"))
       return
     }
     // Read the store AT CALL TIME — the fullscreen editor's "save & run"
     // (and history/example inserts) may have updated the prompt a moment ago.
     const v = useGenStore.getState().video
     if (!v.prompt.trim()) {
-      toast.error('Введите описание видео')
+      toast.error(tt("Введите описание видео"))
       return
     }
     // (правка 146) Режим «Кадры»: первый кадр обязателен
     if (v.mode === 'flf' && !v.startFrame) {
-      toast.error('В режиме «Кадры» нужен первый кадр')
+      toast.error(tt("В режиме «Кадры» нужен первый кадр"))
       return
     }
     let prompt = v.prompt.trim()
@@ -769,12 +774,12 @@ export function GenerateView() {
       prompt = prompt.replace(/\s{2,}/g, ' ').trim()
     }
     if (removedTags.length) {
-      toast.warning('Режим генерации', {
+      toast.warning(tt("Режим генерации"), {
         description: `Метки ${removedTags.join(', ')} убраны из промпта (не поддерживаются в режиме «${mode === 't2v' ? 'Текст' : 'Кадры'}»).`,
       })
     }
     if (!prompt) {
-      toast.error('Промпт пуст после очистки тегов')
+      toast.error(tt("Промпт пуст после очистки тегов"))
       return
     }
 
@@ -799,7 +804,7 @@ export function GenerateView() {
         if (n < 1 || n > counts[kind]) dangling.add(tm[0])
       }
       if (dangling.size) {
-        toast.error('Промпт ссылается на несуществующие референсы', {
+        toast.error(tt("Промпт ссылается на несуществующие референсы"), {
           description: `Тег${dangling.size > 1 ? 'и' : ''} ${[...dangling].join(', ')} — под этим номером нет файла. Добавьте референс или удалите тег из промпта.`,
           duration: 8000,
         })
@@ -978,7 +983,7 @@ export function GenerateView() {
               onClick={() => moveRefSynced(index, index - 1)}
               disabled={index === 0}
               className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[var(--surface-3)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title="Выше"
+              title={tt("Выше")}
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 6L5 3L8 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
@@ -986,7 +991,7 @@ export function GenerateView() {
               onClick={() => moveRefSynced(index, index + 1)}
               disabled={index === total - 1}
               className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[var(--surface-3)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title="Ниже"
+              title={tt("Ниже")}
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 4L5 7L8 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
@@ -1048,9 +1053,9 @@ export function GenerateView() {
               {ref.kind === 'image' && isCropped(ref) && (
                 <span
                   className="ml-1 text-[9px] text-cyan-400/80"
-                  title="Изображение обрезано — оригинал сохранён в ComfyUI input/"
+                  title={tt("Изображение обрезано — оригинал сохранён в ComfyUI input/")}
                 >
-                  кроп
+                  {tt("кроп")}
                 </span>
               )}
             </p>
@@ -1058,7 +1063,7 @@ export function GenerateView() {
           <button
             onClick={() => removeRefSynced(ref.id)}
             className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors shrink-0"
-            title="Удалить референс"
+            title={tt("Удалить референс")}
           >
             <XIcon className="w-3.5 h-3.5" />
           </button>
@@ -1072,14 +1077,14 @@ export function GenerateView() {
                 onChange={(e) => updateRef(ref.id, { includeAudio: e.target.checked })}
                 className="accent-cyan-500"
               />
-              использовать звук видео
+              {' '}{tt("использовать звук видео")}
             </label>
             {/* (правка 493) Сжатие рефа до 480p на сервере (ffmpeg, кэш):
                 видео-референсы тяжёлые, а для якоря движения/сцены высокое
                 разрешение почти никогда не нужно. */}
             <label
               className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer"
-              title="Перед генерацией видео ресайзится до 480p с сохранением пропорций — меньше токенов и VRAM, для референса движения/сцены этого достаточно"
+              title={tt("Перед генерацией видео ресайзится до 480p с сохранением пропорций — меньше токенов и VRAM, для референса движения/сцены этого достаточно")}
             >
               <input
                 type="checkbox"
@@ -1087,7 +1092,7 @@ export function GenerateView() {
                 onChange={(e) => updateRef(ref.id, { compress: e.target.checked })}
                 className="accent-cyan-500"
               />
-              сжать видео (480p)
+              {' '}{tt("сжать видео (480p)")}
             </label>
           </div>
         )}
@@ -1106,7 +1111,7 @@ export function GenerateView() {
         {/* (правка 472) панель — surface-1, как у Refine/Tile/FPS (единый вид) */}
         <div className="w-[400px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
           <div className="flex-1 flex items-center justify-center p-4">
-            <div className="text-xs text-muted-foreground">Загрузка…</div>
+            <div className="text-xs text-muted-foreground">{tt("Загрузка…")}</div>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center">
@@ -1125,7 +1130,7 @@ export function GenerateView() {
             const bMP = video.finalResolution > 0 ? video.finalResolution : 0.7
             // (правки 121, 124) точные размеры: gen кратная 32 + финальный кроп
             const bDims = computeOutputDimensions(bAspect, bMP)
-            return <>Свободное · {bAspect} · {bMP.toFixed(2)} MP ({bDims.w}×{bDims.h})</>
+            return <>{tt("Свободное ·")}{' '} {bAspect} · {bMP.toFixed(2)} MP ({bDims.w}×{bDims.h})</>
           })()}
         </Badge>
       ) : (
@@ -1137,11 +1142,11 @@ export function GenerateView() {
       <Badge variant="secondary" className="text-[10px]">
         {Math.round((video.loop === true && video.mode !== 'extend'
           ? loopInfo.seconds
-          : video.videoLength / fps))} с · {fps} fps
+          : video.videoLength / fps))} {' '}{tt("с ·")}{' '} {fps} fps
       </Badge>
       {video.loop === true && video.mode !== 'extend' && (
         <Badge className="text-[10px] bg-violet-500/15 text-violet-300 border-violet-500/30 hover:bg-violet-500/15">
-          Зациклено
+          {tt("Зациклено")}
         </Badge>
       )}
       {/* (правка 742) Количество проходов зависит от пайплайна: драфт —
@@ -1158,7 +1163,7 @@ export function GenerateView() {
         {video.pipeline === 'draft' ? '1-Pass' : '2-Pass'} · {video.finalResolution || 'auto'} MP
       </Badge>
       {video.refs.length > 0 && (
-        <Badge variant="secondary" className="text-[10px]">{video.refs.length} референс(ов)</Badge>
+        <Badge variant="secondary" className="text-[10px]">{video.refs.length} {' '}{tt("референс(ов)")}</Badge>
       )}
     </>
   )
@@ -1176,7 +1181,7 @@ export function GenerateView() {
 
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">Параметры</h2>
+            <h2 className="text-sm font-semibold text-foreground">{tt("Параметры")}</h2>
             <Badge className="text-[10px] bg-cyan-500/15 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/15">
               MiniMax H3
             </Badge>
@@ -1196,7 +1201,7 @@ export function GenerateView() {
                     : 'Добавьте картинки, видео или аудио — модель будет опираться на них как на образцы.'
               }
             >
-              Режим генерации
+              {tt("Режим генерации")}
             </Label>
             <div className="grid grid-cols-3 gap-1.5">
               {([
@@ -1224,8 +1229,7 @@ export function GenerateView() {
                 идут в целевом разрешении — по времени это заметно дороже t2v. */}
             {video.mode === 'flf' && (
               <div className="text-[10px] text-amber-300/80">
-                Оба прохода идут в полном разрешении (3D-апскейлер пропускается) — «Кадры»
-                дороже обычного «Текста» примерно вдвое. Для пробы возьмите 720p или драфт.
+                {tt("Оба прохода идут в полном разрешении (3D-апскейлер пропускается) — «Кадры» дороже обычного «Текста» примерно вдвое. Для пробы возьмите 720p или драфт.")}
               </div>
             )}
           </div>
@@ -1266,33 +1270,33 @@ export function GenerateView() {
                     <span className="flex items-center justify-between gap-1.5">
                       <span className="flex items-center gap-1.5">
                         <span className={cn('text-xs font-medium', loopOn ? 'text-violet-300' : 'text-foreground/80')}>
-                          Зациклено
+                          {tt("Зациклено")}
                         </span>
                         <span className="text-[10px] text-muted-foreground/70">
-                          бесшовный повтор
+                          {tt("бесшовный повтор")}
                         </span>
                       </span>
                       {loopOn && (
                         <span className="text-[10px] font-mono text-violet-300/80">
-                          {loopInfo.frames} кадр · {Math.round(loopInfo.seconds)} с
+                          {loopInfo.frames} {' '}{tt("кадр ·")}{' '} {Math.round(loopInfo.seconds)} {' '}{tt("с")}
                         </span>
                       )}
                     </span>
                     {loopOn && (
                       <span className="block text-[10px] leading-relaxed text-muted-foreground/80">
-                        Для чистого стыка: статичная камера и циклическое движение (дыхание, покачивание, ветер) — без dоlly/pan и разовых действий.
+                        {tt("Для чистого стыка: статичная камера и циклическое движение (дыхание, покачивание, ветер) — без dоlly/pan и разовых действий.")}
                       </span>
                     )}
                   </span>
                 </label>
                 {loopOn && stepsNow < 8 && (
                   <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">
-                    Сейчас {stepsNow} шаг(а) — модель может не успеть свести концы. Для чистого стыка поставьте 8+ шагов или включите «Полное».
+                    {tt("Сейчас")}{' '} {stepsNow} {' '}{tt("шаг(а) — модель может не успеть свести концы. Для чистого стыка поставьте 8+ шагов или включите «Полное».")}
                   </p>
                 )}
                 {loopOn && loopInfo.overTrained && (
                   <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">
-                    С обёрнутым контекстом длина превышает обученный диапазон H3 (~362 кадра) — стык может выйти заметным.
+                    {tt("С обёрнутым контекстом длина превышает обученный диапазон H3 (~362 кадра) — стык может выйти заметным.")}
                   </p>
                 )}
               </div>
@@ -1311,7 +1315,7 @@ export function GenerateView() {
                   : 'Сначала быстрый черновик в малом разрешении, затем доработка до чёткого результата. Дольше, но качественнее.'
               }
             >
-              Качество прохода
+              {tt("Качество прохода")}
             </Label>
             <div className="grid grid-cols-2 gap-1.5">
               {([
@@ -1364,7 +1368,7 @@ export function GenerateView() {
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Разрешение</Label>
+                    <Label className="text-xs text-muted-foreground">{tt("Разрешение")}</Label>
                     <Select
                       value={curQuality}
                       disabled={freeOn}
@@ -1374,7 +1378,7 @@ export function GenerateView() {
                       }}
                     >
                       <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md disabled:cursor-not-allowed disabled:opacity-50">
-                        <SelectValue placeholder="Разрешение" />
+                        <SelectValue placeholder={tt("Разрешение")} />
                       </SelectTrigger>
                       <SelectContent className="bg-[var(--surface-3)] border-border">
                         {qualities.map((q) => (
@@ -1384,7 +1388,7 @@ export function GenerateView() {
                     </Select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Соотношение</Label>
+                    <Label className="text-xs text-muted-foreground">{tt("Соотношение")}</Label>
                     {/* (правка 152) В режиме «Кадры» соотношение берётся из первого кадра — селектор заблокирован */}
                     <Select
                       value={curAspect}
@@ -1423,7 +1427,7 @@ export function GenerateView() {
                   )}
                 >
                   <SlidersHorizontalIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">Свободное разрешение</span>
+                  <span className="truncate">{tt("Свободное разрешение")}</span>
                   {freeOn && (
                     <span className="ml-auto text-[10px] font-mono tabular-nums text-cyan-300/90">
                       {freeMP.toFixed(2)} MP ({freeDims.w}×{freeDims.h})
@@ -1440,7 +1444,7 @@ export function GenerateView() {
                   >
                     <div className="space-y-1 px-1">
                       <SettingSlider
-                        label="Разрешение (MP)"
+                        label={tt("Разрешение (MP)")}
                         labelTitle="Точный размер видео в мегапикселях. Рядом показано итоговое разрешение в пикселях; в поле справа можно ввести вручную до 16 MP."
                         value={freeMP}
                         onChange={(v) => patchVideo({ finalResolution: Math.round(v * 100) / 100 })}
@@ -1469,7 +1473,7 @@ export function GenerateView() {
             max={framesMax}
             step={framesStep}
             fps={fps}
-            hint="внутри — ближайшие валидные кадры модели (до 30 с)"
+            hint={tt("внутри — ближайшие валидные кадры модели (до 30 с)")}
           />
 
           <Separator className="bg-border opacity-50" />
@@ -1479,7 +1483,7 @@ export function GenerateView() {
             /* ── Режим «Кадры»: первый/последний кадр + аудио-референсы ── */
             <div className="space-y-2.5">
               <Label className="text-xs text-muted-foreground flex items-center justify-between">
-                <span>Кадры и аудио</span>
+                <span>{tt("Кадры и аудио")}</span>
                 <span className="text-[10px] font-normal">
                   {refCounts.audio}/{refLimits.audio} aud
                 </span>
@@ -1499,7 +1503,7 @@ export function GenerateView() {
                         setRefsDragOver(false)
                         const f = Array.from(e.dataTransfer.files).find((x) => detectKind(x.name) === 'image')
                         if (f) void addFrameFile(f, isStart ? 'start' : 'end')
-                        else toast.error('Нужна картинка')
+                        else toast.error(tt("Нужна картинка"))
                       }}
                       // (правка 887) занятый слот клик не открывает файловый диалог:
                       // замена — через «убрать» + выбор заново. Плюс клик по фону
@@ -1527,7 +1531,7 @@ export function GenerateView() {
                             path={slot.path ?? ''}
                             url={slot.previewUrl || undefined}
                             className="w-full block"
-                            title="Открыть кадр во весь экран"
+                            title={tt("Открыть кадр во весь экран")}
                             stopPropagation
                             crop={slot.crop}
                             originalSrc={cropOriginalSrc(slot)}
@@ -1555,7 +1559,7 @@ export function GenerateView() {
                             {slot.name}
                             {/* (правка 908) подпись: кадр уже обрезан */}
                             {isCropped(slot) && (
-                              <span className="ml-1 text-[9px] text-cyan-400/80" title="Кадр обрезан — оригинал сохранён в ComfyUI input/">кроп</span>
+                              <span className="ml-1 text-[9px] text-cyan-400/80" title={tt("Кадр обрезан — оригинал сохранён в ComfyUI input/")}>{tt("кроп")}</span>
                             )}
                           </p>
                           <button
@@ -1567,14 +1571,14 @@ export function GenerateView() {
                             }}
                             className="text-[10px] text-red-400 hover:text-red-300 mt-0.5"
                           >
-                            убрать
+                            {tt("убрать")}
                           </button>
                         </div>
                       ) : (
                         <>
                           <ImageIcon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
-                          <p className="text-xs text-muted-foreground font-medium">{isStart ? 'Первый кадр' : 'Последний кадр'}</p>
-                          <p className="text-[10px] text-muted-foreground/60">{isStart ? 'обязательный' : 'необязательный'}</p>
+                          <p className="text-xs text-muted-foreground font-medium">{isStart ? tt("Первый кадр") : tt("Последний кадр")}</p>
+                          <p className="text-[10px] text-muted-foreground/60">{isStart ? tt("обязательный") : tt("необязательный")}</p>
                         </>
                       )}
                     </div>
@@ -1589,7 +1593,7 @@ export function GenerateView() {
                 onDropFiles={(files) => void addAudioOnlyFiles(files)}
                 uploading={uploadingRefs}
                 counts={`${refCounts.audio}/${refLimits.audio} aud`}
-                hint="аудио для голоса/озвучки (WAV, MP3…)"
+                hint={tt("аудио для голоса/озвучки (WAV, MP3…)")}
               />
               <input
                 ref={frameInputRef}
@@ -1638,7 +1642,7 @@ export function GenerateView() {
                 onDropFiles={(files) => void addAudioOnlyFiles(files)}
                 uploading={uploadingRefs}
                 counts={`${refCounts.audio}/${refLimits.audio} aud`}
-                hint="аудио для голоса/озвучки — картинки/видео в этом режиме не используются"
+                hint={tt("аудио для голоса/озвучки — картинки/видео в этом режиме не используются")}
               />
               <input
                 ref={audioOnlyInputRef}
@@ -1662,9 +1666,9 @@ export function GenerateView() {
             <div className="space-y-2.5">
               <Label
                 className="text-xs text-muted-foreground flex items-center justify-between"
-                title="Чтобы привязать файл к описанию, введите @ в тексте — появится список. Реплики героев оборачивайте в <d>…</d>."
+                title={tt("Чтобы привязать файл к описанию, введите @ в тексте — появится список. Реплики героев оборачивайте в <d>…</d>.")}
               >
-                <span>Референсы</span>
+                <span>{tt("Референсы")}</span>
                 <span className="text-[10px] font-normal">
                   {refCounts.image}/{refLimits.image} img · {refCounts.video}/{refLimits.video} vid ·{' '}
                   {refCounts.audio}/{refLimits.audio} aud
@@ -1697,16 +1701,16 @@ export function GenerateView() {
                   }}
                 />
                 {uploadingRefs ? (
-                  <p className="text-xs text-cyan-400">Загрузка референсов…</p>
+                  <p className="text-xs text-cyan-400">{tt("Загрузка референсов…")}</p>
                 ) : (
                   <>
                     <UploadIcon className="w-5 h-5 text-muted-foreground mx-auto mb-1.5" />
                     <p className="text-xs text-muted-foreground">
-                      Перетащите, <span className="text-cyan-400 underline">выберите</span> или вставьте по{' '}
+                      {tt("Перетащите,")}{' '} <span className="text-cyan-400 underline">{tt("выберите")}</span> {' '}{tt("или вставьте по")}{' '}
                       <span className="font-mono text-cyan-400">Ctrl+V</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                      картинки, видео и аудио — до {refLimits.total} шт.
+                      {tt("картинки, видео и аудио — до")}{' '} {refLimits.total} {' '}{tt("шт.")}
                     </p>
                   </>
                 )}
@@ -1731,11 +1735,10 @@ export function GenerateView() {
                   />
                   <span className="min-w-0">
                     <span className="block text-xs font-medium text-foreground">
-                      Сохранить оригинальный звук и вести по нему
+                      {tt("Сохранить оригинальный звук и вести по нему")}
                     </span>
                     <span className="block text-[10px] text-muted-foreground/70 leading-snug mt-0.5">
-                      Аудио-рефы станут Audio Guide; в итоговое видео подставится
-                      оригинальная дорожка первого аудио-рефа, обрезанная по длине ролика.
+                      {tt("Аудио-рефы станут Audio Guide; в итоговое видео подставится оригинальная дорожка первого аудио-рефа, обрезанная по длине ролика.")}
                     </span>
                   </span>
                 </label>
@@ -1752,7 +1755,7 @@ export function GenerateView() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-cyan-500/30 transition-all text-left"
             >
-              <span className="text-xs font-medium text-muted-foreground">Дополнительные параметры</span>
+              <span className="text-xs font-medium text-muted-foreground">{tt("Дополнительные параметры")}</span>
               <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvanced && 'rotate-180')}>▼</span>
             </button>
 
@@ -1799,9 +1802,9 @@ export function GenerateView() {
                         <div className="space-y-1">
                           <Label
                             className="text-xs text-muted-foreground"
-                            title="Как обрабатывать загруженные картинки. Match — быстрее; Max — точнее сохраняет детали референсов, но медленнее."
+                            title={tt("Как обрабатывать загруженные картинки. Match — быстрее; Max — точнее сохраняет детали референсов, но медленнее.")}
                           >
-                            Рефы: режим размера
+                            {tt("Рефы: режим размера")}
                           </Label>
                           <div className="grid grid-cols-2 gap-1.5">
                             <button
@@ -1814,7 +1817,7 @@ export function GenerateView() {
                                   : 'border-border text-muted-foreground hover:text-foreground',
                               )}
                             >
-                              Match (быстро)
+                              {tt("Match (быстро)")}
                             </button>
                             <button
                               type="button"
@@ -1826,7 +1829,7 @@ export function GenerateView() {
                                   : 'border-border text-muted-foreground hover:text-foreground',
                               )}
                             >
-                              Max (качество)
+                              {tt("Max (качество)")}
                             </button>
                           </div>
                         </div>
@@ -1840,7 +1843,7 @@ export function GenerateView() {
                           className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-[var(--surface-3)] border border-border/60 hover:border-cyan-500/30 transition-all text-left"
                         >
                           <span className="text-xs font-medium text-muted-foreground">
-                            {isDraft ? 'Драфт — единственный проход' : 'Pass 1 — Low-res'}
+                            {isDraft ? tt("Драфт — единственный проход") : 'Pass 1 — Low-res'}
                           </span>
                           <span className={cn('text-[10px] text-muted-foreground transition-transform', showPass1 && 'rotate-180')}>▼</span>
                         </button>
@@ -1864,7 +1867,7 @@ export function GenerateView() {
                                 const maxLowRes = Math.min(2, Math.max(finalMP, 1))
                                 return (
                                   <SettingSlider
-                                    label="Low-res разрешение (MP)"
+                                    label={tt("Low-res разрешение (MP)")}
                                     labelTitle="Размер чернового прохода: чем меньше, тем быстрее. В конце видео всё равно доводится до полного разрешения. (правка 525) При пресетах качества (480p/720p/1080p) шаблон сам подбирает канву pass 1 с той же пропорцией, что и финальное разрешение — апскейл равномерный, без искажения. Слайдер задаёт максимальный размер pass 1; шаблон может уменьшить его для сохранения пропорции."
                                     value={typeof video.lowResMP === 'number' ? Math.min(video.lowResMP, maxLowRes) : 0.2}
                                     onChange={(v) => {
@@ -1918,7 +1921,7 @@ export function GenerateView() {
                                   детализирует после апскейла своим sigma-профилем. */}
                               {!isDraft && (
                                 <p className="text-[10px] text-muted-foreground/70 leading-snug">
-                                  Pass 1: σ 1.0 → 0 ({pass1Split} шагов) · Pass 2: σ {pass2SigmaStart} → 0 ({pass2Steps} шага)
+                                  Pass 1: σ 1.0 → 0 ({pass1Split} {' '}{tt("шагов) · Pass 2: σ")}{' '} {pass2SigmaStart} → 0 ({pass2Steps} {' '}{tt("шага)")}
                                 </p>
                               )}
                             </div>
@@ -1926,16 +1929,16 @@ export function GenerateView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler."
+                          title={tt("Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler.")}
                         >
-                          Сэмплер
+                          {tt("Сэмплер")}
                         </Label>
                         <Select
                           value={video.pass1Sampler || 'euler'}
                           onValueChange={(v) => patchVideo({ pass1Sampler: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
@@ -1950,16 +1953,16 @@ export function GenerateView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Как модель распределяет работу между шагами. Обычно лучше оставить simple."
+                          title={tt("Как модель распределяет работу между шагами. Обычно лучше оставить simple.")}
                         >
-                          Планировщик
+                          {tt("Планировщик")}
                         </Label>
                         <Select
                           value={video.pass1Scheduler || 'simple'}
                           onValueChange={(v) => patchVideo({ pass1Scheduler: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SCHEDULER_OPTIONS.map((o) => (
@@ -1995,23 +1998,23 @@ export function GenerateView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Сколько шагов делает финальный проход детализации. Больше — чётче картинка, но дольше."
+                          title={tt("Сколько шагов делает финальный проход детализации. Больше — чётче картинка, но дольше.")}
                         >
-                          Sigma-профиль (шаги)
+                          {tt("Sigma-профиль (шаги)")}
                         </Label>
                         <Select
                           value={video.sigmaVariant || '3step'}
                           onValueChange={(v) => patchVideo({ sigmaVariant: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
-                            <SelectItem value="3step">3 шага (быстрее)</SelectItem>
-                            <SelectItem value="4step">4 шага (баланс)</SelectItem>
-                            <SelectItem value="5step">5 шагов (высокое)</SelectItem>
-                            <SelectItem value="6step">6 шагов (оч. высокое)</SelectItem>
-                            <SelectItem value="7step">7 шагов (макс.)</SelectItem>
+                            <SelectItem value="3step">{tt("3 шага (быстрее)")}</SelectItem>
+                            <SelectItem value="4step">{tt("4 шага (баланс)")}</SelectItem>
+                            <SelectItem value="5step">{tt("5 шагов (высокое)")}</SelectItem>
+                            <SelectItem value="6step">{tt("6 шагов (оч. высокое)")}</SelectItem>
+                            <SelectItem value="7step">{tt("7 шагов (макс.)")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2019,16 +2022,16 @@ export function GenerateView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler."
+                          title={tt("Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler.")}
                         >
-                          Сэмплер
+                          {tt("Сэмплер")}
                         </Label>
                         <Select
                           value={video.pass2Sampler || 'euler'}
                           onValueChange={(v) => patchVideo({ pass2Sampler: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
@@ -2082,14 +2085,14 @@ export function GenerateView() {
             <div className="flex items-center justify-between shrink-0">
               <Label className="text-sm font-medium text-foreground flex items-center gap-2">
                 <SparklesIcon className="w-4 h-4 text-cyan-400" />
-                Описание видео
+                {' '}{tt("Описание видео")}
               </Label>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-muted-foreground/70 hidden sm:block">
                   <kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl</kbd>
                   {' + '}
                   <kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Enter</kbd>
-                  {' — запустить'}
+                  {tt("— запустить")}
                 </span>
               </div>
             </div>
@@ -2140,7 +2143,7 @@ export function GenerateView() {
               <PromptFixDialog
                 open={fixOpen}
                 onOpenChange={setFixOpen}
-                hint="Промпт и ваше задание уйдут в чат ассистента вкладки «Генерация» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена."
+                hint={tt("Промпт и ваше задание уйдут в чат ассистента вкладки «Генерация» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.")}
                 onSubmit={(req) => requestImprovePrompt(video.prompt, { mode: 'generate', fixRequest: req })}
               />
             </div>
@@ -2167,7 +2170,7 @@ export function GenerateView() {
                 )}
               >
                 <HistoryIcon className="w-3 h-3" />
-                История
+                {' '}{tt("История")}{' '}
                 {mounted && historyEntries.length > 0 && (
                   <span className="ml-0.5 px-1 rounded-full bg-[var(--surface-3)] text-[10px] text-muted-foreground">
                     {historyEntries.length}
@@ -2189,7 +2192,7 @@ export function GenerateView() {
                 )}
               >
                 <SparklesIcon className="w-3 h-3" />
-                Примеры
+                {' '}{tt("Примеры")}
               </button>
             </div>
 
@@ -2210,20 +2213,20 @@ export function GenerateView() {
                   style={dropdownPos(historyBtnRef.current)}
                 >
                   <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-3)]">
-                    <span className="text-[10px] font-semibold text-foreground">История промптов</span>
+                    <span className="text-[10px] font-semibold text-foreground">{tt("История промптов")}</span>
                     {historyEntries.length > 0 && (
                       <button
                         type="button"
                         onClick={clearHistory}
                         className="text-[10px] text-muted-foreground hover:text-red-400"
                       >
-                        очистить всё
+                        {tt("очистить всё")}
                       </button>
                     )}
                   </div>
                   {historyEntries.length === 0 && (
                     <p className="px-2.5 py-3 text-xs text-muted-foreground">
-                      Пока пусто — запущенные промпты сохраняются здесь автоматически.
+                      {tt("Пока пусто — запущенные промпты сохраняются здесь автоматически.")}
                     </p>
                   )}
                   {historyEntries.map((e) => (
@@ -2233,7 +2236,7 @@ export function GenerateView() {
                       onClick={() => {
                         setPrompt(e.text)
                         setHistoryOpen(false)
-                        toast.success('Промпт вставлен из истории')
+                        toast.success(tt("Промпт вставлен из истории"))
                       }}
                     >
                       <button
@@ -2260,7 +2263,7 @@ export function GenerateView() {
                           removeHistoryEntry(e.id)
                         }}
                         className="shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Удалить из истории"
+                        title={tt("Удалить из истории")}
                       >
                         <XIcon className="w-3 h-3" />
                       </button>
@@ -2277,7 +2280,7 @@ export function GenerateView() {
                   style={dropdownPos(examplesBtnRef.current)}
                 >
                   <div className="px-2.5 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-3)]">
-                    <span className="text-[10px] font-semibold text-foreground">Готовые примеры</span>
+                    <span className="text-[10px] font-semibold text-foreground">{tt("Готовые примеры")}</span>
                   </div>
                   {EXAMPLES.map((ex) => (
                     <div
@@ -2292,7 +2295,7 @@ export function GenerateView() {
                     </div>
                   ))}
                   <p className="px-2.5 py-2 text-[10px] text-muted-foreground/60 border-t border-border">
-                    Заменяет текущий промпт (с возможностью отменить). Промпты — на английском: модель понимает его лучше всего.
+                    {tt("Заменяет текущий промпт (с возможностью отменить). Промпты — на английском: модель понимает его лучше всего.")}
                   </p>
                 </div>,
                 document.body
@@ -2335,7 +2338,7 @@ export function GenerateView() {
                         )}
                       >
                         <FilmIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="flex-1 truncate">Общая папка</span>
+                        <span className="flex-1 truncate">{tt("Общая папка")}</span>
                       </button>
                       {galleryFolders.map((f) => {
                         // (правка 495) Вложенные папки: отступ по глубине,
@@ -2377,7 +2380,7 @@ export function GenerateView() {
               }
               className="h-11 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-sm font-semibold shadow-lg shadow-cyan-500/20"
             >
-              {isGenerating ? 'Ещё в очередь' : 'Сгенерировать видео'}
+              {isGenerating ? tt("Ещё в очередь") : tt("Сгенерировать видео")}
             </Button>
           </div>
         </div>

@@ -51,6 +51,7 @@ import {
 import { useFaceRefineJob } from '@/lib/face-refine-job-store'
 import { uploadInputFile } from '@/lib/upload'
 import type { FaceSelectMode } from '@/lib/comfy/face-refine-template'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const SELECT_MODES: Array<{ value: FaceSelectMode; label: string }> = [
   { value: 'largest_face', label: 'Самое крупное лицо' },
@@ -66,6 +67,8 @@ const SELECT_MODES: Array<{ value: FaceSelectMode; label: string }> = [
 ]
 
 export function FaceRefineView() {
+  const { t } = useTranslation() // (правка 955)
+
   const storeTarget = useFaceRefineTarget((s) => s.target)
   const clearStoreTarget = useFaceRefineTarget((s) => s.clear)
   const source = useFaceRefineTarget((s) => s.source)
@@ -199,7 +202,7 @@ export function FaceRefineView() {
       })
       toast.success(`Источник: ${file.name}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки видео')
+      toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
       setUploadingSrc(false)
     }
@@ -219,12 +222,12 @@ export function FaceRefineView() {
       if (facePoint) {
         setFacePoint(null)
         patchParams({ select: 'largest_face' })
-        toast.success('Референс лица загружен — точка на кадре снята')
+        toast.success(t("Референс лица загружен — точка на кадре снята"))
       } else {
-        toast.success('Референс лица загружен')
+        toast.success(t("Референс лица загружен"))
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки референса')
+      toast.error(e instanceof Error ? e.message : t("Ошибка загрузки референса"))
     } finally {
       setUploadingRef(false)
     }
@@ -233,11 +236,11 @@ export function FaceRefineView() {
   const start = useCallback(async () => {
     const src = sourceRef.current
     if (!src) {
-      toast.error('Сначала выберите видео-источник')
+      toast.error(t("Сначала выберите видео-источник"))
       return
     }
     if (uploadingSrc) {
-      toast.error('Видео ещё загружается')
+      toast.error(t("Видео ещё загружается"))
       return
     }
 
@@ -303,12 +306,12 @@ export function FaceRefineView() {
           subfolder: parsed.subfolder ?? '',
         })
         toast.success(`Источник: ${parsed.filename}`)
-      } catch { toast.error('Не удалось прочитать перетащенное видео') }
+      } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
       return
     }
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadLocalFile(f)
-    else toast.error('Нужно видео')
+    else toast.error(t("Нужно видео"))
   }
 
   // (правка 780) На «Загрузить фото человека» дроп не был навешан — фото с
@@ -319,7 +322,7 @@ export function FaceRefineView() {
     setRefDragOver(false)
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadIdentityRef(f)
-    else toast.error('Нужно фото человека')
+    else toast.error(t("Нужно фото человека"))
   }
 
   const identityPreview = identityRef
@@ -350,14 +353,12 @@ export function FaceRefineView() {
           </div>
 
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            H3 плохо рисует лица, когда голова занимает малую долю кадра. Нода
-            находит лицо, перерисовывает его крупно и вклеивает обратно — остальной
-            кадр остаётся исходным.
+            {t("H3 плохо рисует лица, когда голова занимает малую долю кадра. Нода находит лицо, перерисовывает его крупно и вклеивает обратно — остальной кадр остаётся исходным.")}
           </p>
 
           {/* Источник */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Источник</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Источник")}</Label>
             {source ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -373,7 +374,7 @@ export function FaceRefineView() {
                   name={source.filename}
                   url={source.url}
                   className="w-20 h-12 rounded object-cover bg-black shrink-0"
-                  title="Открыть исходное видео во весь экран"
+                  title={t("Открыть исходное видео во весь экран")}
                 >
                   <video
                     src={source.url}
@@ -386,12 +387,12 @@ export function FaceRefineView() {
                 </RefPreviewThumb>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-foreground truncate">{source.filename}</p>
-                  {uploadingSrc && <p className="text-[10px] text-yellow-400">загрузка…</p>}
+                  {uploadingSrc && <p className="text-[10px] text-yellow-400">{t("загрузка…")}</p>}
                 </div>
                 {!busy && (
                   <button onClick={() => setSourceSafe(null)}
                     className="text-[10px] text-muted-foreground hover:text-foreground shrink-0">
-                    убрать
+                    {t("убрать")}
                   </button>
                 )}
               </div>
@@ -410,7 +411,7 @@ export function FaceRefineView() {
                 )}
               >
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
-                <span>Кликните для выбора, перетащите карточку из галереи или файл с диска</span>
+                <span>{t("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
             )}
             <input
@@ -428,7 +429,7 @@ export function FaceRefineView() {
 
           {/* Кого перерисовывать */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Кого перерисовывать</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Кого перерисовывать")}</Label>
 
             {/* (правка 723) Клик по лицу: правило видит только геометрию кадра и
                 в толпе упирается в одно и то же лицо. Точка задаёт цель напрямую. */}
@@ -436,9 +437,9 @@ export function FaceRefineView() {
               <div className="flex items-center gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-2">
                 <CrosshairIcon className="w-4 h-4 text-yellow-400 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-foreground">Лицо выбрано кликом</p>
+                  <p className="text-xs font-medium text-foreground">{t("Лицо выбрано кликом")}</p>
                   <p className="text-[10px] text-muted-foreground font-mono">
-                    X {facePoint.x} · Y {facePoint.y} · кадр {facePoint.frame}
+                    X {facePoint.x} · Y {facePoint.y} {' '}{t("· кадр")}{' '} {facePoint.frame}
                   </p>
                 </div>
                 {!busy && (
@@ -447,7 +448,7 @@ export function FaceRefineView() {
                       onClick={() => setPickOpen(true)}
                       className="text-[10px] text-yellow-400 hover:text-yellow-300"
                     >
-                      изменить
+                      {t("изменить")}
                     </button>
                     <button
                       onClick={() => {
@@ -455,7 +456,7 @@ export function FaceRefineView() {
                         patchParams({ select: 'largest_face' })
                       }}
                       className="text-muted-foreground hover:text-foreground"
-                      title="Сбросить точку и вернуться к правилу"
+                      title={t("Сбросить точку и вернуться к правилу")}
                     >
                       <XIcon className="w-3.5 h-3.5" />
                     </button>
@@ -468,16 +469,16 @@ export function FaceRefineView() {
                 onClick={() => setPickOpen(true)}
                 disabled={!source || busy}
                 className="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-yellow-500/40 hover:bg-[var(--surface-2)] transition-all disabled:opacity-50"
-                title="Открыть кадр исходника и кликнуть по нужному лицу"
+                title={t("Открыть кадр исходника и кликнуть по нужному лицу")}
               >
                 <CrosshairIcon className="w-3.5 h-3.5" />
-                Указать лицо кликом по кадру
+                {' '}{t("Указать лицо кликом по кадру")}
               </button>
             )}
 
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground" title="Правило выбора субъекта. Он выбирается ОДИН раз на шот, дальше трекер ведёт то же лицо.">
-                Правило
+              <Label className="text-xs text-muted-foreground" title={t("Правило выбора субъекта. Он выбирается ОДИН раз на шот, дальше трекер ведёт то же лицо.")}>
+                {t("Правило")}
               </Label>
               <Select
                 value={params.select === 'closest_to_xy' && !facePoint ? 'largest_face' : params.select}
@@ -502,8 +503,8 @@ export function FaceRefineView() {
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground" title="Номер лица в рейтинге правила: 0 — первое, 1 — второе и так далее. При выборе кликом не используется.">
-                Номер в рейтинге
+              <Label className="text-xs text-muted-foreground" title={t("Номер лица в рейтинге правила: 0 — первое, 1 — второе и так далее. При выборе кликом не используется.")}>
+                {t("Номер в рейтинге")}
               </Label>
               <Select
                 value={String(params.selectIndex)}
@@ -515,15 +516,13 @@ export function FaceRefineView() {
                 </SelectTrigger>
                 <SelectContent className="bg-[var(--surface-3)] border-border">
                   {[0, 1, 2, 3].map((n) => (
-                    <SelectItem key={n} value={String(n)}>{n + 1}-е лицо</SelectItem>
+                    <SelectItem key={n} value={String(n)}>{t("{{p1}}-е лицо", { p1: n + 1 })}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               {identityOverridesSelection && (
                 <p className="text-[10px] leading-snug text-yellow-400/90">
-                  Выбран референс конкретного человека — нода использует его,
-                  а правило и номер в рейтинге игнорируются. Чтобы вернуть
-                  правило, уберите фото референса.
+                  {t("Выбран референс конкретного человека — нода использует его, а правило и номер в рейтинге игнорируются. Чтобы вернуть правило, уберите фото референса.")}
                 </p>
               )}
             </div>
@@ -533,9 +532,9 @@ export function FaceRefineView() {
             <div className="space-y-1">
               <Label
                 className="text-xs text-muted-foreground"
-                title="Фото конкретного человека. Трекер сопоставляет лица по эмбеддингу (insightface) и ведёт этого человека через весь ролик. Требует buffalo_l и пакет insightface."
+                title={t("Фото конкретного человека. Трекер сопоставляет лица по эмбеддингу (insightface) и ведёт этого человека через весь ролик. Требует buffalo_l и пакет insightface.")}
               >
-                Референс конкретного человека (необязательно)
+                {t("Референс конкретного человека (необязательно)")}
               </Label>
               {identityRef ? (
                 <div
@@ -559,7 +558,7 @@ export function FaceRefineView() {
                       path={identityRef.name}
                       url={identityPreview}
                       className="w-10 h-10 rounded object-cover border shrink-0 block overflow-hidden"
-                      title="Открыть фото во весь экран / обрезать"
+                      title={t("Открыть фото во весь экран / обрезать")}
                       crop={identityRef.crop}
                       originalSrc={identityAsRef ? cropOriginalSrc(identityAsRef) : undefined}
                       onCrop={(rect, blob) => {
@@ -588,9 +587,9 @@ export function FaceRefineView() {
                     {identityRef.originalName && (
                       <span
                         className="ml-1 text-[9px] text-yellow-400/80"
-                        title="Фото обрезано — оригинал сохранён в ComfyUI input/"
+                        title={t("Фото обрезано — оригинал сохранён в ComfyUI input/")}
                       >
-                        кроп
+                        {t("кроп")}
                       </span>
                     )}
                   </p>
@@ -619,7 +618,7 @@ export function FaceRefineView() {
                   {uploadingRef
                     ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
                     : <ImageIcon className="w-3.5 h-3.5" />}
-                  Загрузить фото человека — клик или перетащите файл
+                  {' '}{t("Загрузить фото человека — клик или перетащите файл")}
                 </button>
               )}
               <input
@@ -638,9 +637,7 @@ export function FaceRefineView() {
                   почему фото «не сработало». */}
               {facePoint && identityRef && (
                 <p className="text-[10px] text-yellow-400/90 leading-snug">
-                  Не используется: лицо выбрано кликом, трекер берёт его с точки.
-                  Уберите точку (✕ в карточке) или загрузите фото заново, чтобы
-                  искать человека по лицу.
+                  {t("Не используется: лицо выбрано кликом, трекер берёт его с точки. Уберите точку (✕ в карточке) или загрузите фото заново, чтобы искать человека по лицу.")}
                 </p>
               )}
             </div>
@@ -651,9 +648,9 @@ export function FaceRefineView() {
             <div className="space-y-1">
               <Label
                 className="text-xs text-muted-foreground"
-                title="Канва, в которой H3 перерисовывает лицо. 512 дешевле 768 примерно в 2.25 раза по latent-токенам; выше 768 — заметно дороже по VRAM и времени (максимум движка — 1344)."
+                title={t("Канва, в которой H3 перерисовывает лицо. 512 дешевле 768 примерно в 2.25 раза по latent-токенам; выше 768 — заметно дороже по VRAM и времени (максимум движка — 1344).")}
               >
-                Канва (px)
+                {t("Канва (px)")}
               </Label>
               <Select
                 value={String(params.canvas)}
@@ -666,15 +663,15 @@ export function FaceRefineView() {
                 <SelectContent className="bg-[var(--surface-3)] border-border">
                   {[384, 512, 640, 768, 896, 1024, 1152, 1280].map((n) => (
                     <SelectItem key={n} value={String(n)}>
-                      {n}{n > 768 ? ' — выше эталона' : ''}
+                      {n}{n > 768 ? t("— выше эталона") : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground" title="Шаги сэмплирования. Наша модель 4-шаговая — столько и нужно.">
-                Шаги
+              <Label className="text-xs text-muted-foreground" title={t("Шаги сэмплирования. Наша модель 4-шаговая — столько и нужно.")}>
+                {t("Шаги")}
               </Label>
               <Select
                 value={String(params.steps)}
@@ -694,7 +691,7 @@ export function FaceRefineView() {
           </div>
 
           <SettingSlider
-            label="Денойз"
+            label={t("Денойз")}
             labelTitle="Насколько сильно модель перерисовывает лицо. H3 — flow matching со сдвигом 12: 0.25 даёт эффективную sigma 0.800 (кадр переписывается целиком). Рабочий диапазон 0.25–0.40."
             value={params.denoise}
             min={0.05}
@@ -722,12 +719,10 @@ export function FaceRefineView() {
             />
             <span className="space-y-0.5">
               <span className="block text-xs font-medium text-foreground">
-                Использовать аудио
+                {t("Использовать аудио")}
               </span>
               <span className="block text-[10px] text-muted-foreground leading-relaxed">
-                Дорожка исходника подаётся модели как гайд на всём ролике: мимика и
-                артикуляция говорящего подчёркиваются, а не размываются перерисовкой.
-                Звук на выходе — всё равно из исходника.
+                {t("Дорожка исходника подаётся модели как гайд на всём ролике: мимика и артикуляция говорящего подчёркиваются, а не размываются перерисовкой. Звук на выходе — всё равно из исходника.")}
               </span>
             </span>
           </label>
@@ -739,14 +734,14 @@ export function FaceRefineView() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-yellow-500/30 transition-all text-left"
             >
-              <span className="text-xs font-medium text-muted-foreground">Дополнительные параметры</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Дополнительные параметры")}</span>
               <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvanced && 'rotate-180')}>▼</span>
             </button>
 
             {showAdvanced && (
               <div className="space-y-3 pl-1">
                 <SettingSlider
-                  label="Кроп лица (×)"
+                  label={t("Кроп лица (×)")}
                   labelTitle="Сторона кропа как кратное высоты лица. 2.5 помещает лицо примерно в 40% холста. Больше — больше контекста, но меньше увеличение."
                   value={params.cropFactor}
                   min={1.2}
@@ -757,7 +752,7 @@ export function FaceRefineView() {
                   disabled={busy}
                 />
                 <SettingSlider
-                  label="Порог детектора"
+                  label={t("Порог детектора")}
                   labelTitle="Ниже — ловит больше профилей и мелких лиц, но и больше ложных срабатываний."
                   value={params.confidence}
                   min={0.05}
@@ -768,7 +763,7 @@ export function FaceRefineView() {
                   disabled={busy}
                 />
                 <SettingSlider
-                  label="Денойз: мелкие лица ×"
+                  label={t("Денойз: мелкие лица ×")}
                   labelTitle="Множитель денойза для самых мелких лиц. Ниже 1.0 — весь ролик становится мягче."
                   value={params.denoiseSmall}
                   min={0}
@@ -779,7 +774,7 @@ export function FaceRefineView() {
                   disabled={busy}
                 />
                 <SettingSlider
-                  label="Денойз: крупные лица ×"
+                  label={t("Денойз: крупные лица ×")}
                   labelTitle="Множитель денойза для крупных лиц — у них уже есть детали, их не нужно переписывать."
                   value={params.denoiseLarge}
                   min={0}
@@ -791,8 +786,8 @@ export function FaceRefineView() {
                 />
 
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground" title="Что вклеивается обратно: только прямоугольник лица или весь кроп (с волосами и фоном — может дать видимый прямоугольник).">
-                    Вклейка
+                  <Label className="text-xs text-muted-foreground" title={t("Что вклеивается обратно: только прямоугольник лица или весь кроп (с волосами и фоном — может дать видимый прямоугольник).")}>
+                    {t("Вклейка")}
                   </Label>
                   <Select
                     value={params.pasteRegion}
@@ -803,16 +798,16 @@ export function FaceRefineView() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-[var(--surface-3)] border-border">
-                      <SelectItem value="face_only">Только лицо</SelectItem>
-                      <SelectItem value="face_ellipse">Лицо овалом</SelectItem>
-                      <SelectItem value="full_crop">Весь кроп</SelectItem>
+                      <SelectItem value="face_only">{t("Только лицо")}</SelectItem>
+                      <SelectItem value="face_ellipse">{t("Лицо овалом")}</SelectItem>
+                      <SelectItem value="full_crop">{t("Весь кроп")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground" title="Что делать с кадрами, где лицо не найдено (отвернулся, закрыт).">
-                    Кадры без лица
+                  <Label className="text-xs text-muted-foreground" title={t("Что делать с кадрами, где лицо не найдено (отвернулся, закрыт).")}>
+                    {t("Кадры без лица")}
                   </Label>
                   <Select
                     value={params.undetectedFrames}
@@ -823,9 +818,9 @@ export function FaceRefineView() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-[var(--surface-3)] border-border">
-                      <SelectItem value="fade_out">Плавно убрать вклейку</SelectItem>
-                      <SelectItem value="skip">Оставить как есть</SelectItem>
-                      <SelectItem value="composite_anyway">Вклеить всё равно</SelectItem>
+                      <SelectItem value="fade_out">{t("Плавно убрать вклейку")}</SelectItem>
+                      <SelectItem value="skip">{t("Оставить как есть")}</SelectItem>
+                      <SelectItem value="composite_anyway">{t("Вклеить всё равно")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -849,20 +844,20 @@ export function FaceRefineView() {
                   />
                   <span className="space-y-0.5">
                     <span className="block text-xs font-medium text-foreground">
-                      Далёкие планы: искать человека
+                      {t("Далёкие планы: искать человека")}
                     </span>
                     <span className="block text-[10px] text-muted-foreground leading-relaxed">
                       {fallbackAvailable === true
-                        ? 'Лица не видно (человек спиной, в капюшоне) — голова берётся от бокса человека. Без этого такие кадры интерполируются.'
+                        ? t("Лица не видно (человек спиной, в капюшоне) — голова берётся от бокса человека. Без этого такие кадры интерполируются.")
                         : fallbackAvailable === null
-                          ? 'Проверяю модели детекторов…'
-                          : 'Нужна модель segm/person_yolov8m-seg.pt в models/ultralytics — после установки перезапустите студию.'}
+                          ? t("Проверяю модели детекторов…")
+                          : t("Нужна модель segm/person_yolov8m-seg.pt в models/ultralytics — после установки перезапустите студию.")}
                     </span>
                   </span>
                 </label>
 
                 <SettingSlider
-                  label="Размытие края (px)"
+                  label={t("Размытие края (px)")}
                   labelTitle="Радиус размытия маски вклейки в пикселях исходника. Меньше — резче стык."
                   value={params.feather}
                   min={0}
@@ -873,7 +868,7 @@ export function FaceRefineView() {
                   disabled={busy}
                 />
                 <SettingSlider
-                  label="Колор-матч"
+                  label={t("Колор-матч")}
                   labelTitle="Сведение среднего и отклонения перерисованного лица к исходному участку — без этого лицо выглядит вклеенным."
                   value={params.colourMatch}
                   min={0}
@@ -884,7 +879,7 @@ export function FaceRefineView() {
                   disabled={busy}
                 />
                 <SettingSlider
-                  label="Прозрачность вклейки"
+                  label={t("Прозрачность вклейки")}
                   labelTitle="Общая непрозрачность перерисованного лица. Ниже 1.0 — смесь с исходником."
                   value={params.blend}
                   min={0}
@@ -902,7 +897,7 @@ export function FaceRefineView() {
           <div className="flex gap-2 pt-1">
             <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
               <PlayIcon className="w-4 h-4" />
-              {busy ? 'Ещё в очередь' : 'Запустить Face Refine'}
+              {busy ? t("Ещё в очередь") : t("Запустить Face Refine")}
             </Button>
           </div>
         </div>

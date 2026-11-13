@@ -25,6 +25,7 @@ import {
   Maximize2Icon,
   Minimize2Icon,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface VideoFile {
   url: string
@@ -51,6 +52,8 @@ function readStoredVolume(): number {
 }
 
 export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoLightboxProps) {
+  const { t } = useTranslation() // (правка 955)
+
   const [index, setIndex] = useState(initialIndex)
   const [showControls, setShowControls] = useState(true)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -249,12 +252,12 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
         {/* Load error overlay with retry */}
         {loadError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 pointer-events-auto">
-            <p className="text-sm text-white/80">Не удалось загрузить видео</p>
+            <p className="text-sm text-white/80">{t("Не удалось загрузить видео")}</p>
             <button
               onClick={() => setRetryCount((n) => n + 1)}
               className="px-4 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-medium transition-colors"
             >
-              Повторить
+              {t("Повторить")}
             </button>
           </div>
         )}
@@ -292,7 +295,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
               href={file.url}
               download={file.filename}
               className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-              title="Скачать"
+              title={t("Скачать")}
             >
               <DownloadIcon className="w-4 h-4" />
             </a>
@@ -304,20 +307,20 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
                     onClick={() => void handleDelete()}
                     className="px-3 py-1.5 rounded-lg bg-red-500/80 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                   >
-                    Удалить
+                    {t("Удалить")}
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}
                     className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs transition-colors"
                   >
-                    Отмена
+                    {t("Отмена")}
                   </button>
                 </div>
               ) : (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   className="p-2 rounded-lg bg-white/10 hover:bg-red-500/40 text-white transition-colors"
-                  title="Удалить"
+                  title={t("Удалить")}
                 >
                   <Trash2Icon className="w-4 h-4" />
                 </button>
@@ -327,7 +330,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
             <button
               onClick={onClose}
               className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors ml-1"
-              title="Закрыть (Esc)"
+              title={t("Закрыть (Esc)")}
             >
               <XIcon className="w-4 h-4" />
             </button>
@@ -389,10 +392,10 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
             <div className="flex items-center gap-1.5">
               {files.length > 1 && (
                 <>
-                  <button onClick={() => goTo(index - 1)} className="p-1.5 text-white/70 hover:text-white transition-colors" title="Предыдущее">
+                  <button onClick={() => goTo(index - 1)} className="p-1.5 text-white/70 hover:text-white transition-colors" title={t("Предыдущее")}>
                     <ChevronLeftIcon className="w-4 h-4" />
                   </button>
-                  <button onClick={() => goTo(index + 1)} className="p-1.5 text-white/70 hover:text-white transition-colors" title="Следующее">
+                  <button onClick={() => goTo(index + 1)} className="p-1.5 text-white/70 hover:text-white transition-colors" title={t("Следующее")}>
                     <ChevronRightIcon className="w-4 h-4" />
                   </button>
                 </>
@@ -439,9 +442,9 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
         <div className="absolute bottom-[80px] left-1/2 -translate-x-1/2 flex items-center gap-4 text-[10px] text-white/30 pointer-events-none">
           <span>Space — Play/Pause</span>
           <span>M — Mute</span>
-          <span>F — Полный экран</span>
-          <span>←→ — Навигация</span>
-          <span>Esc — Закрыть</span>
+          <span>{t("F — Полный экран")}</span>
+          <span>{t("←→ — Навигация")}</span>
+          <span>{t("Esc — Закрыть")}</span>
         </div>
       )}
     </motion.div>

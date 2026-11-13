@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import { BotIcon, Loader2Icon } from 'lucide-react'
 import { MODELS } from '@/lib/models-config'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface LlmModelOption {
   id: string
@@ -81,6 +82,8 @@ const LLM_OPTIONS: LlmModelOption[] = [
 ]
 
 export function LlmModelSelector() {
+  const { t } = useTranslation() // (правка 955)
+
   const [selected, setSelected] = useState(DEFAULT_LLM_MODEL_FILE)
   const [saving, setSaving] = useState(false)
   // Путь своей GGUF-модели из конфига: если задан — в списке появляется
@@ -119,19 +122,19 @@ export function LlmModelSelector() {
         // ensureLlm (llm-runner.ts).
         void fetch('/api/llm/stop', { method: 'POST' }).catch(() => {})
         if (filename === 'llm_custom') {
-          toast.success('LLM: своя модель (GGUF)', {
-            description: 'Ассистент перезапустится с ней при следующем сообщении.',
+          toast.success(t("LLM: своя модель (GGUF)"), {
+            description: t("Ассистент перезапустится с ней при следующем сообщении."),
           })
         } else {
           const opt = LLM_OPTIONS.find((o) => o.filename === filename)
           toast.success(
             `LLM: ${opt?.label ?? (filename || 'Qwen3.5 9B')}`,
-            { description: 'Ассистент перезапустится с ней при следующем сообщении.' },
+            { description: t("Ассистент перезапустится с ней при следующем сообщении.") },
           )
         }
       }
     } catch {
-      toast.error('Не удалось сохранить')
+      toast.error(t("Не удалось сохранить"))
     } finally {
       setSaving(false)
     }
@@ -149,7 +152,7 @@ export function LlmModelSelector() {
     <div className="space-y-2 pt-2 border-t border-border">
       <div className="flex items-center gap-2">
         <BotIcon className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">Модель ассистента</span>
+        <span className="text-xs text-muted-foreground">{t("Модель ассистента")}</span>
         {saving && <Loader2Icon className="w-3 h-3 animate-spin text-muted-foreground" />}
       </div>
       <select
@@ -159,7 +162,7 @@ export function LlmModelSelector() {
         className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
       >
         {customPath && (
-          <option value="llm_custom">Своя модель (GGUF): {customBase}</option>
+          <option value="llm_custom">{t("Своя модель (GGUF):")}{' '} {customBase}</option>
         )}
         {LLM_OPTIONS.map((opt) => (
           <option key={opt.id} value={opt.filename}>
@@ -169,8 +172,8 @@ export function LlmModelSelector() {
       </select>
       <p className="text-[10px] text-muted-foreground/50">
         {customPath
-          ? 'Своя модель задаётся путём в поле ниже; выбор встроенной модели в списке переключает обратно (путь при этом сохраняется).'
-          : 'Qwen3.5 9B — модель по умолчанию (8–12 ГБ VRAM) · Bonsai 2 27B — необязательная тернарная модель · PTQ1_0 — самая лёгкая (≤8 ГБ) · Gemma Q3 — 8 ГБ VRAM · Q4 — 12 ГБ · Q5 — 16+ ГБ'}
+          ? t("Своя модель задаётся путём в поле ниже; выбор встроенной модели в списке переключает обратно (путь при этом сохраняется).")
+          : t("Qwen3.5 9B — модель по умолчанию (8–12 ГБ VRAM) · Bonsai 2 27B — необязательная тернарная модель · PTQ1_0 — самая лёгкая (≤8 ГБ) · Gemma Q3 — 8 ГБ VRAM · Q4 — 12 ГБ · Q5 — 16+ ГБ")}
       </p>
     </div>
   )

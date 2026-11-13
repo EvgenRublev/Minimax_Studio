@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { useGenProgress } from '@/lib/gen-progress-store' // (правка 696)
 // (правка 719) Превью с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface GenerationStatusProps {
   phase: string
@@ -119,6 +120,8 @@ function GenPreview({
   /** (правка 950) FLF: Pass 1 в полном разрешении. */
   passFullRes?: boolean
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   // (правка 696) Frozen stageKind из стора — до всех early-returns (hook order).
   const frozenKind = useGenProgress((s) => s.video.frozenStageKind)
   const [previewData, setPreviewData] = useState<{
@@ -189,13 +192,13 @@ function GenPreview({
     const stageOnly = previewData?.stage
     return (
       <div className="rounded-lg border border-dashed border-border bg-[var(--surface-1)]/50 h-28 flex flex-col items-center justify-center gap-1">
-        <span className="text-[10px] text-muted-foreground/50 creative-pulse">Ожидание preview…</span>
+        <span className="text-[10px] text-muted-foreground/50 creative-pulse">{tt("Ожидание preview…")}</span>
         {stageOnly && (
           <span className="text-[10px] text-cyan-300 font-medium">
             {/* (правка 487) фаза подготовки модели — без ложных «Тайл 1/N»;
                 правка 696 — frozen kind во время генерации */}
             {stageOnly.preparing
-              ? 'Подготовка модели…'
+              ? tt("Подготовка модели…")
               : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{stageOnly.total > 0 ? ` · шаг ${stageOnly.step}/${stageOnly.total}` : ''}</>}
           </span>
         )}
@@ -235,7 +238,7 @@ function GenPreview({
         name="Превью генерации"
         url={previewData.url}
         className="block w-full"
-        title="Открыть превью во весь экран"
+        title={tt("Открыть превью во весь экран")}
       >
         {isVideo ? (
           <video
@@ -285,6 +288,8 @@ export function GenerationStatus({
   nodeElapsedMs = null,
   passFullRes = false,
 }: GenerationStatusProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const nodeLabel = executingTitle || executingNode
   return (
     <div className="space-y-2">
@@ -374,7 +379,7 @@ export function GenerationStatus({
           onClick={onInterrupt}
           className="w-full text-xs text-red-400/70 hover:text-red-400 py-1 transition-colors"
         >
-          Остановить
+          {tt("Остановить")}
         </button>
       )}
 
@@ -385,7 +390,7 @@ export function GenerationStatus({
           animate={{ opacity: 1, y: 0 }}
           className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg"
         >
-          <span className="text-sm text-red-400 font-medium shrink-0">Ошибка</span>
+          <span className="text-sm text-red-400 font-medium shrink-0">{tt("Ошибка")}</span>
           <div className="space-y-1 min-w-0">
             <p className="text-xs text-red-300/70 break-words">{error}</p>
             <Button
@@ -394,7 +399,7 @@ export function GenerationStatus({
               onClick={onReset}
               className="h-auto p-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/20"
             >
-              Попробовать снова
+              {tt("Попробовать снова")}
             </Button>
           </div>
         </motion.div>

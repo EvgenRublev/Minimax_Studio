@@ -14,6 +14,7 @@ import { PackageIcon, ChevronDownIcon, CheckIcon, RotateCcwIcon, PlusIcon, Loade
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useModelUploadStore } from '@/lib/model-upload-store'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface ModelsResponse {
   models: string[]
@@ -22,6 +23,8 @@ interface ModelsResponse {
 }
 
 export function DiffusionModelSelector() {
+  const { t } = useTranslation() // (правка 955)
+
   const [models, setModels] = useState<string[]>([])
   const [defaultModel, setDefaultModel] = useState('')
   const [selected, setSelected] = useState('')
@@ -82,10 +85,10 @@ export function DiffusionModelSelector() {
         xhr.onerror = () => reject(new Error('Network error'))
         xhr.send(form)
       })
-      toast.success('Модель загружена', { description: file.name })
+      toast.success(t("Модель загружена"), { description: file.name })
       await refresh()
     } catch (err) {
-      toast.error('Ошибка загрузки модели', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Ошибка загрузки модели"), { description: err instanceof Error ? err.message : String(err) })
     } finally {
       done()
     }
@@ -101,12 +104,12 @@ export function DiffusionModelSelector() {
       })
       if (res.ok) {
         toast.success(
-          value && value !== defaultModel ? `Модель: ${value}` : 'Базовая модель',
+          value && value !== defaultModel ? `Модель: ${value}` : t("Базовая модель"),
           { duration: 2500 },
         )
       }
     } catch {
-      toast.error('Не удалось сохранить')
+      toast.error(t("Не удалось сохранить"))
     } finally {
       setSaving(false)
     }
@@ -134,7 +137,7 @@ export function DiffusionModelSelector() {
           <div className="flex-1 min-w-0">
             <span className="text-xs font-medium block truncate">{displayName}</span>
             <span className="text-[10px] text-muted-foreground">
-              {isDefault ? 'Базовая модель' : 'Альтернативная модель'}
+              {isDefault ? t("Базовая модель") : t("Альтернативная модель")}
             </span>
           </div>
           <ChevronDownIcon className={cn('w-4 h-4 text-muted-foreground transition-transform shrink-0', expanded && 'rotate-180')} />
@@ -147,7 +150,7 @@ export function DiffusionModelSelector() {
           className="h-7 gap-1.5 text-xs shrink-0"
         >
           {uploading ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
-          Добавить
+          {' '}{t("Добавить")}
         </Button>
         <input
           ref={fileInputRef}
@@ -191,7 +194,7 @@ export function DiffusionModelSelector() {
               <span className="flex-1 truncate">{m}</span>
               {m === defaultModel && (
                 <span className="text-[10px] px-1 py-0.5 rounded bg-muted-foreground/20 text-muted-foreground shrink-0">
-                  базовая
+                  {t("базовая")}
                 </span>
               )}
             </button>
@@ -206,7 +209,7 @@ export function DiffusionModelSelector() {
               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-amber-400/80 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
             >
               <RotateCcwIcon className="w-3 h-3 shrink-0" />
-              Вернуть базовую модель
+              {' '}{t("Вернуть базовую модель")}
             </button>
           )}
         </div>

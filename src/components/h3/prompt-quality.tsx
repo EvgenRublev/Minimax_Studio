@@ -10,6 +10,7 @@
  */
 import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
+import { t as tt } from '@/lib/i18n' // (правка 955)
 
 interface PromptQualityProps {
   prompt: string
@@ -55,7 +56,7 @@ function analyze(prompt: string, refsCount: number): Item[] {
   }
   const longLine = [...trimmed.matchAll(/<d>(.*?)<\/d>/g)].find((m) => m[1].trim().split(/\s+/).length > 12)
   if (longLine) {
-    items.push({ kind: 'warn', text: 'Длинная реплика (>12 слов) — озвучка любит короткие фразы' })
+    items.push({ kind: 'warn', text: tt("Длинная реплика (>12 слов) — озвучка любит короткие фразы") })
   }
 
   // ── Size ──

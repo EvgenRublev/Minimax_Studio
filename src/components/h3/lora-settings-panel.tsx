@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useModelUploadStore } from '@/lib/model-upload-store'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface LoraItem {
   name: string
@@ -41,6 +42,8 @@ function shortName(name: string): string {
 }
 
 export function LoraSettingsPanel() {
+  const { t } = useTranslation() // (правка 955)
+
   const [loras, setLoras] = useState<LoraItem[]>([])
   const [loading, setLoading] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -104,10 +107,10 @@ export function LoraSettingsPanel() {
         xhr.send(form)
       })
 
-      toast.success('LoRA добавлена', { description: file.name })
+      toast.success(t("LoRA добавлена"), { description: file.name })
       await refresh()
     } catch (err) {
-      toast.error('Ошибка загрузки LoRA', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Ошибка загрузки LoRA"), { description: err instanceof Error ? err.message : String(err) })
     } finally {
       done()
     }
@@ -135,7 +138,7 @@ export function LoraSettingsPanel() {
       }
     } catch (err) {
       setLoras((prev) => prev.map((l) => l.name === name ? { ...l, enabled: !enabled } : l))
-      toast.error('Не удалось обновить', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Не удалось обновить"), { description: err instanceof Error ? err.message : String(err) })
     }
   }
 
@@ -206,10 +209,10 @@ export function LoraSettingsPanel() {
         const d = await r.json().catch(() => ({}))
         throw new Error(d.error || `HTTP ${r.status}`)
       }
-      toast.success('LoRA удалена')
+      toast.success(t("LoRA удалена"))
       await refresh()
     } catch (err) {
-      toast.error('Ошибка удаления', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Ошибка удаления"), { description: err instanceof Error ? err.message : String(err) })
     }
   }
 
@@ -228,7 +231,7 @@ export function LoraSettingsPanel() {
             className="h-7 gap-1.5 text-xs"
           >
             {uploading ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
-            Добавить
+            {' '}{t("Добавить")}
           </Button>
         </div>
         {/* Hidden file input */}
@@ -242,8 +245,7 @@ export function LoraSettingsPanel() {
       </div>
 
       <p className="text-[10px] text-muted-foreground leading-snug">
-        Встроенная турбо-лора включена по умолчанию. В режиме «Кадры» с добавленным аудио
-        она пропускается автоматически; обычные LoRA работают всегда.
+        {t("Встроенная турбо-лора включена по умолчанию. В режиме «Кадры» с добавленным аудио она пропускается автоматически; обычные LoRA работают всегда.")}
       </p>
 
       {/* Upload progress (правка 104 — состояние из общего store) */}
@@ -266,7 +268,7 @@ export function LoraSettingsPanel() {
         </div>
       ) : loras.length === 0 ? (
         <p className="text-xs text-muted-foreground/60 py-1">
-          Нет кастомных LoRAs. Добавьте файл .safetensors.
+          {t("Нет кастомных LoRAs. Добавьте файл .safetensors.")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -300,7 +302,7 @@ export function LoraSettingsPanel() {
                   <button
                     onClick={() => handleDelete(lora.name)}
                     className="p-1.5 rounded-md text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="Удалить"
+                    title={t("Удалить")}
                   >
                     <Trash2Icon className="w-3.5 h-3.5" />
                   </button>
@@ -330,7 +332,7 @@ export function LoraSettingsPanel() {
                   {/* Trigger words (правка 46) */}
                   <input
                     type="text"
-                    placeholder="Триггерные слова (добавляются к промпту)"
+                    placeholder={t("Триггерные слова (добавляются к промпту)")}
                     value={lora.trigger || ''}
                     onChange={(e) => updateTrigger(lora.name, e.target.value)}
                     className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/40"

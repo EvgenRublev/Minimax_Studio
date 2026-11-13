@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { reloadAssistantChats } from '@/lib/assistant-chats-sync'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface CategoryResult {
   enabled: boolean
@@ -40,6 +41,8 @@ interface MigrateResult {
 }
 
 export function ModelMigrationPanel() {
+  const { t } = useTranslation() // (правка 955)
+
   const [expanded, setExpanded] = useState(false)
   const [sourceDir, setSourceDir] = useState('')
   const [migrating, setMigrating] = useState(false)
@@ -54,11 +57,11 @@ export function ModelMigrationPanel() {
 
   const handleMigrate = async () => {
     if (!sourceDir.trim()) {
-      toast.error('Укажите путь к папке старой версии.')
+      toast.error(t("Укажите путь к папке старой версии."))
       return
     }
     if (nothingSelected) {
-      toast.error('Выберите, что переносить: модели, файлы, контент и/или данные.')
+      toast.error(t("Выберите, что переносить: модели, файлы, контент и/или данные."))
       return
     }
 
@@ -129,7 +132,7 @@ export function ModelMigrationPanel() {
         disabled={migrating}
       >
         <FolderOpenIcon className="w-3.5 h-3.5" />
-        Перенос со старой версии (модели, файлы, контент, данные)
+        {' '}{t("Перенос со старой версии (модели, файлы, контент, данные)")}{' '}
         {expanded ? (
           <span className="ml-auto text-xs text-muted-foreground">↑</span>
         ) : (
@@ -141,7 +144,7 @@ export function ModelMigrationPanel() {
       {expanded && (
         <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Папка старой версии</label>
+            <label className="text-xs text-muted-foreground">{t("Папка старой версии")}</label>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -152,7 +155,7 @@ export function ModelMigrationPanel() {
                     const res = await fetch('/api/dialog/folder', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: 'Выберите папку со старой версией программы' }),
+                      body: JSON.stringify({ title: t("Выберите папку со старой версией программы") }),
                     })
                     const data = await res.json()
                     if (!res.ok) {
@@ -163,7 +166,7 @@ export function ModelMigrationPanel() {
                       setSourceDir(data.path)
                     }
                   } catch {
-                    toast.error('Не удалось открыть диалог выбора папки.')
+                    toast.error(t("Не удалось открыть диалог выбора папки."))
                   }
                 }}
                 disabled={migrating}
@@ -178,7 +181,7 @@ export function ModelMigrationPanel() {
 
           {/* (правка 765) Выбор категорий переноса */}
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Что перенести</label>
+            <label className="text-xs text-muted-foreground">{t("Что перенести")}</label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                 <input
@@ -188,7 +191,7 @@ export function ModelMigrationPanel() {
                   onChange={(e) => setSelModels(e.target.checked)}
                   disabled={migrating}
                 />
-                Модели
+                {' '}{t("Модели")}
               </label>
               <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                 <input
@@ -198,7 +201,7 @@ export function ModelMigrationPanel() {
                   onChange={(e) => setSelInput(e.target.checked)}
                   disabled={migrating}
                 />
-                Файлы ввода (что кидал)
+                {' '}{t("Файлы ввода (что кидал)")}
               </label>
               <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                 <input
@@ -208,7 +211,7 @@ export function ModelMigrationPanel() {
                   onChange={(e) => setSelOutput(e.target.checked)}
                   disabled={migrating}
                 />
-                Контент (output)
+                {' '}{t("Контент (output)")}
               </label>
               <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                 <input
@@ -218,7 +221,7 @@ export function ModelMigrationPanel() {
                   onChange={(e) => setSelData(e.target.checked)}
                   disabled={migrating}
                 />
-                Данные (чаты, пресеты)
+                {' '}{t("Данные (чаты, пресеты)")}
               </label>
             </div>
           </div>
@@ -232,31 +235,27 @@ export function ModelMigrationPanel() {
             {migrating ? (
               <>
                 <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
-                Перенос...
+                {' '}{t("Перенос...")}
               </>
             ) : (
               <>
                 <ArrowRightIcon className="w-3.5 h-3.5" />
-                Начать перенос
+                {' '}{t("Начать перенос")}
               </>
             )}
           </Button>
 
           <p className="text-[10px] text-muted-foreground/50">
-            Программа найдёт в выбранной папке папки "models", "input", "output" и "data"
-            (до 3 уровней глубины) и перенесёт их содержимое в текущую установку.
-            Файлы с одинаковым именем и размером считаются дубликатами; если файл
-            с таким же именем ДРУГОЙ — он переносится под новым именем ( суффикс
-            "_restored"), ничего не перезаписывается и не теряется.
+            {t("Программа найдёт в выбранной папке папки \"models\", \"input\", \"output\" и \"data\" (до 3 уровней глубины) и перенесёт их содержимое в текущую установку. Файлы с одинаковым именем и размером считаются дубликатами; если файл с таким же именем ДРУГОЙ — он переносится под новым именем ( суффикс \"_restored\"), ничего не перезаписывается и не теряется.")}
           </p>
 
           {/* Result panels — по одной карточке на категорию */}
           {result && (
             <div className="space-y-2">
-              <CategoryCard label="Модели" cat={result.models} unit="файлов" />
-              <CategoryCard label="Файлы ввода" cat={result.input} unit="файлов" />
-              <CategoryCard label="Контент" cat={result.output} unit="файлов" />
-              <CategoryCard label="Данные (чаты, пресеты)" cat={result.data} unit="файлов" />
+              <CategoryCard label={t("Модели")} cat={result.models} unit="файлов" />
+              <CategoryCard label={t("Файлы ввода")} cat={result.input} unit="файлов" />
+              <CategoryCard label={t("Контент")} cat={result.output} unit="файлов" />
+              <CategoryCard label={t("Данные (чаты, пресеты)")} cat={result.data} unit="файлов" />
             </div>
           )}
         </div>
@@ -267,6 +266,8 @@ export function ModelMigrationPanel() {
 
 /** Карточка результата переноса одной категории. */
 function CategoryCard({ label, cat, unit = 'файлов' }: { label: string; cat: CategoryResult; unit?: string }) {
+  const { t } = useTranslation() // (правка 955)
+
   if (!cat.enabled) return null
 
   return (
@@ -279,7 +280,7 @@ function CategoryCard({ label, cat, unit = 'файлов' }: { label: string; ca
         )}
         <span className="font-medium">{label}</span>
         <span className={cn('ml-auto text-xs', cat.found ? 'text-emerald-500' : 'text-amber-500')}>
-          {cat.found ? 'Готово' : 'Не найдено'}
+          {cat.found ? t("Готово") : t("Не найдено")}
         </span>
       </div>
 
@@ -287,24 +288,24 @@ function CategoryCard({ label, cat, unit = 'файлов' }: { label: string; ca
         <div className="text-xs text-muted-foreground space-y-0.5">
           {(cat.file || cat.dir) && (
             <p className="break-all">
-              {cat.file ? 'Файл: ' : 'Папка: '}
+              {cat.file ? t("Файл:") : t("Папка:")}
               <code className="text-xs">{cat.file ?? cat.dir}</code>
             </p>
           )}
           <p>
-            Перенесено {unit}: <span className="text-emerald-400 font-medium">{cat.moved}</span>
+            {t("Перенесено")}{' '} {unit}: <span className="text-emerald-400 font-medium">{cat.moved}</span>
             {cat.renamed > 0 && (
               <>
                 {' · '}
-                Под новым именем: <span className="text-sky-400 font-medium">{cat.renamed}</span>
+                {' '}{t("Под новым именем:")}{' '} <span className="text-sky-400 font-medium">{cat.renamed}</span>
               </>
             )}
             {' · '}
-            Дубликатов пропущено: <span className="text-amber-400 font-medium">{cat.skipped}</span>
+            {' '}{t("Дубликатов пропущено:")}{' '} <span className="text-amber-400 font-medium">{cat.skipped}</span>
           </p>
           {cat.errors.length > 0 && (
             <>
-              <p className="text-red-400">Ошибок: {cat.errors.length}</p>
+              <p className="text-red-400">{t("Ошибок:")}{' '} {cat.errors.length}</p>
               <ul className="list-disc pl-4 space-y-0.5 max-h-24 overflow-y-auto">
                 {cat.errors.map((e, i) => (
                   <li key={i} className="text-red-300/80 text-xs break-all">{e}</li>

@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { SparklesIcon, SettingsIcon, GraduationCapIcon, XIcon, ArrowRightIcon, AlertTriangleIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface WelcomeDialogProps {
   /**
@@ -51,6 +52,8 @@ function Step({ n, title, text }: { n: number } & StepDef) {
 }
 
 export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDialogProps) {
+  const { t } = useTranslation() // (правка 955)
+
   // (правка 113) «Больше не показывать» — по умолчанию снята:
   // без галочки окно будет появляться при каждом запуске.
   const [hideForever, setHideForever] = useState(false)
@@ -80,17 +83,17 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
           </span>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold text-foreground leading-tight">
-              Добро пожаловать в <span className="gradient-creative-text">MiniMax H3 Studio 7</span>
+              {t("Добро пожаловать в")}{' '} <span className="gradient-creative-text">MiniMax H3 Studio 7</span>
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Генерация видео со звуком — прямо на вашей видеокарте
+              {t("Генерация видео со звуком — прямо на вашей видеокарте")}
             </p>
           </div>
           <button
             type="button"
             onClick={() => onClose(hideForever)}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-[var(--surface-2)] transition-colors shrink-0"
-            title="Закрыть"
+            title={t("Закрыть")}
           >
             <XIcon className="w-4.5 h-4.5" />
           </button>
@@ -99,21 +102,21 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
         {/* Steps (краткая инструкция, правка 113 — карточки) */}
         <div className="px-5 py-4 space-y-2.5 overflow-y-auto">
           <p className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
-            Чтобы начать — три шага
+            {t("Чтобы начать — три шага")}
           </p>
           <Step
             n={1}
-            title="Скачайте модели"
+            title={t("Скачайте модели")}
             text="Настройки (шестерёнка внизу сайдбара) → «Общие» → «Скачать все». Это единоразово — после этого интернет больше не нужен."
           />
           <Step
             n={2}
-            title="Сгенерируйте первое видео"
+            title={t("Сгенерируйте первое видео")}
             text="Вкладка «Генерация»: выберите режим (Текст / Кадры / Референсы), опишите сцену (или попросите Ассистента), выберите разрешение и длительность — «Сгенерировать видео»."
           />
           <Step
             n={3}
-            title="Смотрите результат"
+            title={t("Смотрите результат")}
             text="Готовые видео сохраняются в «Галерею», сделать их чётче можно на вкладке «Upscale»."
           />
 
@@ -123,18 +126,18 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
               <span className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
                 <AlertTriangleIcon className="w-4 h-4 text-amber-400" />
               </span>
-              <p className="text-sm font-semibold text-amber-300">Важно: увеличьте файл подкачки</p>
+              <p className="text-sm font-semibold text-amber-300">{t("Важно: увеличьте файл подкачки")}</p>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Для работы программы нужен большой файл подкачки (virtual memory). Если он небольшой — программа может выдавать ошибку «не хватает памяти».
+              {t("Для работы программы нужен большой файл подкачки (virtual memory). Если он небольшой — программа может выдавать ошибку «не хватает памяти».")}
             </p>
             <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-foreground/80 leading-relaxed space-y-1">
-              <p className="font-medium text-foreground">Как увеличить:</p>
+              <p className="font-medium text-foreground">{t("Как увеличить:")}</p>
               <p>1. Win + R → <code className="font-mono bg-[var(--surface-3)] px-1 rounded">sysdm.cpl</code> → Enter</p>
-              <p>2. Вкладка «Дополнительно» → «Быстродействие» → «Параметры» → «Виртуальная память» → «Изменить»</p>
-              <p>3. Снять галочку «Автоматически определять»</p>
-              <p>4. Выбрать диск, поле «Максимальный размер (МБ)» = 32768 (или больше)</p>
-              <p>5. «Установить» → «ОК» → <b>перезагрузить ПК</b></p>
+              <p>{t("2. Вкладка «Дополнительно» → «Быстродействие» → «Параметры» → «Виртуальная память» → «Изменить»")}</p>
+              <p>{t("3. Снять галочку «Автоматически определять»")}</p>
+              <p>{t("4. Выбрать диск, поле «Максимальный размер (МБ)» = 32768 (или больше)")}</p>
+              <p>{t("5. «Установить» → «ОК» →")}{' '} <b>{t("перезагрузить ПК")}</b></p>
             </div>
           </div>
 
@@ -144,14 +147,14 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
               <GraduationCapIcon className="w-4 h-4 text-cyan-300" />
             </span>
             <p className="text-xs text-cyan-100/90 flex-1 min-w-0 leading-relaxed">
-              Подробный пошаговый тур с картинками — на вкладке <span className="font-semibold text-cyan-100">«Обучение»</span>
+              {t("Подробный пошаговый тур с картинками — на вкладке")}{' '} <span className="font-semibold text-cyan-100">{t("«Обучение»")}</span>
             </p>
             <button
               type="button"
               onClick={() => onGoLearn(hideForever)}
               className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-cyan-100 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 transition-colors"
             >
-              Открыть
+              {t("Открыть")}{' '}
               <ArrowRightIcon className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -167,7 +170,7 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
               className="w-4 h-4 rounded accent-cyan-500 cursor-pointer shrink-0"
             />
             <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
-              Больше не показывать это окно
+              {t("Больше не показывать это окно")}
             </span>
           </label>
           <div className="flex items-center gap-2.5">
@@ -178,10 +181,10 @@ export function WelcomeDialog({ onClose, onOpenSettings, onGoLearn }: WelcomeDia
               onClick={() => onOpenSettings(hideForever)}
             >
               <SettingsIcon className="w-3.5 h-3.5" />
-              Открыть настройки
+              {' '}{t("Открыть настройки")}
             </Button>
             <Button size="sm" className="flex-1" onClick={() => onClose(hideForever)}>
-              Понятно
+              {t("Понятно")}
             </Button>
           </div>
         </div>

@@ -78,10 +78,13 @@ import {
 import { useGenQueue, type QueueItem } from '@/lib/gen-queue-store'
 import { useGenStore } from '@/lib/gen-store' // (правка 407) veda-настройки
 import { uploadInputFile } from '@/lib/upload'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 type Phase = 'idle' | 'submitting' | 'queued' | 'running' | 'done' | 'error'
 
 export function RefineView() {
+  const { t } = useTranslation() // (правка 955)
+
   // ── Источник: из стора (кнопка «В Refine» в галерее) или клик в ленте ──
   const storeTarget = useRefineTarget((s) => s.target)
   const clearStoreTarget = useRefineTarget((s) => s.clear)
@@ -218,7 +221,7 @@ export function RefineView() {
       })
       toast.success(`Источник: ${file.name}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки видео')
+      toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
       setUploadingSrc(false)
     }
@@ -229,9 +232,9 @@ export function RefineView() {
   // Максимум 8: первый кадр исходника займёт девятый слот (refine-template).
   const addRefFiles = useCallback(async (files: File[]) => {
     const images = files.filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(f.name))
-    if (!images.length) { toast.error('Референсы — только картинки (png, jpg, webp)'); return }
+    if (!images.length) { toast.error(t("Референсы — только картинки (png, jpg, webp)")); return }
     const room = 8 - useRefineTarget.getState().userRefs.length
-    if (room <= 0) { toast.error('Максимум 8 картинок-референсов'); return }
+    if (room <= 0) { toast.error(t("Максимум 8 картинок-референсов")); return }
     if (images.length > room) toast.error(`Максимум 8 референсов — добавлено ${room}`)
     setUploadingRefs(true)
     try {
@@ -245,7 +248,7 @@ export function RefineView() {
             previewUrl: `/api/comfy/file?filename=${encodeURIComponent(path)}&type=input&width=200`,
           }])
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : 'Ошибка загрузки референса')
+          toast.error(e instanceof Error ? e.message : t("Ошибка загрузки референса"))
         }
       }
     } finally {
@@ -357,14 +360,14 @@ export function RefineView() {
   const start = useCallback(async () => {
     const src = sourceRef.current
     if (!src) {
-      toast.error('Сначала выберите видео-источник')
+      toast.error(t("Сначала выберите видео-источник"))
       return
     }
     // (правка 587) Дешёвые guard'ы — ДО троттла и очистки статуса: клик во
     // время загрузки источника раньше успевал потратить тротл-окно и стереть
     // карточку только что завершённого результата, ничего не сделав.
     if (uploadingSrc) {
-      toast.error('Видео ещё загружается — дождитесь завершения')
+      toast.error(t("Видео ещё загружается — дождитесь завершения"))
       return
     }
     if (Date.now() - lastSubmitAtRef.current < 1000) return // (правка 333)
@@ -412,7 +415,7 @@ export function RefineView() {
 
   const cancel = useCallback(async () => {
     await cancelActiveRefines()
-    toast.info('Refine отменён')
+    toast.info(t("Refine отменён"))
   }, [])
 
   const reset = useCallback(() => {
@@ -438,7 +441,7 @@ export function RefineView() {
             {/* (правка 459) Лейблы/селекты панели приведены к эталону вкладки
                 «Генерация»: Label text-xs text-muted-foreground font-medium,
                 SelectTrigger h-9 bg-[var(--surface-2)] text-sm. */}
-            <Label className="text-xs text-muted-foreground font-medium">Источник</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Источник")}</Label>
             {source ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -457,12 +460,12 @@ export function RefineView() {
                         subfolder: parsed.subfolder ?? '',
                       })
                       toast.success(`Источник: ${parsed.filename}`)
-                    } catch { toast.error('Не удалось прочитать перетащенное видео') }
+                    } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
                     return
                   }
                   const f = e.dataTransfer.files?.[0]
                   if (f) void uploadLocalFile(f)
-                  else toast.error('Нужно видео')
+                  else toast.error(t("Нужно видео"))
                 }}
                 className={cn(
                   'flex items-center gap-3 rounded-lg border bg-[var(--surface-2)] p-2 transition-all',
@@ -480,7 +483,7 @@ export function RefineView() {
                   name={source.filename}
                   url={source.url}
                   className="w-20 h-12 rounded object-cover bg-black shrink-0"
-                  title="Открыть исходное видео во весь экран"
+                  title={t("Открыть исходное видео во весь экран")}
                 >
                   <video
                     src={source.url}
@@ -502,7 +505,7 @@ export function RefineView() {
                     {source.filename}
                   </p>
                   {uploadingSrc && (
-                    <p className="text-[10px] text-cyan-400">загрузка…</p>
+                    <p className="text-[10px] text-cyan-400">{t("загрузка…")}</p>
                   )}
                 </div>
                 {!busy && (
@@ -510,7 +513,7 @@ export function RefineView() {
                     onClick={() => { revokeSourceUrl(sourceRef.current); setSource(null) }} // (правка 345)
                     className="text-[10px] text-muted-foreground hover:text-foreground shrink-0"
                   >
-                    убрать
+                    {t("убрать")}
                   </button>
                 )}
               </div>
@@ -532,12 +535,12 @@ export function RefineView() {
                         subfolder: parsed.subfolder ?? '',
                       })
                       toast.success(`Источник: ${parsed.filename}`)
-                    } catch { toast.error('Не удалось прочитать перетащенное видео') }
+                    } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
                     return
                   }
                   const f = e.dataTransfer.files?.[0]
                   if (f) void uploadLocalFile(f)
-                  else toast.error('Нужно видео')
+                  else toast.error(t("Нужно видео"))
                 }}
                 // (правка 274) Клик по полю — выбор файла с диска
                 onClick={() => fileInputRef.current?.click()}
@@ -550,7 +553,7 @@ export function RefineView() {
                 )}
               >
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
-                <span>Кликните для выбора, перетащите карточку из галереи или файл с диска</span>
+                <span>{t("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
             )}
             {/* (правка 274) Скрытый input — клик-выбор видео с диска */}
@@ -571,7 +574,7 @@ export function RefineView() {
               в папку оригинала (правка 366); файл с диска — общая папка. */}
           {source && (
             <p className="text-[10px] text-muted-foreground/60 -mt-2">
-              Папка результата: {source.inputSource ? 'общая' : `${source.subfolder || 'общая'} (по оригиналу)`}
+              {t("Папка результата:")}{' '} {source.inputSource ? t("общая") : `${source.subfolder || 'общая'} (по оригиналу)`}
             </p>
           )}
 
@@ -587,8 +590,8 @@ export function RefineView() {
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
               {mode === 'whole'
-                ? 'Зациклено ✓ — рефайн сохранит цикл'
-                : 'Зациклено — в «Частями» цикл не сохраняется'}
+                ? t("Зациклено ✓ — рефайн сохранит цикл")
+                : t("Зациклено — в «Частями» цикл не сохраняется")}
             </p>
           )}
 
@@ -597,10 +600,10 @@ export function RefineView() {
           {backToMontage && (
             <p
               className="text-[10px] -mt-1 flex items-center gap-1.5 text-[#A78BFA]"
-              title="Клип отправлен в Refine из монтажки: когда генерация закончится, вернись на вкладку «Монтаж» — чистовик заменит этот клип, его подрезка и настройки останутся на месте."
+              title={t("Клип отправлен в Refine из монтажки: когда генерация закончится, вернись на вкладку «Монтаж» — чистовик заменит этот клип, его подрезка и настройки останутся на месте.")}
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#A78BFA]" />
-              Клип из монтажки — результат вернётся и заменит его
+              {' '}{t("Клип из монтажки — результат вернётся и заменит его")}
             </p>
           )}
 
@@ -622,7 +625,7 @@ export function RefineView() {
               }
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Латент ✓ — рефайн без потерь
+              {' '}{t("Латент ✓ — рефайн без потерь")}
             </p>
           )}
 
@@ -635,15 +638,15 @@ export function RefineView() {
             <div className="space-y-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2.5">
               <Label
                 className="text-xs text-muted-foreground font-medium"
-                title="У файла с диска нет сохранённых метаданных — опишите сцену сами и, при желании, добавьте картинки-якоря (персонаж, локация, стиль)."
+                title={t("У файла с диска нет сохранённых метаданных — опишите сцену сами и, при желании, добавьте картинки-якоря (персонаж, локация, стиль).")}
               >
-                Промпт и референсы
+                {t("Промпт и референсы")}
               </Label>
               <div className="relative">
                 <Textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Опишите сцену: что происходит, персонажи, стиль, свет. Пусто — универсальный промпт детализации…"
+                  placeholder={t("Опишите сцену: что происходит, персонажи, стиль, свет. Пусто — универсальный промпт детализации…")}
                   disabled={uploadingRefs}
                   className="min-h-[72px] resize-y bg-[var(--surface-2)] border-border text-xs pr-14"
                 />
@@ -654,7 +657,7 @@ export function RefineView() {
                 <button
                   type="button"
                   onClick={() => setFixOpen(true)}
-                  title="Исправить промпт с ассистентом: напишите, что изменить — промпт и задание уйдут в чат"
+                  title={t("Исправить промпт с ассистентом: напишите, что изменить — промпт и задание уйдут в чат")}
                   className="absolute top-2 right-9 p-1.5 rounded-md bg-[var(--surface-3)]/80 hover:bg-[var(--surface-4)] text-violet-300 hover:text-violet-200 transition-colors border border-violet-500/30 z-10 backdrop-blur-sm"
                 >
                   <WandSparklesIcon className="w-3.5 h-3.5" />
@@ -663,7 +666,7 @@ export function RefineView() {
                   <button
                     type="button"
                     onClick={() => setPrompt('')}
-                    title="Очистить поле промпта"
+                    title={t("Очистить поле промпта")}
                     className="absolute top-2 right-16 p-1.5 rounded-md bg-[var(--surface-3)]/80 hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors border border-border/50 z-10 backdrop-blur-sm"
                   >
                     <Trash2Icon className="w-3.5 h-3.5" />
@@ -699,11 +702,11 @@ export function RefineView() {
                   }}
                 />
                 {uploadingRefs ? (
-                  <span className="text-cyan-400">Загрузка референсов…</span>
+                  <span className="text-cyan-400">{t("Загрузка референсов…")}</span>
                 ) : (
                   <span className="flex items-center justify-center gap-1.5">
                     <UploadIcon className="w-3.5 h-3.5" />
-                    Референсы (необязательно, до 8)
+                    {' '}{t("Референсы (необязательно, до 8)")}
                   </span>
                 )}
               </div>
@@ -719,7 +722,7 @@ export function RefineView() {
                         path={r.path}
                         url={r.previewUrl}
                         className="w-full h-full block"
-                        title="Открыть референс во весь экран"
+                        title={t("Открыть референс во весь экран")}
                         // (правка 908) Кроп референса — как на «Генерации».
                         crop={r.crop}
                         originalSrc={cropOriginalSrc(r)}
@@ -747,7 +750,7 @@ export function RefineView() {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground/60">
-                На картинки в промпте ссылайтесь как &lt;Picture 1&gt;, &lt;Picture 2&gt;… Первый кадр видео добавится якорем последним слотом автоматически.
+                {t("На картинки в промпте ссылайтесь как &lt;Picture 1&gt;, &lt;Picture 2&gt;… Первый кадр видео добавится якорем последним слотом автоматически.")}
               </p>
             </div>
           )}
@@ -760,12 +763,12 @@ export function RefineView() {
             <div className="space-y-2">
               <Label
                 className="text-xs text-muted-foreground font-medium"
-                title="Картинки, сохранённые в видео при генерации, плюс его первый кадр — они помогают сохранить персонажей, цвета и свет."
+                title={t("Картинки, сохранённые в видео при генерации, плюс его первый кадр — они помогают сохранить персонажей, цвета и свет.")}
               >
-                Референсы из метаданных
+                {t("Референсы из метаданных")}
               </Label>
               {metaLoading ? (
-                <p className="text-[10px] text-muted-foreground">Чтение метаданных…</p>
+                <p className="text-[10px] text-muted-foreground">{t("Чтение метаданных…")}</p>
               ) : metaRefs && metaRefs.length > 0 ? (
                 <>
                   <div className="flex flex-wrap gap-1.5">
@@ -796,7 +799,7 @@ export function RefineView() {
                 </>
               ) : (
                 <p className="text-[10px] text-muted-foreground">
-                  Нет метаданных: якорем будет только первый кадр.
+                  {t("Нет метаданных: якорем будет только первый кадр.")}
                 </p>
               )}
             </div>
@@ -807,9 +810,9 @@ export function RefineView() {
           <div className="space-y-2">
             <Label
               className="text-xs text-muted-foreground font-medium"
-              title="Как обрабатывать картинки-референсы. Match — быстрее; Max — точнее сохраняет детали, но медленнее."
+              title={t("Как обрабатывать картинки-референсы. Match — быстрее; Max — точнее сохраняет детали, но медленнее.")}
             >
-              Рефы: режим размера
+              {t("Рефы: режим размера")}
             </Label>
             <div className="grid grid-cols-2 gap-1.5">
               {/* (правка 465) Настройки НЕ блокируются во время генерации:
@@ -828,7 +831,7 @@ export function RefineView() {
                       : 'border-border text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  {m === 'match' ? 'Match (быстро)' : 'Max (качество)'}
+                  {m === 'match' ? t("Match (быстро)") : t("Max (качество)")}
                 </button>
               ))}
             </div>
@@ -846,17 +849,17 @@ export function RefineView() {
                     : `Короткая сторона результата — ${target}p, пропорции исходника сохраняются.`
               }
             >
-              Целевое разрешение
+              {t("Целевое разрешение")}
             </Label>
             <Select value={target} onValueChange={(v) => patchParams({ target: v as 'same' | '720' | '1080' | 'free' })}>
               <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                <SelectValue placeholder="Разрешение" />
+                <SelectValue placeholder={t("Разрешение")} />
               </SelectTrigger>
               <SelectContent className="bg-[var(--surface-3)] border-border">
-                <SelectItem value="720">720p (быстрее, безопаснее по VRAM)</SelectItem>
-                <SelectItem value="1080">1080p (медленнее, максимум детализации)</SelectItem>
-                <SelectItem value="free">Свободное (в Мп, до 4K)</SelectItem>
-                <SelectItem value="same">Как в исходнике (только детализация)</SelectItem>
+                <SelectItem value="720">{t("720p (быстрее, безопаснее по VRAM)")}</SelectItem>
+                <SelectItem value="1080">{t("1080p (медленнее, максимум детализации)")}</SelectItem>
+                <SelectItem value="free">{t("Свободное (в Мп, до 4K)")}</SelectItem>
+                <SelectItem value="same">{t("Как в исходнике (только детализация)")}</SelectItem>
               </SelectContent>
             </Select>
             {/* (правка 494) Свободное разрешение — MP-слайдер как во вкладке
@@ -866,7 +869,7 @@ export function RefineView() {
                 предпросчёт по размерам превью-видео. */}
             {target === 'free' && (
               <SettingSlider
-                label="Разрешение (Мп)"
+                label={t("Разрешение (Мп)")}
                 labelTitle="Точный размер результата в мегапикселях — пропорции исходника сохраняются. 8.3 Мп = 4K (например 3840×2160). Выше 2–3 Мп — заметно больше VRAM и времени."
                 value={targetMp}
                 onChange={(v) => patchParams({ targetMp: Math.round(v * 100) / 100 })}
@@ -888,7 +891,7 @@ export function RefineView() {
 
           {/* Режим: целиком / частями */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Режим</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Режим")}</Label>
             <div className="grid grid-cols-2 gap-1.5">
               {([
                 ['whole', 'Целый', 'Один джоб на всё видео'],
@@ -921,16 +924,16 @@ export function RefineView() {
             {mode === 'chunks' && (
               <div
                 className="space-y-1.5 pt-1"
-                title="Длинное видео обрабатывается кусками с небольшим нахлёстом, затем куски незаметно склеиваются. Звук перегенерируется вместе с видео — галочка «Оставить оригинальный звук» ниже подставит дорожку исходника."
+                title={t("Длинное видео обрабатывается кусками с небольшим нахлёстом, затем куски незаметно склеиваются. Звук перегенерируется вместе с видео — галочка «Оставить оригинальный звук» ниже подставит дорожку исходника.")}
               >
                 <Select value={chunkSec} onValueChange={(v) => patchParams({ chunkSec: v as '3' | '5' | '8' })}>
                   <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                    <SelectValue placeholder="Длина куска" />
+                    <SelectValue placeholder={t("Длина куска")} />
                   </SelectTrigger>
                   <SelectContent className="bg-[var(--surface-3)] border-border">
-                    <SelectItem value="3">~3 с (меньше VRAM)</SelectItem>
-                    <SelectItem value="5">~5 с (рекомендуется)</SelectItem>
-                    <SelectItem value="8">~8 с (быстрее в сумме)</SelectItem>
+                    <SelectItem value="3">{t("~3 с (меньше VRAM)")}</SelectItem>
+                    <SelectItem value="5">{t("~5 с (рекомендуется)")}</SelectItem>
+                    <SelectItem value="8">{t("~8 с (быстрее в сумме)")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -947,19 +950,19 @@ export function RefineView() {
                   : 'Сколько шагов делает проход улучшения. 3 — проверенный баланс скорости и чёткости; больше — детальнее, но медленнее.'
               }
             >
-              Проход (шаги)
+              {t("Проход (шаги)")}
             </Label>
             <Select value={steps} onValueChange={(v) => patchParams({ steps: v as '2' | '3' | '4' | '5' | '6' | '7' })}>
               <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                <SelectValue placeholder="Шаги" />
+                <SelectValue placeholder={t("Шаги")} />
               </SelectTrigger>
               <SelectContent className="bg-[var(--surface-3)] border-border">
-                <SelectItem value="2">2 шага</SelectItem>
-                <SelectItem value="3">3 шага — быстро (эталон генерации)</SelectItem>
-                <SelectItem value="4">4 шага — детальнее</SelectItem>
-                <SelectItem value="5">5 шагов</SelectItem>
-                <SelectItem value="6">6 шагов</SelectItem>
-                <SelectItem value="7">7 шагов — максимум (как в генерации)</SelectItem>
+                <SelectItem value="2">{t("2 шага")}</SelectItem>
+                <SelectItem value="3">{t("3 шага — быстро (эталон генерации)")}</SelectItem>
+                <SelectItem value="4">{t("4 шага — детальнее")}</SelectItem>
+                <SelectItem value="5">{t("5 шагов")}</SelectItem>
+                <SelectItem value="6">{t("6 шагов")}</SelectItem>
+                <SelectItem value="7">{t("7 шагов — максимум (как в генерации)")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -973,7 +976,7 @@ export function RefineView() {
               двухпроходной генерации (ManualSigmas 0.9035, 0.6316, 0.3158, 0). */}
           <div className="space-y-1.5">
             <SettingSlider
-              label="Влияние Refine"
+              label={t("Влияние Refine")}
               labelTitle={
                 strength >= 0.9
                   ? 'Модель смело дорисовывает детали — максимальный эффект.'
@@ -991,7 +994,7 @@ export function RefineView() {
             <div className="flex items-center gap-2">
               <span
                 className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground"
-                title="Фактическая лестница сигм (старт → … → 0), которую получит сэмплер. Пресет Pass 2 повторяет сигмы второго прохода двухпроходной генерации."
+                title={t("Фактическая лестница сигм (старт → … → 0), которую получит сэмплер. Пресет Pass 2 повторяет сигмы второго прохода двухпроходной генерации.")}
               >
                 σ{' '}
                 {refineSigmaLadder(parseInt(steps, 10), strength)
@@ -1028,7 +1031,7 @@ export function RefineView() {
               className="flex-1 gap-1.5"
             >
               {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {busy ? 'Ещё в очередь' : 'Запустить Refine'}
+              {busy ? t("Ещё в очередь") : t("Запустить Refine")}
             </Button>
           </div>
 
@@ -1057,7 +1060,7 @@ export function RefineView() {
       <PromptFixDialog
         open={fixOpen}
         onOpenChange={setFixOpen}
-        hint="Промпт и ваше задание уйдут в чат ассистента — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена."
+        hint={t("Промпт и ваше задание уйдут в чат ассистента — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.")}
         onSubmit={(req) => requestImprovePrompt(prompt, { mode: 'generate', fixRequest: req })}
       />
 

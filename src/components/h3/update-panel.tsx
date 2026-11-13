@@ -35,7 +35,8 @@ import {
   XIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ReleaseNotes } from './release-notes' // (правка 891)
+import { ReleaseNotes } from './release-notes'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 891)
 
 interface UpdateInfo {
   version: string
@@ -75,6 +76,8 @@ function fmtSize(n: number): string {
 }
 
 export function UpdatePanel() {
+  const { t } = useTranslation() // (правка 955)
+
   const [data, setData] = useState<CheckResult | null>(null)
   const [busy, setBusy] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -132,7 +135,7 @@ export function UpdatePanel() {
       if (!j.ok) toast.error(j.error || 'Не удалось начать загрузку')
       await refresh()
     } catch {
-      toast.error('Ошибка запроса к серверу')
+      toast.error(t("Ошибка запроса к серверу"))
     } finally {
       setBusy(false)
     }
@@ -156,7 +159,7 @@ export function UpdatePanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'discard' }),
       })
-      toast.success('Обновление удалено')
+      toast.success(t("Обновление удалено"))
     } catch { /* ignore */ }
     await refresh(true)
   }, [refresh])
@@ -178,14 +181,14 @@ export function UpdatePanel() {
         return
       }
       if (!window.h3desktop?.applyUpdate) {
-        toast.error('Установка возможна только в десктопной версии приложения')
+        toast.error(t("Установка возможна только в десктопной версии приложения"))
         return
       }
       const r = await window.h3desktop.applyUpdate()
       if (!r.ok) toast.error(r.error || 'Не удалось запустить установку')
       // При успехе приложение сейчас закроется и откроется само обновлённым.
     } catch {
-      toast.error('Ошибка запроса к серверу')
+      toast.error(t("Ошибка запроса к серверу"))
     } finally {
       setBusy(false)
     }
@@ -195,7 +198,7 @@ export function UpdatePanel() {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
         <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
-        Проверка обновлений...
+        {' '}{t("Проверка обновлений...")}
       </div>
     )
   }
@@ -231,17 +234,16 @@ export function UpdatePanel() {
       <div className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
         <div className="text-xs">
           <span className="font-medium text-emerald-400">
-            Обновлено скачано: v{data.armed.version}
+            {t("Обновлено скачано: v")}{data.armed.version}
           </span>
           {data.armed.depsChanged && (
             <div className="text-[11px] text-muted-foreground mt-1">
-              Изменились зависимости — после перезапуска откроется окно установки
-              компонентов, дождитесь его завершения.
+              {t("Изменились зависимости — после перезапуска откроется окно установки компонентов, дождитесь его завершения.")}
             </div>
           )}
           {!desktop && (
             <div className="text-[11px] text-muted-foreground mt-1">
-              Установка доступна в десктопной версии приложения.
+              {t("Установка доступна в десктопной версии приложения.")}
             </div>
           )}
         </div>
@@ -249,12 +251,12 @@ export function UpdatePanel() {
           {desktop && (
             <Button size="sm" onClick={() => void install()} disabled={busy} className="gap-1.5">
               <RocketIcon className="w-3.5 h-3.5" />
-              Перезапустить и установить
+              {' '}{t("Перезапустить и установить")}
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => void discard()} className="gap-1.5">
             <XIcon className="w-3.5 h-3.5" />
-            Отменить
+            {' '}{t("Отменить")}
           </Button>
         </div>
         {notes && (
@@ -273,7 +275,7 @@ export function UpdatePanel() {
     return (
       <div className="space-y-2 rounded-md border border-border/60 p-3">
         <div className="flex items-center justify-between text-xs">
-          <span>Загрузка v{dl.version}...</span>
+          <span>{t("Загрузка v")}{dl.version}...</span>
           <span className="text-muted-foreground">
             {fmtSize(dl.bytesReceived)}
             {dl.totalBytes ? ` / ${fmtSize(dl.totalBytes)}` : ''}
@@ -288,7 +290,7 @@ export function UpdatePanel() {
         </div>
         <Button size="sm" variant="outline" onClick={() => void cancelDownload()} className="gap-1.5">
           <XIcon className="w-3.5 h-3.5" />
-          Отменить загрузку
+          {' '}{t("Отменить загрузку")}
         </Button>
         {notes && (
           <div className="space-y-1 pt-1">
@@ -306,13 +308,13 @@ export function UpdatePanel() {
     <div className="space-y-2 rounded-md border border-border/60 p-3">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
-          Обновления студии
+          {t("Обновления студии")}{' '}
           {alreadyDownloaded && data.downloadedVersion ? (
-            <span className="text-emerald-400"> — v{data.downloadedVersion} скачано, ждёт установки</span>
+            <span className="text-emerald-400"> — v{data.downloadedVersion} {' '}{t("скачано, ждёт установки")}</span>
           ) : data.update ? (
-            <span className="text-violet-400 font-medium"> — доступно v{data.update.version}</span>
+            <span className="text-violet-400 font-medium"> {t("— доступно v")}{data.update.version}</span>
           ) : data.ok ? (
-            <span className="text-emerald-400"> — актуальная версия</span>
+            <span className="text-emerald-400"> {t("— актуальная версия")}</span>
           ) : (
             <span className="text-muted-foreground/70"> — {data.error || 'сервис недоступен'}</span>
           )}
@@ -324,14 +326,14 @@ export function UpdatePanel() {
           className="h-6 gap-1 text-[11px] px-2"
         >
           <RefreshCwIcon className="w-3 h-3" />
-          Проверить
+          {' '}{t("Проверить")}
         </Button>
       </div>
 
       {failedDl && (
         <div className="text-[11px] text-red-400">
           {failedDl.status === 'cancelled'
-            ? 'Загрузка остановлена — начните заново (прогресс сохранён).'
+            ? t("Загрузка остановлена — начните заново (прогресс сохранён).")
             : `Ошибка загрузки: ${failedDl.error || 'неизвестная'}`}
         </div>
       )}
@@ -343,7 +345,7 @@ export function UpdatePanel() {
           {!alreadyDownloaded && (
             <Button size="sm" onClick={() => void startDownload()} disabled={busy} className="gap-1.5">
               <DownloadIcon className="w-3.5 h-3.5" />
-              Скачать {data.update.sizeBytes ? `(${fmtSize(data.update.sizeBytes)})` : ''}
+              {' '}{t("Скачать")}{' '} {data.update.sizeBytes ? `(${fmtSize(data.update.sizeBytes)})` : ''}
             </Button>
           )}
           {data.update.htmlUrl && (
@@ -355,7 +357,7 @@ export function UpdatePanel() {
             >
               <a href={data.update.htmlUrl} target="_blank" rel="noreferrer">
                 <ExternalLinkIcon className="w-3.5 h-3.5" />
-                Открыть релиз
+                {' '}{t("Открыть релиз")}
               </a>
             </Button>
           )}
@@ -366,11 +368,11 @@ export function UpdatePanel() {
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={() => void install()} disabled={busy} className="gap-1.5">
             <RocketIcon className="w-3.5 h-3.5" />
-            Установить v{data.downloadedVersion}
+            {' '}{t("Установить v")}{data.downloadedVersion}
           </Button>
           <Button size="sm" variant="outline" onClick={() => void discard()} className="gap-1.5">
             <XIcon className="w-3.5 h-3.5" />
-            Удалить
+            {' '}{t("Удалить")}
           </Button>
         </div>
       )}

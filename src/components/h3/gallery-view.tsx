@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/button'
 import { useGenStore } from '@/lib/gen-store'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from './video-gallery-grid'
 import { useVideoGallery } from './use-video-gallery'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 type FolderFilter = '__all__' | '' | string
 
@@ -69,6 +70,8 @@ function remapFolderPath(value: string, oldPath: string, newPath: string): strin
 }
 
 export function GalleryView() {
+  const { t } = useTranslation() // (правка 955)
+
   const { files, folders, loading, load, deleteFile, toggleLike } = useVideoGallery()
   const [filter, setFilter] = useState<FolderFilter>('__all__')
   // (правка 793) Фильтр «только избранные» — по флагу liked в сайдкарах.
@@ -148,14 +151,14 @@ export function GalleryView() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      toast.success('Папка создана', { description: d.name })
+      toast.success(t("Папка создана"), { description: d.name })
       setCreating(false)
       setNewName('')
       setCreateParent('')
       setFilter(d.name)
       await load(true)
     } catch (err) {
-      toast.error('Не удалось создать папку', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Не удалось создать папку"), { description: err instanceof Error ? err.message : String(err) })
     }
   }, [newName, createParent, load])
 
@@ -174,7 +177,7 @@ export function GalleryView() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      toast.success('Папка переименована', { description: `«${oldName}» → «${d.name}»` })
+      toast.success(t("Папка переименована"), { description: `«${oldName}» → «${d.name}»` })
       if (filter !== '__all__') setFilter((cur) => remapFolderPath(cur, oldName, d.name))
       // Активная папка генерации — обновляем, если совпадает со старой
       const gen = useGenStore.getState()
@@ -185,7 +188,7 @@ export function GalleryView() {
       setRenameValue('')
       await load(true)
     } catch (err) {
-      toast.error('Не удалось переименовать папку', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Не удалось переименовать папку"), { description: err instanceof Error ? err.message : String(err) })
     }
   }, [renameValue, filter, load])
 
@@ -199,12 +202,12 @@ export function GalleryView() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      toast.success('Папка удалена')
+      toast.success(t("Папка удалена"))
       // (правка 495) Фильтр мог указывать на удалённую папку или её потомка.
       if (filter !== '__all__' && inFolder(filter, name) ) setFilter('__all__')
       await load(true)
     } catch (err) {
-      toast.error('Не удалось удалить папку', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Не удалось удалить папку"), { description: err instanceof Error ? err.message : String(err) })
     }
   }, [filter, load])
 
@@ -233,7 +236,7 @@ export function GalleryView() {
       toast.success(`Перемещено в «${targetFolder || 'Общая'}»`, { description: payload.filename })
       await load(true)
     } catch (err) {
-      toast.error('Не удалось переместить', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(t("Не удалось переместить"), { description: err instanceof Error ? err.message : String(err) })
     }
   }, [load])
 
@@ -283,7 +286,7 @@ export function GalleryView() {
                 if (e.key === 'Enter') void renameFolder(key)
                 if (e.key === 'Escape') setRenaming(null)
               }}
-              placeholder="Новое имя…"
+              placeholder={t("Новое имя…")}
               className="w-full min-w-0 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
               maxLength={60}
             />
@@ -291,7 +294,7 @@ export function GalleryView() {
               type="button"
               onClick={() => void renameFolder(key)}
               className="shrink-0 w-4 h-4 flex items-center justify-center text-emerald-400/80 hover:text-emerald-300"
-              title="Сохранить (Enter)"
+              title={t("Сохранить (Enter)")}
             >
               <CheckIcon className="w-3 h-3" />
             </button>
@@ -299,7 +302,7 @@ export function GalleryView() {
               type="button"
               onClick={() => setRenaming(null)}
               className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground/60 hover:text-foreground"
-              title="Отмена (Esc)"
+              title={t("Отмена (Esc)")}
             >
               <XIcon className="w-3 h-3" />
             </button>
@@ -317,7 +320,7 @@ export function GalleryView() {
             type="button"
             onClick={(e) => { e.stopPropagation(); startCreate(key) }}
             className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-violet-300 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Создать подпапку"
+            title={t("Создать подпапку")}
           >
             <FolderPlusIcon className="w-3 h-3" />
           </button>
@@ -331,7 +334,7 @@ export function GalleryView() {
               setRenameValue(label)
             }}
             className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-violet-300 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Переименовать папку"
+            title={t("Переименовать папку")}
           >
             <PencilIcon className="w-3 h-3" />
           </button>
@@ -341,7 +344,7 @@ export function GalleryView() {
             type="button"
             onClick={(e) => { e.stopPropagation(); void deleteFolder(key) }}
             className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Удалить папку (только пустую)"
+            title={t("Удалить папку (только пустую)")}
           >
             <Trash2Icon className="w-3 h-3" />
           </button>
@@ -362,16 +365,16 @@ export function GalleryView() {
                 <span className="w-9 h-9 rounded-xl gradient-creative flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/20">
                   <FilmIcon className="w-4.5 h-4.5 text-white" />
                 </span>
-                Галерея
+                {' '}{t("Галерея")}
               </h1>
               <p className="text-xs text-muted-foreground mt-1.5">
                 {filter === '__all__'
-                  ? 'Все видео из всех папок'
+                  ? t("Все видео из всех папок")
                   : filter === ''
-                    ? 'Общая папка (без проектов)'
+                    ? t("Общая папка (без проектов)")
                     : `Папка «${filter}» (включая подпапки)`}
                 {!loading && (
-                  <> · <span className="text-foreground/80 font-medium">{visibleFiles.length}</span> шт.</>
+                  <> · <span className="text-foreground/80 font-medium">{visibleFiles.length}</span> {' '}{t("шт.")}</>
                 )}
               </p>
             </div>
@@ -402,13 +405,13 @@ export function GalleryView() {
       {/* Right rail: folders (правка 91) */}
       <div className="w-56 border-l border-border flex flex-col bg-[var(--surface-0)]/60 shrink-0">
         <div className="p-3 border-b border-border flex items-center gap-2">
-          <span className="text-xs font-medium text-foreground flex-1">Папки</span>
+          <span className="text-xs font-medium text-foreground flex-1">{t("Папки")}</span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => startCreate(filter !== '__all__' ? filter : '')}
             className="h-7 gap-1 text-xs"
-            title="Создать папку проекта (внутри выбранной, если она выбрана)"
+            title={t("Создать папку проекта (внутри выбранной, если она выбрана)")}
           >
             <FolderPlusIcon className="w-3.5 h-3.5" />
           </Button>
@@ -419,7 +422,7 @@ export function GalleryView() {
           <div className="p-2 border-b border-border/60 space-y-1.5">
             {createParent && (
               <p className="text-[10px] text-muted-foreground/60 leading-snug">
-                Подпапка в «{createParent}»
+                {t("Подпапка в «")}{createParent}»
               </p>
             )}
             <input
@@ -430,16 +433,16 @@ export function GalleryView() {
                 if (e.key === 'Enter') void createFolder()
                 if (e.key === 'Escape') setCreating(false)
               }}
-              placeholder="Имя папки…"
+              placeholder={t("Имя папки…")}
               className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
               maxLength={120}
             />
             <div className="flex gap-1.5">
               <Button size="sm" onClick={() => void createFolder()} disabled={!newName.trim()} className="h-6 text-[10px] px-2 flex-1">
-                Создать
+                {t("Создать")}
               </Button>
               <Button variant="outline" size="sm" onClick={() => setCreating(false)} className="h-6 text-[10px] px-2">
-                Отмена
+                {t("Отмена")}
               </Button>
             </div>
           </div>
@@ -461,7 +464,7 @@ export function GalleryView() {
         </div>
 
         <p className="px-3 py-2 text-[10px] text-muted-foreground/50 border-t border-border/60 leading-snug">
-          Перетащите видео на папку, чтобы переместить его. «+» на строке папки создаёт подпапку; папку можно переименовать (карандаш) или удалить (крестик, только пустую). Папку можно выбрать и на вкладке «Генерация» — новые видео будут ложиться в неё.
+          {t("Перетащите видео на папку, чтобы переместить его. «+» на строке папки создаёт подпапку; папку можно переименовать (карандаш) или удалить (крестик, только пустую). Папку можно выбрать и на вкладке «Генерация» — новые видео будут ложиться в неё.")}
         </p>
       </div>
     </div>

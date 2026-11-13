@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { useGenStore } from '@/lib/gen-store'
 import { restoreFromMeta } from '@/lib/restore-from-meta'
 import { RefViewerDialog, RefViewerData } from './ref-viewer-dialog'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface MetaDialogProps {
   /** Relative path of the file (subfolder/filename). */
@@ -154,6 +155,8 @@ function ParamCell({ label, children }: { label: string; children: React.ReactNo
 }
 
 export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
+  const { t } = useTranslation() // (правка 955)
+
   const [data, setData] = useState<Record<string, MetaValue> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -354,14 +357,14 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
           {loading && (
             <div className="flex items-center justify-center py-8">
               <Loader2Icon className="w-5 h-5 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-sm text-muted-foreground">Загрузка метаданных…</span>
+              <span className="ml-2 text-sm text-muted-foreground">{t("Загрузка метаданных…")}</span>
             </div>
           )}
 
           {error && (
             <div className="text-center py-6">
               <p className="text-sm text-amber-400">{error}</p>
-              <p className="text-xs text-muted-foreground mt-1">Файл метаданных не найден или недоступен</p>
+              <p className="text-xs text-muted-foreground mt-1">{t("Файл метаданных не найден или недоступен")}</p>
             </div>
           )}
 
@@ -376,16 +379,16 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
               {isUpscaleMeta && (
                 <div className="space-y-1">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                    Результат апскейла
+                    {t("Результат апскейла")}
                   </p>
                   <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-[var(--surface-2)] p-3">
-                    <ParamCell label="Инструмент">
+                    <ParamCell label={t("Инструмент")}>
                       <span className="text-sm">{String(params?.tool)}</span>
                     </ParamCell>
-                    <ParamCell label="Разрешение">
+                    <ParamCell label={t("Разрешение")}>
                       {typeof params?.resolution === 'string' ? params.resolution : '—'}
                     </ParamCell>
-                    <ParamCell label="Длительность">
+                    <ParamCell label={t("Длительность")}>
                       {typeof params?.duration_seconds === 'number'
                         ? `${formatDuration(params.duration_seconds)} (${params.duration_seconds.toFixed(1)} с)`
                         : '—'}
@@ -393,22 +396,22 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                     <ParamCell label="FPS">
                       {typeof params?.fps === 'number' ? `${params.fps}` : '—'}
                     </ParamCell>
-                    <ParamCell label="Размер файла">
+                    <ParamCell label={t("Размер файла")}>
                       {typeof params?.file_size === 'number' ? formatSize(params.file_size) : '—'}
                     </ParamCell>
-                    <ParamCell label="Создано">
+                    <ParamCell label={t("Создано")}>
                       {formatCreatedAt(params?.created_at) ?? '—'}
                     </ParamCell>
                     {typeof params?.source_file === 'string' && params.source_file && (
                       <div className="col-span-2">
-                        <ParamCell label="Исходник">
+                        <ParamCell label={t("Исходник")}>
                           <span className="font-mono text-xs break-all">{params.source_file}</span>
                         </ParamCell>
                       </div>
                     )}
                     {typeof params?.upscale_feature === 'string' && (
                       <div className="col-span-2">
-                        <ParamCell label="Настройка DLSS">
+                        <ParamCell label={t("Настройка DLSS")}>
                           <span className="font-mono text-xs">{String(params.upscale_feature)}</span>
                         </ParamCell>
                       </div>
@@ -421,7 +424,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
               {prompt && (
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Промпт</p>
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("Промпт")}</p>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -433,16 +436,16 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                             store.setVideoSeed(params.seed)
                           }
                           window.dispatchEvent(new CustomEvent('h3:goto-generate'))
-                          toast.success('Промпт загружен в редактор', {
-                            description: 'Только промпт и seed. Для полного восстановления используйте «Повторить».',
+                          toast.success(t("Промпт загружен в редактор"), {
+                            description: t("Только промпт и seed. Для полного восстановления используйте «Повторить»."),
                           })
                           onClose()
                         }}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-colors"
-                        title="Загрузить промпт и seed в форму генерации"
+                        title={t("Загрузить промпт и seed в форму генерации")}
                       >
                         <ArrowDownToLineIcon className="w-3 h-3" />
-                        В редактор
+                        {' '}{t("В редактор")}
                       </button>
                       <button
                         type="button"
@@ -451,10 +454,10 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                           if (ok) onClose()
                         }}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-                        title="Восстановить ВСЕ параметры генерации (промпт, seed, референсы, сэмплеры, разрешение…)"
+                        title={t("Восстановить ВСЕ параметры генерации (промпт, seed, референсы, сэмплеры, разрешение…)")}
                       >
                         <RotateCcwIcon className="w-3 h-3" />
-                        Повторить
+                        {' '}{t("Повторить")}
                       </button>
                     </div>
                   </div>
@@ -469,15 +472,15 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                 {/* (правка 147) Режим генерации — первое в сетке, чтобы сразу
                     было видно, какой путь модели был задействован. */}
                 {modeLabel && (
-                  <ParamCell label="Режим">
+                  <ParamCell label={t("Режим")}>
                     <span className="text-sm text-cyan-300">{modeLabel}</span>
                   </ParamCell>
                 )}
                 <ParamCell label="Seed">
                   <span className="font-mono">{typeof params?.seed === 'number' ? params.seed : '—'}</span>
                 </ParamCell>
-                <ParamCell label="Разрешение">{params?.resolution != null ? String(params.resolution) : '—'}</ParamCell>
-                <ParamCell label="Длительность">
+                <ParamCell label={t("Разрешение")}>{params?.resolution != null ? String(params.resolution) : '—'}</ParamCell>
+                <ParamCell label={t("Длительность")}>
                   {durationSeconds != null
                     ? `${durationSeconds.toFixed(1)} c${videoLength != null ? ` · ${videoLength} кадр.` : ''}`
                     : videoLength != null && fps != null
@@ -490,37 +493,37 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                 {/* (правка 829) «Зациклено»: в mp4 ровно один цикл (pad —
                     клипов контекста с каждой стороны, views — видов сэмплинга). */}
                 {params?.loop === true && (
-                  <ParamCell label="Цикл">
+                  <ParamCell label={t("Цикл")}>
                     <span className="text-violet-300">
-                      бесшовный · pad {typeof params.loop_pad_clips === 'number' ? params.loop_pad_clips : 1}
+                      {t("бесшовный · pad")}{' '} {typeof params.loop_pad_clips === 'number' ? params.loop_pad_clips : 1}
                       {typeof params.loop_views === 'number' ? ` · views ${params.loop_views}` : ''}
                     </span>
                   </ParamCell>
                 )}
                 {/* (правка 69, 440) Сэмплер pass 2 — только если pass 2 был */}
                 {params?.pass2_sampler != null && pass2Ran && (
-                  <ParamCell label="Сэмплер (pass 2)">
+                  <ParamCell label={t("Сэмплер (pass 2)")}>
                     <span className="font-mono">{String(params.pass2_sampler)}</span>
                   </ParamCell>
                 )}
                 {/* (правка 70) Pass 1: сэмплер, планировщик */}
                 {params?.pass1_sampler != null && (
-                  <ParamCell label="Сэмплер (pass 1)">
+                  <ParamCell label={t("Сэмплер (pass 1)")}>
                     <span className="font-mono">{String(params.pass1_sampler)}</span>
                   </ParamCell>
                 )}
                 {params?.pass1_scheduler != null && (
-                  <ParamCell label="Планировщик (pass 1)">
+                  <ParamCell label={t("Планировщик (pass 1)")}>
                     <span className="font-mono">{String(params.pass1_scheduler)}</span>
                   </ParamCell>
                 )}
                 {params?.guidance_scale != null && (
                   <ParamCell label="Guidance">{String(params.guidance_scale)}</ParamCell>
                 )}
-                <ParamCell label="Дата">
+                <ParamCell label={t("Дата")}>
                   {formatCreatedAt(data.created_at) ?? '—'}
                 </ParamCell>
-                <ParamCell label="Время генерации">
+                <ParamCell label={t("Время генерации")}>
                   {typeof data.generation_time === 'number' && data.generation_time > 0
                     ? formatDuration(data.generation_time)
                     : '—'}
@@ -531,17 +534,17 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                   с референсами (это то, что реально шло в генерацию). */}
               {(firstFrame || lastFrame) && (
                 <div className="space-y-1.5">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Кадры (fl2va)</p>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("Кадры (fl2va)")}</p>
                   {firstFrame && (
                     <div className="flex items-center gap-2 rounded-md bg-[var(--surface-2)] border border-border px-2 py-1.5">
                       <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                      <span className="text-xs text-foreground/90 truncate flex-1" title={firstFrame}>Первый кадр: {basename(firstFrame)}</span>
+                      <span className="text-xs text-foreground/90 truncate flex-1" title={firstFrame}>{t("Первый кадр:")}{' '} {basename(firstFrame)}</span>
                     </div>
                   )}
                   {lastFrame && (
                     <div className="flex items-center gap-2 rounded-md bg-[var(--surface-2)] border border-border px-2 py-1.5">
                       <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                      <span className="text-xs text-foreground/90 truncate flex-1" title={lastFrame}>Последний кадр: {basename(lastFrame)}</span>
+                      <span className="text-xs text-foreground/90 truncate flex-1" title={lastFrame}>{t("Последний кадр:")}{' '} {basename(lastFrame)}</span>
                     </div>
                   )}
                 </div>
@@ -551,7 +554,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
               {references.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                    Референсы ({references.length})
+                    {t("Референсы (")}{references.length})
                   </p>
                   {references.map((r, i) => (
                     <RefRow
@@ -569,7 +572,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                   ))}
                   {params?.minimax_h3_reference_detail != null && (
                     <p className="text-[10px] text-muted-foreground">
-                      Детализация:{' '}
+                      {t("Детализация:")}{' '}
                       {DETAIL_LABELS[String(params.minimax_h3_reference_detail)] ??
                         String(params.minimax_h3_reference_detail)}
                     </p>
@@ -581,7 +584,7 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
               {restJson && (
                 <details className="text-xs">
                   <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                    Ещё (остальные поля)
+                    {t("Ещё (остальные поля)")}
                   </summary>
                   <pre className="mt-1.5 p-2 rounded bg-[var(--surface-2)] border border-border overflow-auto max-h-48">
                     {restJson}

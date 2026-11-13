@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ─── Types ─── */
 
@@ -81,6 +82,8 @@ function selectedLlmFamily(llmModel: string): 'gemma' | 'qwen' | 'bonsai' {
 /* ─── Component ─── */
 
 export function ModelsPanel() {
+  const { t } = useTranslation() // (правка 955)
+
   const [models, setModels] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState<string | null>(null)
@@ -169,13 +172,13 @@ export function ModelsPanel() {
       })
       const data = await res.json()
       if (!data.ok) {
-        toast.error('Не удалось начать скачивание', { description: data.error })
+        toast.error(t("Не удалось начать скачивание"), { description: data.error })
       } else {
-        toast.info('Скачивание начато', { description: 'Отслеживайте прогресс ниже' })
+        toast.info(t("Скачивание начато"), { description: t("Отслеживайте прогресс ниже") })
         setTimeout(() => void fetchStatus(), 500)
       }
     } catch {
-      toast.error('Ошибка сети при запуске скачивания')
+      toast.error(t("Ошибка сети при запуске скачивания"))
     } finally {
       setStarting(null)
     }
@@ -205,10 +208,10 @@ export function ModelsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelId }),
       })
-      toast.info('Скачивание отменено')
+      toast.info(t("Скачивание отменено"))
       setTimeout(() => void fetchStatus(), 300)
     } catch {
-      toast.error('Не удалось отменить скачивание')
+      toast.error(t("Не удалось отменить скачивание"))
     }
   }, [fetchStatus])
 
@@ -226,13 +229,13 @@ export function ModelsPanel() {
         body: JSON.stringify({ modelId: model.id }),
       })
       if (res.ok) {
-        toast.success('Модель удалена с диска')
+        toast.success(t("Модель удалена с диска"))
       } else {
         const d = await res.json().catch(() => ({}))
-        toast.error('Не удалось удалить модель', { description: d.error || `HTTP ${res.status}` })
+        toast.error(t("Не удалось удалить модель"), { description: d.error || `HTTP ${res.status}` })
       }
     } catch {
-      toast.error('Не удалось удалить модель')
+      toast.error(t("Не удалось удалить модель"))
     } finally {
       setDeletingId(null)
       setTimeout(() => void fetchStatus(), 300)
@@ -261,7 +264,7 @@ export function ModelsPanel() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <PackageIcon className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-medium">Модели</span>
+          <span className="text-sm font-medium">{t("Модели")}</span>
           <span className={cn(
             'text-xs px-1.5 py-0.5 rounded',
             allReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400',
@@ -287,7 +290,7 @@ export function ModelsPanel() {
               disabled={!!starting}
             >
               <DownloadIcon className="w-3 h-3" />
-              Скачать все
+              {' '}{t("Скачать все")}
             </Button>
           )}
         </div>
@@ -298,7 +301,7 @@ export function ModelsPanel() {
         <div className="flex items-center gap-2 px-1 pt-1">
           <CpuIcon className="w-3.5 h-3.5 text-cyan-500/70" />
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Minimax H3 (генерация)
+            {t("Minimax H3 (генерация)")}
           </span>
         </div>
         {h3Models.map(model => (
@@ -320,7 +323,7 @@ export function ModelsPanel() {
           <div className="flex items-center gap-2 px-1 pt-1">
             <GaugeIcon className="w-3.5 h-3.5 text-cyan-500/70" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              FPS (вставка кадров)
+              {t("FPS (вставка кадров)")}
             </span>
           </div>
           {fpsModels.map(model => (
@@ -343,7 +346,7 @@ export function ModelsPanel() {
           <div className="flex items-center gap-2 px-1 pt-1">
             <BotIcon className="w-3.5 h-3.5 text-violet-500/70" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              LLM ассистент
+              {t("LLM ассистент")}
             </span>
           </div>
           {llmModels.map(model => (
@@ -380,6 +383,8 @@ function ModelRow({
   starting: boolean
   deleting?: boolean
 }) {
+  const { t } = useTranslation() // (правка 955)
+
   const progress = model.totalBytes
     ? Math.min(100, ((model.bytesReceived || 0) / model.totalBytes) * 100)
     : null
@@ -409,7 +414,7 @@ function ModelRow({
               эта модель не входит в счётчик и «Скачать все» её не качает. */}
           {model.optional && (
             <span className="shrink-0 px-1 py-px rounded text-[9px] border border-border/60 text-muted-foreground/80">
-              опционально
+              {t("опционально")}
             </span>
           )}
         </div>
@@ -451,7 +456,7 @@ function ModelRow({
           onClick={onDownload}
           disabled={starting}
         >
-          {starting ? <Loader2Icon className="w-3 h-3 animate-spin" /> : 'Скачать'}
+          {starting ? <Loader2Icon className="w-3 h-3 animate-spin" /> : t("Скачать")}
         </Button>
       )}
       {model.status === 'downloading' && onCancel && (
@@ -473,7 +478,7 @@ function ModelRow({
           className="h-7 text-xs shrink-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
           onClick={onDelete}
           disabled={deleting}
-          title="Удалить файлы модели с диска"
+          title={t("Удалить файлы модели с диска")}
         >
           {deleting ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <Trash2Icon className="w-3.5 h-3.5" />}
         </Button>

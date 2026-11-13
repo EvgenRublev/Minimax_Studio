@@ -37,6 +37,22 @@ export function isDataUse(node) {
   return false
 }
 
+/** В файле есть локальная переменная с именем `t` (например таймлайн: map((t) => …)).
+ * Тогда переводчику нужно другое имя, иначе вызов t("…) разобьется на t("…") как вызов числа. */
+export function hasTBinding(sf) {
+  let clash = false
+  const visit = (n) => {
+    if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n)) && n.name && n.name.getText() === 't') {
+      const init = ts.isVariableDeclaration(n) ? (n.initializer?.getText() ?? '') : (ts.isBindingElement(n) ? (n.parent?.parent?.getText?.() ?? '') : '')
+      if (!init.includes('useTranslation')) clash = true
+    }
+    if (ts.isShorthandPropertyAssignment(n) && n.name.text === 't') clash = true
+    if (!clash) ts.forEachChild(n, visit)
+  }
+  ts.forEachChild(sf, visit)
+  return clash
+}
+
 /** Показной ли текст в этой позиции: JSX-атрибут, свойство label/title, toast(), JSX-выражение, label-объект. */
 export function isDisplayPosition(node, depth = 0) {
   const p = node.parent
@@ -75,12 +91,16 @@ export function isDisplayPosition(node, depth = 0) {
   return false
 }
 
-/** Ближайшая ИМЕНОВАННАЯ функция + признак «это React-компонент» (имя с заглавной).
- * Анонимные стрелки (обработчики внутри компонента) не считаем: их накрывает хук
- * внешней функции, иначе в файл попадает лишний (и неиспользуемый) импорт t. */
+/** Хост для перевода: внешняя ИМЕНОВАННАЯ функция, в которую ставим хук (или
+ * которая должна получить импорт t). Анонимные стрелки внутри компонента
+ * накрываются хуком компонента — иначе в файле появляется неиспользуемый импорт.
+ *
+ * isComponent=true → хосту нужен `const { t } = useTranslation()`;
+ * isComponent=false → хосту нужен импорт t из '@/lib/i18n' (модульная функция,
+ * стор, хук: перевод берётся в момент вызова, это корректно для тостов/статусов). */
 export function enclosingFunction(node) {
+  const fns = []
   let p = node.parent
-  let named = null
   while (p) {
     if (ts.isArrowFunction(p) || ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isMethodDeclaration(p)) {
       let name = ''
@@ -90,10 +110,23 @@ export function enclosingFunction(node) {
         const vd = p.parent
         if (vd && ts.isVariableDeclaration(vd) && ts.isIdentifier(vd.name)) name = vd.name.text
       }
-      if (name) { named = { fn: p, name, isComponent: /^[A-Z]/.test(name) }; break }
+      fns.push({ fn: p, name })
     }
-    if (ts.isSourceFile(p)) return null
+    if (ts.isSourceFile(p)) break
     p = p.parent
   }
-  return named
+  if (!fns.length) return null
+  const named = fns.filter((f) => f.name)
+  if (!named.length) return null
+  const innermost = named[named.length - 1]
+  const hasOuterFn = fns.length > (fns.indexOf(innermost) + 1)
+  if (!hasOuterFn) return { fn: innermost.fn, name: innermost.name, isComponent: /^[A-Z]/.test(innermost.name) }
+  // вложенная: ищем самый внешний компонент — хук ставим ему
+  const outer = named[0]
+  const anyComponent = named.some((f) => /^[A-Z]/.test(f.name))
+  if (anyComponent) {
+    const host = named.find((f) => /^[A-Z]/.test(f.name))
+    return { fn: host.fn, name: host.name, isComponent: true }
+  }
+  return { fn: outer.fn, name: outer.name, isComponent: false }
 }

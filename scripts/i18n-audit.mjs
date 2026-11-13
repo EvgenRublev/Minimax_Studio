@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url)
 const ts = require('typescript')
 const { CY } = { CY: /[А-Яа-яЁё]/ }
 
-const AREAS = ['common', 'settings', 'views', 'api']
+const AREAS = fs.readdirSync(path.join('src/lib/i18n/messages/en')).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5))
 const catalog = {}
 for (const a of AREAS) {
   Object.assign(catalog, JSON.parse(fs.readFileSync(path.join('src/lib/i18n/messages/en', `${a}.json`), 'utf8')))
@@ -52,6 +52,13 @@ for (const f of files) {
 }
 
 const missing = [...codeKeys.keys()].filter((k) => CY.test(k) && !(k in catalog))
+if (process.argv.includes('--dump')) {
+  const stub = {}
+  for (const k of missing.sort((a, b) => a.localeCompare(b, 'ru'))) stub[k] = ''
+  fs.mkdirSync('scratchpad', { recursive: true })
+  fs.writeFileSync('scratchpad/i18n-missing.json', JSON.stringify(stub, null, 2), 'utf8')
+  console.log(`ключей в scratchpad/i18n-missing.json: ${missing.length}`)
+}
 const unused = Object.keys(catalog).filter((k) => !used.has(k))
 
 // --- 1) сколько показных строк ещё НЕ обёрнуто в t() (progress-метрика) ---
@@ -79,7 +86,7 @@ checks.push(['en: перевод из каталога', (() => { const k = Obje
 checks.push(['en: пропущенный ключ не пустой', i18n.t('Нет такой записи', { lng: 'en' }) === 'Нет такой записи'])
 checks.push(['подстановка {{p1}}', i18n.t('В очереди {{p1}} задач', { lng: 'ru', p1: 3 }) === 'В очереди 3 задач'])
 
-console.log(`Каталог en: записей ${Object.keys(catalog).length}; ключей в коде: ${codeKeys.size}`)
+console.log(`KEYS_IN_CODE=${codeKeys.size} CATALOG=${Object.keys(catalog).length} MISSING=${missing.length} UNUSED=${unused.length} UNWRAPPED=${leftTotal} FILES_WITH_LEFT=${perFile.length}`)
 console.log(`\n1) ПОКАЗНЫХ СТРОК БЕЗ t(): ${leftTotal}`)
 for (const [f, n] of perFile.slice(0, 25)) console.log(`   ${String(n).padStart(4)}  ${f}`)
 console.log(`\n2) НЕПЕРЕВЕДЕНО (ключ есть в коде, нет в каталоге): ${missing.length}`)

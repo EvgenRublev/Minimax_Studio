@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { ScissorsIcon, PlayIcon, PauseIcon, CheckIcon, Loader2Icon } from 'lucide-react'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store' // (правка 474)
 import type { VideoGalleryFile } from './video-gallery-grid'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface VideoTrimDialogProps {
   file: VideoGalleryFile | null
@@ -38,6 +39,8 @@ function fmt(sec: number): string {
 }
 
 export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimDialogProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const [duration, setDuration] = useState(0)
   const [current, setCurrent] = useState(0)
@@ -147,7 +150,7 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
   const handleSave = useCallback(async () => {
     if (!file || saving) return
     if (trimStart >= trimEnd - 0.1) {
-      toast.error('Диапазон слишком короткий')
+      toast.error(tt("Диапазон слишком короткий"))
       return
     }
     setSaving(true)
@@ -174,7 +177,7 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
       onOpenChange(false)
       onDone?.()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Ошибка')
+      toast.error(err instanceof Error ? err.message : tt("Ошибка"))
     } finally {
       setSaving(false)
     }
@@ -194,10 +197,10 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <ScissorsIcon className="w-4 h-4 text-cyan-400" />
-            Обрезка видео
+            {' '}{tt("Обрезка видео")}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Перетащите маркеры на таймлайне, чтобы выбрать диапазон. Кнопка ▶ проигрывает только выбранный фрагмент.
+            {tt("Перетащите маркеры на таймлайне, чтобы выбрать диапазон. Кнопка ▶ проигрывает только выбранный фрагмент.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -268,13 +271,13 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
             className="h-8 px-3 gap-1.5 text-xs"
           >
             {playing ? <PauseIcon className="w-3.5 h-3.5" /> : <PlayIcon className="w-3.5 h-3.5" />}
-            {playing ? 'Пауза' : 'Превью'}
+            {playing ? tt("Пауза") : tt("Превью")}
           </Button>
 
           <div className="flex-1" />
 
           <span className="text-[10px] text-muted-foreground">
-            Фрагмент: <span className="text-foreground font-medium">{selectedDuration.toFixed(1)} с</span>
+            {tt("Фрагмент:")}{' '} <span className="text-foreground font-medium">{selectedDuration.toFixed(1)} {' '}{tt("с")}</span>
           </span>
 
           <Button
@@ -288,7 +291,7 @@ export function VideoTrimDialog({ file, open, onOpenChange, onDone }: VideoTrimD
             ) : (
               <CheckIcon className="w-3.5 h-3.5" />
             )}
-            {saving ? 'Сохранение…' : 'Обрезать и сохранить'}
+            {saving ? tt("Сохранение…") : tt("Обрезать и сохранить")}
           </Button>
         </div>
       </DialogContent>

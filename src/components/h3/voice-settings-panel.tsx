@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/select'
 import { VoiceInputButton } from './voice-input-button'
 import { setSttMicDevice, getSttMicDevice } from '@/lib/use-voice-dictation'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface SttStatusResp {
   enabled: boolean
@@ -73,6 +74,8 @@ const MODEL_CATALOG: Array<{ name: string; file: string; sizeLabel: string; qual
 ]
 
 export function VoiceSettingsPanel() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [st, setSt] = useState<SttStatusResp | null>(null)
   const [enabled, setEnabled] = useState(true)
   const [model, setModel] = useState('')
@@ -246,7 +249,7 @@ export function VoiceSettingsPanel() {
       setProg(name, { name, downloaded: 0, total: 0, done: false, error: null, cancelled: false })
       ensurePolling()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Ошибка скачивания')
+      toast.error(err instanceof Error ? err.message : tt("Ошибка скачивания"))
     }
   }
 
@@ -290,7 +293,7 @@ export function VoiceSettingsPanel() {
         toast.error(msg)
         return
       }
-      toast.success('Настройки голосового ввода сохранены')
+      toast.success(tt("Настройки голосового ввода сохранены"))
       // Restart STT service with new params
       const rr = await fetch('/api/stt/reload', {
         method: 'POST',
@@ -299,7 +302,7 @@ export function VoiceSettingsPanel() {
       })
       const rd = await rr.json()
       if (rr.ok && rd.ok) {
-        toast.success('STT-сервис запущен и готов', {
+        toast.success(tt("STT-сервис запущен и готов"), {
           description: rd.model ? `Модель: ${String(rd.model).split(/[\\/]/).pop()}` : undefined,
         })
       } else if (enabled) {
@@ -307,7 +310,7 @@ export function VoiceSettingsPanel() {
       }
       await refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Ошибка сохранения')
+      toast.error(err instanceof Error ? err.message : tt("Ошибка сохранения"))
     } finally {
       setSaving(false)
     }
@@ -316,7 +319,7 @@ export function VoiceSettingsPanel() {
   const stopService = async () => {
     const r = await fetch('/api/stt/stop', { method: 'POST' })
     const d = await r.json().catch(() => ({}))
-    if (d.ok !== false) toast.success('STT-сервис остановлен (память освобождена)')
+    if (d.ok !== false) toast.success(tt("STT-сервис остановлен (память освобождена)"))
     await refresh()
   }
 
@@ -324,7 +327,7 @@ export function VoiceSettingsPanel() {
     return (
       <div className="py-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
-        Загрузка настроек голосового ввода…
+        {' '}{tt("Загрузка настроек голосового ввода…")}
       </div>
     )
   }
@@ -337,9 +340,9 @@ export function VoiceSettingsPanel() {
       {/* Вкл/выкл */}
       <div className="flex items-center justify-between">
         <div>
-          <span className="text-sm font-medium text-foreground">Голосовой ввод</span>
+          <span className="text-sm font-medium text-foreground">{tt("Голосовой ввод")}</span>
           <p className="text-[10px] text-muted-foreground/60">
-            Кнопка диктата у поля промпта, в редакторе промпта и в чате ассистента. Работает на CPU (whisper / transcribe.cpp).
+            {tt("Кнопка диктата у поля промпта, в редакторе промпта и в чате ассистента. Работает на CPU (whisper / transcribe.cpp).")}
           </p>
         </div>
         <button
@@ -364,9 +367,9 @@ export function VoiceSettingsPanel() {
       {/* Скачивание моделей */}
       <div className="pt-3 border-t border-border space-y-2">
         <div>
-          <span className="text-xs text-muted-foreground">Модели распознавания</span>
+          <span className="text-xs text-muted-foreground">{tt("Модели распознавания")}</span>
           <p className="text-[10px] text-muted-foreground/60">
-            Скачайте модель нужного качества. Для русского языка рекомендуется <span className="font-mono">small</span> или <span className="font-mono">medium</span>.
+            {tt("Скачайте модель нужного качества. Для русского языка рекомендуется")}{' '} <span className="font-mono">small</span> {' '}{tt("или")}{' '} <span className="font-mono">medium</span>.
           </p>
         </div>
         <div className="space-y-1.5">
@@ -385,7 +388,7 @@ export function VoiceSettingsPanel() {
                 {downloaded ? (
                   <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px] shrink-0">
                     <CheckCircleIcon className="w-3 h-3" />
-                    Скачана
+                    {' '}{tt("Скачана")}
                   </Badge>
                 ) : isActive ? (
                   <div className="flex items-center gap-2 shrink-0">
@@ -400,7 +403,7 @@ export function VoiceSettingsPanel() {
                       type="button"
                       onClick={() => cancelDownload(m.name)}
                       className="p-1 rounded hover:bg-red-500/20 text-red-400"
-                      title="Отменить скачивание"
+                      title={tt("Отменить скачивание")}
                     >
                       <XIcon className="w-3.5 h-3.5" />
                     </button>
@@ -413,7 +416,7 @@ export function VoiceSettingsPanel() {
                     onClick={() => { void startDownload(m.name) }}
                   >
                     <DownloadIcon className="w-3.5 h-3.5" />
-                    Скачать
+                    {' '}{tt("Скачать")}
                   </Button>
                 )}
               </div>
@@ -425,17 +428,17 @@ export function VoiceSettingsPanel() {
       {/* Модель (выбор из скачанных) */}
       <div className="pt-3 border-t border-border space-y-2">
         <div>
-          <span className="text-xs text-muted-foreground">Активная модель</span>
+          <span className="text-xs text-muted-foreground">{tt("Активная модель")}</span>
           <p className="text-[10px] text-muted-foreground/60">
-            Какая модель будет использоваться для распознавания. Пусто = автоматически (первая найденная).
+            {tt("Какая модель будет использоваться для распознавания. Пусто = автоматически (первая найденная).")}
           </p>
         </div>
         <Select value={model || '__auto__'} onValueChange={(v) => setModel(v === '__auto__' ? '' : v)}>
           <SelectTrigger className="h-8 w-full text-xs">
-            <SelectValue placeholder="Выберите модель" />
+            <SelectValue placeholder={tt("Выберите модель")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__auto__">Автоматически (первая доступная)</SelectItem>
+            <SelectItem value="__auto__">{tt("Автоматически (первая доступная)")}</SelectItem>
             {st?.models.map((m) => (
               <SelectItem key={m} value={m}>{m}</SelectItem>
             ))}
@@ -445,7 +448,7 @@ export function VoiceSettingsPanel() {
           <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
             <AlertCircleIcon className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
             <p className="text-xs text-amber-200/90 leading-snug">
-              Модели пока нет. Скачайте модель выше (рекомендуется <span className="font-mono">small</span> для русского языка) — и она появится в списке.
+              {tt("Модели пока нет. Скачайте модель выше (рекомендуется")}{' '} <span className="font-mono">small</span> {' '}{tt("для русского языка) — и она появится в списке.")}
             </p>
           </div>
         )}
@@ -455,9 +458,9 @@ export function VoiceSettingsPanel() {
       <div className="pt-3 border-t border-border space-y-2">
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-xs text-muted-foreground">Микрофон</span>
+            <span className="text-xs text-muted-foreground">{tt("Микрофон")}</span>
             <p className="text-[10px] text-muted-foreground/60">
-              Если на компьютере несколько устройств ввода — выберите нужный здесь.
+              {tt("Если на компьютере несколько устройств ввода — выберите нужный здесь.")}
             </p>
           </div>
           <button
@@ -465,7 +468,7 @@ export function VoiceSettingsPanel() {
             onClick={() => { void refreshMics() }}
             disabled={micLoading}
             className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground transition-colors"
-            title="Обновить список микрофонов"
+            title={tt("Обновить список микрофонов")}
           >
             <RefreshCwIcon className={cn('w-3.5 h-3.5', micLoading && 'animate-spin')} />
           </button>
@@ -477,7 +480,7 @@ export function VoiceSettingsPanel() {
               <SelectValue placeholder={micLoading ? 'Загрузка…' : 'Системный (по умолчанию)'} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">Системный (по умолчанию)</SelectItem>
+              <SelectItem value="__default__">{tt("Системный (по умолчанию)")}</SelectItem>
               {micDevices.map((d) => (
                 <SelectItem key={d.deviceId} value={d.deviceId}>
                   {d.label || `Микрофон ${micDevices.indexOf(d) + 1}`}
@@ -491,26 +494,26 @@ export function VoiceSettingsPanel() {
       {/* Язык + потоки */}
       <div className="pt-3 border-t border-border grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">Язык речи</span>
+          <span className="text-xs text-muted-foreground">{tt("Язык речи")}</span>
           <Select value={language} onValueChange={setLanguage}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ru">Русский</SelectItem>
-              <SelectItem value="en">Английский</SelectItem>
-              <SelectItem value="auto">Автоопределение</SelectItem>
+              <SelectItem value="ru">{tt("Русский")}</SelectItem>
+              <SelectItem value="en">{tt("Английский")}</SelectItem>
+              <SelectItem value="auto">{tt("Автоопределение")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">Потоки CPU</span>
+          <span className="text-xs text-muted-foreground">{tt("Потоки CPU")}</span>
           <Select value={String(threads)} onValueChange={(v) => setThreads(parseInt(v, 10))}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="0">Авто (по ядрам)</SelectItem>
+              <SelectItem value="0">{tt("Авто (по ядрам)")}</SelectItem>
               <SelectItem value="2">2</SelectItem>
               <SelectItem value="4">4</SelectItem>
               <SelectItem value="6">6</SelectItem>
@@ -525,30 +528,30 @@ export function VoiceSettingsPanel() {
       <div className="pt-3 border-t border-border space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">STT-сервис:</span>
+            <span className="text-xs text-muted-foreground">{tt("STT-сервис:")}</span>
             {service?.starting ? (
               <Badge variant="secondary" className="gap-1 text-[10px]">
                 <Loader2Icon className="w-3 h-3 animate-spin" />
-                Загрузка…
+                {' '}{tt("Загрузка…")}
               </Badge>
             ) : service?.running ? (
               <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px]">
                 <CheckCircleIcon className="w-3 h-3" />
-                Работает
+                {' '}{tt("Работает")}
               </Badge>
             ) : st?.runtimeFound === false ? (
               /* (правка 743) Рантайма нет — «запустится при первом диктанте»
                  было неправдой: сервер не сможет стартовать вообще. */
               <Badge className="bg-red-500/15 text-red-300 border-red-500/30 text-[10px]">
-                Недоступен: нет transcribe.dll
+                {tt("Недоступен: нет transcribe.dll")}
               </Badge>
             ) : (st?.models?.length ?? 0) === 0 ? (
               <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
-                Недоступен: нет модели распознавания
+                {tt("Недоступен: нет модели распознавания")}
               </Badge>
             ) : (
               <Badge variant="secondary" className="text-[10px]">
-                Остановлен (запустится при первом диктанте)
+                {tt("Остановлен (запустится при первом диктанте)")}
               </Badge>
             )}
           </div>
@@ -556,14 +559,14 @@ export function VoiceSettingsPanel() {
             {service?.running && (
               <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={stopService}>
                 <PowerIcon className="w-3 h-3" />
-                Остановить
+                {' '}{tt("Остановить")}
               </Button>
             )}
           </div>
         </div>
         {st?.health && (
           <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
-            {String(st.health.model ?? '')} · язык: {String(st.health.language ?? '')} · потоки: {String(st.health.threads ?? '')}
+            {String(st.health.model ?? '')} {' '}{tt("· язык:")}{' '} {String(st.health.language ?? '')} {' '}{tt("· потоки:")}{' '} {String(st.health.threads ?? '')}
             {st.health.version ? ` · ${String(st.health.version)}` : ''}
           </p>
         )}
@@ -573,9 +576,7 @@ export function VoiceSettingsPanel() {
           <p className="text-xs text-amber-300/90 flex items-start gap-1.5">
             <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
-              Папка <code className="font-mono">stt/</code> с рантаймом
-              (transcribe.dll и соседние DLL) не входит в поставку — скопируйте
-              её целиком с рабочей машины рядом с <code className="font-mono">start.bat</code>.
+              {tt("Папка")}{' '} <code className="font-mono">stt/</code> {' '}{tt("с рантаймом (transcribe.dll и соседние DLL) не входит в поставку — скопируйте её целиком с рабочей машины рядом с")}{' '} <code className="font-mono">start.bat</code>.
             </span>
           </p>
         )}
@@ -590,7 +591,7 @@ export function VoiceSettingsPanel() {
       {/* Тест */}
       <div className="pt-3 border-t border-border space-y-2">
         <span className="text-xs text-muted-foreground">
-          Тест: нажмите кнопку, скажите фразу и нажмите её снова — текст появится ниже
+          {tt("Тест: нажмите кнопку, скажите фразу и нажмите её снова — текст появится ниже")}
         </span>
         <div className="flex items-center gap-2">
           <VoiceInputButton
@@ -599,7 +600,7 @@ export function VoiceSettingsPanel() {
             disabled={!enabled}
           />
           <span className="text-[10px] text-muted-foreground/60">
-            {enabled ? 'Голосовой ввод включён' : 'Голосовой ввод выключен — включите его выше'}
+            {enabled ? tt("Голосовой ввод включён") : tt("Голосовой ввод выключен — включите его выше")}
           </span>
         </div>
         {testText && (
@@ -613,11 +614,11 @@ export function VoiceSettingsPanel() {
       <div className="pt-3 border-t border-border flex items-center justify-end gap-2">
         <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => { void refresh() }} disabled={saving}>
           <RefreshCwIcon className="w-3.5 h-3.5" />
-          Обновить
+          {' '}{tt("Обновить")}
         </Button>
         <Button size="sm" className="gap-1.5 text-xs bg-cyan-600 hover:bg-cyan-500" onClick={() => { void save() }} disabled={saving}>
           {saving ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlayIcon className="w-3.5 h-3.5" />}
-          Сохранить и применить
+          {' '}{tt("Сохранить и применить")}
         </Button>
       </div>
     </div>

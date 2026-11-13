@@ -89,6 +89,7 @@ import { dispersionCoeffs, dispersionMaxShift } from '@/lib/montage-dispersion' 
 import { collectGrainOverlays } from '@/lib/montage-grain' // (правка 910)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /** Один шот монтажной последовательности (порядок = позиция в списке) */
 type MontageShot = {
@@ -856,6 +857,8 @@ function makeStrip(url: string, r: { start: number; end: number }, w: number, h:
 }
 
 export function MontageView() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const { files, folders, loading } = useVideoGallery()
   const { bump } = useGalleryRefresh.getState()
 
@@ -4159,9 +4162,9 @@ export function MontageView() {
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#A78BFA]/15 text-[#A78BFA] ring-1 ring-[#A78BFA]/25">
             <ScissorsIcon className="h-3.5 w-3.5 shrink-0" />
           </div>
-          <h2 className="text-sm font-semibold text-foreground">Монтаж</h2>
+          <h2 className="text-sm font-semibold text-foreground">{tt("Монтаж")}</h2>
           <Badge variant="secondary" className="font-mono text-[11px] font-normal tabular-nums text-muted-foreground">
-            {shots.length} шот{shots.length === 1 ? '' : shots.length >= 2 && shots.length <= 4 ? 'а' : 'ов'} · ≈ {tlEnd.toFixed(1)} с
+            {shots.length} {' '}{tt("шот")}{shots.length === 1 ? '' : shots.length >= 2 && shots.length <= 4 ? tt("а") : tt("ов")} · ≈ {tlEnd.toFixed(1)} {' '}{tt("с")}
           </Badge>
           <div className="ml-auto flex items-center gap-2">
             {/* (правка 853) настройки секвенции — как проект/секвенция в Premiere */}
@@ -4174,10 +4177,10 @@ export function MontageView() {
                     : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
                 )}
                 onClick={() => setSeqOpen((v) => !v)}
-                title="Настройки секвенции: разрешение, частота кадров, вписывание, качество"
+                title={tt("Настройки секвенции: разрешение, частота кадров, вписывание, качество")}
               >
                 <ClapperboardIcon className="h-3.5 w-3.5 text-[#A78BFA]" />
-                <span>{seqSet.w && seqSet.h ? `${seqSet.w}×${seqSet.h}` : 'Авто'}</span>
+                <span>{seqSet.w && seqSet.h ? `${seqSet.w}×${seqSet.h}` : tt("Авто")}</span>
                 <span className="text-muted-foreground">· {seqSet.fps ? `${seqSet.fps} fps` : '24 fps'}</span>
               </button>
               {seqOpen && (
@@ -4186,7 +4189,7 @@ export function MontageView() {
                   <div className="fixed inset-0 z-30" onClick={() => setSeqOpen(false)} />
                   <div className="absolute right-0 top-full z-40 mt-1.5 w-64 space-y-2.5 rounded-xl border border-border bg-popover p-3 text-xs text-popover-foreground shadow-2xl">
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Размер кадра</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{tt("Размер кадра")}</div>
                       <div className="space-y-0.5">
                         {SEQ_SIZES.map((s) => {
                           const active = seqSet.w === s.w && seqSet.h === s.h
@@ -4209,7 +4212,7 @@ export function MontageView() {
                       </div>
                     </div>
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Частота кадров</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{tt("Частота кадров")}</div>
                       <div className="grid grid-cols-4 gap-1">
                         {[0, 24, 30, 60].map((f) => {
                           const active = seqSet.fps === f
@@ -4224,14 +4227,14 @@ export function MontageView() {
                               )}
                               onClick={() => setSeqSet((q) => ({ ...q, fps: f }))}
                             >
-                              {f === 0 ? 'Авто (24)' : `${f}`}
+                              {f === 0 ? tt("Авто (24)") : `${f}`}
                             </button>
                           )
                         })}
                       </div>
                     </div>
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Вписывание клипов</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{tt("Вписывание клипов")}</div>
                       <div className="space-y-0.5">
                         {([
                           ['stretch', 'Растянуть по кадру'],
@@ -4259,7 +4262,7 @@ export function MontageView() {
                       </div>
                     </div>
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Качество кодирования</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{tt("Качество кодирования")}</div>
                       <div className="space-y-0.5">
                         {([
                           ['high', 'Высокое (CRF 18)'],
@@ -4288,7 +4291,7 @@ export function MontageView() {
                     {/* (правка 882) кодировщик результата: NVENC быстрее libx264 в разы,
                         но требует видеокарту NVIDIA; auto сам определит и откатится на CPU */}
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Кодирование</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{tt("Кодирование")}</div>
                       <div className="space-y-0.5">
                         {([
                           ['auto', 'Авто (видеокарта, если есть)'],
@@ -4331,7 +4334,7 @@ export function MontageView() {
                 <button
                   className="ml-1 rounded p-0.5 text-muted-foreground transition-colors hover:bg-[var(--surface-2)] hover:text-foreground"
                   onClick={copyResult}
-                  title="Скопировать ссылку на готовый файл"
+                  title={tt("Скопировать ссылку на готовый файл")}
                 >
                   <LinkIcon className="h-3.5 w-3.5" />
                 </button>
@@ -4346,12 +4349,12 @@ export function MontageView() {
               {rendering ? (
                 <>
                   <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
-                  <span>Сборка…{renderPct != null ? ` ${renderPct}%` : ''}</span>
+                  <span>{tt("Сборка…")}{renderPct != null ? ` ${renderPct}%` : ''}</span>
                 </>
               ) : (
                 <>
                   <FilmIcon className="h-3.5 w-3.5" />
-                  <span>Собрать ({shots.length})</span>
+                  <span>{tt("Собрать (")}{shots.length})</span>
                 </>
               )}
             </Button>
@@ -4564,13 +4567,13 @@ export function MontageView() {
               <div className="text-center">
                 <div className="text-xs font-medium text-foreground/80">
                   {shots.length
-                    ? 'Выберите клип на таймлайне или нажмите «Играть»'
-                    : 'Таймлайн пуст'}
+                    ? tt("Выберите клип на таймлайне или нажмите «Играть»")
+                    : tt("Таймлайн пуст")}
                 </div>
                 <div className="mt-0.5 text-[11px] text-muted-foreground">
                   {shots.length
-                    ? 'Пробел — старт/пауза · S — разрез · Колесо мыши — масштаб'
-                    : 'Перетащите видео из галереи справа на любую дорожку'}
+                    ? tt("Пробел — старт/пауза · S — разрез · Колесо мыши — масштаб")
+                    : tt("Перетащите видео из галереи справа на любую дорожку")}
                 </div>
               </div>
             </div>
@@ -4578,14 +4581,14 @@ export function MontageView() {
           {result && (
             <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/85 px-2.5 py-1 text-xs font-medium text-emerald-300 shadow-lg backdrop-blur-md">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Готово: {result.filename}
+              {' '}{tt("Готово:")}{' '} {result.filename}
             </div>
           )}
           {isFs && (
             <button
               className="absolute right-3 top-3 z-10 rounded-lg border border-white/15 bg-black/70 p-2 text-white/80 backdrop-blur-md transition-colors hover:bg-black/90 hover:text-white"
               onClick={() => setIsFs(false)}
-              title="Выйти из полноэкранного режима (Esc)"
+              title={tt("Выйти из полноэкранного режима (Esc)")}
             >
               <MinimizeIcon className="h-4 w-4" />
             </button>
@@ -4595,21 +4598,21 @@ export function MontageView() {
             <button
               className="rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
               onClick={() => setVScale((s) => Math.max(0.2, +(s - 0.1).toFixed(2)))}
-              title="Уменьшить превью"
+              title={tt("Уменьшить превью")}
             >
               <ZoomOutIcon className="h-3.5 w-3.5" />
             </button>
             <button
               className="w-11 text-center font-mono text-[11px] tabular-nums hover:text-white"
               onClick={() => setVScale(0.8)}
-              title="Клик — сбросить масштаб превью (80%)"
+              title={tt("Клик — сбросить масштаб превью (80%)")}
             >
               {Math.round(vScale * 100)}%
             </button>
             <button
               className="rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
               onClick={() => setVScale((s) => Math.min(1, +(s + 0.1).toFixed(2)))}
-              title="Увеличить превью"
+              title={tt("Увеличить превью")}
             >
               <ZoomInIcon className="h-3.5 w-3.5" />
             </button>
@@ -4620,7 +4623,7 @@ export function MontageView() {
         <div
           className="group flex h-2 shrink-0 cursor-ns-resize items-center justify-center border-t border-border bg-[var(--surface-1)] transition-colors hover:bg-[#A78BFA]/15"
           onPointerDown={startTlResize}
-          title="Потяните вверх/вниз — высота таймлайна"
+          title={tt("Потяните вверх/вниз — высота таймлайна")}
         >
           <div className="h-0.5 w-10 rounded-full bg-border transition-colors group-hover:bg-[#A78BFA]" />
         </div>
@@ -4634,7 +4637,7 @@ export function MontageView() {
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
                 onClick={undo}
                 disabled={!canUndo}
-                title="Отменить (Ctrl+Z)"
+                title={tt("Отменить (Ctrl+Z)")}
               >
                 <Undo2Icon className="h-3.5 w-3.5" />
               </button>
@@ -4642,7 +4645,7 @@ export function MontageView() {
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
                 onClick={redo}
                 disabled={!canRedo}
-                title="Повторить (Ctrl+Shift+Z или Ctrl+Y)"
+                title={tt("Повторить (Ctrl+Shift+Z или Ctrl+Y)")}
               >
                 <Redo2Icon className="h-3.5 w-3.5" />
               </button>
@@ -4653,7 +4656,7 @@ export function MontageView() {
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
                 onClick={splitAtPlayhead}
                 disabled={tlEnd <= 0}
-                title="Разрезать клип на плейхеде (S): режет все дорожки под плейхедом"
+                title={tt("Разрезать клип на плейхеде (S): режет все дорожки под плейхедом")}
               >
                 <ScissorsIcon className="h-3.5 w-3.5" />
               </button>
@@ -4665,7 +4668,7 @@ export function MontageView() {
                     : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
                 )}
                 onClick={() => setSnap((v) => !v)}
-                title="Магнит: прилипание к краям клипов и плейхеду"
+                title={tt("Магнит: прилипание к краям клипов и плейхеду")}
               >
                 <MagnetIcon className="h-3.5 w-3.5" />
               </button>
@@ -4685,7 +4688,7 @@ export function MontageView() {
                   setLayerTracks(rowsNow + 1)
                   showToast(`Добавлена видеодорожка V${rowsNow + 2} — перетащите файл из галереи на неё`)
                 }}
-                title="Добавить видеодорожку (V2, V3…)"
+                title={tt("Добавить видеодорожку (V2, V3…)")}
               >
                 <span className="font-mono text-[11px] font-semibold">V+</span>
               </button>
@@ -4713,7 +4716,7 @@ export function MontageView() {
                   setAudioTracks(rowsNow + 1)
                   showToast(`Добавлена аудиодорожка A${rowsNow + 1} — перетащите аудиофайл на неё`)
                 }}
-                title="Добавить аудиодорожку (A1, A2…)"
+                title={tt("Добавить аудиодорожку (A1, A2…)")}
               >
                 <span className="font-mono text-[11px] font-semibold">A+</span>
               </button>
@@ -4730,7 +4733,7 @@ export function MontageView() {
               <button
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-emerald-400"
                 onClick={() => audioFileInputRef.current?.click()}
-                title="Импорт аудиофайла с диска на аудиодорожку (встаёт по плейхеду)"
+                title={tt("Импорт аудиофайла с диска на аудиодорожку (встаёт по плейхеду)")}
               >
                 <MusicIcon className="h-3.5 w-3.5" />
               </button>
@@ -4763,10 +4766,10 @@ export function MontageView() {
                   setSelectedAudioKey(null)
                   setResult(null)
                 }}
-                title="Очистить все дорожки таймлайна"
+                title={tt("Очистить все дорожки таймлайна")}
               >
                 <TrashIcon className="h-3 w-3" />
-                <span>Очистить</span>
+                <span>{tt("Очистить")}</span>
               </button>
             )}
           </div>
@@ -4778,7 +4781,7 @@ export function MontageView() {
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
                 onClick={() => seekTo(0)}
                 disabled={tlEnd <= 0}
-                title="В начало"
+                title={tt("В начало")}
               >
                 <SkipBackIcon className="h-3.5 w-3.5" />
               </button>
@@ -4786,7 +4789,7 @@ export function MontageView() {
                 className="flex h-7 w-8 items-center justify-center rounded-md bg-[#7C3AED] text-white shadow-sm transition-colors hover:bg-[#6D28D9] disabled:pointer-events-none disabled:opacity-40"
                 onClick={togglePlay}
                 disabled={tlEnd <= 0}
-                title="Играть / пауза (пробел)"
+                title={tt("Играть / пауза (пробел)")}
               >
                 {playing ? <PauseIcon className="h-3.5 w-3.5" /> : <PlayIcon className="h-3.5 w-3.5 fill-current" />}
               </button>
@@ -4798,7 +4801,7 @@ export function MontageView() {
                     : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
                 )}
                 onClick={() => setLoop((v) => !v)}
-                title="Повтор всей последовательности (луп)"
+                title={tt("Повтор всей последовательности (луп)")}
               >
                 <RepeatIcon className="h-3.5 w-3.5" />
               </button>
@@ -4810,7 +4813,7 @@ export function MontageView() {
                     : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
                 )}
                 onClick={() => setLoopClip((v) => !v)}
-                title="Повторять текущий клип (не переходя дальше по таймлайну)"
+                title={tt("Повторять текущий клип (не переходя дальше по таймлайну)")}
               >
                 <Repeat1Icon className="h-3.5 w-3.5" />
               </button>
@@ -4829,7 +4832,7 @@ export function MontageView() {
               </button>
               <div
                 className="w-20"
-                title="Общая громкость таймлайна (вплавляется и в готовое видео)"
+                title={tt("Общая громкость таймлайна (вплавляется и в готовое видео)")}
               >
                 <Slider
                   min={0}
@@ -4858,20 +4861,20 @@ export function MontageView() {
               <button
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
                 onClick={() => setPps((p) => Math.max(8, Math.round(p / 1.5)))}
-                title="Уменьшить масштаб таймлайна"
+                title={tt("Уменьшить масштаб таймлайна")}
               >
                 <ZoomOutIcon className="h-3.5 w-3.5" />
               </button>
               <span
                 className="w-14 text-center font-mono text-[11px] tabular-nums text-muted-foreground"
-                title="Колесо мыши над таймлайном — тот же масштаб"
+                title={tt("Колесо мыши над таймлайном — тот же масштаб")}
               >
-                {pps} px/с
+                {pps} {' '}{tt("px/с")}
               </span>
               <button
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
                 onClick={() => setPps((p) => Math.min(240, Math.round(p * 1.5)))}
-                title="Увеличить масштаб таймлайна"
+                title={tt("Увеличить масштаб таймлайна")}
               >
                 <ZoomInIcon className="h-3.5 w-3.5" />
               </button>
@@ -4879,7 +4882,7 @@ export function MontageView() {
                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
                 onClick={fitZoom}
                 disabled={!shots.length}
-                title="Вписать весь таймлайн в окно"
+                title={tt("Вписать весь таймлайн в окно")}
               >
                 <FrameIcon className="h-3.5 w-3.5" />
               </button>
@@ -4936,7 +4939,7 @@ export function MontageView() {
             <div
               className="relative mb-1 h-5 cursor-pointer select-none rounded-t border-b border-border/60"
               onPointerDown={startScrub}
-              title="Клик или тяните — перемотка"
+              title={tt("Клик или тяните — перемотка")}
               style={tlEnd > 0 ? {
                 backgroundImage: `repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${(rulerStep / 5) * pps}px)`,
               } : undefined}
@@ -4947,7 +4950,7 @@ export function MontageView() {
                   className="absolute top-0.5 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground"
                   style={{ left: `${t * pps + 3}px` }}
                 >
-                  {t.toFixed(rulerStep < 0.5 ? 2 : rulerStep < 1 ? 1 : 0)}с
+                  {t.toFixed(rulerStep < 0.5 ? 2 : rulerStep < 1 ? 1 : 0)}{tt("с")}
                 </span>
               ))}
             </div>
@@ -5028,7 +5031,7 @@ export function MontageView() {
                         {pendingReturn[l.key] && (
                           <span
                             className="absolute left-1.5 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow animate-pulse"
-                            title="Отправлен в Refine — придёт и заменит этот клип"
+                            title={tt("Отправлен в Refine — придёт и заменит этот клип")}
                           >
                             <Wand2Icon className="h-2.5 w-2.5" />
                             Refine
@@ -5038,7 +5041,7 @@ export function MontageView() {
                         {!pendingReturn[l.key] && hasFx(l.fx) && (
                           <span
                             className="pointer-events-none absolute left-1.5 top-1 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow"
-                            title="На клипе применены эффекты"
+                            title={tt("На клипе применены эффекты")}
                           >
                             FX
                           </span>
@@ -5046,14 +5049,14 @@ export function MontageView() {
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-1.5 pb-0.5 pt-2 text-[10px] leading-4 text-white">
                           <span className="truncate font-medium">{l.name}</span>
                           <span className="shrink-0 font-mono text-[9px] text-white/80 tabular-nums">
-                            {layerLen(l).toFixed(1)}с{l.hidden ? ' · скрыт' : ''}{l.muted ? ' · без звука' : ''}
+                            {layerLen(l).toFixed(1)}{tt("с")}{l.hidden ? tt("· скрыт") : ''}{l.muted ? tt("· без звука") : ''}
                           </span>
                         </div>
                         <div
                           data-trim-handle="start"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'start')}
                           className="absolute inset-y-0 left-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
-                          title="Подрезать начало"
+                          title={tt("Подрезать начало")}
                         >
                           <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
                         </div>
@@ -5061,21 +5064,21 @@ export function MontageView() {
                           data-trim-handle="end"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'layer', l, 'end')}
                           className="absolute inset-y-0 right-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
-                          title="Подрезать конец"
+                          title={tt("Подрезать конец")}
                         >
                           <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); sendLayerToRefine(l) }}
                           className="absolute right-6 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
-                          title="В Refine (исходник слоя целиком)"
+                          title={tt("В Refine (исходник слоя целиком)")}
                         >
                           <Wand2Icon className="h-2.5 w-2.5" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); removeLayerClip(l.key) }}
                           className="absolute right-1 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white group-hover:block"
-                          title="Убрать клип"
+                          title={tt("Убрать клип")}
                         >
                           <XIcon className="h-2.5 w-2.5" />
                         </button>
@@ -5161,14 +5164,14 @@ export function MontageView() {
                     <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-1.5 pb-0.5 pt-2 text-[10px] leading-4 text-white">
                       <span className="truncate font-medium">{row.shot.name}</span>
                       <span className="shrink-0 font-mono text-[9px] text-white/80 tabular-nums">
-                        {row.len.toFixed(1)}с{row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
+                        {row.len.toFixed(1)}{tt("с")}{row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
                       </span>
                     </div>
                     <div
                       data-trim-handle="start"
                       onPointerDown={(e) => startTrimDrag(e, row.shot, 'start')}
                       className="absolute inset-y-0 left-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
-                      title="Подрезать начало"
+                      title={tt("Подрезать начало")}
                     >
                       <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
                     </div>
@@ -5176,7 +5179,7 @@ export function MontageView() {
                       data-trim-handle="end"
                       onPointerDown={(e) => startTrimDrag(e, row.shot, 'end')}
                       className="absolute inset-y-0 right-0 flex w-2.5 cursor-ew-resize items-center justify-center bg-[#7C3AED]/0 transition-colors group-hover:bg-[#7C3AED]/70"
-                      title="Подрезать конец"
+                      title={tt("Подрезать конец")}
                     >
                       <span className="h-3 w-0.5 rounded-full bg-white/0 group-hover:bg-white/90" />
                     </div>
@@ -5184,7 +5187,7 @@ export function MontageView() {
                     {pendingReturn[row.shot.key] && (
                       <span
                         className="absolute left-1.5 top-1 flex items-center gap-0.5 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow animate-pulse"
-                        title="Отправлен в Refine — придёт и заменит этот клип"
+                        title={tt("Отправлен в Refine — придёт и заменит этот клип")}
                       >
                         <Wand2Icon className="h-2.5 w-2.5" />
                         Refine
@@ -5194,7 +5197,7 @@ export function MontageView() {
                     {!pendingReturn[row.shot.key] && hasFx(row.shot.fx) && (
                       <span
                         className="pointer-events-none absolute left-1.5 top-1 rounded bg-[#7C3AED]/90 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow"
-                        title="На клипе применены эффекты"
+                        title={tt("На клипе применены эффекты")}
                       >
                         FX
                       </span>
@@ -5203,14 +5206,14 @@ export function MontageView() {
                     <button
                       onClick={(e) => { e.stopPropagation(); sendShotToRefine(row.shot) }}
                       className="absolute right-6 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
-                      title="В Refine (исходник целиком, без подрезки)"
+                      title={tt("В Refine (исходник целиком, без подрезки)")}
                     >
                       <Wand2Icon className="h-3 w-3" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); removeShot(row.shot.key) }}
                       className="absolute right-1 top-1 hidden rounded-md bg-black/70 p-1 text-white/80 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white group-hover:block"
-                      title="Убрать шот"
+                      title={tt("Убрать шот")}
                     >
                       <XIcon className="h-3 w-3" />
                     </button>
@@ -5281,24 +5284,24 @@ export function MontageView() {
                           <MusicIcon className="h-3 w-3 shrink-0 text-emerald-200" />
                         </div>
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 text-[9px] leading-3 text-white">
-                          {a.name} · {audioLen(a).toFixed(1)}с · {Math.round(a.vol)}%{a.muted ? ' · нем' : ''}
+                          {a.name} · {audioLen(a).toFixed(1)}{tt("с ·")}{' '} {Math.round(a.vol)}%{a.muted ? tt("· нем") : ''}
                         </div>
                         <div
                           data-trim-handle="start"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'start')}
                           className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-emerald-500/0 transition-colors group-hover:bg-emerald-500/60"
-                          title="Подрезать начало"
+                          title={tt("Подрезать начало")}
                         />
                         <div
                           data-trim-handle="end"
                           onPointerDown={(e) => startFreeTrimDrag(e, 'audio', a, 'end')}
                           className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-emerald-500/0 transition-colors group-hover:bg-emerald-500/60"
-                          title="Подрезать конец"
+                          title={tt("Подрезать конец")}
                         />
                         <button
                           onClick={(e) => { e.stopPropagation(); removeAudioClip(a.key) }}
                           className="absolute right-0.5 top-0.5 hidden rounded bg-black/70 p-0.5 text-white/80 hover:bg-red-500 hover:text-white group-hover:block"
-                          title="Убрать аудио"
+                          title={tt("Убрать аудио")}
                         >
                           <XIcon className="h-2.5 w-2.5" />
                         </button>
@@ -5315,7 +5318,7 @@ export function MontageView() {
                 <div
                   onPointerDown={startScrub}
                   className="pointer-events-auto absolute -left-1.5 top-0 h-3 w-3 rotate-45 cursor-ew-resize rounded-[2px] border border-white/40 bg-rose-500 shadow"
-                  title="Тяните — перемотка"
+                  title={tt("Тяните — перемотка")}
                 />
               </div>
             )}
@@ -5364,10 +5367,10 @@ export function MontageView() {
                     className="h-8 w-full cursor-pointer appearance-none rounded-lg border border-border bg-[var(--surface-2)] pl-7 pr-6 text-xs text-foreground outline-none transition-colors focus:border-[#A78BFA]"
                     value={folderFilter}
                     onChange={(e) => setFolderFilter(e.target.value)}
-                    title="Папка галереи"
+                    title={tt("Папка галереи")}
                   >
-                    <option value="__all__">Все видео</option>
-                    <option value="">Общая</option>
+                    <option value="__all__">{tt("Все видео")}</option>
+                    <option value="">{tt("Общая")}</option>
                     {folders.map((f) => (
                       <option key={f} value={f}>{f}</option>
                     ))}
@@ -5379,14 +5382,14 @@ export function MontageView() {
                   <input
                     className="h-8 w-full rounded-lg border border-border bg-[var(--surface-2)] pl-7 pr-7 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-[#A78BFA]"
                     value={search}
-                    placeholder="Поиск…"
+                    placeholder={tt("Поиск…")}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                   {search && (
                     <button
                       className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
                       onClick={() => setSearch('')}
-                      title="Очистить поиск"
+                      title={tt("Очистить поиск")}
                     >
                       <XIcon className="h-3 w-3" />
                     </button>
@@ -5394,7 +5397,7 @@ export function MontageView() {
                 </div>
               </div>
               <div className="text-[10.5px] leading-snug text-muted-foreground">
-                Перетащите карточку на таймлайн; клик — добавить в конец, <span className="font-medium text-foreground/80">+</span> — на плейхед
+                {tt("Перетащите карточку на таймлайн; клик — добавить в конец,")}{' '} <span className="font-medium text-foreground/80">+</span> {' '}{tt("— на плейхед")}
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -5413,8 +5416,8 @@ export function MontageView() {
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-[var(--surface-2)]">
                     <FilmIcon className="h-5 w-5 opacity-60" />
                   </div>
-                  <div className="text-xs">Видео не найдены</div>
-                  <div className="text-[11px] opacity-70">Измените папку или поисковый запрос</div>
+                  <div className="text-xs">{tt("Видео не найдены")}</div>
+                  <div className="text-[11px] opacity-70">{tt("Измените папку или поисковый запрос")}</div>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -5444,7 +5447,7 @@ export function MontageView() {
                       <button
                         onClick={(e) => { e.stopPropagation(); addShot(f, insertAtPlayheadIdx()) }}
                         className="absolute right-1.5 top-1.5 hidden rounded-md bg-black/75 p-1 text-white/90 backdrop-blur-sm transition-colors hover:bg-[#7C3AED] hover:text-white group-hover:block"
-                        title="Вставить в таймлайн на месте плейхеда"
+                        title={tt("Вставить в таймлайн на месте плейхеда")}
                       >
                         <PlusIcon className="h-3.5 w-3.5" />
                       </button>
@@ -5470,31 +5473,30 @@ export function MontageView() {
                     <span className="truncate font-medium text-foreground" title={selectedLayer.filename}>{selectedLayer.name}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>В кадре: <strong className="text-foreground/90">{layerLen(selectedLayer).toFixed(2)} с</strong></span>
-                    <span>Исходник: {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
+                    <span>{tt("В кадре:")}{' '} <strong className="text-foreground/90">{layerLen(selectedLayer).toFixed(2)} {' '}{tt("с")}</strong></span>
+                    <span>{tt("Исходник:")}{' '} {selectedLayer.duration ? `${selectedLayer.duration.toFixed(2)} с` : '…'}</span>
                   </div>
                   <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
-                    Слой V{selectedLayer.track + 1} лежит над базовой дорожкой; его звук микшируется с базой.
-                    Тяните клип по ряду или между рядами, за края — подрезка.
+                    {tt("Слой V")}{selectedLayer.track + 1} {' '}{tt("лежит над базовой дорожкой; его звук микшируется с базой. Тяните клип по ряду или между рядами, за края — подрезка.")}
                   </div>
                   {/* (правка 878) паритет с базой: слой тоже можно отправить в Refine */}
                   <button
                     onClick={() => sendLayerToRefine(selectedLayer)}
                     className="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-[#7C3AED]/50 bg-[#7C3AED]/15 px-2 py-1.5 text-[11px] text-[#C4B5FD] hover:bg-[#7C3AED]/25"
-                    title="Отправить исходник слоя в Refine целиком (без подрезки)"
+                    title={tt("Отправить исходник слоя в Refine целиком (без подрезки)")}
                   >
                     <Wand2Icon className="h-3 w-3" />
-                    В Refine (исходник целиком)
+                    {' '}{tt("В Refine (исходник целиком)")}
                   </button>
                   {pendingReturn[selectedLayer.key] && (
                     <div className="mt-1 flex items-center gap-1 text-[10px] text-[#A78BFA]">
                       <Wand2Icon className="h-2.5 w-2.5 animate-pulse" />
-                      Ждём чистовик из Refine — он заменит файл слоя
+                      {' '}{tt("Ждём чистовик из Refine — он заменит файл слоя")}
                     </div>
                   )}
                 </div>
                 <div className="space-y-1.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Позиция на шкале, с</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Позиция на шкале, с")}</div>
                   <input
                     key={`at-${selectedLayer.key}-${selectedLayer.at}`}
                     type="text"
@@ -5510,7 +5512,7 @@ export function MontageView() {
                   />
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Вписывание в кадр</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Вписывание в кадр")}</div>
                   <div className="grid grid-cols-4 gap-1">
                     {([
                       ['stretch', 'Растянуть'],
@@ -5534,7 +5536,7 @@ export function MontageView() {
                   </div>
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Скорость воспроизведения</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Скорость воспроизведения")}</div>
                   <div className="grid grid-cols-6 gap-1">
                     {SPEED_STEPS.map((v) => (
                       <button
@@ -5556,11 +5558,11 @@ export function MontageView() {
                 <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-foreground/80">Громкость слоя</span>
+                      <span className="text-[11px] font-medium text-foreground/80">{tt("Громкость слоя")}</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { vol: 1, muted: false }) }}
                         className="font-mono text-[11px] text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 100%"
+                        title={tt("Клик — сбросить в 100%")}
                       >
                         {Math.round((selectedLayer.vol ?? 1) * 100)}%
                       </button>
@@ -5576,13 +5578,13 @@ export function MontageView() {
                   </div>
                   <div className="space-y-1 pt-0.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">Плавный вход звука (↑)</span>
+                      <span className="text-muted-foreground">{tt("Плавный вход звука (↑)")}</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeIn: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить плавный вход"
+                        title={tt("Клик — выключить плавный вход")}
                       >
-                        {(selectedLayer.fadeIn || 0).toFixed(1)} с
+                        {(selectedLayer.fadeIn || 0).toFixed(1)} {' '}{tt("с")}
                       </button>
                     </div>
                     <Slider
@@ -5596,13 +5598,13 @@ export function MontageView() {
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
+                      <span className="text-muted-foreground">{tt("Затухание звука в конце (↓)")}</span>
                       <button
                         onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { fadeOut: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить затухание"
+                        title={tt("Клик — выключить затухание")}
                       >
-                        {(selectedLayer.fadeOut || 0).toFixed(1)} с
+                        {(selectedLayer.fadeOut || 0).toFixed(1)} {' '}{tt("с")}
                       </button>
                     </div>
                     <Slider
@@ -5617,7 +5619,7 @@ export function MontageView() {
                 </div>
                 {/* (правка 876) отражения слоя — как у клипа базовой дорожки */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Отражение кадра</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Отражение кадра")}</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {([
                       ['flipH', '↔ По горизонтали'],
@@ -5648,9 +5650,9 @@ export function MontageView() {
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
                       selectedLayer.muted ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
-                    title="Выключить звук слоя в превью и сборке (картинка остаётся)"
+                    title={tt("Выключить звук слоя в превью и сборке (картинка остаётся)")}
                   >
-                    {selectedLayer.muted ? 'Включить звук' : 'Заглушить'}
+                    {selectedLayer.muted ? tt("Включить звук") : tt("Заглушить")}
                   </button>
                   <button
                     onClick={() => { pushHistory(); patchLayer(selectedLayer.key, { hidden: !selectedLayer.hidden }) }}
@@ -5658,25 +5660,25 @@ export function MontageView() {
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
                       selectedLayer.hidden ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
-                    title="Скрывать слой в превью и сборке"
+                    title={tt("Скрывать слой в превью и сборке")}
                   >
-                    {selectedLayer.hidden ? 'Показать' : 'Скрыть'}
+                    {selectedLayer.hidden ? tt("Показать") : tt("Скрыть")}
                   </button>
                   <button
                     onClick={() => duplicateLayerClip(selectedLayer.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
-                    title="Дублировать слой (D)"
+                    title={tt("Дублировать слой (D)")}
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
-                    Дубликат
+                    {' '}{tt("Дубликат")}
                   </button>
                   <button
                     onClick={() => removeLayerClip(selectedLayer.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
-                    title="Удалить слой (Del)"
+                    title={tt("Удалить слой (Del)")}
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
-                    Удалить
+                    {' '}{tt("Удалить")}
                   </button>
                 </div>
               </div>
@@ -5688,16 +5690,16 @@ export function MontageView() {
                     <span className="truncate font-medium text-foreground" title={selectedAudio.name}>{selectedAudio.name}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>В сборке: <strong className="text-foreground/90">{audioLen(selectedAudio).toFixed(2)} с</strong></span>
-                    <span>Файл: {selectedAudio.duration ? `${selectedAudio.duration.toFixed(2)} с` : '…'}</span>
+                    <span>{tt("В сборке:")}{' '} <strong className="text-foreground/90">{audioLen(selectedAudio).toFixed(2)} {' '}{tt("с")}</strong></span>
+                    <span>{tt("Файл:")}{' '} {selectedAudio.duration ? `${selectedAudio.duration.toFixed(2)} с` : '…'}</span>
                   </div>
                   <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
-                    Звук дорожки A{selectedAudio.track} микшируется с базой без нормализации.
+                    {tt("Звук дорожки A")}{selectedAudio.track} {' '}{tt("микшируется с базой без нормализации.")}
                   </div>
                 </div>
                 <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="space-y-1.5">
-                    <div className="text-[11px] font-medium text-foreground/80">Позиция на шкале, с</div>
+                    <div className="text-[11px] font-medium text-foreground/80">{tt("Позиция на шкале, с")}</div>
                     <input
                       key={`aat-${selectedAudio.key}-${selectedAudio.at}`}
                       type="text"
@@ -5714,11 +5716,11 @@ export function MontageView() {
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-foreground/80">Громкость клипа</span>
+                      <span className="text-[11px] font-medium text-foreground/80">{tt("Громкость клипа")}</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { vol: 100 }) }}
                         className="font-mono text-[11px] text-[#A78BFA] hover:underline"
-                        title="Клик — сбросить в 100%"
+                        title={tt("Клик — сбросить в 100%")}
                       >
                         {Math.round(selectedAudio.vol)}%
                       </button>
@@ -5734,13 +5736,13 @@ export function MontageView() {
                   </div>
                   <div className="space-y-1 pt-0.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">Плавный вход звука (↑)</span>
+                      <span className="text-muted-foreground">{tt("Плавный вход звука (↑)")}</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeIn: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить плавный вход"
+                        title={tt("Клик — выключить плавный вход")}
                       >
-                        {(selectedAudio.fadeIn || 0).toFixed(1)} с
+                        {(selectedAudio.fadeIn || 0).toFixed(1)} {' '}{tt("с")}
                       </button>
                     </div>
                     <Slider
@@ -5754,13 +5756,13 @@ export function MontageView() {
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
+                      <span className="text-muted-foreground">{tt("Затухание звука в конце (↓)")}</span>
                       <button
                         onClick={() => { pushHistory(); patchAudio(selectedAudio.key, { fadeOut: 0 }) }}
                         className="font-mono text-[#A78BFA] hover:underline"
-                        title="Клик — выключить затухание"
+                        title={tt("Клик — выключить затухание")}
                       >
-                        {(selectedAudio.fadeOut || 0).toFixed(1)} с
+                        {(selectedAudio.fadeOut || 0).toFixed(1)} {' '}{tt("с")}
                       </button>
                     </div>
                     <Slider
@@ -5780,37 +5782,37 @@ export function MontageView() {
                       'rounded border border-border bg-[var(--surface-2)] py-1.5 text-[11px] hover:border-[#A78BFA]',
                       selectedAudio.muted ? 'text-[#A78BFA]' : 'text-foreground/80',
                     )}
-                    title="Выключить этот звук в превью и сборке"
+                    title={tt("Выключить этот звук в превью и сборке")}
                   >
-                    {selectedAudio.muted ? 'Включить звук' : 'Заглушить'}
+                    {selectedAudio.muted ? tt("Включить звук") : tt("Заглушить")}
                   </button>
                   <button
                     onClick={() => duplicateAudioClip(selectedAudio.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
-                    title="Дублировать аудио (D)"
+                    title={tt("Дублировать аудио (D)")}
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
-                    Дубликат
+                    {' '}{tt("Дубликат")}
                   </button>
                   <button
                     onClick={() => removeAudioClip(selectedAudio.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
-                    title="Удалить аудио (Del)"
+                    title={tt("Удалить аудио (Del)")}
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
-                    Удалить
+                    {' '}{tt("Удалить")}
                   </button>
                 </div>
               </div>
             ) : !selected ? (
               <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground">
-                <div>Кликните по клипу на таймлайне, чтобы настроить его свойства</div>
+                <div>{tt("Кликните по клипу на таймлайне, чтобы настроить его свойства")}</div>
                 {shots.length > 0 && (
                   <button
                     onClick={() => selectClip('shot', shots[0].key)}
                     className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-foreground/80 hover:border-[#A78BFA]"
                   >
-                    Выбрать 1-й клип
+                    {tt("Выбрать 1-й клип")}
                   </button>
                 )}
               </div>
@@ -5832,7 +5834,7 @@ export function MontageView() {
                       </div>
                       <div className="flex items-center justify-between font-mono text-[10px] text-white/70">
                         <span>
-                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} с
+                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} {' '}{tt("с")}
                         </span>
                         <span>{selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
                       </div>
@@ -5841,16 +5843,16 @@ export function MontageView() {
                   <div className="space-y-1.5 p-2.5">
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                       <span>
-                        На таймлайне:{' '}
+                        {tt("На таймлайне:")}{' '}
                         <strong className="text-foreground/90">
-                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} с
+                          {((effRange(selected).end - effRange(selected).start) / shotSpeed(selected)).toFixed(2)} {' '}{tt("с")}
                         </strong>
                       </span>
-                      <span>Исходник: {selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
+                      <span>{tt("Исходник:")}{' '} {selected.duration ? `${selected.duration.toFixed(2)} с` : '…'}</span>
                     </div>
                     {(selected.gap ?? 0) >= 0.02 && (
                       <div className="flex items-center justify-between rounded bg-[#7C3AED]/15 px-2 py-1 text-[11px] text-[#A78BFA]">
-                        <span>Пауза перед клипом: {(selected.gap ?? 0).toFixed(2)} с</span>
+                        <span>{tt("Пауза перед клипом:")}{' '} {(selected.gap ?? 0).toFixed(2)} {' '}{tt("с")}</span>
                         <button
                           onClick={() => {
                             pushHistory()
@@ -5858,12 +5860,12 @@ export function MontageView() {
                           }}
                           className="rounded border border-[#A78BFA]/40 px-1.5 py-0.5 text-[10px] text-white hover:bg-[#7C3AED]/40"
                         >
-                          Прижать встык
+                          {tt("Прижать встык")}
                         </button>
                       </div>
                     )}
                     <div className="rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] leading-snug text-muted-foreground">
-                      Тяните сам клип по дорожке для свободного сдвига, за края — для подрезки; разрез на плейхеде — <kbd className="rounded border border-border px-1">S</kbd>
+                      {tt("Тяните сам клип по дорожке для свободного сдвига, за края — для подрезки; разрез на плейхеде —")}{' '} <kbd className="rounded border border-border px-1">S</kbd>
                     </div>
                   </div>
                 </div>
@@ -5876,14 +5878,14 @@ export function MontageView() {
                     <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-foreground/80">Громкость клипа</span>
+                          <span className="text-[11px] font-medium text-foreground/80">{tt("Громкость клипа")}</span>
                           <button
                             onClick={() => {
                               pushHistory()
                               setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, vol: 1 } : x)))
                             }}
                             className="font-mono text-[11px] text-[#A78BFA] hover:underline"
-                            title="Клик — сбросить в 100%"
+                            title={tt("Клик — сбросить в 100%")}
                           >
                             {Math.round((selected.vol ?? 1) * 100)}%
                           </button>
@@ -5904,16 +5906,16 @@ export function MontageView() {
                       {/* (правка 860) Плавный вход аудио — ползунок */}
                       <div className="space-y-1 pt-0.5">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-muted-foreground">Плавный вход звука (↑)</span>
+                          <span className="text-muted-foreground">{tt("Плавный вход звука (↑)")}</span>
                           <button
                             onClick={() => {
                               pushHistory()
                               setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, fadeIn: undefined } : x)))
                             }}
                             className="font-mono text-[#A78BFA] hover:underline"
-                            title="Клик — выключить плавный вход"
+                            title={tt("Клик — выключить плавный вход")}
                           >
-                            {(selected.fadeIn || 0).toFixed(1)} с
+                            {(selected.fadeIn || 0).toFixed(1)} {' '}{tt("с")}
                           </button>
                         </div>
                         <Slider
@@ -5934,16 +5936,16 @@ export function MontageView() {
                       {/* (правка 860) Затухание аудио — ползунок */}
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-muted-foreground">Затухание звука в конце (↓)</span>
+                          <span className="text-muted-foreground">{tt("Затухание звука в конце (↓)")}</span>
                           <button
                             onClick={() => {
                               pushHistory()
                               setShots((prev) => prev.map((x) => (x.key === selected.key ? { ...x, fadeOut: undefined } : x)))
                             }}
                             className="font-mono text-[#A78BFA] hover:underline"
-                            title="Клик — выключить затухание"
+                            title={tt("Клик — выключить затухание")}
                           >
-                            {(selected.fadeOut || 0).toFixed(1)} с
+                            {(selected.fadeOut || 0).toFixed(1)} {' '}{tt("с")}
                           </button>
                         </div>
                         <Slider
@@ -5966,7 +5968,7 @@ export function MontageView() {
 
                 {/* скорость */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Скорость воспроизведения</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Скорость воспроизведения")}</div>
                   <div className="grid grid-cols-6 gap-1">
                     {SPEED_STEPS.map((v) => {
                       const active = Math.abs(shotSpeed(selected) - v) < 0.01
@@ -5995,7 +5997,7 @@ export function MontageView() {
 
                 {/* отражение */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/80">Отражение кадра</div>
+                  <div className="text-[11px] font-medium text-foreground/80">{tt("Отражение кадра")}</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {([
                       ['flipH', '↔ По горизонтали'],
@@ -6025,26 +6027,26 @@ export function MontageView() {
                   <button
                     onClick={() => sendShotToRefine(selected)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
-                    title="Отправить исходник в Refine (результат вернётся и заменит этот клип)"
+                    title={tt("Отправить исходник в Refine (результат вернётся и заменит этот клип)")}
                   >
                     <Wand2Icon className="h-3.5 w-3.5" />
-                    В Refine
+                    {' '}{tt("В Refine")}
                   </button>
                   <button
                     onClick={() => duplicateShot(selected.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-[#A78BFA] hover:text-[#A78BFA]"
-                    title="Дублировать клип (D)"
+                    title={tt("Дублировать клип (D)")}
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
-                    Дубликат
+                    {' '}{tt("Дубликат")}
                   </button>
                   <button
                     onClick={() => removeShot(selected.key)}
                     className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-2)] py-1.5 text-foreground/80 hover:border-red-500/60 hover:text-red-300"
-                    title="Удалить клип (Del)"
+                    title={tt("Удалить клип (Del)")}
                   >
                     <TrashIcon className="h-3.5 w-3.5" />
-                    Удалить
+                    {' '}{tt("Удалить")}
                   </button>
                 </div>
               </>
@@ -6057,13 +6059,13 @@ export function MontageView() {
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
             {!fxTarget ? (
               <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground">
-                <div>Выберите клип на базовой дорожке или слой V2+, чтобы настроить его эффекты</div>
+                <div>{tt("Выберите клип на базовой дорожке или слой V2+, чтобы настроить его эффекты")}</div>
                 {shots.length > 0 && (
                   <button
                     onClick={() => selectClip('shot', shots[0].key)}
                     className="mt-2 rounded border border-border bg-[var(--surface-2)] px-2.5 py-1 text-foreground/80 hover:border-[#A78BFA]"
                   >
-                    Выбрать 1-й клип
+                    {tt("Выбрать 1-й клип")}
                   </button>
                 )}
               </div>
@@ -6107,7 +6109,7 @@ export function MontageView() {
                         }
                       >
                         {isByp(k) ? <EyeOffIcon className="h-3 w-3" /> : <EyeIcon className="h-3 w-3" />}
-                        <span>{isByp(k) ? 'До' : 'Вкл'}</span>
+                        <span>{isByp(k) ? tt("До") : tt("Вкл")}</span>
                       </button>
                     )
                   }
@@ -6119,17 +6121,17 @@ export function MontageView() {
                             {fxTarget.name}
                             {/* (правка 876) подпись дорожки: слой V2+ или базовая V1 */}
                             {'track' in fxTarget ? (
-                              <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">слой V{fxTarget.track + 1}</span>
+                              <span className="ml-1.5 font-mono text-[10px] text-[#A78BFA]">{tt("слой V")}{fxTarget.track + 1}</span>
                             ) : null}
                           </div>
                           <div className="text-[10px] text-muted-foreground">
                             {!hasFx(fxTarget.fx)
-                              ? 'Без эффектов'
+                              ? tt("Без эффектов")
                               : isAllBypassed
-                                ? 'Общий байпас включён — показан исходник (До)'
+                                ? tt("Общий байпас включён — показан исходник (До)")
                                 : hasActiveFx(fxTarget.fx)
-                                  ? 'Эффекты активны (После)'
-                                  : 'Все настроенные эффекты в байпасе (До)'}
+                                  ? tt("Эффекты активны (После)")
+                                  : tt("Все настроенные эффекты в байпасе (До)")}
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
@@ -6146,17 +6148,17 @@ export function MontageView() {
                                 ? 'border-amber-500/60 bg-amber-500/20 text-amber-200'
                                 : 'border-[#A78BFA]/50 bg-[#7C3AED]/25 text-white hover:bg-[#7C3AED]/40',
                             )}
-                            title="Общий байпас всех эффектов клипа: сравнить До / После одним кликом"
+                            title={tt("Общий байпас всех эффектов клипа: сравнить До / После одним кликом")}
                           >
                             {isAllBypassed ? <EyeOffIcon className="h-3.5 w-3.5" /> : <EyeIcon className="h-3.5 w-3.5" />}
-                            <span>{isAllBypassed ? 'До (Байпас)' : 'До / После'}</span>
+                            <span>{isAllBypassed ? tt("До (Байпас)") : tt("До / После")}</span>
                           </button>
                           {hasFx(fxTarget.fx) && (
                             <button
                               onClick={resetSelectedFx}
                               className="shrink-0 rounded border border-border bg-[var(--surface-1)] px-2 py-1 text-[11px] text-foreground/80 hover:border-red-500/50 hover:text-red-300"
                             >
-                              Сбросить
+                              {tt("Сбросить")}
                             </button>
                           )}
                         </div>
@@ -6224,14 +6226,14 @@ export function MontageView() {
                             <div className="flex items-center justify-between gap-1">
                               <div className="flex items-center gap-1.5">
                                 {renderBypassBtn('curves', 'Кривые цвета')}
-                                <span className="text-[11px] font-medium text-foreground/90">Кривые цвета (5 точек)</span>
+                                <span className="text-[11px] font-medium text-foreground/90">{tt("Кривые цвета (5 точек)")}</span>
                               </div>
                               <button
                                 onClick={() => { pushHistory(); setChannelPts(undefined) }}
                                 className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
-                                title="Сбросить выбранный канал кривой"
+                                title={tt("Сбросить выбранный канал кривой")}
                               >
-                                Сброс канала
+                                {tt("Сброс канала")}
                               </button>
                             </div>
                             {/* переключатель канала RGB / R / G / B */}
@@ -6327,11 +6329,11 @@ export function MontageView() {
                                 })}
                               </svg>
                               <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-muted-foreground">
-                                <span>Чёрн {Math.round(activePts[0][1] * 100)}%</span>
-                                <span>Тени {Math.round(activePts[1][1] * 100)}%</span>
-                                <span>Сред {Math.round(activePts[2][1] * 100)}%</span>
-                                <span>Света {Math.round(activePts[3][1] * 100)}%</span>
-                                <span>Бел {Math.round(activePts[4][1] * 100)}%</span>
+                                <span>{tt("Чёрн")}{' '} {Math.round(activePts[0][1] * 100)}%</span>
+                                <span>{tt("Тени")}{' '} {Math.round(activePts[1][1] * 100)}%</span>
+                                <span>{tt("Сред")}{' '} {Math.round(activePts[2][1] * 100)}%</span>
+                                <span>{tt("Света")}{' '} {Math.round(activePts[3][1] * 100)}%</span>
+                                <span>{tt("Бел")}{' '} {Math.round(activePts[4][1] * 100)}%</span>
                               </div>
                             </div>
                             {/* пресеты кривых */}
@@ -6381,7 +6383,7 @@ export function MontageView() {
                       {/* 2. ЦВЕТ И ТОН: ТЕМПЕРАТУРА, ОТТЕНОК (HUE), ЯРКОСТЬ, КОНТРАСТ, НАСЫЩЕННОСТЬ + ИНДИВИДУАЛЬНЫЙ БАЙПАС */}
                       <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-foreground/90">Цвет и тон</span>
+                          <span className="text-[11px] font-medium text-foreground/90">{tt("Цвет и тон")}</span>
                           <button
                             onClick={() => {
                               pushHistory()
@@ -6394,9 +6396,9 @@ export function MontageView() {
                               })
                             }}
                             className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
-                            title="Сбросить температуру, оттенок, яркость, контраст и насыщенность"
+                            title={tt("Сбросить температуру, оттенок, яркость, контраст и насыщенность")}
                           >
-                            Сброс
+                            {tt("Сброс")}
                           </button>
                         </div>
                         {/* Температура (-100 .. +100) */}
@@ -6404,14 +6406,14 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('temp', 'Температура')}
-                              <span className="text-foreground/80" title="Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)">
-                                Температура
+                              <span className="text-foreground/80" title={tt("Цветовая температура: влево — холоднее (синий), вправо — теплее (янтарный)")}>
+                                {tt("Температура")}
                               </span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ temp: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — сбросить в 0"
+                              title={tt("Клик — сбросить в 0")}
                             >
                               {Math.round(fxTarget.fx?.temp ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.temp ?? 0)}` : `${Math.round(fxTarget.fx?.temp ?? 0)}`}
                             </button>
@@ -6432,14 +6434,14 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('hue', 'Оттенок (HUE)')}
-                              <span className="text-foreground/80" title="Сдвиг цветового тона по кругу (HUE)">
-                                Оттенок (HUE)
+                              <span className="text-foreground/80" title={tt("Сдвиг цветового тона по кругу (HUE)")}>
+                                {tt("Оттенок (HUE)")}
                               </span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ hue: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — сбросить в 0°"
+                              title={tt("Клик — сбросить в 0°")}
                             >
                               {Math.round(fxTarget.fx?.hue ?? 0) > 0 ? `+${Math.round(fxTarget.fx?.hue ?? 0)}°` : `${Math.round(fxTarget.fx?.hue ?? 0)}°`}
                             </button>
@@ -6460,12 +6462,12 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('bright', 'Яркость')}
-                              <span className="text-foreground/80">Яркость</span>
+                              <span className="text-foreground/80">{tt("Яркость")}</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ bright: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — сбросить в 0"
+                              title={tt("Клик — сбросить в 0")}
                             >
                               {Math.round((fxTarget.fx?.bright ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.bright ?? 0) * 100)}%`}
                             </button>
@@ -6487,12 +6489,12 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('contrast', 'Контраст')}
-                              <span className="text-foreground/80">Контраст</span>
+                              <span className="text-foreground/80">{tt("Контраст")}</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ contrast: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — сбросить в 0"
+                              title={tt("Клик — сбросить в 0")}
                             >
                               {Math.round((fxTarget.fx?.contrast ?? 0) * 100) > 0 ? `+${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%` : `${Math.round((fxTarget.fx?.contrast ?? 0) * 100)}%`}
                             </button>
@@ -6514,12 +6516,12 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('sat', 'Насыщенность')}
-                              <span className="text-foreground/80">Насыщенность</span>
+                              <span className="text-foreground/80">{tt("Насыщенность")}</span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ sat: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — сбросить в 100%"
+                              title={tt("Клик — сбросить в 100%")}
                             >
                               {Math.round((fxTarget.fx?.sat ?? 1) * 100)}%
                             </button>
@@ -6541,16 +6543,16 @@ export function MontageView() {
                       {/* 3. ОПТИКА И ПЛЁНКА: РАДИАЛЬНАЯ ДИСПЕРСИЯ + МАСКА ЦЕНТРА + КИНОШНЫЙ ШУМ */}
                       <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium text-foreground/90">Оптика и плёнка</span>
+                          <span className="text-[11px] font-medium text-foreground/90">{tt("Оптика и плёнка")}</span>
                           <button
                             onClick={() => {
                               pushHistory()
                               updateSelectedFx({ dispersion: undefined, dispersionMask: undefined, grain: undefined })
                             }}
                             className="text-[10px] text-muted-foreground hover:text-[#A78BFA]"
-                            title="Сбросить дисперсию, радиальную маску и киношный шум"
+                            title={tt("Сбросить дисперсию, радиальную маску и киношный шум")}
                           >
-                            Сброс
+                            {tt("Сброс")}
                           </button>
                         </div>
                         {/* Дисперсия (радиальная: центр чистый, к краям нарастает) + радиальная маска центра */}
@@ -6559,16 +6561,16 @@ export function MontageView() {
                             <div className="flex items-center justify-between text-[11px]">
                               <div className="flex items-center gap-1.5">
                                 {renderBypassBtn('dispersion', 'Дисперсия')}
-                                <span className="text-foreground/80" title="Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB">
-                                  Дисперсия (к краям)
+                                <span className="text-foreground/80" title={tt("Линзовая дисперсия как в DaVinci Resolve: центр кадра остаётся резким, а к краям и углам расходится спектр RGB")}>
+                                  {tt("Дисперсия (к краям)")}
                                 </span>
                               </div>
                               <button
                                 onClick={() => { pushHistory(); updateSelectedFx({ dispersion: undefined }) }}
                                 className="font-mono text-[#A78BFA] hover:underline"
-                                title="Клик — выключить дисперсию"
+                                title={tt("Клик — выключить дисперсию")}
                               >
-                                {fxTarget.fx?.dispersion ?? 0} пикс
+                                {fxTarget.fx?.dispersion ?? 0} {' '}{tt("пикс")}
                               </button>
                             </div>
                             <Slider
@@ -6587,14 +6589,14 @@ export function MontageView() {
                             <div className="flex items-center justify-between text-[11px]">
                               <span
                                 className="text-muted-foreground"
-                                title="Радиус чистой зоны в центре кадра: 0% — дисперсия максимальной силы по всему кадру, 90% — эффект сильно приглушён и остаётся у самых краёв. Считается одинаково в превью и в финальном рендере"
+                                title={tt("Радиус чистой зоны в центре кадра: 0% — дисперсия максимальной силы по всему кадру, 90% — эффект сильно приглушён и остаётся у самых краёв. Считается одинаково в превью и в финальном рендере")}
                               >
-                                Радиальная маска центра
+                                {tt("Радиальная маска центра")}
                               </span>
                               <button
                                 onClick={() => { pushHistory(); updateSelectedFx({ dispersionMask: undefined }) }}
                                 className="font-mono text-[#A78BFA] hover:underline"
-                                title="Клик — сбросить маску центра в 35%"
+                                title={tt("Клик — сбросить маску центра в 35%")}
                               >
                                 {Math.round(fxTarget.fx?.dispersionMask ?? 35)}%
                               </button>
@@ -6617,14 +6619,14 @@ export function MontageView() {
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-1.5">
                               {renderBypassBtn('grain', 'Киношный шум')}
-                              <span className="text-foreground/80" title="Живое анимированное зерно 35mm плёнки (noise=allf=t+u)">
-                                Киношный анимированный шум
+                              <span className="text-foreground/80" title={tt("Живое анимированное зерно 35mm плёнки (noise=allf=t+u)")}>
+                                {tt("Киношный анимированный шум")}
                               </span>
                             </div>
                             <button
                               onClick={() => { pushHistory(); updateSelectedFx({ grain: undefined }) }}
                               className="font-mono text-[#A78BFA] hover:underline"
-                              title="Клик — выключить шум"
+                              title={tt("Клик — выключить шум")}
                             >
                               {fxTarget.fx?.grain ?? 0}%
                             </button>
@@ -6647,7 +6649,7 @@ export function MontageView() {
 
                 {/* 4. КОПИРОВАНИЕ ЭФФЕКТОВ НА ДРУГИЕ КЛИПЫ */}
                 <div className="space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
-                  <div className="text-[11px] font-medium text-foreground/90">Перенос эффектов на другие клипы</div>
+                  <div className="text-[11px] font-medium text-foreground/90">{tt("Перенос эффектов на другие клипы")}</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => {
@@ -6657,7 +6659,7 @@ export function MontageView() {
                       className="flex items-center justify-center gap-1 rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-foreground/90 hover:border-[#A78BFA]"
                     >
                       <CopyIcon className="h-3 w-3" />
-                      Скопировать
+                      {' '}{tt("Скопировать")}
                     </button>
                     <button
                       disabled={!copiedFx}
@@ -6667,7 +6669,7 @@ export function MontageView() {
                       }}
                       className="rounded border border-border bg-[var(--surface-1)] py-1.5 text-[11px] text-foreground/90 hover:border-[#A78BFA] disabled:opacity-40"
                     >
-                      Вставить сюда
+                      {tt("Вставить сюда")}
                     </button>
                   </div>
                   {shots.length + layers.length > 1 && (
@@ -6685,7 +6687,7 @@ export function MontageView() {
                       }
                       className="w-full rounded bg-[#7C3AED] py-1.5 text-[11px] font-medium text-white hover:bg-[#6D28D9]"
                     >
-                      Скопировать на все клипы и слои ({shots.length + layers.length - 1})
+                      {tt("Скопировать на все клипы и слои (")}{shots.length + layers.length - 1})
                     </button>
                   )}
                 </div>

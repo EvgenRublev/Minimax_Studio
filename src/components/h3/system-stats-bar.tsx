@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangleIcon, CpuIcon, MemoryStickIcon, MonitorCogIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const POLL_INTERVAL = 5000 // 5 seconds
 
@@ -67,6 +68,8 @@ function StatBar({ value, max, color, label, titleSuffix }: { value: number; max
 }
 
 export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation() // (правка 955)
+
   const [stats, setStats] = useState<StatsData | null>(null)
 
   useEffect(() => {
@@ -209,9 +212,9 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
               const comfyOk = comfyRes.status === 'fulfilled' && comfyRes.value.ok
               const llmOk = llmRes.status === 'fulfilled' && llmRes.value.ok
               if (comfyOk && llmOk) {
-                toast.success('Кэш VRAM выгружен (ComfyUI + LLM)')
+                toast.success(t("Кэш VRAM выгружен (ComfyUI + LLM)"))
               } else if (comfyOk || llmOk) {
-                toast.success('Часть выгружена из VRAM')
+                toast.success(t("Часть выгружена из VRAM"))
               } else {
                 const errors: string[] = []
                 if (comfyRes.status === 'fulfilled' && comfyRes.value.error) errors.push(comfyRes.value.error)
@@ -219,14 +222,14 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
                 toast.error(errors.join('; ') || 'Не удалось выгрузить кэш')
               }
             } catch {
-              toast.error('Сервисы недоступны')
+              toast.error(t("Сервисы недоступны"))
             }
           }}
           className={`flex items-center gap-1 text-[10px] transition-colors ${vramWarn ? 'text-amber-400 hover:text-red-400 font-medium' : 'text-muted-foreground hover:text-red-400'}`}
-          title="Выгрузить модели ComfyUI и LLM из VRAM"
+          title={t("Выгрузить модели ComfyUI и LLM из VRAM")}
         >
           <Trash2Icon className="w-3 h-3" />
-          Выгрузить кэш VRAM
+          {' '}{t("Выгрузить кэш VRAM")}
         </button>
       </div>
     </div>

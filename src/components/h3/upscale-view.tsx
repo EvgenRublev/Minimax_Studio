@@ -76,6 +76,8 @@ import {
   cancelActiveUpscales,
   sweepOrphanUpscaleItems,
 } from '@/lib/upscale-queue'
+import { useTranslation } from 'react-i18next' // (правка 955)
+import { t as tt } from '@/lib/i18n' // (правка 955)
 
 /* ────────────────────────────────────────────────────────────────
  * Типы (статус/схема/job/Gpu — в @/lib/upscale-service)
@@ -203,29 +205,29 @@ function buildSpecs(schema: UpscaleSchema | null): Record<FeatureKey, Control[]>
   const sizeMode = itemsFrom(vsrVid, 'size_mode', FALLBACK.sizeMode)
 
   const nrSliders: Control[] = [
-    { kind: 'slider', key: 'nr_intensity', label: 'Интенсивность NR', min: 0, max: 2, step: 0.05 },
-    { kind: 'slider', key: 'local_tone_strength', label: 'Локальный тон', min: 0, max: 2, step: 0.05 },
-    { kind: 'slider', key: 'local_structure_strength', label: 'Локальная структура', min: 0, max: 2, step: 0.05 },
-    { kind: 'slider', key: 'skin_structure_strength', label: 'Структура кожи', min: -1, max: 2, step: 0.05 },
+    { kind: 'slider', key: 'nr_intensity', label: tt("Интенсивность NR"), min: 0, max: 2, step: 0.05 },
+    { kind: 'slider', key: 'local_tone_strength', label: tt("Локальный тон"), min: 0, max: 2, step: 0.05 },
+    { kind: 'slider', key: 'local_structure_strength', label: tt("Локальная структура"), min: 0, max: 2, step: 0.05 },
+    { kind: 'slider', key: 'skin_structure_strength', label: tt("Структура кожи"), min: -1, max: 2, step: 0.05 },
   ]
 
   return {
     'nr-video': [
-      { kind: 'select', key: 'nr_preset', label: 'Пресет NR', items: nrPreset },
-      { kind: 'select', key: 'nr_style', label: 'Стиль', items: nrStyle },
-      { kind: 'select', key: 'dlss_model_preset', label: 'DLSS-модель', items: dlssModel },
-      { kind: 'select', key: 'upscaling_factor', label: 'Коэффициент', items: factor },
+      { kind: 'select', key: 'nr_preset', label: tt("Пресет NR"), items: nrPreset },
+      { kind: 'select', key: 'nr_style', label: tt("Стиль"), items: nrStyle },
+      { kind: 'select', key: 'dlss_model_preset', label: tt("DLSS-модель"), items: dlssModel },
+      { kind: 'select', key: 'upscaling_factor', label: tt("Коэффициент"), items: factor },
       ...nrSliders,
     ],
     'vsr-video': [
-      { kind: 'select', key: 'vsr_quality', label: 'Качество VSR', items: vsrQ },
-      { kind: 'select', key: 'size_mode', label: 'Режим размера', items: sizeMode },
+      { kind: 'select', key: 'vsr_quality', label: tt("Качество VSR"), items: vsrQ },
+      { kind: 'select', key: 'size_mode', label: tt("Режим размера"), items: sizeMode },
       /* size_mode может прийти из bridge в другом регистре/формате — сравниваем
          без учёта регистра по слову 'custom', а не по точной строке. */
-      { kind: 'select', key: 'scale_factor', label: 'Коэффициент', items: scale, hiddenIf: isCustomSize },
-      { kind: 'number', key: 'width', label: 'Ширина', min: 2, max: 16384, step: 2, int: true, hiddenIf: (o) => !isCustomSize(o) },
-      { kind: 'number', key: 'height', label: 'Высота', min: 2, max: 16384, step: 2, int: true, hiddenIf: (o) => !isCustomSize(o) },
-      { kind: 'toggle', key: 'aspect_lock', label: 'Сохранять пропорции', hiddenIf: (o) => !isCustomSize(o) },
+      { kind: 'select', key: 'scale_factor', label: tt("Коэффициент"), items: scale, hiddenIf: isCustomSize },
+      { kind: 'number', key: 'width', label: tt("Ширина"), min: 2, max: 16384, step: 2, int: true, hiddenIf: (o) => !isCustomSize(o) },
+      { kind: 'number', key: 'height', label: tt("Высота"), min: 2, max: 16384, step: 2, int: true, hiddenIf: (o) => !isCustomSize(o) },
+      { kind: 'toggle', key: 'aspect_lock', label: tt("Сохранять пропорции"), hiddenIf: (o) => !isCustomSize(o) },
       /* (правка 162) RTX Video HDR убран из UI: H.264 не поддерживает HDR,
          а пользователь не должен сталкиваться с ошибкой. */
     ],
@@ -368,6 +370,8 @@ const VIDEO_EXTS =
  * ──────────────────────────────────────────────────────────────── */
 
 export function UpscaleView() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   /* (правка 77) Состояние сервиса — синглтон-стор: переживает unmount
    * вкладок, тосты fire'ятся в цикле (один раз), автозапуск — в tick. */
   const st = useUpscaleService((s) => s.st)
@@ -511,7 +515,7 @@ export function UpscaleView() {
       if (!r.ok || !d.ok) throw new Error(d.error ?? `upload → ${r.status}`)
       await applyLoadedFile(d)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки файла')
+      toast.error(e instanceof Error ? e.message : tt("Ошибка загрузки файла"))
     } finally {
       setUploading(false)
     }
@@ -525,7 +529,7 @@ export function UpscaleView() {
   const doImport = useCallback(async (filename: string, subfolder: string) => {
     if (!filename) return
     if (uploading || isBusy) {
-      toast.warning('Дождитесь завершения текущей обработки апскейла')
+      toast.warning(tt("Дождитесь завершения текущей обработки апскейла"))
       return
     }
     setUploading(true)
@@ -541,7 +545,7 @@ export function UpscaleView() {
       if (!r.ok || !d.ok) throw new Error(d.error ?? `import → ${r.status}`)
       await applyLoadedFile(d)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить видео из галереи')
+      toast.error(e instanceof Error ? e.message : tt("Не удалось загрузить видео из галереи"))
     } finally {
       setUploading(false)
     }
@@ -558,7 +562,7 @@ export function UpscaleView() {
         const parsed = JSON.parse(raw) as { filename?: string; subfolder?: string }
         void doImport(parsed.filename ?? '', parsed.subfolder ?? '')
       } catch {
-        toast.error('Не удалось прочитать перетащенное видео')
+        toast.error(tt("Не удалось прочитать перетащенное видео"))
       }
       return
     }
@@ -713,7 +717,7 @@ export function UpscaleView() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">Параметры</h2>
+            <h2 className="text-sm font-semibold text-foreground">{tt("Параметры")}</h2>
             <Badge className="text-[10px] bg-violet-500/15 text-violet-400 border-violet-500/30 hover:bg-violet-500/15">
               DLSS 5
             </Badge>
@@ -724,21 +728,21 @@ export function UpscaleView() {
           {/* Сервис — всегда виден, не сворачивается */}
           <div
             className="space-y-2"
-            title="Сервис запускается автоматически. Первый запуск занимает 2–3 минуты. Работает только на видеокартах NVIDIA RTX (серии 20/30/40/50)."
+            title={tt("Сервис запускается автоматически. Первый запуск занимает 2–3 минуты. Работает только на видеокартах NVIDIA RTX (серии 20/30/40/50).")}
           >
             <div className="flex items-center justify-between gap-2">
               {disabled ? (
-                <span className="text-xs font-medium text-red-300">Вкладка отключена</span>
+                <span className="text-xs font-medium text-red-300">{tt("Вкладка отключена")}</span>
               ) : svcRunning ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> сервис запущен
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> {' '}{tt("сервис запущен")}
                 </span>
               ) : svcStarting ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-300">
-                  <Loader2Icon className="w-3 h-3 animate-spin" /> запуск…
+                  <Loader2Icon className="w-3 h-3 animate-spin" /> {' '}{tt("запуск…")}
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">сервис не запущен</span>
+                <span className="text-xs text-muted-foreground">{tt("сервис не запущен")}</span>
               )}
               <div className="flex items-center gap-1.5 shrink-0">
                 <Button
@@ -746,10 +750,10 @@ export function UpscaleView() {
                   size="sm"
                   onClick={() => void start()}
                   disabled={svcRunning || svcStarting || disabled || startBusy}
-                  title="Запустить / переподключить DLSS-мост"
+                  title={tt("Запустить / переподключить DLSS-мост")}
                 >
                   <RefreshCwIcon className={cn((svcStarting || startBusy) && 'animate-spin')} />
-                  Запустить
+                  {' '}{tt("Запустить")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -784,7 +788,7 @@ export function UpscaleView() {
             <div className="flex flex-wrap gap-1.5">
               {svcRunning && runtimeReady && (
                 <Badge className="bg-violet-500/10 text-violet-300 border-violet-500/30 text-[10px]">
-                  рантайм готов
+                  {tt("рантайм готов")}
                 </Badge>
               )}
               {svcRunning && !runtimeReady && runtimeError && (
@@ -794,7 +798,7 @@ export function UpscaleView() {
               )}
               {svcRunning && !runtimeReady && !runtimeError && (
                 <Badge className="bg-amber-500/10 text-amber-300 border-amber-500/30 text-[10px]">
-                  <Loader2Icon className="w-3 h-3 animate-spin" /> подготовка рантайма…
+                  <Loader2Icon className="w-3 h-3 animate-spin" /> {' '}{tt("подготовка рантайма…")}
                 </Badge>
               )}
               {gpus.length > 0 && (
@@ -823,13 +827,13 @@ export function UpscaleView() {
                 {!schema ? (
                   <p className="text-xs text-muted-foreground/70 flex items-center gap-1.5">
                     <Loader2Icon className="w-3 h-3 animate-spin" />
-                    {svcStarting ? 'запуск сервиса…' : 'ожидание схемы параметров…'}
+                    {svcStarting ? tt("запуск сервиса…") : tt("ожидание схемы параметров…")}
                   </p>
                 ) : modeControls.length > 0 ? (
                   <div className="space-y-3">{modeControls.map(renderControl)}</div>
                 ) : (
                   <p className="text-xs text-muted-foreground/70">
-                    Схема параметров появится после запуска сервиса.
+                    {tt("Схема параметров появится после запуска сервиса.")}
                   </p>
                 )}
               </motion.div>
@@ -849,7 +853,7 @@ export function UpscaleView() {
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-violet-300 inline-flex items-center gap-1.5">
                   <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
-                  {job?.status === 'queued' ? 'В очереди…' : 'Идёт обработка…'}
+                  {job?.status === 'queued' ? tt("В очереди…") : tt("Идёт обработка…")}
                 </span>
                 <span className="text-muted-foreground font-mono tabular-nums">
                   {Math.round((job?.progress ?? 0) * 100)}%
@@ -867,32 +871,32 @@ export function UpscaleView() {
                 </p>
               )}
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-muted-foreground/60">GPU занята — дождитесь</span>
+                <span className="text-[10px] text-muted-foreground/60">{tt("GPU занята — дождитесь")}</span>
                 <Button variant="outline" size="sm" onClick={() => cancel()} disabled={cancelBusy}>
                   <SquareIcon />
-                  {cancelBusy ? 'Отмена…' : 'Отменить'}
+                  {cancelBusy ? tt("Отмена…") : tt("Отменить")}
                 </Button>
               </div>
             </div>
           ) : job?.status === 'done' ? (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-sm font-medium text-emerald-300">
-                <CheckCircle2Icon className="w-4 h-4" /> Готово
+                <CheckCircle2Icon className="w-4 h-4" /> {' '}{tt("Готово")}
               </div>
               {/* (правка 77) Скачивание убрано: результат в общей галерее. */}
               <p className="text-[10px] text-muted-foreground/60">
-                Результат добавлен в общую галерею справа.
+                {tt("Результат добавлен в общую галерею справа.")}
               </p>
             </div>
           ) : job?.status === 'error' ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-sm font-medium text-red-300">
-                <AlertTriangleIcon className="w-4 h-4" /> Ошибка
+                <AlertTriangleIcon className="w-4 h-4" /> {' '}{tt("Ошибка")}
               </div>
               <p className="text-xs text-red-300/80 break-words">{job.error}</p>
             </div>
           ) : job?.status === 'cancelled' ? (
-            <p className="text-xs text-muted-foreground">Обработка отменена.</p>
+            <p className="text-xs text-muted-foreground">{tt("Обработка отменена.")}</p>
           ) : null}
         </div>
         )}
@@ -905,20 +909,20 @@ export function UpscaleView() {
           <div className="flex items-center justify-between shrink-0">
             <Label
               className="text-sm font-medium text-foreground flex items-center gap-2"
-              title="Загрузите видео, выберите режим и нажмите «Запустить». Результат появится в общей галерее справа."
+              title={tt("Загрузите видео, выберите режим и нажмите «Запустить». Результат появится в общей галерее справа.")}
             >
               <SparklesIcon className="w-4 h-4 text-violet-400" />
-              Режим обработки
+              {' '}{tt("Режим обработки")}
             </Label>
             <span className="text-[10px] text-muted-foreground/70 hidden sm:block">
-              DLSS 5 · только видео · NVIDIA RTX (20/30/40/50)
+              {tt("DLSS 5 · только видео · NVIDIA RTX (20/30/40/50)")}
             </span>
           </div>
 
           {disabled && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex items-center gap-2">
               <AlertTriangleIcon className="w-3.5 h-3.5 shrink-0" />
-              Вкладка отключена: config.ini → [upscale] enabled=1
+              {' '}{tt("Вкладка отключена: config.ini → [upscale] enabled=1")}
             </div>
           )}
 
@@ -961,26 +965,26 @@ export function UpscaleView() {
               <div className="flex flex-col items-center gap-2 py-3">
                 <UploadCloudIcon className="w-8 h-8 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  Перетащите видео сюда — можно прямо с превьюшки в галерее — или{' '}
+                  {tt("Перетащите видео сюда — можно прямо с превьюшки в галерее — или")}{' '}
                   <button
                     type="button"
                     className="text-violet-300 underline underline-offset-2 hover:text-violet-200"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading || isBusy}
                   >
-                    выберите файл
+                    {tt("выберите файл")}
                   </button>{' '}
                   (MP4 / MOV / MKV / AVI / WEBM…)
                 </p>
                 <div className="flex items-center gap-2">
                   <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading || isBusy}>
                     <UploadCloudIcon />
-                    {uploading ? 'Загрузка…' : 'Выбрать видео'}
+                    {uploading ? tt("Загрузка…") : tt("Выбрать видео")}
                   </Button>
                 </div>
                 {uploading && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Loader2Icon className="w-3 h-3 animate-spin" /> Пересылка в сервис… (крупные видео могут идти минуту)
+                    <Loader2Icon className="w-3 h-3 animate-spin" /> {' '}{tt("Пересылка в сервис… (крупные видео могут идти минуту)")}
                   </p>
                 )}
               </div>
@@ -996,7 +1000,7 @@ export function UpscaleView() {
                       path={file.path}
                       url={`/api/upscale/file?path=${encodeURIComponent(file.path)}`}
                       className="flex items-center gap-2 text-left min-w-0 group"
-                      title="Открыть файл во весь экран"
+                      title={tt("Открыть файл во весь экран")}
                     >
                       <FileVideoIcon className="w-4 h-4 text-violet-300 shrink-0" />
                       <span className="text-sm font-medium truncate group-hover:underline">
@@ -1009,12 +1013,12 @@ export function UpscaleView() {
                     {probe?.width && probe?.height && <span>{probe.width}×{probe.height}</span>}
                     {probe?.fps && <span>{Number(probe.fps).toFixed(2).replace(/\.?0+$/, '')} fps</span>}
                     {probe && probe.duration ? <span>{humanDuration(probe.duration)}</span> : null}
-                    {probe?.frames && <span>{probe.frames} кадров</span>}
+                    {probe?.frames && <span>{probe.frames} {' '}{tt("кадров")}</span>}
                     {probe?.codec && <span className="font-mono">{probe.codec}</span>}
                     {probe?.hdr ? <span className="text-amber-300">HDR</span> : null}
                     {/* (правка 727) Куда ляжет результат: папка источника. */}
                     <span className="text-violet-300/90">
-                      Результат: {file.subfolder ? `папка «${file.subfolder}»` : 'общая папка'}
+                      {tt("Результат:")}{' '} {file.subfolder ? `папка «${file.subfolder}»` : tt("общая папка")}
                     </span>
                   </div>
                 </div>
@@ -1025,7 +1029,7 @@ export function UpscaleView() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading || isBusy}
                   >
-                    Сменить
+                    {tt("Сменить")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -1064,17 +1068,17 @@ export function UpscaleView() {
               )}
               {svcRunning && runtimeReady && (
                 <Badge className="bg-violet-500/10 text-violet-300 border-violet-500/30 text-[10px]">
-                  готово к работе
+                  {tt("готово к работе")}
                 </Badge>
               )}
               {svcRunning && !runtimeReady && (
                 <Badge className="bg-amber-500/10 text-amber-300 border-amber-500/30 text-[10px]">
-                  <Loader2Icon className="w-3 h-3 animate-spin" /> ждём рантайм DLSS…
+                  <Loader2Icon className="w-3 h-3 animate-spin" /> {' '}{tt("ждём рантайм DLSS…")}
                 </Badge>
               )}
               {!svcRunning && !disabled && (
                 <Badge variant="secondary" className="text-[10px]">
-                  сервис не запущен
+                  {tt("сервис не запущен")}
                 </Badge>
               )}
             </div>
@@ -1091,7 +1095,7 @@ export function UpscaleView() {
               className="h-11 px-6 bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white border-0 text-sm font-semibold shadow-lg shadow-violet-500/20"
             >
               {isBusy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {isBusy ? 'Ещё в очередь' : 'Запустить'}
+              {isBusy ? tt("Ещё в очередь") : tt("Запустить")}
             </Button>
           </div>
         </div>

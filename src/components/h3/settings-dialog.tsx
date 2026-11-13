@@ -75,6 +75,8 @@ import { UpdatePanel } from './update-panel' // (правка 790)
  * старую версию (метка живёт в собранном .next, который тоже подменяется,
  * но при следующем релизе её пришлось бы править руками). */
 function AboutVersion() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [ver, setVer] = useState<string | null>(null)
   useEffect(() => {
     fetch('/api/update')
@@ -83,10 +85,11 @@ function AboutVersion() {
       .catch(() => { /* сервер недоступен — метка останется прочерком */ })
   }, [])
   return (
-    <div className="text-xs text-muted-foreground">{ver ? `Версия ${ver}` : 'Версия …'}</div>
+    <div className="text-xs text-muted-foreground">{ver ? `Версия ${ver}` : tt("Версия …")}</div>
   )
 }
 import { Label } from '@/components/ui/label'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ─── Types ─── */
 
@@ -150,6 +153,8 @@ async function saveErrorText(res: Response, fallback = 'Ошибка сохра�
 }
 
 export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [tab, setTab] = useState<TabId>('general')
   const [loading, setLoading] = useState(false)
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -298,16 +303,16 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       if (res.ok) {
         setLlmModelCurrent(liveModel) // (правка 477) состояние = живому конфигу
         setLlmSelTick((t) => t + 1) // (правка 467) селектор перечитывает конфиг
-        toast.success('Настройки LLM сохранены', {
+        toast.success(tt("Настройки LLM сохранены"), {
           // (правка 54) точнее: устройство/контекст — при следующем запуске
           // модели, видение видео и макс. длина — сразу (per-request).
-          description: 'Устройство/контекст/своя модель — при следующем запуске модели; остальное — сразу.',
+          description: tt("Устройство/контекст/своя модель — при следующем запуске модели; остальное — сразу."),
         })
       } else {
         toast.error(await saveErrorText(res))
       }
     } catch {
-      toast.error('Ошибка сохранения')
+      toast.error(tt("Ошибка сохранения"))
     } finally {
       setSaving(false)
     }
@@ -327,14 +332,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         }),
       })
       if (res.ok) {
-        toast.success('Оптимизация сохранена', {
-          description: 'Применится при перезапуске ComfyUI.',
+        toast.success(tt("Оптимизация сохранена"), {
+          description: tt("Применится при перезапуске ComfyUI."),
         })
       } else {
         toast.error(await saveErrorText(res))
       }
     } catch {
-      toast.error('Ошибка сохранения')
+      toast.error(tt("Ошибка сохранения"))
     } finally {
       setSaving(false)
     }
@@ -354,14 +359,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         }),
       })
       if (res.ok) {
-        toast.success('Формат сохранения сохранён', {
-          description: 'Применится ко всем НОВЫМ задачам всех режимов (генерация, рефайн, продление, апскейлы, обрезка).',
+        toast.success(tt("Формат сохранения сохранён"), {
+          description: tt("Применится ко всем НОВЫМ задачам всех режимов (генерация, рефайн, продление, апскейлы, обрезка)."),
         })
       } else {
         toast.error(await saveErrorText(res))
       }
     } catch {
-      toast.error('Ошибка сохранения')
+      toast.error(tt("Ошибка сохранения"))
     } finally {
       setSaving(false)
     }
@@ -370,7 +375,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   /* ── Опасная зона: конфиг для подтверждения ── */
   const CONFIRM: Record<string, { title: string; desc: string; button: string }> = {
     reset: {
-      title: 'Сбросить настройки?',
+      title: tt("Сбросить настройки?"),
       // (правка 54) текст соответствует фактическому поведению: сбрасываются
       // ВСЕ параметры, включая выбор моделей (LLM-квант, базовая модель),
       // видение видео и звук.
@@ -380,17 +385,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       button: 'Сбросить',
     },
     clean: {
-      title: 'Очистить кэш?',
+      title: tt("Очистить кэш?"),
       desc: 'Будут удалены ВСЕ файлы из папки input ComfyUI (референсы, кадры, загрузки). Действие необратимо.',
       button: 'Очистить',
     },
     delete: {
-      title: 'Удалить весь контент?',
+      title: tt("Удалить весь контент?"),
       desc: 'Будут удалены ВСЕ сгенерированные видео, история чатов с ассистентом, история промптов и текущий промпт. Действие необратимо.',
       button: 'Удалить',
     },
     factory: {
-      title: 'Полный сброс?',
+      title: tt("Полный сброс?"),
       // (правка 130 + полный сброс) Полный сброс «как с завода»: настройки +
       // LoRA + кэш + контент + апскейл + вложения/чаты + промпты + логи.
       desc: 'Будут удалены ВСЕ ваши данные: сгенерированные видео (output), кэш и загрузки (input), файлы апскейла и его журналы, вложения чатов, история чатов ассистента, история и избранное промптов, текущий промпт, журнал задач, логи запуска и внутренние логи ComfyUI (включая его базу и сохранённые воркфлоу). Настройки (VRAM, LLM, модели, LoRA, формат видео, звук) вернутся к заводским, локальные данные браузера будут очищены. Программа перезапустится; для полной очистки логов ComfyUI закройте и снова откройте её. Действие необратимо.',
@@ -452,7 +457,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         await fetch('/api/settings?all=1', { method: 'DELETE' }).catch(() => {})
 
         if (failed) {
-          toast.error('Полный сброс выполнен частично', {
+          toast.error(tt("Полный сброс выполнен частично"), {
             description: `Не удалось: ${reason}. Проверьте, запущена ли программа, и повторите.`,
           })
           return
@@ -460,7 +465,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         // 5) Перезагрузка: гарантирует, что ни один стор не остался в памяти
         //    со старыми данными.
-        toast.success('Полный сброс выполнен. Программа перезапускается...')
+        toast.success(tt("Полный сброс выполнен. Программа перезапускается..."))
         window.setTimeout(() => window.location.reload(), 1200)
         return
       }
@@ -531,7 +536,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         // отвечать со старой моделью/конфигом (чат-роут уже читает новые) —
         // «глючные» первые ответы. Страховка — сигнатура в ensureLlm.
         void fetch('/api/llm/stop', { method: 'POST' }).catch(() => {})
-        toast.success('Настройки сброшены к значениям по умолчанию')
+        toast.success(tt("Настройки сброшены к значениям по умолчанию"))
       } else if (action === 'clean') {
         const res = await fetch('/api/comfy/clean', {
           method: 'POST',
@@ -570,7 +575,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       }
     } catch (err) {
       console.error('Action failed:', err)
-      toast.error('Произошла ошибка при выполнении действия')
+      toast.error(tt("Произошла ошибка при выполнении действия"))
     } finally {
       setExecuting(false)
       setConfirmAction(null)
@@ -586,10 +591,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <DialogHeader className="px-6 pt-5 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <ServerIcon className="w-5 h-5" />
-            Настройки
+            {' '}{tt("Настройки")}
           </DialogTitle>
           <DialogDescription>
-            Подключение, модели, LLM, память GPU, ComfyUI и ссылки для ручной загрузки
+            {tt("Подключение, модели, LLM, память GPU, ComfyUI и ссылки для ручной загрузки")}
           </DialogDescription>
         </DialogHeader>
 
@@ -634,23 +639,23 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               {loading ? (
                 <Badge variant="secondary" className="gap-1">
                   <Loader2Icon className="w-3 h-3 animate-spin" />
-                  Проверка...
+                  {' '}{tt("Проверка...")}
                 </Badge>
               ) : connected ? (
                 <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1">
                   <CheckCircleIcon className="w-3 h-3" />
-                  Подключено
+                  {' '}{tt("Подключено")}
                 </Badge>
               ) : (
                 <Badge variant="destructive" className="gap-1">
                   <AlertCircleIcon className="w-3 h-3" />
-                  Недоступно
+                  {' '}{tt("Недоступно")}
                 </Badge>
               )}
             </div>
             {!connected && (
               <p className="text-xs text-muted-foreground">
-                Убедитесь, что ComfyUI запущен на порту 8188.
+                {tt("Убедитесь, что ComfyUI запущен на порту 8188.")}
               </p>
             )}
 
@@ -684,10 +689,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
              * его при клике по чужому оверлею). */}
             <div className="space-y-2 pt-2 border-t border-border">
               <div>
-                <span className="text-xs text-muted-foreground">Приветствие при запуске</span>
+                <span className="text-xs text-muted-foreground">{tt("Приветствие при запуске")}</span>
                 <p className="text-[10px] text-muted-foreground/60">
-                  Всплывающее окно с краткой инструкцией. Если поставили галочку
-                  «Больше не показывать» — верните его этой кнопкой.
+                  {tt("Всплывающее окно с краткой инструкцией. Если поставили галочку «Больше не показывать» — верните его этой кнопкой.")}
                 </p>
               </div>
               <Button
@@ -704,7 +708,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 }}
               >
                 <SparklesIcon className="w-3.5 h-3.5" />
-                Показать окно приветствия
+                {' '}{tt("Показать окно приветствия")}
               </Button>
             </div>
 
@@ -716,7 +720,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               className="w-full"
             >
               <RefreshCwIcon className={loading ? 'animate-spin' : ''} />
-              Перепроверить
+              {' '}{tt("Перепроверить")}
             </Button>
 
 
@@ -738,9 +742,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             {/* (правка 111) Звук при завершении — вынесено из «Общих» */}
             <div className="flex items-center justify-between pt-2 border-t border-border">
               <div>
-                <span className="text-xs text-muted-foreground">Звук при завершении</span>
+                <span className="text-xs text-muted-foreground">{tt("Звук при завершении")}</span>
                 <p className="text-[10px] text-muted-foreground/60">
-                  Короткий сигнал при окончании генерации
+                  {tt("Короткий сигнал при окончании генерации")}
                 </p>
               </div>
               <button
@@ -782,18 +786,18 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2 text-sm font-medium">
               <BotIcon className="w-4 h-4 text-cyan-400" />
-              LLM-ассистент
+              {' '}{tt("LLM-ассистент")}
             </div>
             <p className="text-xs text-muted-foreground/70 -mt-2">
-              Устройство и параметры контекста модели чата (Gemma 4 12B / Qwen3.5 9B).
+              {tt("Устройство и параметры контекста модели чата (Gemma 4 12B / Qwen3.5 9B).")}
             </p>
 
             <div className="space-y-1.5 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs text-muted-foreground">Устройство</span>
+                  <span className="text-xs text-muted-foreground">{tt("Устройство")}</span>
                   <p className="text-[10px] text-muted-foreground/60">
-                    Где считается модель чата
+                    {tt("Где считается модель чата")}
                   </p>
                 </div>
               </div>
@@ -823,9 +827,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             <div className="space-y-1.5 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Контекст LLM</span>
+                <span className="text-xs text-muted-foreground">{tt("Контекст LLM")}</span>
                 <span className="text-xs font-mono text-cyan-300">
-                  {(llmCtxSize / 1024).toFixed(llmCtxSize % 1024 === 0 ? 0 : 1)}K токенов
+                  {(llmCtxSize / 1024).toFixed(llmCtxSize % 1024 === 0 ? 0 : 1)}{tt("K токенов")}
                 </span>
               </div>
               <input
@@ -846,10 +850,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {/* (правка 109) Квантизация KV-кэша: экономит VRAM/RAM, качество чуть ниже */}
             <div className="space-y-1.5 pt-2 border-t border-border">
-              <span className="text-xs text-muted-foreground">Квантизация KV-кэша</span>
+              <span className="text-xs text-muted-foreground">{tt("Квантизация KV-кэша")}</span>
               <p className="text-[10px] text-muted-foreground/60">
-                Сжимает кэш контекста модели чата (меньше памяти при том же контексте).
-                По умолчанию q4_0 — максимум экономии (правка 119); q8_0 — почти без потери качества; off — без сжатия.
+                {tt("Сжимает кэш контекста модели чата (меньше памяти при том же контексте). По умолчанию q4_0 — максимум экономии (правка 119); q8_0 — почти без потери качества; off — без сжатия.")}
               </p>
               <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--surface-2)]/60 border border-border">
                 {([
@@ -880,11 +883,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="space-y-1.5 pt-2 border-t border-border">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <span className="text-xs text-muted-foreground">Видение видео ассистентом</span>
+                  <span className="text-xs text-muted-foreground">{tt("Видение видео ассистентом")}</span>
                   <p className="text-[10px] text-muted-foreground/60">
-                    Вкл: ассистент получает сжатый digest видео-рефов (кэшируется по
-                    содержимому файла). Выкл: знает только о наличии видео и не
-                    выдумывает его содержимое.
+                    {tt("Вкл: ассистент получает сжатый digest видео-рефов (кэшируется по содержимому файла). Выкл: знает только о наличии видео и не выдумывает его содержимое.")}
                   </p>
                 </div>
                 <button
@@ -915,13 +916,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 модели ассистента при этом гаснет). mmproj — опционально,
                 для зрения; без него ассистент работает только текстом. */}
             <div className="space-y-1.5 pt-2 border-t border-border">
-              <span className="text-xs text-muted-foreground">Своя модель (GGUF)</span>
+              <span className="text-xs text-muted-foreground">{tt("Своя модель (GGUF)")}</span>
               <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
                 {/* (правка 308) Сервер принимает и папку, и файл: папка
                     резолвится в первый .gguf внутри неё при сохранении. */}
-                Папка с .gguf-моделью или путь к самому файлу — ассистент
-                запустится с ней (движок студии, без скачивания и копирования).
-                Пусто = модель из списка выше. Пример: <span className="font-mono">D:\models</span>
+                {' '}{tt("Папка с .gguf-моделью или путь к самому файлу — ассистент запустится с ней (движок студии, без скачивания и копирования). Пусто = модель из списка выше. Пример:")}{' '} <span className="font-mono">D:\models</span>
               </p>
               {/* (правка 278) Кнопка «Выбрать папку» — нативный диалог
                   (тот же, что у «Свои папки моделей»); ручной ввод остаётся
@@ -935,7 +934,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     const res = await fetch('/api/dialog/folder', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: 'Выберите папку с моделью .gguf' }),
+                      body: JSON.stringify({ title: tt("Выберите папку с моделью .gguf") }),
                     })
                     const data = await res.json()
                     if (!res.ok) {
@@ -944,21 +943,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     }
                     if (data.path) setLlmCustomModel(data.path as string)
                   } catch {
-                    toast.error('Не удалось открыть диалог выбора папки.')
+                    toast.error(tt("Не удалось открыть диалог выбора папки."))
                   }
                 }}
               >
                 <FolderOpenIcon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-                Выбрать папку на диске…
+                {' '}{tt("Выбрать папку на диске…")}
               </Button>
               <input
                 type="text"
                 value={llmCustomModel}
                 onChange={(e) => setLlmCustomModel(e.target.value)}
-                placeholder="…или введите путь вручную: D:\models"
+                placeholder={tt("…или введите путь вручную: D:\\models")}
                 className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               />
-              <span className="text-xs text-muted-foreground block pt-1">mmproj (зрение, опционально)</span>
+              <span className="text-xs text-muted-foreground block pt-1">{tt("mmproj (зрение, опционально)")}</span>
               {/* (правка 308) Тоже файл или папка: из папки берётся первый
                   файл с 'mmproj' в имени. */}
               <input
@@ -971,9 +970,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             </div>
 
             <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-              Макс. длина ответа рассчитывается автоматически из контекста.
-              Применяется при следующем запуске модели.
-              При генерации видео GPU-режим автоматически уступает память.
+              {tt("Макс. длина ответа рассчитывается автоматически из контекста. Применяется при следующем запуске модели. При генерации видео GPU-режим автоматически уступает память.")}
             </p>
 
             <Button
@@ -983,7 +980,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               disabled={saving}
               className="w-full"
             >
-              {saving ? 'Сохранение...' : 'Сохранить'}
+              {saving ? tt("Сохранение...") : tt("Сохранить")}
             </Button>
           </div>
         )}
@@ -998,15 +995,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <CpuIcon className="w-4 h-4 text-amber-400" />
-                Память GPU (ComfyUI)
+                {' '}{tt("Память GPU (ComfyUI)")}
               </div>
               <p className="text-xs text-muted-foreground/70 -mt-1.5">
-                Резерв и динамическое управление VRAM ComfyUI. Применяется при перезапуске.
+                {tt("Резерв и динамическое управление VRAM ComfyUI. Применяется при перезапуске.")}
               </p>
 
               <div className="space-y-1.5 pt-2 border-t border-border">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Резерв VRAM</span>
+                  <span className="text-xs text-muted-foreground">{tt("Резерв VRAM")}</span>
                   <span className="text-xs font-mono">{reserveVram} GB</span>
                 </div>
                 <input
@@ -1037,8 +1034,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   выгружаются/офлоадятся раньше. */}
               <div className="space-y-1.5 pt-2 border-t border-border">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Запас свободной VRAM (headroom)</span>
-                  <span className="text-xs font-mono">{vramHeadroom > 0 ? `${vramHeadroom} GB` : 'Выкл'}</span>
+                  <span className="text-xs text-muted-foreground">{tt("Запас свободной VRAM (headroom)")}</span>
+                  <span className="text-xs font-mono">{vramHeadroom > 0 ? `${vramHeadroom} GB` : tt("Выкл")}</span>
                 </div>
                 <input
                   type="range"
@@ -1050,15 +1047,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   className="w-full h-2 cursor-pointer accent-amber-400"
                 />
                 <div className="relative h-3 text-[10px] text-muted-foreground/50">
-                  <span className="absolute left-0">Выкл</span>
+                  <span className="absolute left-0">{tt("Выкл")}</span>
                   <span className="absolute" style={{ left: '22%' }}>2 GB</span>
                   <span className="absolute right-0">8 GB</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-                  Дополнительный запас, который учитывает нативный слой
-                  DynamicVRAM (comfy-aimdo) при распределении VRAM — с учётом и
-                  чужих приложений. Гарантированный рычаг — «Резерв VRAM»:
-                  его менеджер моделей ComfyUI вычитает при загрузке весов.
+                  {tt("Дополнительный запас, который учитывает нативный слой DynamicVRAM (comfy-aimdo) при распределении VRAM — с учётом и чужих приложений. Гарантированный рычаг — «Резерв VRAM»: его менеджер моделей ComfyUI вычитает при загрузке весов.")}
                 </p>
               </div>
 
@@ -1067,7 +1061,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <div>
                     <span className="text-xs text-muted-foreground">Dynamic VRAM</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      Динамическое управление VRAM ComfyUI
+                      {tt("Динамическое управление VRAM ComfyUI")}
                     </p>
                   </div>
                   <button
@@ -1089,7 +1083,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
 
               <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-                Применяется при перезапуске ComfyUI — после сохранения перезапустите студию (start.bat).
+                {tt("Применяется при перезапуске ComfyUI — после сохранения перезапустите студию (start.bat).")}
               </p>
             </div>
 
@@ -1097,21 +1091,19 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="space-y-3 pt-4 border-t border-border">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <SlidersHorizontalIcon className="w-4 h-4 text-emerald-400" />
-                Оптимизация генерации (VRAM)
+                {' '}{tt("Оптимизация генерации (VRAM)")}
               </div>
               <p className="text-xs text-muted-foreground/70 -mt-1.5">
-                Режимы экономии памяти для нод генерации. Применяются ко всем новым
-                генерациям сразу — без перезапуска ComfyUI.
+                {tt("Режимы экономии памяти для нод генерации. Применяются ко всем новым генерациям сразу — без перезапуска ComfyUI.")}
               </p>
 
               {/* (правка 168) Sparse Attention (Sol-Attn) */}
               <div className="space-y-1.5 pt-2 border-t border-border">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-muted-foreground">Разреженное внимание (Sol-Attn)</span>
+                    <span className="text-xs text-muted-foreground">{tt("Разреженное внимание (Sol-Attn)")}</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      Ускоряет длинные последовательности (~1.2–2.5×);
-                      короткие остаются плотными автоматически
+                      {tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически")}
                     </p>
                   </div>
                   <button
@@ -1147,7 +1139,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 {video.sparseAttention && (
                   <div className="space-y-3 pl-3 border-l border-border/60">
                     <SettingSlider
-                      label="Порог разреженности (tau)"
+                      label={tt("Порог разреженности (tau)")}
                       labelTitle="Насколько смело пропускать часть вычислений внимания. Больше — быстрее, но картинка может стать грубее. Стандартно 1.3."
                       value={video.sparseTau}
                       onChange={(v) => patchVideo({ sparseTau: v })}
@@ -1158,7 +1150,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       inputMax={4}
                     />
                     <SettingSlider
-                      label="Включать с начала генерации"
+                      label={tt("Включать с начала генерации")}
                       labelTitle="Первые шаги генерации задают композицию — их лучше считать точно. 20% — стандарт: первые пять шагов полные, дальше ускорение."
                       value={Math.round(video.sparseStartPercent * 100)}
                       onChange={(v) => patchVideo({ sparseStartPercent: v / 100 })}
@@ -1168,7 +1160,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       formatValue={(v) => `${Math.round(v)}%`}
                     />
                     <SettingSlider
-                      label="Работать до конца генерации"
+                      label={tt("Работать до конца генерации")}
                       labelTitle="До какого момента применять ускорение. 100% — до последнего шага (быстрее всего). Если финал выглядит мыльным — уменьшите."
                       value={Math.round(video.sparseEndPercent * 100)}
                       onChange={(v) => patchVideo({ sparseEndPercent: v / 100 })}
@@ -1178,7 +1170,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       formatValue={(v) => `${Math.round(v)}%`}
                     />
                     <SettingSlider
-                      label="Минимальная длина видео (токены)"
+                      label={tt("Минимальная длина видео (токены)")}
                       labelTitle="Короткие видео Sol-Attn не ускоряет — они всегда считаются точно. Уменьшите значение, чтобы ускорение включалось и на более коротких роликах."
                       value={video.sparseMinTokens}
                       onChange={(v) => patchVideo({ sparseMinTokens: Math.round(v) })}
@@ -1189,7 +1181,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       inputMax={131072}
                     />
                     <SettingSlider
-                      label="Дополнительный контекст (токены)"
+                      label={tt("Дополнительный контекст (токены)")}
                       labelTitle="Запас токенов сверх основной длины — помогает не терять мелкие детали при ускорении. Стандартно 256."
                       value={video.sparseExtraTokens}
                       onChange={(v) => patchVideo({ sparseExtraTokens: Math.round(v) })}
@@ -1209,7 +1201,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <div>
                     <span className="text-xs text-muted-foreground">Veda Sparse Attention</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn
+                      {tt("Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn")}
                     </p>
                   </div>
                   <button
@@ -1235,7 +1227,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 {video.vedaAttention && (
                   <div className="space-y-3 pl-3 border-l border-border/60">
                     <SettingSlider
-                      label="Спарсити генерации, %"
+                      label={tt("Спарсити генерации, %")}
                       value={(() => { const n = Number.parseFloat(video.vedaGeneratedSparsity); return Number.isFinite(n) ? n : 90 })()}
                       onChange={(v) => patchVideo({ vedaGeneratedSparsity: `${Math.round(v)}%` })}
                       min={50}
@@ -1243,10 +1235,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       step={5}
                     />
                     <p className="text-[10px] text-muted-foreground/60 -mt-1.5 leading-snug">
-                      Сколько key-тайлов пропускать в генерации. Выше % = быстрее, но грубее картинка.
+                      {tt("Сколько key-тайлов пропускать в генерации. Выше % = быстрее, но грубее картинка.")}
                     </p>
                     <SettingSlider
-                      label="Спарсити референсов, %"
+                      label={tt("Спарсити референсов, %")}
                       value={(() => { const n = Number.parseFloat(video.vedaReferenceSparsity); return Number.isFinite(n) ? n : 90 })()}
                       onChange={(v) => patchVideo({ vedaReferenceSparsity: `${Math.round(v)}%` })}
                       min={0}
@@ -1254,10 +1246,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       step={5}
                     />
                     <p className="text-[10px] text-muted-foreground/60 -mt-1.5 leading-snug">
-                      То же для референсов. 0% = полное внимание к референсам — точнее лицо персонажа, но медленнее.
+                      {tt("То же для референсов. 0% = полное внимание к референсам — точнее лицо персонажа, но медленнее.")}
                     </p>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground">Слои с полным вниманием</span>
+                      <span className="text-xs text-muted-foreground">{tt("Слои с полным вниманием")}</span>
                       <input
                         type="text"
                         value={video.vedaFullAttentionLayers}
@@ -1266,11 +1258,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                       />
                       <p className="text-[10px] text-muted-foreground/60 leading-snug">
-                        0-based номера блоков DiT, которые всегда считаются плотно. Пусто = все слои sparse.
+                        {tt("0-based номера блоков DiT, которые всегда считаются плотно. Пусто = все слои sparse.")}
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground">Шаги с полным вниманием</span>
+                      <span className="text-xs text-muted-foreground">{tt("Шаги с полным вниманием")}</span>
                       <input
                         type="text"
                         value={video.vedaFullAttentionSteps}
@@ -1279,7 +1271,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                       />
                       <p className="text-[10px] text-muted-foreground/60 leading-snug">
-                        0-based номера шагов сэмплера с полным вниманием. Пусто = все шаги sparse.
+                        {tt("0-based номера шагов сэмплера с полным вниманием. Пусто = все шаги sparse.")}
                       </p>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -1289,7 +1281,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         onChange={(e) => patchVideo({ vedaVerbose: e.target.checked })}
                         className="w-3.5 h-3.5 accent-emerald-500"
                       />
-                      <span className="text-xs text-muted-foreground">Подробный лог (verbose)</span>
+                      <span className="text-xs text-muted-foreground">{tt("Подробный лог (verbose)")}</span>
                     </label>
                   </div>
                 )}
@@ -1301,7 +1293,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <div>
                     <span className="text-xs text-muted-foreground">Low VRAM Attention</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      Attention чанками по 4 головы — экономит видеопамять
+                      {tt("Attention чанками по 4 головы — экономит видеопамять")}
                     </p>
                   </div>
                   <button
@@ -1330,7 +1322,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <div>
                     <span className="text-xs text-muted-foreground">Chunk FeedForward</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      FeedForward чанками на длинных последовательностях — экономит VRAM
+                      {tt("FeedForward чанками на длинных последовательностях — экономит VRAM")}
                     </p>
                   </div>
                   <button
@@ -1355,7 +1347,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 {video.chunkFeedForward && (
                   <div className="space-y-3 pl-3 border-l border-border/60">
                     <SettingSlider
-                      label="Chunk FF: число чанков"
+                      label={tt("Chunk FF: число чанков")}
                       value={typeof video.chunkFFChunks === 'number' ? video.chunkFFChunks : 2}
                       onChange={(v) => patchVideo({ chunkFFChunks: Math.round(v) })}
                       min={1}
@@ -1363,7 +1355,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       step={1}
                     />
                     <SettingSlider
-                      label="Chunk FF: порог длины"
+                      label={tt("Chunk FF: порог длины")}
                       value={typeof video.chunkFFThreshold === 'number' ? video.chunkFFThreshold : 4096}
                       onChange={(v) => patchVideo({ chunkFFThreshold: Math.round(v) })}
                       min={1024}
@@ -1378,10 +1370,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <div className="space-y-1.5 pt-2 border-t border-border">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-muted-foreground">3D-апскейлер латентов</span>
+                    <span className="text-xs text-muted-foreground">{tt("3D-апскейлер латентов")}</span>
                     <p className="text-[10px] text-muted-foreground/60">
-                      Обученный 3D-апскейлер между проходами. Если выключить — латент
-                      просто растягивается: быстрее и экономит VRAM, но качество хуже
+                      {tt("Обученный 3D-апскейлер между проходами. Если выключить — латент просто растягивается: быстрее и экономит VRAM, но качество хуже")}
                     </p>
                   </div>
                   <button
@@ -1412,7 +1403,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               disabled={saving}
               className="w-full"
             >
-              {saving ? 'Сохранение...' : 'Сохранить'}
+              {saving ? tt("Сохранение...") : tt("Сохранить")}
             </Button>
           </div>
         )}
@@ -1422,7 +1413,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="space-y-6 py-2">
             {/* Кодек */}
             <div className="space-y-2">
-              <Label className="text-xs">Кодек видео</Label>
+              <Label className="text-xs">{tt("Кодек видео")}</Label>
               <div className="grid grid-cols-2 gap-1.5">
                 {([
                   ['h264', 'H.264 (x264)', 'Максимальная совместимость — играет везде'],
@@ -1450,7 +1441,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground">
-                NVENC использует отдельный блок видеокарты; если задачи начнут падать на сохранении — вернитесь на программный кодек.
+                {tt("NVENC использует отдельный блок видеокарты; если задачи начнут падать на сохранении — вернитесь на программный кодек.")}
               </p>
             </div>
 
@@ -1458,7 +1449,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             {videoCodec === 'h264' || videoCodec === 'h265' ? (
               <div className="space-y-2">
                 <SettingSlider
-                  label="Качество (CRF — меньше = лучше)"
+                  label={tt("Качество (CRF — меньше = лучше)")}
                   value={videoCrf}
                   min={0}
                   max={30}
@@ -1469,14 +1460,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   }
                 />
                 <p className="text-[10px] leading-snug text-muted-foreground">
-                  12 — прежний максимум студии (архивное качество). 17–19 — «высокое», глазом почти неотличимо.
-                  23+ — компактные черновики. H.265 при том же CRF даёт заметно меньший файл, чем H.264.
+                  {tt("12 — прежний максимум студии (архивное качество). 17–19 — «высокое», глазом почти неотличимо. 23+ — компактные черновики. H.265 при том же CRF даёт заметно меньший файл, чем H.264.")}
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
                 <SettingSlider
-                  label="Битрейт NVENC"
+                  label={tt("Битрейт NVENC")}
                   value={videoNvencBitrate}
                   min={4}
                   max={40}
@@ -1485,16 +1475,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onChange={(v) => setVideoNvencBitrate(Math.round(v))}
                 />
                 <p className="text-[10px] leading-snug text-muted-foreground">
-                  Аппаратные энкодеры управляются битрейтом, а не CRF. Для 1080p ориентир: 16 Мбит/с ≈ высокому
-                  качеству, 24+ — максимум, 8 — компактно.
+                  {tt("Аппаратные энкодеры управляются битрейтом, а не CRF. Для 1080p ориентир: 16 Мбит/с ≈ высокому качеству, 24+ — максимум, 8 — компактно.")}
                 </p>
               </div>
             )}
 
             <p className="text-[10px] leading-snug text-muted-foreground/70">
-              Применяется ко всем НОВЫМ задачам: генерация (драфт/полное), рефайн «Целый» и «Частями»,
-              продление, Tile Upscale, FPS, обрезка и склейки. Уже созданные файлы не перекодируются.
-              Настройка действует сразу — перезапуск не нужен.
+              {tt("Применяется ко всем НОВЫМ задачам: генерация (драфт/полное), рефайн «Целый» и «Частями», продление, Tile Upscale, FPS, обрезка и склейки. Уже созданные файлы не перекодируются. Настройка действует сразу — перезапуск не нужен.")}
             </p>
 
             <Button
@@ -1504,7 +1491,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               disabled={saving}
               className="w-full"
             >
-              {saving ? 'Сохранение...' : 'Сохранить'}
+              {saving ? tt("Сохранение...") : tt("Сохранить")}
             </Button>
           </div>
         )}
@@ -1550,7 +1537,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {/* (правка 484) Техническая информация */}
             <div className="border-t border-border/50 pt-3 space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground">Техническая информация</div>
+              <div className="text-xs font-medium text-muted-foreground">{tt("Техническая информация")}</div>
               {ABOUT_TECH.map((t) => (
                 <div key={t.label} className="flex items-baseline gap-2 text-xs">
                   <span className="text-muted-foreground/70 shrink-0">{t.label}:</span>
@@ -1566,10 +1553,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2">
               <AlertTriangleIcon className="w-4 h-4 text-red-400" />
-              <span className="text-sm font-medium text-red-400">Опасная зона</span>
+              <span className="text-sm font-medium text-red-400">{tt("Опасная зона")}</span>
             </div>
             <p className="text-xs text-muted-foreground/70 -mt-2">
-              Необратимые операции. Действуйте с осторожностью.
+              {tt("Необратимые операции. Действуйте с осторожностью.")}
             </p>
 
             <div className="space-y-4">
@@ -1581,11 +1568,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onClick={() => setConfirmAction('reset')}
                 >
                   <RotateCcwIcon className="w-3.5 h-3.5" />
-                  Сброс настроек
+                  {' '}{tt("Сброс настроек")}
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
                   {/* (правка 826) «формат сохранения» теперь тоже сбрасывается */}
-                  Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию.
+                  {' '}{tt("Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию.")}
                 </p>
               </div>
 
@@ -1597,10 +1584,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onClick={() => setConfirmAction('clean')}
                 >
                   <Trash2Icon className="w-3.5 h-3.5" />
-                  Очистить кэш
+                  {' '}{tt("Очистить кэш")}
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
-                  Удалит все файлы из папки input ComfyUI (референсы, кадры, временные загрузки).
+                  {tt("Удалит все файлы из папки input ComfyUI (референсы, кадры, временные загрузки).")}
                 </p>
               </div>
 
@@ -1612,11 +1599,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onClick={() => setConfirmAction('delete')}
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
-                  Удалить контент
+                  {' '}{tt("Удалить контент")}
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
-                  Удалит ВСЕ сгенерированные видео (папка output), историю
-                  чатов ассистента, историю промптов и ТЕКУЩИЙ промпт в поле генерации.
+                  {tt("Удалит ВСЕ сгенерированные видео (папка output), историю чатов ассистента, историю промптов и ТЕКУЩИЙ промпт в поле генерации.")}
                 </p>
               </div>
 
@@ -1629,10 +1615,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   onClick={() => setConfirmAction('factory')}
                 >
                   <SparklesIcon className="w-3.5 h-3.5" />
-                  Полный сброс (всё)
+                  {' '}{tt("Полный сброс (всё)")}
                 </Button>
                 <p className="text-xs text-muted-foreground/60 pl-1">
-                  Удалит ВСЁ ваше: видео, кэш, файлы апскейла, вложения и историю чатов, промпты, журналы и локальные данные. Настройки, LoRA и config.ini вернутся к заводским. Для передачи программы другому человеку — после сброса не останется ничего вашего.
+                  {tt("Удалит ВСЁ ваше: видео, кэш, файлы апскейла, вложения и историю чатов, промпты, журналы и локальные данные. Настройки, LoRA и config.ini вернутся к заводским. Для передачи программы другому человеку — после сброса не останется ничего вашего.")}
                 </p>
               </div>
             </div>
@@ -1657,7 +1643,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           </DialogHeader>
           <div className="flex gap-2 justify-end mt-4">
             <Button variant="outline" size="sm" onClick={() => setConfirmAction(null)} disabled={executing}>
-              Отмена
+              {tt("Отмена")}
             </Button>
             <Button
               size="sm"
@@ -1665,7 +1651,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               onClick={() => void executeAction(confirmAction)}
               disabled={executing}
             >
-              {executing ? 'Выполняется...' : CONFIRM[confirmAction].button}
+              {executing ? tt("Выполняется...") : CONFIRM[confirmAction].button}
             </Button>
           </div>
         </DialogContent>
@@ -1686,6 +1672,8 @@ let extraEntryUid = 0
 const nextExtraEntryUid = () => ++extraEntryUid
 
 function ExtraModelPathsPanel() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   // (правка 262) exists — флаг наличия папки (сервер проверяет через statSync)
   const [entries, setEntries] = useState<Array<{ path: string; category: string; exists?: boolean; uid: number }>>([])
   const [newPath, setNewPath] = useState('')
@@ -1740,10 +1728,10 @@ function ExtraModelPathsPanel() {
       toast.success(
         found.length > 1
           ? `Добавлено категорий: ${found.length} (структура ComfyUI)`
-          : 'Папка добавлена',
+          : tt("Папка добавлена"),
       )
     } catch {
-      toast.error('Не удалось проверить папку')
+      toast.error(tt("Не удалось проверить папку"))
     } finally {
       setAdding(false)
     }
@@ -1762,20 +1750,20 @@ function ExtraModelPathsPanel() {
       })
       const d = await res.json()
       if (!res.ok || d.error) {
-        toast.error(typeof d?.error === 'string' && d.error ? d.error : 'Ошибка сохранения')
+        toast.error(typeof d?.error === 'string' && d.error ? d.error : tt("Ошибка сохранения"))
         return
       }
       setDirty(false)
       if (d.restart_required) {
-        toast.success('Папки сохранены', {
-          description: 'Перезапустите start.bat — ComfyUI подхватит внешние папки при старте.',
+        toast.success(tt("Папки сохранены"), {
+          description: tt("Перезапустите start.bat — ComfyUI подхватит внешние папки при старте."),
           duration: 10000,
         })
       } else {
-        toast.success('Папки сохранены')
+        toast.success(tt("Папки сохранены"))
       }
     } catch {
-      toast.error('Ошибка сохранения')
+      toast.error(tt("Ошибка сохранения"))
     } finally {
       setSaving(false)
     }
@@ -1785,13 +1773,10 @@ function ExtraModelPathsPanel() {
     <div className="space-y-2 pt-2 border-t border-border">
       <div className="flex items-center gap-2 text-xs font-medium">
         <FolderOpenIcon className="w-3.5 h-3.5 text-amber-400" />
-        Свои папки моделей
+        {' '}{tt("Свои папки моделей")}
       </div>
       <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-        Папки с моделями ВНЕ папки студии (коллекции с других машин, общие
-        хранилища) — без копирования. Папку со стандартной структурой
-        (как <span className="font-mono">models</span> у ComfyUI) студия
-        разложит по категориям сама. После изменения перезапустите start.bat.
+        {tt("Папки с моделями ВНЕ папки студии (коллекции с других машин, общие хранилища) — без копирования. Папку со стандартной структурой (как")}{' '} <span className="font-mono">models</span> {' '}{tt("у ComfyUI) студия разложит по категориям сама. После изменения перезапустите start.bat.")}
       </p>
 
       {entries.length > 0 && (
@@ -1801,10 +1786,10 @@ function ExtraModelPathsPanel() {
               {/* (правка 262) Индикатор: папка не существует на диске */}
               {e.exists === false && (
                 <span
-                  title="Папка не найдена на диске — удалите или исправьте путь"
+                  title={tt("Папка не найдена на диске — удалите или исправьте путь")}
                   className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/30"
                 >
-                  нет
+                  {tt("нет")}
                 </span>
               )}
               <input
@@ -1829,7 +1814,7 @@ function ExtraModelPathsPanel() {
                   setDirty(true)
                 }}
                 className="rounded-md border border-border bg-[var(--surface-2)] px-1.5 py-1 text-[10px] text-foreground focus:outline-none"
-                title="Категория (папка ComfyUI)"
+                title={tt("Категория (папка ComfyUI)")}
               >
                 {EXTRA_CATEGORY_OPTIONS.map(([k, label]) => (
                   <option key={k} value={k}>{label}</option>
@@ -1842,7 +1827,7 @@ function ExtraModelPathsPanel() {
                   setDirty(true)
                 }}
                 className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 shrink-0"
-                title="Убрать папку"
+                title={tt("Убрать папку")}
               >
                 <Trash2Icon className="w-3.5 h-3.5" />
               </button>
@@ -1862,7 +1847,7 @@ function ExtraModelPathsPanel() {
             const res = await fetch('/api/dialog/folder', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ title: 'Выберите папку с моделями' }),
+              body: JSON.stringify({ title: tt("Выберите папку с моделями") }),
             })
             const data = await res.json()
             if (!res.ok) {
@@ -1871,12 +1856,12 @@ function ExtraModelPathsPanel() {
             }
             if (data.path) void add(data.path as string)
           } catch {
-            toast.error('Не удалось открыть диалог выбора папки.')
+            toast.error(tt("Не удалось открыть диалог выбора папки."))
           }
         }}
       >
         <FolderOpenIcon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-        {adding ? 'Добавление…' : 'Выбрать папку на диске…'}
+        {adding ? tt("Добавление…") : tt("Выбрать папку на диске…")}
       </Button>
 
       <div className="flex gap-1.5">
@@ -1890,16 +1875,16 @@ function ExtraModelPathsPanel() {
               void add()
             }
           }}
-          placeholder="…или введите путь вручную: D:\AI\models"
+          placeholder={tt("…или введите путь вручную: D:\\AI\\models")}
           className="flex-1 rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
         />
         <Button variant="outline" size="sm" onClick={() => void add()} disabled={adding || !newPath.trim()} className="h-8 px-3">
-          {adding ? '…' : 'Добавить'}
+          {adding ? '…' : tt("Добавить")}
         </Button>
       </div>
 
       <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="w-full">
-        {saving ? 'Сохранение…' : 'Сохранить папки'}
+        {saving ? tt("Сохранение…") : tt("Сохранить папки")}
       </Button>
     </div>
   )
@@ -1919,6 +1904,8 @@ const EXTRA_CATEGORY_OPTIONS: Array<[string, string]> = [
 /* ─── Manual download links (all models: URLs + target paths) ─── */
 
 function ManualDownloadPanel() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [comfyCore, setComfyCore] = useState('')
   const [bonsaiDir, setBonsaiDir] = useState('')
 
@@ -1945,7 +1932,7 @@ function ManualDownloadPanel() {
       await navigator.clipboard.writeText(text)
       toast.success(`${what} скопирован`)
     } catch {
-      toast.error('Не удалось скопировать')
+      toast.error(tt("Не удалось скопировать"))
     }
   }
 
@@ -1953,12 +1940,10 @@ function ManualDownloadPanel() {
     <div className="space-y-3 py-2">
       <div className="flex items-center gap-2 text-sm font-medium">
         <LinkIcon className="w-4 h-4 text-cyan-400" />
-        Ручная загрузка моделей
+        {' '}{tt("Ручная загрузка моделей")}
       </div>
       <p className="text-xs text-muted-foreground/70 -mt-1 leading-relaxed">
-        Если скачивание из приложения не работает (например, huggingface.co недоступен) —
-        скачайте файлы вручную по прямым ссылкам и положите по указанным путям.
-        Приложение подхватит их автоматически.
+        {tt("Если скачивание из приложения не работает (например, huggingface.co недоступен) — скачайте файлы вручную по прямым ссылкам и положите по указанным путям. Приложение подхватит их автоматически.")}
       </p>
 
       {/* Models root paths */}
@@ -1972,7 +1957,7 @@ function ManualDownloadPanel() {
             type="button"
             onClick={() => void copy(comfyModelsRoot, 'Путь')}
             className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-            title="Скопировать путь"
+            title={tt("Скопировать путь")}
           >
             <CopyIcon className="w-3.5 h-3.5" />
           </button>
@@ -1986,7 +1971,7 @@ function ManualDownloadPanel() {
             type="button"
             onClick={() => void copy(bonsaiModelsRoot, 'Путь')}
             className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-            title="Скопировать путь"
+            title={tt("Скопировать путь")}
           >
             <CopyIcon className="w-3.5 h-3.5" />
           </button>
@@ -2031,7 +2016,7 @@ function ManualDownloadPanel() {
                     type="button"
                     onClick={() => void copy(fullPath, 'Путь')}
                     className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                    title="Скопировать полный путь"
+                    title={tt("Скопировать полный путь")}
                   >
                     <CopyIcon className="w-3 h-3" />
                   </button>
@@ -2050,7 +2035,7 @@ function ManualDownloadPanel() {
                     type="button"
                     onClick={() => void copy(m.url, 'URL')}
                     className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                    title="Скопировать ссылку"
+                    title={tt("Скопировать ссылку")}
                   >
                     <CopyIcon className="w-3 h-3" />
                   </button>
@@ -2060,15 +2045,15 @@ function ManualDownloadPanel() {
                   <div className="flex items-center gap-1.5">
                     <span
                       className="flex-1 min-w-0 text-[10px] text-amber-300/90"
-                      title="Скачанный по ссылке файл нужно переименовать, иначе приложение его не увидит"
+                      title={tt("Скачанный по ссылке файл нужно переименовать, иначе приложение его не увидит")}
                     >
-                      ⚠ по ссылке скачается «{renameHint.downloaded}» — переименуйте файл в «{renameHint.expected}»
+                      {tt("⚠ по ссылке скачается «")}{renameHint.downloaded}{tt("» — переименуйте файл в «")}{renameHint.expected}»
                     </span>
                     <button
                       type="button"
                       onClick={() => void copy(renameHint.expected, 'Имя файла')}
                       className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                      title="Скопировать нужное имя файла"
+                      title={tt("Скопировать нужное имя файла")}
                     >
                       <CopyIcon className="w-3 h-3" />
                     </button>
@@ -2082,10 +2067,8 @@ function ManualDownloadPanel() {
       })}
 
       <p className="text-[10px] text-muted-foreground/60 leading-relaxed pt-1">
-        Имя файла должно совпасть точно (браузер иногда дописывает «(1)» — переименуйте).
-        Если huggingface.co не открывается — замените в ссылке домен на{' '}
-        <code className="text-cyan-300/80">hf-mirror.com</code>. После скачивания
-        проверьте размер файла (см. бейдж) — меньший размер означает обрыв загрузки.
+        {tt("Имя файла должно совпасть точно (браузер иногда дописывает «(1)» — переименуйте). Если huggingface.co не открывается — замените в ссылке домен на")}{' '}
+        <code className="text-cyan-300/80">hf-mirror.com</code>{tt(". После скачивания проверьте размер файла (см. бейдж) — меньший размер означает обрыв загрузки.")}
       </p>
     </div>
   )
@@ -2095,6 +2078,8 @@ function ManualDownloadPanel() {
 
 /** (правка 111) `first` — первый блок вкладки «Внешний вид»: без верхней границы. */
 function ThemeSwitcher({ first = false }: { first?: boolean }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -2110,7 +2095,7 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
     <div className={cn('space-y-2', !first && 'pt-2 border-t border-border')}>
       <div className="flex items-center gap-2">
         <SunIcon className="w-4 h-4 text-amber-400" />
-        <span className="text-sm font-medium">Тема оформления</span>
+        <span className="text-sm font-medium">{tt("Тема оформления")}</span>
       </div>
       {/* (правка 98) Светлая тема удалена — только тёмные.
           (правка 441) + тема «Студия» (dark-calm, Calm Studio). */}
@@ -2121,7 +2106,7 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
           className={cn(btnBase, theme === 'dark-gray' ? btnActive : btnIdle)}
         >
           <MoonIcon className="w-4 h-4" />
-          Серая
+          {' '}{tt("Серая")}
         </button>
         <button
           type="button"
@@ -2129,7 +2114,7 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
           className={cn(btnBase, theme === 'dark' ? btnActive : btnIdle)}
         >
           <MoonIcon className="w-4 h-4" />
-          Чёрная
+          {' '}{tt("Чёрная")}
         </button>
         <button
           type="button"
@@ -2137,7 +2122,7 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
           className={cn(btnBase, theme === 'dark-calm' ? btnActive : btnIdle)}
         >
           <SparklesIcon className="w-4 h-4" />
-          Студия
+          {' '}{tt("Студия")}
         </button>
       </div>
     </div>
@@ -2170,6 +2155,8 @@ function applyUiScale(pct: number) {
 }
 
 function UiScaleSwitcher() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   // (правка 579) дефолт масштаба UI — 80%
   const [scale, setScale] = useState(80)
   const [mounted, setMounted] = useState(false)
@@ -2198,7 +2185,7 @@ function UiScaleSwitcher() {
     <div className="space-y-2 pt-2 border-t border-border">
       <div className="flex items-center gap-2">
         <ZoomInIcon className="w-4 h-4 text-cyan-400" />
-        <span className="text-sm font-medium">Масштаб интерфейса</span>
+        <span className="text-sm font-medium">{tt("Масштаб интерфейса")}</span>
       </div>
       <div className="grid grid-cols-5 gap-2">
         {UI_SCALE_PRESETS.map((pct) => (
@@ -2218,7 +2205,7 @@ function UiScaleSwitcher() {
         ))}
       </div>
       <p className="text-[10px] text-muted-foreground/60">
-        Меняет базовый размер шрифта — за ним масштабируется весь интерфейс. Применяется сразу и запоминается.
+        {tt("Меняет базовый размер шрифта — за ним масштабируется весь интерфейс. Применяется сразу и запоминается.")}
       </p>
     </div>
   )
@@ -2241,6 +2228,8 @@ function applySelectText(on: boolean) {
 }
 
 function SelectTextSwitcher() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [on, setOn] = useState(false)
   const [mounted, setMounted] = useState(false)
 
@@ -2266,9 +2255,9 @@ function SelectTextSwitcher() {
   return (
     <div className="flex items-center justify-between pt-2 border-t border-border">
       <div>
-        <span className="text-xs text-muted-foreground">Выделение текста в интерфейсе</span>
+        <span className="text-xs text-muted-foreground">{tt("Выделение текста в интерфейсе")}</span>
         <p className="text-[10px] text-muted-foreground/60">
-          Разрешить выделять и копировать текст в UI (по умолчанию заблокировано)
+          {tt("Разрешить выделять и копировать текст в UI (по умолчанию заблокировано)")}
         </p>
       </div>
       <button

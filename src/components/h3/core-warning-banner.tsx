@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface CoreVersionResp {
   ok?: boolean
@@ -38,6 +39,8 @@ interface CoreVersionResp {
 }
 
 export function CoreWarningBanner() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [info, setInfo] = useState<CoreVersionResp | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -81,13 +84,13 @@ export function CoreWarningBanner() {
           onClick={() => setHelpOpen(true)}
         >
           <ArrowUpCircleIcon className="w-3 h-3" />
-          Как обновить
+          {' '}{tt("Как обновить")}
         </Button>
         <button
           type="button"
           onClick={() => setDismissed(true)}
           className="p-1 rounded hover:bg-red-500/20 text-red-400/70 hover:text-red-300 shrink-0"
-          title="Скрыть до перезапуска"
+          title={tt("Скрыть до перезапуска")}
         >
           <XIcon className="w-3.5 h-3.5" />
         </button>
@@ -96,39 +99,31 @@ export function CoreWarningBanner() {
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Как обновить ядро ComfyUI</DialogTitle>
+            <DialogTitle>{tt("Как обновить ядро ComfyUI")}</DialogTitle>
             <DialogDescription>
-              Обновление внутри программы меняет только файлы студии. Ядро ComfyUI
-              ставится установщиком и обновляется отдельно — один раз.
+              {tt("Обновление внутри программы меняет только файлы студии. Ядро ComfyUI ставится установщиком и обновляется отдельно — один раз.")}
             </DialogDescription>
           </DialogHeader>
 
           <ol className="list-decimal pl-5 space-y-2 text-sm text-foreground/85">
             <li>
-              Закройте студию (это окно) — установщик не сможет обновить ядро,
-              пока ComfyUI запущен.
+              {tt("Закройте студию (это окно) — установщик не сможет обновить ядро, пока ComfyUI запущен.")}
             </li>
             <li>
-              В папке программы запустите <code className="px-1 rounded bg-[var(--surface-2)] font-mono text-xs">install.bat</code> и
-              дождитесь окончания. Скачивается ~2 ГБ ядра, установка занимает
-              10–40 минут в зависимости от интернета.
+              {tt("В папке программы запустите")}{' '} <code className="px-1 rounded bg-[var(--surface-2)] font-mono text-xs">install.bat</code> {' '}{tt("и дождитесь окончания. Скачивается ~2 ГБ ядра, установка занимает 10–40 минут в зависимости от интернета.")}
             </li>
             <li>
-              Запустите <code className="px-1 rounded bg-[var(--surface-2)] font-mono text-xs">start.bat</code>. Установщик
-              сам перенесёт <span className="font-medium">models, custom_nodes, user, output, input, temp</span> и
-              настройки в новое ядро; при сбое вернёт старое назад.
+              {tt("Запустите")}{' '} <code className="px-1 rounded bg-[var(--surface-2)] font-mono text-xs">start.bat</code>{tt(". Установщик сам перенесёт")}{' '} <span className="font-medium">models, custom_nodes, user, output, input, temp</span> {' '}{tt("и настройки в новое ядро; при сбое вернёт старое назад.")}
             </li>
           </ol>
 
           <p className="text-xs text-muted-foreground">
-            Модели и кастомные ноды скачивать заново не нужно. Если вы не
-            уверены, что установка прошла, — версия ядра показана в этом баннере
-            и обновляется сама.
+            {tt("Модели и кастомные ноды скачивать заново не нужно. Если вы не уверены, что установка прошла, — версия ядра показана в этом баннере и обновляется сама.")}
           </p>
 
           <DialogFooter>
             <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setHelpOpen(false)}>
-              Понятно
+              {tt("Понятно")}
             </Button>
           </DialogFooter>
         </DialogContent>

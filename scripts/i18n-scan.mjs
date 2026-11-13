@@ -3,7 +3,7 @@
  * (замена на t("…"), хук useTranslation, импорт). Ничего не пишет сам.
  */
 import { ts, CY, normKey } from './i18n-rules.mjs'
-import { isDataUse, isDisplayPosition, enclosingFunction } from './i18n-classify.mjs'
+import { isDataUse, isDisplayPosition, enclosingFunction, hasTBinding } from './i18n-classify.mjs'
 
 function q(s) { return JSON.stringify(s) }
 
@@ -37,8 +37,10 @@ function parts(node) {
 }
 
 export function analyze(fileName, text, opts = {}) {
-  const tFn = opts.fn || 't'
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  // имя переводчика: в файлах, где уже есть локальная переменная t (тайм-линии),
+  // берём tt — иначе t("…") будет вызовом числа/строки
+  const tFn = opts.fn || (hasTBinding(sf) ? 'tt' : 't')
   const edits = []
   const keys = []
   const manual = []
@@ -76,6 +78,7 @@ export function analyze(fileName, text, opts = {}) {
     if (!isDisplayPosition(node)) { skipped.push({ line, text: normKey(node.getText()).slice(0, 60) }); return }
     const { key, params, hasNewline } = parts(node)
     if (hasNewline) { manual.push({ line, why: 'многострочный текст — ключ схлопнет перенос', text: key.slice(0, 90) }); return }
+    if (/\{\{|\}\}/.test(key)) { manual.push({ line, why: 'в тексте есть {{ или }} — это синтаксис подстановки', text: key.slice(0, 90) }); return }
     if (!CY.test(key)) { skipped.push({ line, text: key.slice(0, 60) }); return }
     const enc = enclosingFunction(node)
     if (!enc) { manual.push({ line, why: 'уровень модуля — нужен вызов при рендере', text: key.slice(0, 90) }); return }
@@ -90,20 +93,23 @@ export function analyze(fileName, text, opts = {}) {
       const raw = node.text
       const key = normKey(raw)
       if (!key) { ts.forEachChild(node, visit); return }
-      // отступы вокруг текста оставляем как были: правка касается только самого текста
+      const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1
+      if (/\{\{|\}\}/.test(key)) { manual.push({ line, why: 'в тексте есть {{ или }}', text: key.slice(0, 90) }); return }
+      const enc = enclosingFunction(node)
+      if (!enc) { manual.push({ line, why: 'JSX на уровне модуля', text: key.slice(0, 90) }); return }
+      mark(enc.fn, enc.isComponent ? 'component' : 'plain')
+      // у JsxText в .text входят и отступы: координаты берём от pos/end, а не от getStart()
       const leadWs = /^\s*/.exec(raw)[0]
       const trailWs = /\s*$/.exec(raw.slice(leadWs.length))[0]
       const kids = node.parent.children
       const idx = kids.indexOf(node)
       const lead = leadWs && idx > 0 ? "{' '}" : ''
       const trail = trailWs && idx < kids.length - 1 ? "{' '}" : ''
-      const start = node.getStart(sf) + leadWs.length
-      const end = node.getEnd() - trailWs.length
+      const start = node.pos + leadWs.length
+      const end = node.end - trailWs.length
+      if (normKey(text.slice(start, end)) !== key) { manual.push({ line, why: 'не совпал диапазон JsxText', text: key.slice(0, 90) }); return }
       edits.push({ start, end, text: `${lead}{${tFn}(${q(key)})}${trail}` })
-      keys.push({ key, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, params: 0 })
-      const enc = enclosingFunction(node)
-      if (!enc) { manual.push({ line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, why: 'JSX на уровне модуля', text: key.slice(0, 90) }); edits.pop() }
-      else mark(enc.fn, enc.isComponent ? 'component' : 'plain')
+      keys.push({ key, line, params: 0 })
       return
     }
     const strish = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node) ||
@@ -118,5 +124,5 @@ export function analyze(fileName, text, opts = {}) {
   }
   ts.forEachChild(sf, visit)
 
-  return { sf, edits, keys, manual, skipped, fnUsage }
+  return { sf, edits, keys, manual, skipped, fnUsage, tFn }
 }

@@ -38,6 +38,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const PREVIEW_WIDTH = 220
 const PREVIEW_HEIGHT = 130
@@ -86,6 +87,8 @@ export function PreviewCard({
   position: { top: number; left: number; flipUp: boolean }
   className?: string
 }) {
+  const { t } = useTranslation() // (правка 955)
+
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
 
@@ -142,7 +145,7 @@ export function PreviewCard({
         )}
         {kind === 'video' && loaded && (
           <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-medium">
-            Видео
+            {t("Видео")}
           </div>
         )}
         {label && loaded && (

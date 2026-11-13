@@ -28,6 +28,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /** Минимум, который нужен диалогу от файла галереи. */
 export interface CompareVideo {
@@ -61,6 +62,8 @@ function shortName(name: string): string {
 }
 
 export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const wrapRef = useRef<HTMLDivElement>(null)
   const aRef = useRef<HTMLVideoElement>(null)
   const bRef = useRef<HTMLVideoElement>(null)
@@ -265,7 +268,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
       <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-white/10">
         <ArrowLeftRightIcon className="w-4 h-4 text-cyan-400 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-white leading-tight">Сравнение до / после</p>
+          <p className="text-sm font-semibold text-white leading-tight">{tt("Сравнение до / после")}</p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] text-white/60">
             <span className="inline-flex items-center gap-1.5 min-w-0">
               <span className="shrink-0 rounded bg-cyan-500/20 border border-cyan-400/40 px-1 text-[10px] font-bold text-cyan-300">A</span>
@@ -284,7 +287,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
           type="button"
           onClick={onClose}
           className="p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-          title="Закрыть (Esc)"
+          title={tt("Закрыть (Esc)")}
         >
           <XIcon className="w-5 h-5" />
         </button>
@@ -298,7 +301,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         className="relative flex-1 min-h-0 m-2 sm:m-3 rounded-xl overflow-hidden bg-black select-none touch-none cursor-ew-resize"
-        title="Потяните шторку, чтобы сравнить"
+        title={tt("Потяните шторку, чтобы сравнить")}
       >
         {/* B — «после», целиком под шторкой. Цикл общий: ограничен
               длительностью короткого ролика, поэтому длинный не обгоняет. */}
@@ -392,9 +395,9 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
                 'px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors',
                 mode === 'frame' ? 'bg-white text-black' : 'text-white/70 hover:text-white',
               )}
-              title="Стоп-кадр: пауза и покадровое листание"
+              title={tt("Стоп-кадр: пауза и покадровое листание")}
             >
-              Кадр
+              {tt("Кадр")}
             </button>
             <button
               type="button"
@@ -403,9 +406,9 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
                 'px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors',
                 mode === 'video' ? 'bg-white text-black' : 'text-white/70 hover:text-white',
               )}
-              title="Проигрывать оба видео синхронно"
+              title={tt("Проигрывать оба видео синхронно")}
             >
-              Видео
+              {tt("Видео")}
             </button>
           </div>
 
@@ -416,18 +419,18 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
                 type="button"
                 onClick={() => stepFrame(-1)}
                 className="p-1.5 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                title="Предыдущий кадр (←)"
+                title={tt("Предыдущий кадр (←)")}
               >
                 <ChevronLeftIcon className="w-4 h-4" />
               </button>
               <span className="text-[10px] text-white/50 tabular-nums w-[4.5rem] text-center">
-                кадр {Math.max(0, Math.round(time * FPS))}
+                {tt("кадр")}{' '} {Math.max(0, Math.round(time * FPS))}
               </span>
               <button
                 type="button"
                 onClick={() => stepFrame(1)}
                 className="p-1.5 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                title="Следующий кадр (→)"
+                title={tt("Следующий кадр (→)")}
               >
                 <ChevronRightIcon className="w-4 h-4" />
               </button>
@@ -442,7 +445,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
             value={Math.min(time, duration || 0)}
             onChange={(e) => seek(Number(e.target.value))}
             className="flex-1 min-w-0 h-1 accent-cyan-400 cursor-pointer"
-            title="Позиция в видео"
+            title={tt("Позиция в видео")}
           />
 
           <span className="shrink-0 text-[11px] text-white/70 tabular-nums w-[92px] text-right">
@@ -460,7 +463,7 @@ export function VideoCompareDialog({ a, b, onClose }: VideoCompareDialogProps) {
         </div>
 
         <p className="text-[10px] text-white/40 leading-tight">
-          Тяните шторку мышью · «Кадр» — только ←/→ и таймлайн · Пробел — пауза/играть в режиме «Видео» · Esc — закрыть
+          {tt("Тяните шторку мышью · «Кадр» — только ←/→ и таймлайн · Пробел — пауза/играть в режиме «Видео» · Esc — закрыть")}
         </p>
       </div>
     </div>,

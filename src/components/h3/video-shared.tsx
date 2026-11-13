@@ -16,6 +16,7 @@ import { useGenStore } from '@/lib/gen-store'
 import type { ModelOptions } from '@/hooks/use-model-options'
 import { uploadInputFile } from '@/lib/upload'
 import { framesForDuration } from '@/lib/comfy/minimax-h3-template'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ──────────────── Shared helpers ──────────────── */
 
@@ -114,6 +115,8 @@ interface DurationSliderProps {
 }
 
 export function DurationSlider({ min, max, fps, hint, disabled }: DurationSliderProps) {
+  const { t } = useTranslation() // (правка 955)
+
   const videoLength = useGenStore((s) => s.video.videoLength)
   const setVideoLength = useGenStore((s) => s.setVideoLength)
   // Guard against undefined/NaN from stale localStorage
@@ -161,7 +164,7 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground flex items-center justify-between gap-2">
-        <span>Длительность</span>
+        <span>{t("Длительность")}</span>
         <span className="flex items-center gap-1.5">
           <input
             type="text"
@@ -197,7 +200,7 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
             className="text-xs"
             title={`Фактически: ${(clamped / fps).toFixed(2)} с · ${clamped} кадров`}
           >
-            {curSec} с
+            {curSec} {' '}{t("с")}
           </Badge>
         </span>
       </Label>
@@ -212,9 +215,9 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
         className="w-full accent-cyan-500"
       />
       <p className="text-[10px] text-muted-foreground/60">
-        {fps} кадр/с · от {secMin} до {secMax} с, шаг 1 с{hint ? ` · ${hint}` : ''}
+        {fps} {' '}{t("кадр/с · от")}{' '} {secMin} {' '}{t("до")}{' '} {secMax} {' '}{t("с, шаг 1 с")}{hint ? ` · ${hint}` : ''}
         {' · '}
-        <span title="Секунда переводится в ближайшее валидное число кадров модели; вне диапазона — к границе">ручной ввод в секундах: {secMin}–{secMax} с.</span>
+        <span title={t("Секунда переводится в ближайшее валидное число кадров модели; вне диапазона — к границе")}>{t("ручной ввод в секундах:")}{' '} {secMin}–{secMax} {' '}{t("с.")}</span>
       </p>
     </div>
   )
@@ -223,6 +226,8 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
 /* ──────────────── SeedBlock ──────────────────── */
 
 export function SeedBlock({ disabled }: { disabled?: boolean }) {
+  const { t } = useTranslation() // (правка 955)
+
   const seed = useGenStore((s) => s.video.seed)
   const setSeed = useGenStore((s) => s.setVideoSeed)
 
@@ -233,7 +238,7 @@ export function SeedBlock({ disabled }: { disabled?: boolean }) {
         <button
           onClick={() => setSeed(-1)}
           className="p-1 rounded hover:bg-[var(--surface-3)] transition-colors"
-          title="Случайный seed (-1)"
+          title={t("Случайный seed (-1)")}
         >
           <DicesIcon className="w-4 h-4 text-muted-foreground" />
         </button>

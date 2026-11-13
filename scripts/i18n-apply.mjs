@@ -20,8 +20,10 @@ function applyEdits(text, edits) {
 }
 
 export function apply(text, analysis, opts = {}) {
-  const tFn = opts.fn || 't'
+  const tFn = analysis.tFn || opts.fn || 't'
   const mod = opts.module || '@/lib/i18n'
+  const hookDecl = tFn === 't' ? 'const { t } = useTranslation()' : `const { t: ${tFn} } = useTranslation()`
+  const plainImport = tFn === 't' ? `import { t } from '${mod}'` : tFn === 'st' ? `import { st } from '${mod}'` : `import { t as ${tFn} } from '${mod}'`
   const sf = analysis.sf
   const extra = []
   let hookCount = 0
@@ -34,13 +36,13 @@ export function apply(text, analysis, opts = {}) {
     if (body.kind === ts.SyntaxKind.Block) {
       const src = body.getText()
       if (src.includes('useTranslation(')) continue
-      extra.push({ start: body.getStart(sf) + 1, end: body.getStart(sf) + 1, text: `\n  const { t } = useTranslation() // (правка 955)\n` })
+      extra.push({ start: body.getStart(sf) + 1, end: body.getStart(sf) + 1, text: `\n  ${hookDecl} // (правка 955)\n` })
       hookCount++
     } else {
       // стрелочная с телом-выражением: оборачиваем в блок, иначе хук вставить некуда
       extra.push({
         start: body.getStart(sf), end: body.getEnd(),
-        text: `{ const { t } = useTranslation(); return ${body.getText()} }`,
+        text: `{ ${hookDecl}; return ${body.getText()} }`,
       })
       hookCount++
     }
@@ -52,7 +54,7 @@ export function apply(text, analysis, opts = {}) {
   const addImports = []
   if (hookCount && !/from ['"]react-i18next['"]/.test(text)) addImports.push(`\nimport { useTranslation } from 'react-i18next' // (правка 955)`)
   if (plainUsed && !new RegExp(`from ['"]${mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`).test(text)) {
-    addImports.push(`\nimport { ${tFn} } from '${mod}' // (правка 955)`)
+    addImports.push(`\n${plainImport} // (правка 955)`)
   }
   if (addImports.length) extra.push({ start: anchor, end: anchor, text: addImports.join('') })
 

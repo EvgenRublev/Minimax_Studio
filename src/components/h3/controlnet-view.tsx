@@ -68,7 +68,8 @@ import { MIN_FIRST_PASS_STEPS, DEFAULT_FIRST_PASS_STEPS } from '@/lib/comfy/mini
 import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { uploadInputFile } from '@/lib/upload'
 import { AssistantPanel } from './assistant/assistant-panel' // (правка 502)
-import { useGenStore } from '@/lib/gen-store' // (правка 512) Veda/Sparse из настроек приложения
+import { useGenStore } from '@/lib/gen-store'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 512) Veda/Sparse из настроек приложения
 
 // (правка 511) Подписи сэмплеров/планировщиков — те же, что на вкладке «Генерация»
 const SAMPLER_OPTIONS = [
@@ -94,6 +95,8 @@ const SCHEDULER_OPTIONS = [
 ]
 
 export function ControlNetView() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const storeTarget = useControlNetTarget((s) => s.target)
   const clearStoreTarget = useControlNetTarget((s) => s.clear)
   const source = useControlNetTarget((s) => s.source)
@@ -248,7 +251,7 @@ export function ControlNetView() {
       })
       toast.success(`Источник: ${file.name}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки видео')
+      toast.error(e instanceof Error ? e.message : tt("Ошибка загрузки видео"))
     } finally {
       setUploadingSrc(false)
     }
@@ -289,11 +292,11 @@ export function ControlNetView() {
 
   const addRefFiles = useCallback(async (files: File[]) => {
     const images = files.filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(f.name))
-    if (!images.length) { toast.error('Референсы — только картинки (png, jpg, webp)'); return }
+    if (!images.length) { toast.error(tt("Референсы — только картинки (png, jpg, webp)")); return }
     // (правка 502) Актуальный список — из стора (реактивный refImages здесь
     // мог бы устареть в момент длительной загрузки).
     const room = 9 - useControlNetTarget.getState().refImages.length
-    if (room <= 0) { toast.error('Максимум 9 картинок-референсов'); return }
+    if (room <= 0) { toast.error(tt("Максимум 9 картинок-референсов")); return }
     if (images.length > room) toast.error(`Максимум 9 референсов — добавлено ${room}`)
     setUploadingRefs(true)
     try {
@@ -308,7 +311,7 @@ export function ControlNetView() {
             previewUrl: `/api/comfy/file?filename=${encodeURIComponent(path)}&type=input&width=200`,
           }])
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : 'Ошибка загрузки референса')
+          toast.error(e instanceof Error ? e.message : tt("Ошибка загрузки референса"))
         }
       }
     } finally {
@@ -323,15 +326,15 @@ export function ControlNetView() {
   const start = useCallback(async () => {
     const src = sourceRef.current
     if (!src) {
-      toast.error('Сначала выберите контрольное видео')
+      toast.error(tt("Сначала выберите контрольное видео"))
       return
     }
     if (uploadingSrc) {
-      toast.error('Видео ещё загружается')
+      toast.error(tt("Видео ещё загружается"))
       return
     }
     if (modelsMissing) {
-      toast.error('Сначала скачайте модели ControlNet (Настройки → Модели)')
+      toast.error(tt("Сначала скачайте модели ControlNet (Настройки → Модели)"))
       return
     }
 
@@ -432,8 +435,8 @@ export function ControlNetView() {
       useControlNetTarget.getState().setPrompt(text)
       setExamplesOpen(false)
       if (old.trim()) {
-        toast.success('Пример вставлен (прежний промпт заменён)', {
-          action: { label: 'Отменить', onClick: () => useControlNetTarget.getState().setPrompt(old) },
+        toast.success(tt("Пример вставлен (прежний промпт заменён)"), {
+          action: { label: tt("Отменить"), onClick: () => useControlNetTarget.getState().setPrompt(old) },
         })
       }
     },
@@ -476,12 +479,12 @@ export function ControlNetView() {
           subfolder: parsed.subfolder ?? '',
         })
         toast.success(`Источник: ${parsed.filename}`)
-      } catch { toast.error('Не удалось прочитать перетащенное видео') }
+      } catch { toast.error(tt("Не удалось прочитать перетащенное видео")) }
       return
     }
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadLocalFile(f)
-    else toast.error('Нужно видео')
+    else toast.error(tt("Нужно видео"))
   }
 
   return (
@@ -494,7 +497,7 @@ export function ControlNetView() {
             <h2 className="text-sm font-semibold text-foreground">ControlNet</h2>
           </div>
           <p className="text-[10px] text-muted-foreground/70 -mt-2">
-            Генерация видео, следующего движению контрольного ролика (3D-болванка, превиз или референс) покадрово.
+            {tt("Генерация видео, следующего движению контрольного ролика (3D-болванка, превиз или референс) покадрово.")}
           </p>
 
           {/* Баннер недостающих моделей */}
@@ -502,7 +505,7 @@ export function ControlNetView() {
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
               <AlertTriangleIcon className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-300">
-                Для режима ControlNet нужно скачать модели: {missingModels.join(', ')} — Настройки → Модели (категория Препроцессоры)
+                {tt("Для режима ControlNet нужно скачать модели:")}{' '} {missingModels.join(', ')} {' '}{tt("— Настройки → Модели (категория Препроцессоры)")}
               </p>
             </div>
           )}
@@ -513,9 +516,9 @@ export function ControlNetView() {
           <div className="space-y-1">
             <Label
               className="text-xs text-muted-foreground"
-              title="Драфт — один проход (быстро). Полный — два прохода: черновик в низком разрешении, затем апскейл латента и дорисовка в полном (дольше, качественнее). Карта — просто сохранить Depth/Canny-видео без генерации, чтобы использовать его в других программах."
+              title={tt("Драфт — один проход (быстро). Полный — два прохода: черновик в низком разрешении, затем апскейл латента и дорисовка в полном (дольше, качественнее). Карта — просто сохранить Depth/Canny-видео без генерации, чтобы использовать его в других программах.")}
             >
-              Режим
+              {tt("Режим")}
             </Label>
             {/* (правка 508) Три режима: драфт (однопроходный), полный
                 (двухпроходный, бейдж «ControlNet x2»), карта (только
@@ -560,7 +563,7 @@ export function ControlNetView() {
 
           {/* Источник */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Источник (контрольное видео)</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{tt("Источник (контрольное видео)")}</Label>
             {source ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -581,7 +584,7 @@ export function ControlNetView() {
                   name={source.filename}
                   url={source.url}
                   className="w-20 h-12 rounded object-cover bg-black shrink-0"
-                  title="Открыть контрольное видео во весь экран"
+                  title={tt("Открыть контрольное видео во весь экран")}
                 >
                   <video
                     src={source.url}
@@ -594,12 +597,12 @@ export function ControlNetView() {
                 </RefPreviewThumb>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-foreground truncate">{source.filename}</p>
-                  {uploadingSrc && <p className="text-[10px] text-orange-400">загрузка…</p>}
+                  {uploadingSrc && <p className="text-[10px] text-orange-400">{tt("загрузка…")}</p>}
                 </div>
                 {!busy && (
                   <button onClick={() => setSourceSafe(null)}
                     className="text-[10px] text-muted-foreground hover:text-foreground shrink-0">
-                    убрать
+                    {tt("убрать")}
                   </button>
                 )}
               </div>
@@ -618,7 +621,7 @@ export function ControlNetView() {
                 )}
               >
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
-                <span>Кликните для выбора, перетащите карточку из галереи или файл с диска</span>
+                <span>{tt("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
             )}
             <input
@@ -637,7 +640,7 @@ export function ControlNetView() {
                 разрешение, а препроцессинг и VAE-энкод заметно легче. */}
             <label
               className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer"
-              title="Перед обработкой видео ресайзится до 480p с сохранением пропорций (сервер, кэш) — быстрее препроцессинг и меньше VRAM. Для переноса движения высокое разрешение болванки не нужно."
+              title={tt("Перед обработкой видео ресайзится до 480p с сохранением пропорций (сервер, кэш) — быстрее препроцессинг и меньше VRAM. Для переноса движения высокое разрешение болванки не нужно.")}
             >
               <input
                 type="checkbox"
@@ -645,7 +648,7 @@ export function ControlNetView() {
                 onChange={(e) => patchParams({ compressSource: e.target.checked })}
                 className="accent-orange-500"
               />
-              Сжать видео до 480p
+              {' '}{tt("Сжать видео до 480p")}
             </label>
           </div>
 
@@ -657,9 +660,9 @@ export function ControlNetView() {
           <div className={cn('space-y-1.5', params.preprocessOnly && 'opacity-40 pointer-events-none select-none')}>
             <Label
               className="text-xs text-muted-foreground font-medium flex items-center justify-between"
-              title="Картинки персонажа, локации или кадра — модель сохранит их внешность в каждом кадре. В промпте ссылайтесь на них как <Picture 1>, <Picture 2> и т.д."
+              title={tt("Картинки персонажа, локации или кадра — модель сохранит их внешность в каждом кадре. В промпте ссылайтесь на них как <Picture 1>, <Picture 2> и т.д.")}
             >
-              <span>Референсы (персонаж / локация / кадр){params.preprocessOnly ? ' — не используются в режиме карты' : ''}</span>
+              <span>{tt("Референсы (персонаж / локация / кадр)")}{params.preprocessOnly ? tt("— не используются в режиме карты") : ''}</span>
               {refImages.length > 0 && <span className="text-[10px] font-normal">{refImages.length}/9</span>}
             </Label>
             <div
@@ -691,11 +694,11 @@ export function ControlNetView() {
                 }}
               />
               {uploadingRefs ? (
-                <span className="text-orange-400">Загрузка референсов…</span>
+                <span className="text-orange-400">{tt("Загрузка референсов…")}</span>
               ) : (
                 <span className="flex items-center justify-center gap-1.5">
                   <UploadIcon className="w-3.5 h-3.5" />
-                  Перетащите или выберите картинки (до 9)
+                  {' '}{tt("Перетащите или выберите картинки (до 9)")}
                 </span>
               )}
             </div>
@@ -712,7 +715,7 @@ export function ControlNetView() {
                       path={r.path}
                       url={r.previewUrl}
                       className="w-full h-full block"
-                      title="Открыть референс во весь экран"
+                      title={tt("Открыть референс во весь экран")}
                       crop={r.crop}
                       originalSrc={cropOriginalSrc(r)}
                       onCrop={(rect, blob) =>
@@ -741,7 +744,7 @@ export function ControlNetView() {
               </div>
             )}
             <p className="text-[10px] text-muted-foreground/60">
-              В промпте ссылайтесь на них как &lt;Picture 1&gt;, &lt;Picture 2&gt;…
+              {tt("В промпте ссылайтесь на них как &lt;Picture 1&gt;, &lt;Picture 2&gt;…")}
             </p>
 
             {/* (правка 505) Рефы: режим размера — как на вкладке «Генерация»
@@ -749,9 +752,9 @@ export function ControlNetView() {
             <div className="space-y-1 pt-1">
               <Label
                 className="text-xs text-muted-foreground"
-                title="Как обрабатывать загруженные картинки. Match — уменьшает референс до размера кадра (быстрее, но лицо может терять сходство). Max — сохраняет детали референса (точнее идентичность, медленнее). В ControlNet референсы ограничены 1024px при загрузке — иначе в режиме Max они вытесняют контроль движения и ломают картинку."
+                title={tt("Как обрабатывать загруженные картинки. Match — уменьшает референс до размера кадра (быстрее, но лицо может терять сходство). Max — сохраняет детали референса (точнее идентичность, медленнее). В ControlNet референсы ограничены 1024px при загрузке — иначе в режиме Max они вытесняют контроль движения и ломают картинку.")}
               >
-                Рефы: режим размера
+                {tt("Рефы: режим размера")}
               </Label>
               <div className="grid grid-cols-2 gap-1.5">
                 {(['match', 'max'] as const).map((m) => (
@@ -766,7 +769,7 @@ export function ControlNetView() {
                         : 'border-border text-muted-foreground hover:text-foreground',
                     )}
                   >
-                    {m === 'match' ? 'Match (быстро)' : 'Max (детально)'}
+                    {m === 'match' ? tt("Match (быстро)") : tt("Max (детально)")}
                   </button>
                 ))}
               </div>
@@ -777,9 +780,9 @@ export function ControlNetView() {
           <div className="space-y-1">
             <Label
               className="text-xs text-muted-foreground"
-              title="Глубина — карта расстояний (сцены, объёмы). Контуры — линии краёв (рисунки, чертежи). Поза — скелет тела (DWPose). Прямой — видео подаётся как обычный видео-референс, без карт (как на вкладке «Генерация»)."
+              title={tt("Глубина — карта расстояний (сцены, объёмы). Контуры — линии краёв (рисунки, чертежи). Поза — скелет тела (DWPose). Прямой — видео подаётся как обычный видео-референс, без карт (как на вкладке «Генерация»).")}
             >
-              Тип контроля
+              {tt("Тип контроля")}
             </Label>
             <Select
               value={params.controlType}
@@ -793,10 +796,10 @@ export function ControlNetView() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-[var(--surface-3)] border-border">
-                <SelectItem value="depth">Глубина (Depth)</SelectItem>
-                <SelectItem value="canny">Контуры (Canny)</SelectItem>
-                <SelectItem value="pose">Поза (DWPose)</SelectItem>
-                <SelectItem value="direct">Прямой (без карт)</SelectItem>
+                <SelectItem value="depth">{tt("Глубина (Depth)")}</SelectItem>
+                <SelectItem value="canny">{tt("Контуры (Canny)")}</SelectItem>
+                <SelectItem value="pose">{tt("Поза (DWPose)")}</SelectItem>
+                <SelectItem value="direct">{tt("Прямой (без карт)")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -804,7 +807,7 @@ export function ControlNetView() {
           {/* Длительность */}
           <div className="space-y-1">
             <SettingSlider
-              label="Длительность, сек"
+              label={tt("Длительность, сек")}
               labelTitle="Длительность результата в секундах."
               value={params.duration}
               min={1}
@@ -814,7 +817,7 @@ export function ControlNetView() {
               formatValue={(v) => `${v} с`}
             />
             <p className="text-[10px] text-muted-foreground/60">
-              Если контрольное видео короче — длительность обрежется под него.
+              {tt("Если контрольное видео короче — длительность обрежется под него.")}
             </p>
           </div>
 
@@ -822,9 +825,9 @@ export function ControlNetView() {
           <div className="space-y-1">
             <Label
               className="text-xs text-muted-foreground"
-              title="Короткая сторона результата. Длинная считается по пропорции контрольного видео."
+              title={tt("Короткая сторона результата. Длинная считается по пропорции контрольного видео.")}
             >
-              Короткая сторона результата
+              {tt("Короткая сторона результата")}
             </Label>
             <Select
               value={String(params.targetShortSide)}
@@ -846,7 +849,7 @@ export function ControlNetView() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-orange-500/30 transition-all text-left"
             >
-              <span className="text-xs font-medium text-muted-foreground">Дополнительные параметры</span>
+              <span className="text-xs font-medium text-muted-foreground">{tt("Дополнительные параметры")}</span>
               <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvanced && 'rotate-180')}>▼</span>
             </button>
 
@@ -859,7 +862,7 @@ export function ControlNetView() {
                     <button
                       onClick={() => setSeed(-1)}
                       className="p-1 rounded hover:bg-[var(--surface-3)] transition-colors"
-                      title="Случайный seed (-1)"
+                      title={tt("Случайный seed (-1)")}
                     >
                       <DicesIcon className="w-4 h-4 text-muted-foreground" />
                     </button>
@@ -886,7 +889,7 @@ export function ControlNetView() {
                     className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-[var(--surface-3)] border border-border/60 hover:border-orange-500/30 transition-all text-left"
                   >
                     <span className="text-xs font-medium text-muted-foreground">
-                      {isDraft ? 'Драфт — единственный проход' : 'Pass 1 — Low-res'}
+                      {isDraft ? tt("Драфт — единственный проход") : 'Pass 1 — Low-res'}
                     </span>
                     <span className={cn('text-[10px] text-muted-foreground transition-transform', showPass1 && 'rotate-180')}>▼</span>
                   </button>
@@ -897,7 +900,7 @@ export function ControlNetView() {
                       {!isDraft && (
                         <div className="space-y-1">
                           <SettingSlider
-                            label="Low-res разрешение (MP)"
+                            label={tt("Low-res разрешение (MP)")}
                             labelTitle="Размер чернового прохода: чем меньше, тем быстрее. В конце видео всё равно доводится до полного разрешения."
                             value={params.lowResMP}
                             onChange={(v) => patchParams({ lowResMP: Math.min(2, Math.max(0.2, Math.round(v * 100) / 100)) })}
@@ -933,7 +936,7 @@ export function ControlNetView() {
                         />
                         {!isDraft && (
                           <p className="text-[10px] text-muted-foreground/70 leading-snug">
-                            Pass 1: σ 1.0 → 0 ({cnSplit} шагов) · Pass 2: σ {cnPass2Start} → 0 ({cnPass2Steps} шага)
+                            Pass 1: σ 1.0 → 0 ({cnSplit} {' '}{tt("шагов) · Pass 2: σ")}{' '} {cnPass2Start} → 0 ({cnPass2Steps} {' '}{tt("шага)")}
                           </p>
                         )}
                       </div>
@@ -942,16 +945,16 @@ export function ControlNetView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler."
+                          title={tt("Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler.")}
                         >
-                          Сэмплер
+                          {tt("Сэмплер")}
                         </Label>
                         <Select
                           value={params.pass1Sampler}
                           onValueChange={(v) => patchParams({ pass1Sampler: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SAMPLER_OPTIONS.map((o) => (
@@ -965,16 +968,16 @@ export function ControlNetView() {
                       <div className="space-y-1">
                         <Label
                           className="text-xs text-muted-foreground"
-                          title="Как модель распределяет работу между шагами. Обычно лучше оставить simple."
+                          title={tt("Как модель распределяет работу между шагами. Обычно лучше оставить simple.")}
                         >
-                          Планировщик
+                          {tt("Планировщик")}
                         </Label>
                         <Select
                           value={params.pass1Scheduler}
                           onValueChange={(v) => patchParams({ pass1Scheduler: v })}
                         >
                           <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue placeholder={tt("Выберите")} />
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--surface-3)] border-border">
                             {SCHEDULER_OPTIONS.map((o) => (
@@ -1005,23 +1008,23 @@ export function ControlNetView() {
                         <div className="space-y-1">
                           <Label
                             className="text-xs text-muted-foreground"
-                            title="Сколько шагов делает финальный проход детализации. Больше — чётче картинка, но дольше."
+                            title={tt("Сколько шагов делает финальный проход детализации. Больше — чётче картинка, но дольше.")}
                           >
-                            Sigma-профиль (шаги)
+                            {tt("Sigma-профиль (шаги)")}
                           </Label>
                           <Select
                             value={params.sigmaVariant}
                             onValueChange={(v) => patchParams({ sigmaVariant: v })}
                           >
                             <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                              <SelectValue placeholder="Выберите" />
+                              <SelectValue placeholder={tt("Выберите")} />
                             </SelectTrigger>
                             <SelectContent className="bg-[var(--surface-3)] border-border">
-                              <SelectItem value="3step">3 шага (быстрее)</SelectItem>
-                              <SelectItem value="4step">4 шага (баланс)</SelectItem>
-                              <SelectItem value="5step">5 шагов (высокое)</SelectItem>
-                              <SelectItem value="6step">6 шагов (оч. высокое)</SelectItem>
-                              <SelectItem value="7step">7 шагов (макс.)</SelectItem>
+                              <SelectItem value="3step">{tt("3 шага (быстрее)")}</SelectItem>
+                              <SelectItem value="4step">{tt("4 шага (баланс)")}</SelectItem>
+                              <SelectItem value="5step">{tt("5 шагов (высокое)")}</SelectItem>
+                              <SelectItem value="6step">{tt("6 шагов (оч. высокое)")}</SelectItem>
+                              <SelectItem value="7step">{tt("7 шагов (макс.)")}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -1030,16 +1033,16 @@ export function ControlNetView() {
                         <div className="space-y-1">
                           <Label
                             className="text-xs text-muted-foreground"
-                            title="Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler."
+                            title={tt("Способ, которым модель рисует кадры. Влияет на детализацию и стабильность; если не уверены — оставьте euler.")}
                           >
-                            Сэмплер
+                            {tt("Сэмплер")}
                           </Label>
                           <Select
                             value={params.pass2Sampler}
                             onValueChange={(v) => patchParams({ pass2Sampler: v })}
                           >
                             <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                              <SelectValue placeholder="Выберите" />
+                              <SelectValue placeholder={tt("Выберите")} />
                             </SelectTrigger>
                             <SelectContent className="bg-[var(--surface-3)] border-border">
                               {SAMPLER_OPTIONS.map((o) => (
@@ -1063,9 +1066,9 @@ export function ControlNetView() {
             <div className="space-y-1.5">
               <Label
                 className="text-xs text-muted-foreground"
-                title="Куда сохранять результат. По умолчанию — папка исходного видео."
+                title={tt("Куда сохранять результат. По умолчанию — папка исходного видео.")}
               >
-                Папка результата
+                {tt("Папка результата")}
               </Label>
               <div className="relative">
                 <button
@@ -1100,7 +1103,7 @@ export function ControlNetView() {
                         )}
                       >
                         <FilmIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="flex-1 truncate">Общая папка</span>
+                        <span className="flex-1 truncate">{tt("Общая папка")}</span>
                       </button>
                       {gallery.folders.map((f) => {
                         // (правка 495) Вложенные папки: отступ по глубине.
@@ -1134,7 +1137,7 @@ export function ControlNetView() {
           <div className="flex gap-2 pt-1">
             <Button onClick={startWithHistory} disabled={!source || modelsMissing || uploadingSrc} className="flex-1 gap-1.5">
               <PlayIcon className="w-4 h-4" />
-              {busy ? 'Ещё в очередь' : params.preprocessOnly ? 'Сохранить карту' : 'Сгенерировать'}
+              {busy ? tt("Ещё в очередь") : params.preprocessOnly ? tt("Сохранить карту") : tt("Сгенерировать")}
             </Button>
           </div>
 
@@ -1170,13 +1173,13 @@ export function ControlNetView() {
           <div className="flex items-center justify-between shrink-0">
             <Label className="text-sm font-medium text-foreground flex items-center gap-2">
               <SparklesIcon className="w-4 h-4 text-orange-400" />
-              Описание видео
+              {' '}{tt("Описание видео")}
             </Label>
             <span className="text-[10px] text-muted-foreground/70 hidden sm:block">
               <kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl</kbd>
               {' + '}
               <kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Enter</kbd>
-              {' — запустить'}
+              {tt("— запустить")}
             </span>
           </div>
 
@@ -1241,7 +1244,7 @@ export function ControlNetView() {
             <PromptFixDialog
               open={fixOpen}
               onOpenChange={setFixOpen}
-              hint="Промпт и ваше задание уйдут в чат ассистента вкладки «ControlNet» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена."
+              hint={tt("Промпт и ваше задание уйдут в чат ассистента вкладки «ControlNet» — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.")}
               onSubmit={(req) => requestImprovePrompt(prompt, { mode: 'controlnet', fixRequest: req })}
             />
           </div>
@@ -1266,7 +1269,7 @@ export function ControlNetView() {
               )}
             >
               <HistoryIcon className="w-3 h-3" />
-              История
+              {' '}{tt("История")}{' '}
               {historyEntries.length > 0 && (
                 <span className="ml-0.5 px-1 rounded-full bg-[var(--surface-3)] text-[10px] text-muted-foreground">
                   {historyEntries.length}
@@ -1288,7 +1291,7 @@ export function ControlNetView() {
               )}
             >
               <SparklesIcon className="w-3 h-3" />
-              Примеры
+              {' '}{tt("Примеры")}
             </button>
           </div>
 
@@ -1309,20 +1312,20 @@ export function ControlNetView() {
                 style={dropdownPos(historyBtnRef.current)}
               >
                 <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-3)]">
-                  <span className="text-[10px] font-semibold text-foreground">История промптов</span>
+                  <span className="text-[10px] font-semibold text-foreground">{tt("История промптов")}</span>
                   {historyEntries.length > 0 && (
                     <button
                       type="button"
                       onClick={clearHistory}
                       className="text-[10px] text-muted-foreground hover:text-red-400"
                     >
-                      очистить всё
+                      {tt("очистить всё")}
                     </button>
                   )}
                 </div>
                 {historyEntries.length === 0 && (
                   <p className="px-2.5 py-3 text-xs text-muted-foreground">
-                    Пока пусто — запущенные промпты сохраняются здесь автоматически.
+                    {tt("Пока пусто — запущенные промпты сохраняются здесь автоматически.")}
                   </p>
                 )}
                 {historyEntries.map((e) => (
@@ -1332,7 +1335,7 @@ export function ControlNetView() {
                     onClick={() => {
                       setPrompt(e.text)
                       setHistoryOpen(false)
-                      toast.success('Промпт вставлен из истории')
+                      toast.success(tt("Промпт вставлен из истории"))
                     }}
                   >
                     <button
@@ -1359,7 +1362,7 @@ export function ControlNetView() {
                         removeHistoryEntry(e.id)
                       }}
                       className="shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Удалить из истории"
+                      title={tt("Удалить из истории")}
                     >
                       <XIcon className="w-3 h-3" />
                     </button>
@@ -1376,7 +1379,7 @@ export function ControlNetView() {
                 style={dropdownPos(examplesBtnRef.current)}
               >
                 <div className="px-2.5 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-3)]">
-                  <span className="text-[10px] font-semibold text-foreground">Готовые примеры</span>
+                  <span className="text-[10px] font-semibold text-foreground">{tt("Готовые примеры")}</span>
                 </div>
                 {EXAMPLES.map((ex) => (
                   <div
@@ -1391,7 +1394,7 @@ export function ControlNetView() {
                   </div>
                 ))}
                 <p className="px-2.5 py-2 text-[10px] text-muted-foreground/60 border-t border-border">
-                  Заменяет текущий промпт (с возможностью отменить). Промпты — на английском: модель понимает его лучше всего.
+                  {tt("Заменяет текущий промпт (с возможностью отменить). Промпты — на английском: модель понимает его лучше всего.")}
                 </p>
               </div>,
               document.body

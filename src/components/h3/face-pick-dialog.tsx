@@ -25,6 +25,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { CrosshairIcon, PauseIcon, PlayIcon, XIcon } from 'lucide-react'
 import type { FaceRefinePoint } from '@/lib/face-refine-target-store'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface FacePickDialogProps {
   open: boolean
@@ -60,6 +61,8 @@ export function FacePickDialog({
   onPick,
   onClear,
 }: FacePickDialogProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const [duration, setDuration] = useState(0)
   const [time, setTime] = useState(0)
@@ -146,12 +149,10 @@ export function FacePickDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <CrosshairIcon className="w-4 h-4 text-yellow-400" />
-            Кого перерисовывать
+            {' '}{tt("Кого перерисовывать")}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Найдите кадр, где нужное лицо видно лучше всего, и кликните по нему.
-            Нода возьмёт ближайшее к точке лицо и будет вести этого человека через
-            весь ролик.
+            {tt("Найдите кадр, где нужное лицо видно лучше всего, и кликните по нему. Нода возьмёт ближайшее к точке лицо и будет вести этого человека через весь ролик.")}{' '}
             {filename && <span className="text-muted-foreground/70"> {filename}</span>}
           </DialogDescription>
         </DialogHeader>
@@ -166,7 +167,7 @@ export function FacePickDialog({
             className="relative inline-block max-w-full rounded-lg overflow-hidden bg-black cursor-crosshair select-none"
             style={maxVideoWidthVh ? { width: `min(100%, ${maxVideoWidthVh}vh)` } : { width: '100%' }}
             onClick={handleClick}
-            title="Кликните по лицу"
+            title={tt("Кликните по лицу")}
           >
             <video
               ref={videoRef}
@@ -197,8 +198,7 @@ export function FacePickDialog({
         <div className="space-y-1">
           {loadFailed && (
             <p className="text-[10px] text-yellow-400">
-              Браузер не открыл этот файл (контейнер не читается) — выберите лицо
-              правилом в панели слева.
+              {tt("Браузер не открыл этот файл (контейнер не читается) — выберите лицо правилом в панели слева.")}
             </p>
           )}
           <input
@@ -209,12 +209,12 @@ export function FacePickDialog({
             value={Math.min(time, duration || 0)}
             onChange={(e) => seek(parseFloat(e.target.value))}
             className="w-full accent-yellow-400"
-            aria-label="Позиция в ролике"
+            aria-label={tt("Позиция в ролике")}
           />
           <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
             <span>{fmtTime(time)} / {fmtTime(duration)}</span>
             <span className="text-yellow-400">
-              кадр {frameOf(time)}{frames > 0 ? ` из ${frames}` : ''}
+              {tt("кадр")}{' '} {frameOf(time)}{frames > 0 ? ` из ${frames}` : ''}
               {marker ? ` · точка на кадре ${marker.frame}` : ''}
             </span>
           </div>
@@ -223,7 +223,7 @@ export function FacePickDialog({
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={togglePlay} className="h-8 px-3 gap-1.5 text-xs">
             {playing ? <PauseIcon className="w-3.5 h-3.5" /> : <PlayIcon className="w-3.5 h-3.5" />}
-            {playing ? 'Пауза' : 'Проиграть'}
+            {playing ? tt("Пауза") : tt("Проиграть")}
           </Button>
           <div className="flex-1" />
           {marker && (
@@ -236,10 +236,10 @@ export function FacePickDialog({
                 size="sm"
                 onClick={() => { setMarker(null); onClear(); onOpenChange(false) }}
                 className="h-8 px-2 gap-1 text-xs text-muted-foreground"
-                title="Сбросить точку и вернуться к правилу"
+                title={tt("Сбросить точку и вернуться к правилу")}
               >
                 <XIcon className="w-3.5 h-3.5" />
-                Сбросить
+                {' '}{tt("Сбросить")}
               </Button>
             </>
           )}
@@ -248,7 +248,7 @@ export function FacePickDialog({
             onClick={() => onOpenChange(false)}
             className="h-8 px-4 text-xs bg-yellow-500 hover:bg-yellow-400 text-black border-0 font-medium"
           >
-            Готово
+            {tt("Готово")}
           </Button>
         </div>
       </DialogContent>

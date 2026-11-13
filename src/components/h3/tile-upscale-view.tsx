@@ -39,8 +39,11 @@ import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useTileUpscaleTarget, type TileUpscaleSource } from '@/lib/tile-upscale-target-store'
 import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
 import { uploadInputFile } from '@/lib/upload'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 export function TileUpscaleView() {
+  const { t } = useTranslation() // (правка 955)
+
   const storeTarget = useTileUpscaleTarget((s) => s.target)
   const clearStoreTarget = useTileUpscaleTarget((s) => s.clear)
   const source = useTileUpscaleTarget((s) => s.source)
@@ -122,7 +125,7 @@ export function TileUpscaleView() {
       })
       toast.success(`Источник: ${file.name}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ошибка загрузки видео')
+      toast.error(e instanceof Error ? e.message : t("Ошибка загрузки видео"))
     } finally {
       setUploadingSrc(false)
     }
@@ -135,11 +138,11 @@ export function TileUpscaleView() {
   const start = useCallback(async () => {
     const src = sourceRef.current
     if (!src) {
-      toast.error('Сначала выберите видео-источник')
+      toast.error(t("Сначала выберите видео-источник"))
       return
     }
     if (uploadingSrc) {
-      toast.error('Видео ещё загружается')
+      toast.error(t("Видео ещё загружается"))
       return
     }
 
@@ -183,12 +186,12 @@ export function TileUpscaleView() {
           subfolder: parsed.subfolder ?? '',
         })
         toast.success(`Источник: ${parsed.filename}`)
-      } catch { toast.error('Не удалось прочитать перетащенное видео') }
+      } catch { toast.error(t("Не удалось прочитать перетащенное видео")) }
       return
     }
     const f = e.dataTransfer.files?.[0]
     if (f) void uploadLocalFile(f)
-    else toast.error('Нужно видео')
+    else toast.error(t("Нужно видео"))
   }
 
   return (
@@ -203,7 +206,7 @@ export function TileUpscaleView() {
 
           {/* Источник */}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground font-medium">Источник</Label>
+            <Label className="text-xs text-muted-foreground font-medium">{t("Источник")}</Label>
             {source ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -225,7 +228,7 @@ export function TileUpscaleView() {
                   name={source.filename}
                   url={source.url}
                   className="w-20 h-12 rounded object-cover bg-black shrink-0"
-                  title="Открыть исходное видео во весь экран"
+                  title={t("Открыть исходное видео во весь экран")}
                 >
                   <video
                     src={source.url}
@@ -238,12 +241,12 @@ export function TileUpscaleView() {
                 </RefPreviewThumb>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-foreground truncate">{source.filename}</p>
-                  {uploadingSrc && <p className="text-[10px] text-pink-400">загрузка…</p>}
+                  {uploadingSrc && <p className="text-[10px] text-pink-400">{t("загрузка…")}</p>}
                 </div>
                 {!busy && (
                   <button onClick={() => setSourceSafe(null)}
                     className="text-[10px] text-muted-foreground hover:text-foreground shrink-0">
-                    убрать
+                    {t("убрать")}
                   </button>
                 )}
               </div>
@@ -263,7 +266,7 @@ export function TileUpscaleView() {
                 )}
               >
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
-                <span>Кликните для выбора, перетащите карточку из галереи или файл с диска</span>
+                <span>{t("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
             )}
             {/* (правка 274) Скрытый input — клик-выбор видео с диска */}
@@ -287,7 +290,7 @@ export function TileUpscaleView() {
               @/components/ui/select (эталон вкладки «Генерация»). */}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Разрешение</Label>
+              <Label className="text-xs text-muted-foreground">{t("Разрешение")}</Label>
               <Select
                 value={String(params.targetResolution)}
                 onValueChange={(v) => patchParams({ targetResolution: parseInt(v, 10) })}
@@ -302,7 +305,7 @@ export function TileUpscaleView() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Шаги</Label>
+              <Label className="text-xs text-muted-foreground">{t("Шаги")}</Label>
               <Select
                 value={String(params.steps)}
                 onValueChange={(v) => patchParams({ steps: parseInt(v, 10) })}
@@ -322,7 +325,7 @@ export function TileUpscaleView() {
               SettingSlider (как во вкладке «Генерация»): значение — в
               formatValue, пояснение — в labelTitle-тултипе. */}
           <SettingSlider
-            label="Денойз"
+            label={t("Денойз")}
             labelTitle="Насколько сильно модель перерисовывает картинку при апскейле. Меньше — результат ближе к исходнику, больше — больше новых деталей."
             value={params.denoise}
             min={0.05}
@@ -340,7 +343,7 @@ export function TileUpscaleView() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-pink-500/30 transition-all text-left"
             >
-              <span className="text-xs font-medium text-muted-foreground">Дополнительные параметры</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Дополнительные параметры")}</span>
               <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvanced && 'rotate-180')}>▼</span>
             </button>
 
@@ -352,9 +355,9 @@ export function TileUpscaleView() {
                 <div className="space-y-1">
                   <Label
                     className="text-xs text-muted-foreground"
-                    title="Тайлы согласуются после каждого шага сэмплирования (блендинг в общий канвас + общий шум) — убирает мерцание на стыках. Выключите для сравнения со старым режимом."
+                    title={t("Тайлы согласуются после каждого шага сэмплирования (блендинг в общий канвас + общий шум) — убирает мерцание на стыках. Выключите для сравнения со старым режимом.")}
                   >
-                    SyncTile (швы без мерцания)
+                    {t("SyncTile (швы без мерцания)")}
                   </Label>
                   <Select
                     value={params.syncTiles ? 'on' : 'off'}
@@ -365,8 +368,8 @@ export function TileUpscaleView() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-[var(--surface-3)] border-border">
-                      <SelectItem value="on">Вкл (рекомендуется)</SelectItem>
-                      <SelectItem value="off">Выкл (старый режим)</SelectItem>
+                      <SelectItem value="on">{t("Вкл (рекомендуется)")}</SelectItem>
+                      <SelectItem value="off">{t("Выкл (старый режим)")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -376,9 +379,9 @@ export function TileUpscaleView() {
                   <div className="space-y-1">
                     <Label
                       className="text-xs text-muted-foreground"
-                      title="Размер кусочков, на которые делится кадр при обработке. Сколько их понадобится — посчитается автоматически."
+                      title={t("Размер кусочков, на которые делится кадр при обработке. Сколько их понадобится — посчитается автоматически.")}
                     >
-                      Тайл (px)
+                      {t("Тайл (px)")}
                     </Label>
                     <Select
                       value={String(params.tileSize)}
@@ -398,7 +401,7 @@ export function TileUpscaleView() {
                 {/* Overlap + Fade */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Перекрытие (px)</Label>
+                    <Label className="text-xs text-muted-foreground">{t("Перекрытие (px)")}</Label>
                     <Select
                       value={String(params.overlap)}
                       onValueChange={(v) => patchParams({ overlap: parseInt(v, 10) })}
@@ -413,7 +416,7 @@ export function TileUpscaleView() {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Фейд (px)</Label>
+                    <Label className="text-xs text-muted-foreground">{t("Фейд (px)")}</Label>
                     <Select
                       value={String(params.fade)}
                       onValueChange={(v) => patchParams({ fade: parseInt(v, 10) })}
@@ -432,7 +435,7 @@ export function TileUpscaleView() {
                 {/* Temporal */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Кусок (кадры)</Label>
+                    <Label className="text-xs text-muted-foreground">{t("Кусок (кадры)")}</Label>
                     <Select
                       value={String(params.chunkFrames)}
                       onValueChange={(v) => patchParams({ chunkFrames: parseInt(v, 10) })}
@@ -442,12 +445,12 @@ export function TileUpscaleView() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-[var(--surface-3)] border-border">
-                        {[102, 136, 170, 204, 272].map((n) => <SelectItem key={n} value={String(n)}>{n} (~{Math.round(n/24*10)/10}с)</SelectItem>)}
+                        {[102, 136, 170, 204, 272].map((n) => <SelectItem key={n} value={String(n)}>{n} (~{Math.round(n/24*10)/10}{t("с)")}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Overlap (кадры)</Label>
+                    <Label className="text-xs text-muted-foreground">{t("Overlap (кадры)")}</Label>
                     <Select
                       value={String(params.temporalOverlap)}
                       onValueChange={(v) => patchParams({ temporalOverlap: parseInt(v, 10) })}
@@ -470,7 +473,7 @@ export function TileUpscaleView() {
           <div className="flex gap-2 pt-1">
             <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
               <PlayIcon className="w-4 h-4" />
-              {busy ? 'Ещё в очередь' : 'Запустить Tile Upscale'}
+              {busy ? t("Ещё в очередь") : t("Запустить Tile Upscale")}
             </Button>
           </div>
 

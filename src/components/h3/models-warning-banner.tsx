@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangleIcon, XIcon, DownloadIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface ModelStatusItem {
   id: string
@@ -51,6 +52,8 @@ function selectedLlmFamily(llmModel: string): 'gemma' | 'qwen' | 'bonsai' {
 }
 
 export function ModelsWarningBanner({ onOpenSettings }: ModelsWarningBannerProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [missing, setMissing] = useState<ModelStatusItem[]>([])
   const [dismissed, setDismissed] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -142,13 +145,13 @@ export function ModelsWarningBanner({ onOpenSettings }: ModelsWarningBannerProps
         onClick={onOpenSettings}
       >
         <DownloadIcon className="w-3 h-3" />
-        Скачать в настройках
+        {' '}{tt("Скачать в настройках")}
       </Button>
       <button
         type="button"
         onClick={() => setDismissed(true)}
         className="p-1 rounded hover:bg-amber-500/20 text-amber-400/70 hover:text-amber-300 shrink-0"
-        title="Скрыть"
+        title={tt("Скрыть")}
       >
         <XIcon className="w-3.5 h-3.5" />
       </button>

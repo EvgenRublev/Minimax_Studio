@@ -43,6 +43,7 @@ import { usePromptHistory } from '@/lib/prompt-history-store'
 import { useImprovePrompt, type ImprovePromptOptions } from '@/hooks/use-improve-prompt'
 import { VoiceInputButton } from './voice-input-button'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface PromptEditorDialogProps {
   open: boolean
@@ -88,6 +89,8 @@ export function PromptEditorDialog({
   mentions,
   improveOptions,
 }: PromptEditorDialogProps) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [text, setText] = useState(initialText)
   const [rightTab, setRightTab] = useState<RightTab>('insert')
   const editorRef = useRef<MentionTextareaHandle>(null)
@@ -109,7 +112,7 @@ export function PromptEditorDialog({
   /** Apply a full prompt (from history/examples) — replaces the current text. */
   const applyPrompt = (snippet: string) => {
     setText(snippet)
-    toast.success('Промпт подставлен')
+    toast.success(tt("Промпт подставлен"))
   }
 
   /** (правка 560) «Исправить промпт»: сначала спрашиваем, ЧТО именно
@@ -121,7 +124,7 @@ export function PromptEditorDialog({
   /** "Исправить промпт" — open the "what to change" dialog (правка 560). */
   const handleImprove = () => {
     if (!text.trim()) {
-      toast.info('Промпт пуст', { description: 'Введите хотя бы несколько слов, чтобы LLM мог его исправить.' })
+      toast.info(tt("Промпт пуст"), { description: tt("Введите хотя бы несколько слов, чтобы LLM мог его исправить.") })
       return
     }
     setFixText('')
@@ -158,9 +161,9 @@ export function PromptEditorDialog({
   const copyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(text)
-      toast.success('Промпт скопирован в буфер обмена')
+      toast.success(tt("Промпт скопирован в буфер обмена"))
     } catch {
-      toast.error('Не удалось скопировать')
+      toast.error(tt("Не удалось скопировать"))
     }
   }
 
@@ -202,31 +205,31 @@ export function PromptEditorDialog({
         <DialogHeader className="px-4 pt-3 pb-2 border-b border-border shrink-0 flex items-center justify-between">
           <div>
             <DialogTitle className="text-base font-semibold">
-              Редактор промпта
+              {tt("Редактор промпта")}
             </DialogTitle>
             {mentions && mentions.length > 0 && (
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                Введите <span className="font-mono text-foreground/80">@</span> для вставки референса
+                {tt("Введите")}{' '} <span className="font-mono text-foreground/80">@</span> {' '}{tt("для вставки референса")}
               </p>
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground mr-2">{text.length} символов</span>
+            <span className="text-xs text-muted-foreground mr-2">{text.length} {' '}{tt("символов")}</span>
             {/* (правка 560) «Исправить промпт» — открывает окно задания. */}
             <button
               type="button"
               onClick={handleImprove}
-              title="Отправить в LLM-ассистент с указанием, что именно изменить"
+              title={tt("Отправить в LLM-ассистент с указанием, что именно изменить")}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-violet-300 border border-violet-500/30 hover:from-violet-500/30 hover:to-fuchsia-500/30 transition-colors"
             >
               <WandSparklesIcon className="w-3.5 h-3.5" />
-              Исправить промпт
+              {' '}{tt("Исправить промпт")}
             </button>
             {/* Mini-toolbar: wrap selection · copy · clear */}
             <button
               type="button"
               onClick={() => editorRef.current?.wrapSelection('<d>', '</d>')}
-              title="Обернуть выделение в <d>…</d>"
+              title={tt("Обернуть выделение в <d>…</d>")}
               className="p-1.5 rounded-md text-muted-foreground hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
             >
               <WrapTextIcon className="w-4 h-4" />
@@ -234,7 +237,7 @@ export function PromptEditorDialog({
             <button
               type="button"
               onClick={copyPrompt}
-              title="Скопировать промпт"
+              title={tt("Скопировать промпт")}
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-[var(--surface-3)] transition-colors"
             >
               <CopyIcon className="w-4 h-4" />
@@ -242,13 +245,13 @@ export function PromptEditorDialog({
             <button
               type="button"
               onClick={() => setText('')}
-              title="Очистить"
+              title={tt("Очистить")}
               className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <TrashIcon className="w-4 h-4" />
             </button>
             <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-              Отмена
+              {tt("Отмена")}
             </Button>
             {onSaveAndRun ? (
               <Button
@@ -257,11 +260,11 @@ export function PromptEditorDialog({
                 className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 font-semibold"
                 title="Ctrl+Enter"
               >
-                Сохранить и запустить
+                {tt("Сохранить и запустить")}
               </Button>
             ) : null}
             <Button size="sm" variant={onSaveAndRun ? 'outline' : 'default'} onClick={handleSave}>
-              Сохранить
+              {tt("Сохранить")}
             </Button>
           </div>
         </DialogHeader>
@@ -284,7 +287,7 @@ export function PromptEditorDialog({
               <VoiceInputButton
                 hotkey
                 onText={(t) => editorRef.current?.insertAtCursor(t)}
-                title="Голосовой ввод — вставка по курсору"
+                title={tt("Голосовой ввод — вставка по курсору")}
               />
             </div>
             <PromptQuality prompt={text} refsCount={mentions?.length ?? 0} className="shrink-0" />
@@ -331,7 +334,7 @@ export function PromptEditorDialog({
                   </button>
                 ))}
                 {(!mentions || mentions.length === 0) && (
-                  <p className="text-[10px] text-muted-foreground/70">Загрузите референсы на вкладке генерации.</p>
+                  <p className="text-[10px] text-muted-foreground/70">{tt("Загрузите референсы на вкладке генерации.")}</p>
                 )}
               </div>
             ))}
@@ -349,9 +352,9 @@ export function PromptEditorDialog({
                   type="button"
                   onClick={() => editorRef.current?.wrapSelection('<d>', '</d>')}
                   className="w-full px-2 py-1.5 rounded-md text-xs border border-amber-500/20 text-amber-300/80 hover:bg-amber-500/10 transition-colors"
-                  title="Выделите текст в промпте и нажмите"
+                  title={tt("Выделите текст в промпте и нажмите")}
                 >
-                  Обернуть выделение в &lt;d&gt;
+                  {tt("Обернуть выделение в &lt;d&gt;")}
                 </button>
               </div>
             ))}
@@ -380,7 +383,7 @@ export function PromptEditorDialog({
                     onClick={() => insert(s.text)}
                     className="w-full text-left px-2 py-1.5 rounded-md text-xs border border-border bg-[var(--surface-2)]/70 text-foreground/85 hover:border-cyan-500/40 transition-colors"
                   >
-                    {s.label} <span className="text-muted-foreground/60">— вставить скелет</span>
+                    {s.label} <span className="text-muted-foreground/60">{tt("— вставить скелет")}</span>
                   </button>
                 ))}
               </div>
@@ -392,20 +395,20 @@ export function PromptEditorDialog({
             {rightTab === 'history' && (
               <div className="flex-1 overflow-y-auto min-h-0 space-y-1">
                 <div className="flex items-center justify-between px-1 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-1)]">
-                  <span className="text-[10px] font-semibold text-foreground">История промптов</span>
+                  <span className="text-[10px] font-semibold text-foreground">{tt("История промптов")}</span>
                   {historyEntries.length > 0 && (
                     <button
                       type="button"
                       onClick={clearHistory}
                       className="text-[10px] text-muted-foreground hover:text-red-400"
                     >
-                      очистить всё
+                      {tt("очистить всё")}
                     </button>
                   )}
                 </div>
                 {historyEntries.length === 0 && (
                   <p className="px-2 py-4 text-xs text-muted-foreground text-center">
-                    Пока пусто — запущенные промпты сохраняются здесь автоматически.
+                    {tt("Пока пусто — запущенные промпты сохраняются здесь автоматически.")}
                   </p>
                 )}
                 {historyEntries.map((e) => (
@@ -438,7 +441,7 @@ export function PromptEditorDialog({
                         removeHistoryEntry(e.id)
                       }}
                       className="shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Удалить из истории"
+                      title={tt("Удалить из истории")}
                     >
                       <XIcon className="w-3 h-3" />
                     </button>
@@ -451,7 +454,7 @@ export function PromptEditorDialog({
             {rightTab === 'examples' && (
               <div className="flex-1 overflow-y-auto min-h-0 space-y-1">
                 <div className="px-1 py-1.5 border-b border-border sticky top-0 bg-[var(--surface-1)]">
-                  <span className="text-[10px] font-semibold text-foreground">Готовые примеры</span>
+                  <span className="text-[10px] font-semibold text-foreground">{tt("Готовые примеры")}</span>
                 </div>
                 {EXAMPLES.map((ex) => (
                   <div
@@ -466,7 +469,7 @@ export function PromptEditorDialog({
                   </div>
                 ))}
                 <p className="px-2 py-2 text-[10px] text-muted-foreground/60 border-t border-border mt-2">
-                  Заменяет текущий промпт. Промпты — на английском: модель понимает его лучше всего.
+                  {tt("Заменяет текущий промпт. Промпты — на английском: модель понимает его лучше всего.")}
                 </p>
               </div>
             )}
@@ -482,9 +485,9 @@ export function PromptEditorDialog({
     <Dialog open={fixOpen} onOpenChange={setFixOpen}>
       <DialogContent className="max-w-lg p-0 gap-0">
           <DialogHeader className="px-4 pt-4 pb-2 border-b border-border">
-            <DialogTitle className="text-base font-semibold">Исправить промпт</DialogTitle>
+            <DialogTitle className="text-base font-semibold">{tt("Исправить промпт")}</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
-              Напишите, что бы вы хотели изменить в этом промпте
+              {tt("Напишите, что бы вы хотели изменить в этом промпте")}
             </DialogDescription>
           </DialogHeader>
           <div className="p-4 space-y-3">
@@ -502,16 +505,15 @@ export function PromptEditorDialog({
                 }
               }}
               rows={4}
-              placeholder="Например: сделай камеру статичной, убери дождь, реплику героя — короче…"
+              placeholder={tt("Например: сделай камеру статичной, убери дождь, реплику героя — короче…")}
               className="w-full resize-none rounded-xl border border-border bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
             />
             <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-              Промпт и ваше задание уйдут в чат ассистента этой вкладки — ответ
-              можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.
+              {tt("Промпт и ваше задание уйдут в чат ассистента этой вкладки — ответ можно будет вставить обратно кнопкой «В промпт». Ctrl+Enter — отправить, Esc — отмена.")}
             </p>
             <div className="flex items-center justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setFixOpen(false)}>
-                Отмена
+                {tt("Отмена")}
               </Button>
               <Button
                 size="sm"
@@ -520,7 +522,7 @@ export function PromptEditorDialog({
                 className="gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25 hover:border-violet-500/50 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <WandSparklesIcon className="w-3.5 h-3.5" />
-                Отправить ассистенту
+                {' '}{tt("Отправить ассистенту")}
               </Button>
           </div>
         </div>
@@ -565,11 +567,13 @@ export function PromptFixButton({
   /** Вызывается при клике (промпт пуст / непустой — решение за родителем). */
   onFix: () => void
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   return (
     <button
       type="button"
       onClick={onFix}
-      title="Исправить промпт с ассистентом: напишите, что изменить — промпт и задание уйдут в чат"
+      title={tt("Исправить промпт с ассистентом: напишите, что изменить — промпт и задание уйдут в чат")}
       className="p-1.5 rounded-md bg-[var(--surface-3)]/80 hover:bg-[var(--surface-4)] text-violet-300 hover:text-violet-200 transition-colors border border-violet-500/30 backdrop-blur-sm"
     >
       <WandSparklesIcon className="w-3.5 h-3.5" />
@@ -588,12 +592,14 @@ export function PromptClearButton({
   /** true — промпт пуст: кнопку не показываем (нет смысла чистить). */
   disabled?: boolean
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   if (disabled) return null
   return (
     <button
       type="button"
       onClick={onClear}
-      title="Очистить поле промпта"
+      title={tt("Очистить поле промпта")}
       className="p-1.5 rounded-md bg-[var(--surface-3)]/80 hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors border border-border/50 backdrop-blur-sm"
     >
       <Trash2Icon className="w-3.5 h-3.5" />
@@ -611,11 +617,13 @@ export function PromptEditButton({
 }: {
   onOpen: () => void
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   return (
     <button
       onClick={onOpen}
       className="p-1.5 rounded-md bg-[var(--surface-3)] hover:bg-[var(--surface-4)] text-muted-foreground hover:text-foreground transition-colors border border-border/50"
-      title="Открыть редактор промпта"
+      title={tt("Открыть редактор промпта")}
     >
       <PencilLineIcon className="w-3.5 h-3.5" />
     </button>
@@ -644,6 +652,8 @@ export function PromptFixDialog({
    *  (чат вкладки, номер клипа и т.п.). По умолчанию — обобщённая. */
   hint?: string
 }) {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [text, setText] = useState('')
 
   // Сброс текста при каждом открытии — задание вводится заново.
@@ -666,9 +676,9 @@ export function PromptFixDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg p-0 gap-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-border">
-          <DialogTitle className="text-base font-semibold">Исправить промпт</DialogTitle>
+          <DialogTitle className="text-base font-semibold">{tt("Исправить промпт")}</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
-            Напишите, что бы вы хотели изменить в этом промпте
+            {tt("Напишите, что бы вы хотели изменить в этом промпте")}
           </DialogDescription>
         </DialogHeader>
         <div className="p-4 space-y-3">
@@ -686,7 +696,7 @@ export function PromptFixDialog({
               }
             }}
             rows={4}
-            placeholder="Например: сделай камеру статичной, убери дождь, реплику героя — короче…"
+            placeholder={tt("Например: сделай камеру статичной, убери дождь, реплику героя — короче…")}
             className="w-full resize-none rounded-xl border border-border bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
           />
           <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
@@ -694,7 +704,7 @@ export function PromptFixDialog({
           </p>
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-              Отмена
+              {tt("Отмена")}
             </Button>
             <Button
               size="sm"
@@ -703,7 +713,7 @@ export function PromptFixDialog({
               className="gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25 hover:border-violet-500/50 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <WandSparklesIcon className="w-3.5 h-3.5" />
-              Отправить ассистенту
+              {' '}{tt("Отправить ассистенту")}
             </Button>
           </div>
         </div>
