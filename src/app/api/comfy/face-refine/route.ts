@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       sourceFilename?: string
       sourceSubfolder?: string
+      outputSubfolder?: string
       inputSource?: string
       prompt?: string
       seed?: number
@@ -138,6 +139,7 @@ export async function POST(req: NextRequest) {
 
     // ─── Источник: файл с диска (input/) или копия из галереи ───
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
+    const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
     const safeName = path.basename(body.sourceFilename ?? '')
     let inName: string
     let probe: { width: number; height: number; frames: number; durationSec: number }
@@ -304,7 +306,7 @@ export async function POST(req: NextRequest) {
       width: probe.width,
       height: probe.height,
       frames: probe.frames,
-      outputSubfolder: sub,
+      outputSubfolder: outSub,
       videoFormat: getVideoFormatSettings(),
     })
 

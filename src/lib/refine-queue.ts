@@ -23,6 +23,8 @@ export interface RefineTask {
   mode: 'whole' | 'chunks'
   /** Оригинал из галереи (output), из которого делается рефайн. */
   source: { filename: string; subfolder: string }
+  /** (правка 997) Папка сохранения результата ('' = общая). */
+  outputSubfolder?: string
   /** (правка 265) Файл с диска, уже в ComfyUI input/ (через /api/comfy/upload).
       При наличии — источник, а не копия из output. */
   inputSource?: string
@@ -220,6 +222,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
     body: JSON.stringify({
       sourceFilename: task.source.filename,
       sourceSubfolder: task.source.subfolder,
+      ...(task.outputSubfolder != null ? { outputSubfolder: task.outputSubfolder } : {}),
       ...(task.inputSource ? { inputSource: task.inputSource } : {}),
       // (правка 494) free-режим: сервер конвертирует Мп в короткую сторону
       target: task.target === 'free' ? 'same' : task.target,
@@ -393,7 +396,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
         body: JSON.stringify({
           chunkFiles: parts.map((o) => ({ filename: o.filename, subfolder: o.subfolder || '' })),
           audioSource: { filename: task.source.filename, subfolder: task.source.subfolder },
-          outSubfolder: task.source.subfolder || '',
+          outSubfolder: task.outputSubfolder ?? task.source.subfolder ?? '',
           hard: true,
           meta: {
             // Сервер уже резолвил промпт (мета исходника + картинки) —

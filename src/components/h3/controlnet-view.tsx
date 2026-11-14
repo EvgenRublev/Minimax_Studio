@@ -18,7 +18,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   WaypointsIcon,
-  PlayIcon,
   FileVideoIcon,
   AlertTriangleIcon,
   DicesIcon,
@@ -27,13 +26,9 @@ import {
   SparklesIcon,
   HistoryIcon,
   StarIcon,
-  FolderIcon,
-  FilmIcon,
-  ChevronDownIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -124,7 +119,6 @@ export function ControlNetView() {
   // (правка 727) Папка результата — как на вкладке «Генерация».
   const outputFolder = useControlNetTarget((s) => s.outputFolder)
   const setOutputFolder = useControlNetTarget((s) => s.setOutputFolder)
-  const [folderMenuOpen, setFolderMenuOpen] = useState(false)
 
   // (правка 511) Доп. параметры — как на вкладке «Генерация»:
   // шаги (один слайдер, правка 802 — сплита сигм нет), сэмплер + планировщик
@@ -491,7 +485,7 @@ export function ControlNetView() {
   return (
     <div className="flex h-full w-full min-w-0">
       {/* ═══ Панель параметров ═══ */}
-      <aside className="w-[360px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
+      <aside className="w-[390px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex items-center gap-2">
             <WaypointsIcon className="w-4 h-4 text-orange-400" />
@@ -1052,88 +1046,6 @@ export function ControlNetView() {
             )}
           </div>
 
-          {/* (правка 727) Папка результата — как на вкладке «Генерация».
-              По умолчанию — папка контрольного видео: переиспользование
-              ролика из папки не разбрасывает результаты по корню. */}
-          {gallery.folders.length > 0 && (
-            <div className="space-y-1.5">
-              <Label
-                className="text-xs text-muted-foreground"
-                title={tt("Куда сохранять результат. По умолчанию — папка исходного видео.")}
-              >
-                {tt("Папка результата")}
-              </Label>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setFolderMenuOpen(!folderMenuOpen)}
-                  disabled={busy}
-                  className={cn(
-                    'w-full h-9 inline-flex items-center gap-1.5 px-3 rounded-lg border text-xs transition-colors',
-                    outputFolder
-                      ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
-                      : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:text-foreground',
-                    busy && 'opacity-50 pointer-events-none',
-                  )}
-                  title={outputFolder
-                    ? tt("Папка результата: {{p1}}", { p1: outputFolder })
-                    : tt("Папка результата: общая папка output")}
-                >
-                  <FolderIcon className="w-3.5 h-3.5" />
-                  <span className="flex-1 text-left truncate">{outputFolder || 'Общая папка'}</span>
-                  <ChevronDownIcon className={cn('w-3 h-3 transition-transform', folderMenuOpen && 'rotate-180')} />
-                </button>
-                {folderMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setFolderMenuOpen(false)} />
-                    <div className="absolute bottom-full mb-1.5 left-0 right-0 z-50 rounded-lg border border-border bg-[var(--surface-2)] shadow-xl p-1 max-h-64 overflow-y-auto">
-                      <button
-                        type="button"
-                        onClick={() => { setOutputFolder(''); setFolderMenuOpen(false) }}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors',
-                          !outputFolder ? 'bg-violet-500/10 text-violet-300' : 'hover:bg-[var(--surface-3)] text-foreground/80',
-                        )}
-                      >
-                        <FilmIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="flex-1 truncate">{tt("Общая папка")}</span>
-                      </button>
-                      {gallery.folders.map((f) => {
-                        // (правка 495) Вложенные папки: отступ по глубине.
-                        const depth = f.split('/').length - 1
-                        const leaf = f.slice(f.lastIndexOf('/') + 1)
-                        return (
-                          <button
-                            key={f}
-                            type="button"
-                            onClick={() => { setOutputFolder(f); setFolderMenuOpen(false) }}
-                            title={depth > 0 ? f : undefined}
-                            style={depth > 0 ? { paddingLeft: 10 + depth * 14 } : undefined}
-                            className={cn(
-                              'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors',
-                              outputFolder === f ? 'bg-violet-500/10 text-violet-300' : 'hover:bg-[var(--surface-3)] text-foreground/80',
-                            )}
-                          >
-                            <FolderIcon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="flex-1 truncate">{leaf}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Запуск */}
-          <div className="flex gap-2 pt-1">
-            <Button onClick={startWithHistory} disabled={!source || modelsMissing || uploadingSrc} className="flex-1 gap-1.5">
-              <PlayIcon className="w-4 h-4" />
-              {busy ? tt("Ещё в очередь") : params.preprocessOnly ? tt("Сохранить карту") : tt("Сгенерировать")}
-            </Button>
-          </div>
-
         </div>
 
         {/* Статус */}
@@ -1145,6 +1057,11 @@ export function ControlNetView() {
             statusMessage={null}
             error={error}
             onInterrupt={cancel}
+            onGenerate={startWithHistory}
+            generateLabel={params.preprocessOnly ? tt("Сохранить карту") : tt("Сгенерировать")}
+            generateDisabled={!source || modelsMissing || uploadingSrc}
+            outputFolder={outputFolder}
+            onOutputFolderChange={setOutputFolder}
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}

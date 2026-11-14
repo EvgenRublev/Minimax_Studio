@@ -12,9 +12,7 @@ import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import {
   AudioLinesIcon,
-  ChevronDownIcon,
   FilmIcon,
-  FolderIcon,
   HistoryIcon,
   ImageIcon,
   SlidersHorizontalIcon,
@@ -24,7 +22,6 @@ import {
   XIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -647,14 +644,13 @@ export function GenerateView() {
 
   /* ──────────── Gallery ──────────── */
 
-  const { files: galleryFiles, folders: galleryFolders, loading: galleryLoading, load: loadGallery, deleteFile, toggleLike } = useVideoGallery({ phase })
+  const { files: galleryFiles, loading: galleryLoading, load: loadGallery, deleteFile, toggleLike } = useVideoGallery({ phase })
 
   /* (правка 91) Активная папка проекта: галерея вкладки фильтруется по ней,
    * новые видео складываются в неё. '' = общая папка.
    * (правка 495) Вложенные папки: фильтр включает содержимое подпапок
    * (префиксное совпадение путей 'a/b'). */
   const outputFolder = video.outputFolder || ''
-  const [folderMenuOpen, setFolderMenuOpen] = useState(false)
   const visibleGalleryFiles = useMemo(
     () => galleryFiles.filter((f) => {
       const sub = f.subfolder || ''
@@ -1133,7 +1129,7 @@ export function GenerateView() {
     return (
       <div className="flex-1 flex min-h-0">
         {/* (правка 472) панель — surface-1, как у Refine/Tile/FPS (единый вид) */}
-        <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+        <div className="w-[390px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
           <div className="flex-1 flex items-center justify-center p-4">
             <div className="text-xs text-muted-foreground">{tt("Загрузка…")}</div>
           </div>
@@ -1200,7 +1196,7 @@ export function GenerateView() {
       // а не только при фокусе внутри дерева; onPaste на корне удалён.
     >
       {/* LEFT: Settings panel (правка 472: surface-1, как у Refine/Tile/FPS) */}
-      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[390px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
           {/* Header */}
@@ -2101,6 +2097,18 @@ export function GenerateView() {
             error={error}
             onInterrupt={interrupt}
             onReset={reset}
+            onGenerate={() => void handleGenerate()}
+            generateLabel={tt("Сгенерировать видео")}
+            generateDisabled={!canGenerateNow}
+            outputFolder={video.outputFolder || ''}
+            onOutputFolderChange={(f) => patchVideo({ outputFolder: f })}
+            generateTitle={
+              assistantBusy
+                ? tt("💬 Ассистент отвечает — дождитесь ответа или прервите его")
+                : canGenerate
+                  ? tt("Сгенерировать видео (Ctrl+Enter)")
+                  : tt("Введите промпт")
+            }
             startedAt={videoStartedAt}
             promptId={promptId}
             executingTitle={executingTitle}
@@ -2340,83 +2348,6 @@ export function GenerateView() {
           <div className="flex items-center gap-3">
             <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">{badges}</div>
 
-            {/* (правка 91) Выбор папки проекта: видео этой генерации лягут
-                в неё, галерея ниже показывает только её. Показывается только
-                когда папки уже есть (создаются во вкладке «Галерея»). */}
-            {galleryFolders.length > 0 && (
-              <div className="relative shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setFolderMenuOpen(!folderMenuOpen)}
-                  className={cn(
-                    'h-11 inline-flex items-center gap-1.5 px-3 rounded-lg border text-xs transition-colors',
-                    outputFolder
-                      ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
-                      : 'border-border bg-[var(--surface-2)] text-muted-foreground hover:text-foreground',
-                  )}
-                  title={outputFolder ? tt("Папка проекта: {{p1}} — видео кладутся в неё, галерея показывает её и подпапки", { p1: outputFolder }) : tt("Папка проекта: видео кладутся в неё, галерея показывает только её")}
-                >
-                  <FolderIcon className="w-3.5 h-3.5" />
-                  <span className="max-w-[120px] truncate">{outputFolder || 'Общая папка'}</span>
-                  <ChevronDownIcon className={cn('w-3 h-3 transition-transform', folderMenuOpen && 'rotate-180')} />
-                </button>
-                {folderMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setFolderMenuOpen(false)} />
-                    <div className="absolute bottom-full mb-1.5 right-0 z-50 w-52 rounded-lg border border-border bg-[var(--surface-2)] shadow-xl p-1 max-h-64 overflow-y-auto">
-                      <button
-                        type="button"
-                        onClick={() => { patchVideo({ outputFolder: '' }); setFolderMenuOpen(false) }}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors',
-                          !outputFolder ? 'bg-violet-500/10 text-violet-300' : 'hover:bg-[var(--surface-3)] text-foreground/80',
-                        )}
-                      >
-                        <FilmIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="flex-1 truncate">{tt("Общая папка")}</span>
-                      </button>
-                      {galleryFolders.map((f) => {
-                        // (правка 495) Вложенные папки: отступ по глубине,
-                        // подпись — лист пути, полный путь — в title.
-                        const depth = f.split('/').length - 1
-                        const leaf = f.slice(f.lastIndexOf('/') + 1)
-                        return (
-                          <button
-                            key={f}
-                            type="button"
-                            onClick={() => { patchVideo({ outputFolder: f }); setFolderMenuOpen(false) }}
-                            title={depth > 0 ? f : undefined}
-                            style={depth > 0 ? { paddingLeft: 10 + depth * 14 } : undefined}
-                            className={cn(
-                              'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors',
-                              outputFolder === f ? 'bg-violet-500/10 text-violet-300' : 'hover:bg-[var(--surface-3)] text-foreground/80',
-                            )}
-                          >
-                            <FolderIcon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="flex-1 truncate">{leaf}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            <Button
-              onClick={() => void handleGenerate()}
-              disabled={!canGenerateNow}
-              title={
-                assistantBusy
-                  ? tt("💬 Ассистент отвечает — дождитесь ответа или прервите его")
-                  : canGenerate
-                    ? tt("Сгенерировать видео (Ctrl+Enter)")
-                    : tt("Введите промпт")
-              }
-              className="h-11 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-sm font-semibold shadow-lg shadow-cyan-500/20"
-            >
-              {isGenerating ? tt("Ещё в очередь") : tt("Сгенерировать видео")}
-            </Button>
           </div>
         </div>
 

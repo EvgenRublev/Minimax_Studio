@@ -16,12 +16,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Grid3x3Icon,
-  PlayIcon,
   FileVideoIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -40,9 +38,12 @@ import { useTileUpscaleTarget, type TileUpscaleSource } from '@/lib/tile-upscale
 import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
 import { uploadInputFile } from '@/lib/upload'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
 
 export function TileUpscaleView() {
   const { t } = useTranslation() // (правка 955)
+  const outputFolder = useOutputFolderStore((s) => s.folders['tile-upscale'] )
+  const setOutputFolder = useOutputFolderStore((s) => s.setFolder)
 
   const storeTarget = useTileUpscaleTarget((s) => s.target)
   const clearStoreTarget = useTileUpscaleTarget((s) => s.clear)
@@ -147,6 +148,7 @@ export function TileUpscaleView() {
     }
 
     const body: Record<string, unknown> = {
+      outputSubfolder: outputFolder,
       ...(src.inputSource
         ? { inputSource: src.inputSource }
         : { sourceFilename: src.filename, sourceSubfolder: src.subfolder ?? '' }),
@@ -197,7 +199,7 @@ export function TileUpscaleView() {
   return (
     <div className="flex h-full w-full min-w-0">
       {/* ═══ Панель параметров ═══ */}
-      <aside className="w-[360px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
+      <aside className="w-[390px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Grid3x3Icon className="w-4 h-4 text-pink-400" />
@@ -469,14 +471,6 @@ export function TileUpscaleView() {
             )}
           </div>
 
-          {/* Запуск */}
-          <div className="flex gap-2 pt-1">
-            <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
-              <PlayIcon className="w-4 h-4" />
-              {busy ? t("Ещё в очередь") : t("Запустить Tile Upscale")}
-            </Button>
-          </div>
-
         </div>
 
         {/* Статус */}
@@ -489,6 +483,11 @@ export function TileUpscaleView() {
             statusMessage={null}
             error={error}
             onInterrupt={cancel}
+            onGenerate={start}
+            outputFolder={outputFolder}
+            onOutputFolderChange={(f) => setOutputFolder('tile-upscale', f)}
+            generateLabel={t("Запустить Tile Upscale")}
+            generateDisabled={!source}
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}

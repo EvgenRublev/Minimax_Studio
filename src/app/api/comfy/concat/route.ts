@@ -93,6 +93,9 @@ export async function POST(req: NextRequest) {
        *  предыдущего входа. Нужно для two-pass extend, где preserved-голова
        *  проходит апскейлер/pass 2 и темнеет относительно исходника. */
       toneMatch?: boolean
+      /** (правка 982) Шлифовка швов после склейки: цветовой seam_fade +
+       *  оптический поток на стыке (порт ComfyUI-MiniMax-H3-Extender). */
+      seamPolish?: boolean
       /** (правка 260) Параметры метаданных для сайдкара итогового файла. */
       meta?: Record<string, unknown>
       /** (правка 365) Подпапка output для итогового файла ('' = корень) —
@@ -474,6 +477,57 @@ export async function POST(req: NextRequest) {
         )
       } catch {
         throw new Error(`FFmpeg concat failed: ${stderr.slice(0, 600)}`)
+      }
+    }
+
+    // (правка 982) Позиции стыков в итоговом таймлайне. Считаем по числу
+    // кадров входов: source целиком, у клипа 1 вычитаем 17 кадров головы,
+    // остальные клипы уже приходят без головы.
+    const seamFrames: number[] = []
+    if (body.seamPolish === true && infos.length >= 2) {
+      // (правка 982) Точные номера кадров: format.duration может включать
+      // более длинную аудиодорожку, из-за чего стык уехал бы на 1–2 кадра.
+      const frameCounts = await Promise.all(resolvedPaths.map(async (p) => {
+        try {
+          const pr = await probeVideoFile(p)
+          return pr.frames > 0 ? pr.frames : 0
+        } catch {
+          return 0
+        }
+      }))
+      let acc = frameCounts[0] || Math.round(infos[0].duration * targetFps)
+      for (let i = 1; i < infos.length; i++) {
+        seamFrames.push(acc)
+        const clipFrames = frameCounts[i] || Math.round(infos[i].duration * targetFps)
+        const trimFrames = i === 1 ? Math.round((headTrims[1] || 0) * targetFps) : 0
+        acc += Math.max(1, clipFrames - trimFrames)
+      }
+    }
+
+    // (правка 982) Пост-обработка швов: цветовое совмещение + оптический
+    // поток. Если Python/OpenCV недоступны — молча оставляем обычную склейку.
+    if (seamFrames.length > 0) {
+      const script = path.join(process.cwd(), 'scripts', 'seam-polish.py')
+      const py = cfg.pythonExe
+      if (existsSync(script) && py && existsSync(py)) {
+        const polished = outPath.replace(/\.mp4$/i, '.seam.mp4')
+        try {
+          await execFileAsync(
+            py,
+            [script, '--input', outPath, '--output', polished,
+              '--seams', seamFrames.join(','), '--fade-span', '24', '--radius', '2',
+              '--crossfade-frames', '2',
+              '--ffmpeg', ffmpeg],
+            { timeout: 900_000, maxBuffer: 16 * 1024 * 1024 },
+          )
+          if (existsSync(polished)) {
+            await fs.rm(outPath, { force: true })
+            await fs.rename(polished, outPath)
+          }
+        } catch (e) {
+          console.warn('[concat] seam polish skipped:', e instanceof Error ? e.message : String(e))
+          await fs.rm(polished, { force: true }).catch(() => {})
+        }
       }
     }
 

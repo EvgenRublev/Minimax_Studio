@@ -31,9 +31,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { H3_VIDEO_DND_MIME } from './video-gallery-grid'
 import {
   Wand2Icon,
-  PlayIcon,
   FileVideoIcon,
-  Loader2Icon,
   UploadIcon,
   XIcon,
   WandSparklesIcon,
@@ -41,7 +39,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -79,11 +76,14 @@ import { useGenQueue, type QueueItem } from '@/lib/gen-queue-store'
 import { useGenStore } from '@/lib/gen-store' // (правка 407) veda-настройки
 import { uploadInputFile } from '@/lib/upload'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
 
 type Phase = 'idle' | 'submitting' | 'queued' | 'running' | 'done' | 'error'
 
 export function RefineView() {
   const { t } = useTranslation() // (правка 955)
+  const outputFolder = useOutputFolderStore((s) => s.folders.refine )
+  const setOutputFolder = useOutputFolderStore((s) => s.setFolder)
 
   // ── Источник: из стора (кнопка «В Refine» в галерее) или клик в ленте ──
   const storeTarget = useRefineTarget((s) => s.target)
@@ -377,6 +377,7 @@ export function RefineView() {
 
     const task = {
       mode: mode as 'whole' | 'chunks',
+      outputSubfolder: outputFolder,
       source: { filename: src.filename, subfolder: src.subfolder ?? '' },
       ...(src.inputSource ? { inputSource: src.inputSource } : {}),
       target: target === 'same' ? 'same' as const : target === 'free' ? 'free' as const : parseInt(target, 10),
@@ -434,7 +435,7 @@ export function RefineView() {
   return (
     <div className="flex h-full w-full min-w-0">
       {/* ═══ Панель параметров ═══ */}
-      <aside className="w-[360px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
+      <aside className="w-[390px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Wand2Icon className="w-4 h-4 text-emerald-400" />
@@ -1025,18 +1026,6 @@ export function RefineView() {
             </div>
           </div>
 
-          {/* Запуск (правка 261): можно ставить в очередь, пока идёт задача */}
-          <div className="flex gap-2 pt-1">
-            <Button
-              onClick={start}
-              disabled={!source}
-              className="flex-1 gap-1.5"
-            >
-              {busy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {busy ? t("Ещё в очередь") : t("Запустить Refine")}
-            </Button>
-          </div>
-
         </div>
 
         {/* (правка 261) Pinned bottom: generation status — всегда виден, как в «Генерация» */}
@@ -1049,6 +1038,11 @@ export function RefineView() {
             statusMessage={null}
             error={error}
             onInterrupt={cancel}
+            onGenerate={start}
+            outputFolder={outputFolder}
+            onOutputFolderChange={(f) => setOutputFolder('refine', f)}
+            generateLabel={t("Запустить Refine")}
+            generateDisabled={!source}
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}

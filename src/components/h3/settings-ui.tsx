@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 /** Ширина панели параметров — эталон вкладки Refine. */
-export const SETTINGS_PANEL_WIDTH = 'w-[360px]'
+export const SETTINGS_PANEL_WIDTH = 'w-[390px]'
 
 export function SettingsAside({
   children,

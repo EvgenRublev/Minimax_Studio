@@ -1780,7 +1780,15 @@ export function MontageView() {
 
   /** (правка 860) запускает проигрывание пустого промежутка (паузы) до начала клипа nextIdx */
   const startGapPlay = useCallback((fromT: number, toT: number, nextIdx: number) => {
-    for (const v of [previewARef.current, previewBRef.current]) if (v) v.pause()
+    // (правка 994) В пустом промежутке не должно быть слышно ни текущий, ни
+    // прогреваемый следующий клип: пауза + принудительный mute, иначе браузер
+    // успевал отдать звук из уже загруженного соседнего <video>.
+    for (const v of [previewARef.current, previewBRef.current]) {
+      if (v) {
+        v.pause()
+        v.muted = true
+      }
+    }
     idxRef.current = -1
     inGapRef.current = true
     setInGap(true)
@@ -1901,7 +1909,12 @@ export function MontageView() {
       } else {
         gapPlayRef.current = null
         idxRef.current = -1
-        for (const v of [previewARef.current, previewBRef.current]) if (v) v.pause()
+        for (const v of [previewARef.current, previewBRef.current]) {
+          if (v) {
+            v.pause()
+            v.muted = true
+          }
+        }
         if (!inGapRef.current) {
           inGapRef.current = true
           setInGap(true)
@@ -2185,9 +2198,11 @@ export function MontageView() {
   // звук в превью: у скрытого буфера всегда тихо, чтобы не было двойного звука
   useEffect(() => {
     mutedRef.current = muted
-    if (previewARef.current) previewARef.current.muted = muted || buf !== 0
-    if (previewBRef.current) previewBRef.current.muted = muted || buf !== 1
-  }, [muted, buf])
+    // (правка 994) В пустом промежутке оба буфера молчат, даже если один из
+    // них успел загрузить следующий клип.
+    if (previewARef.current) previewARef.current.muted = muted || inGap || buf !== 0
+    if (previewBRef.current) previewBRef.current.muted = muted || inGap || buf !== 1
+  }, [muted, buf, inGap])
 
   // громкость активного буфера: мастер × громкость клипа × фейды; в превью результата
   // громкость уже вплавляна в файл, там = 1
@@ -5371,7 +5386,7 @@ export function MontageView() {
       </section>
 
       {/* (правка 859) правая панель: 3 вкладки — Галерея | Свойства | Эффекты */}
-      <aside className="flex w-[360px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)] text-foreground">
+      <aside className="flex w-[390px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)] text-foreground">
         {/* переключатель вкладок */}
         <div className="border-b border-border p-2">
           <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-[var(--surface-2)] p-0.5">

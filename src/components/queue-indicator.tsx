@@ -21,6 +21,7 @@ import {
   Grid3x3Icon,
   ScanFaceIcon,
   FilmIcon,
+  ListTodoIcon,
 } from 'lucide-react'
 import { useGenQueue, TYPE_ACCENT, TYPE_LABEL, type QueueItemType } from '@/lib/gen-queue-store'
 import { useGenProgress } from '@/lib/gen-progress-store' // (правка 931) чистый сброс карточки при отмене
@@ -325,7 +326,7 @@ async function cancelQueueItem(item: { id: string; promptId: string | null; type
 
 /* ──────────────────── Component ──────────────────── */
 
-export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
+export function QueueIndicator({ activeTab, embedded = false }: { activeTab?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation() // (правка 955)
 
   const [expanded, setExpanded] = useState(false)
@@ -358,8 +359,11 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
     [items]
   )
 
-  // Don't render anything before mount (SSR) or when there are no items
-  if (!mounted || items.length === 0) return null
+  // Don't render anything before mount (SSR). Встроенный в верхнюю панель
+  // вариант показываем всегда — даже с пустой очередью, чтобы место было
+  // предсказуемым; плавающий по-прежнему скрывается при пустой очереди.
+  if (!mounted) return null
+  if (!embedded && items.length === 0) return null
 
   const accent = currentRunning ? TYPE_ACCENT[currentRunning.type] : '#8B5CF6'
   const progressPercent =
@@ -373,18 +377,23 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
     (activeTab === 'generate' || activeTab === 'extend' || activeTab === 'controlnet' ? panelSpace : 0) + 16
 
   return (
-    // Bottom-right corner: stays out of the way of the prompt line.
-    // flex-col-reverse makes the expanded panel open UP from the pill.
+    // (правка 987) embedded — индикатор живёт в правом краю верхней панели,
+    // панель раскрывается вниз; иначе прежняя плавающая кнопка.
     <div
-      className="fixed bottom-4 z-50 flex flex-col-reverse items-end gap-2 pointer-events-none transition-[right] duration-200 ease-in-out"
-      style={{ right: rightOffset }}
+      className={cn(
+        'flex flex-col-reverse items-end gap-2',
+        embedded
+          ? 'relative pointer-events-auto'
+          : 'fixed bottom-4 z-50 pointer-events-none transition-[right] duration-200 ease-in-out',
+      )}
+      style={embedded ? undefined : { right: rightOffset }}
     >
       {/* Main floating pill */}
       <motion.div
         layout
-        initial={{ opacity: 0, y: -20, scale: 0.9 }}
+        initial={{ opacity: 0, y: embedded ? 4 : -20, scale: 0.9 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -20, scale: 0.9 }}
+        exit={{ opacity: 0, y: embedded ? 4 : -20, scale: 0.9 }}
         className="pointer-events-auto"
       >
         <button
@@ -392,44 +401,53 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
           className={cn(
             'flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-xl border backdrop-blur-xl transition-colors',
             'bg-[var(--surface-1)]/90 border-border hover:border-border shadow-lg shadow-black/30',
+            embedded && 'h-8 gap-2 rounded-lg border-border/70 bg-transparent px-2.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-[var(--surface-2)] hover:text-foreground',
             activeCount > 0 && 'border-opacity-100'
           )}
           style={activeCount > 0 ? { borderColor: `${accent}40` } : undefined}
         >
-          {/* Spinning/pulsing dot */}
-          <div className="relative">
-            {currentRunning && (
-              <motion.div
-                className="absolute inset-0 rounded-full"
-                style={{ backgroundColor: accent }}
-                animate={{ scale: [1, 1.6, 1], opacity: [0.4, 0, 0.4] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          {/* Spinning/pulsing dot — только у плавающего варианта */}
+          {!embedded && (
+            <div className="relative">
+              {currentRunning && (
+                <motion.div
+                  className="absolute inset-0 rounded-full"
+                  style={{ backgroundColor: accent }}
+                  animate={{ scale: [1, 1.6, 1], opacity: [0.4, 0, 0.4] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              )}
+              <div
+                className="relative w-2 h-2 rounded-full"
+                style={{
+                  backgroundColor: activeCount > 0 ? accent : '#555',
+                }}
               />
-            )}
-            <div
-              className="relative w-2 h-2 rounded-full"
-              style={{
-                backgroundColor: activeCount > 0 ? accent : '#555',
-              }}
-            />
-          </div>
+            </div>
+          )}
+
+          {embedded && (
+            <ListTodoIcon className="h-3.5 w-3.5 shrink-0" style={activeCount > 0 ? { color: accent } : undefined} />
+          )}
 
           {/* Label */}
           <div className="flex flex-col items-start min-w-0">
-            <span className="text-xs font-medium text-foreground leading-tight">
-              {activeCount > 0
-                ? currentRunning
-                  ? `${t(TYPE_LABEL[currentRunning.type])}: ${t(STATUS_LABEL[currentRunning.status])}`
-                  : t("{{p1}} в очереди", { p1: activeCount })
-                : t("Очередь пуста")}
+            <span className={cn('text-xs font-medium leading-tight', embedded ? 'text-inherit' : 'text-foreground')}>
+              {embedded
+                ? t("Очередь")
+                : activeCount > 0
+                  ? currentRunning
+                    ? `${t(TYPE_LABEL[currentRunning.type])}: ${t(STATUS_LABEL[currentRunning.status])}`
+                    : t("{{p1}} в очереди", { p1: activeCount })
+                  : t("Очередь пуста")}
             </span>
             {/* Real-time message from WanGP (e.g. "Downloading model...") */}
-            {currentRunning?.message && (
+            {!embedded && currentRunning?.message && (
               <span className="text-[10px] text-blue-400 leading-tight max-w-[180px] truncate">
                 {t(currentRunning.message)}
               </span>
             )}
-            {currentRunning && currentRunning.progressMax > 0 && (
+            {!embedded && currentRunning && currentRunning.progressMax > 0 && (
               <span className="text-[10px] text-muted-foreground font-mono leading-tight">
                 {progressPercent}% · {currentRunning.progressValue}/{currentRunning.progressMax}
               </span>
@@ -437,20 +455,24 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
           </div>
 
           {/* Queue count badge */}
-          {activeCount > 0 && (
+          {(activeCount > 0 || embedded) && (
             <div
-              className="flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-md text-[10px] font-bold text-white"
-              style={{ backgroundColor: accent }}
+              className={cn(
+                'flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-md text-[10px] font-bold',
+                activeCount > 0 && 'text-white',
+                activeCount === 0 && 'bg-[var(--surface-3)] text-muted-foreground',
+              )}
+              style={activeCount > 0 ? { backgroundColor: accent } : undefined}
             >
               {activeCount}
             </div>
           )}
 
-          {/* Expand/collapse chevron (points up when collapsed — panel opens upward) */}
+          {/* Expand/collapse chevron */}
           <svg
             className={cn(
               'w-3.5 h-3.5 text-muted-foreground transition-transform',
-              !expanded && 'rotate-180'
+              embedded ? (expanded && 'rotate-180') : (!expanded && 'rotate-180')
             )}
             viewBox="0 0 24 24"
             fill="none"
@@ -472,12 +494,15 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="pointer-events-auto w-[300px] max-h-[400px] flex flex-col rounded-xl border bg-[var(--surface-1)]/95 backdrop-blur-xl border-border shadow-xl shadow-black/40 overflow-hidden"
+            className={cn(
+              'pointer-events-auto w-[300px] max-h-[400px] flex flex-col rounded-xl border bg-[var(--surface-1)]/95 backdrop-blur-xl border-border shadow-xl shadow-black/40 overflow-hidden',
+              embedded && 'absolute right-0 top-full z-[60] mt-2',
+            )}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
               <span className="text-xs font-semibold text-foreground">
-                {t("Очередь генераций")}{t("Очередь генераций")}
+                {t("Очередь генераций")}
               </span>
               <div className="flex items-center gap-1">
                 {items.some((it) => it.status === 'done' || it.status === 'error' || it.status === 'cancelled') && (
@@ -500,6 +525,11 @@ export function QueueIndicator({ activeTab }: { activeTab?: string } = {}) {
 
             {/* Item list */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {items.length === 0 && (
+                <p className="px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                  {t("Очередь пуста")}
+                </p>
+              )}
               {[...items].reverse().map((item) => {
                 const Icon = TYPE_ICON[item.type]
                 const itemAccent = TYPE_ACCENT[item.type]

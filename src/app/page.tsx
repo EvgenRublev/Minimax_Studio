@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { StudioSidebar, TabType } from '@/components/h3/sidebar'
+import { AppTopBar } from '@/components/h3/app-top-bar' // (правка 987)
 import { GenerateView } from '@/components/h3/generate-view'
 import { ExtendView } from '@/components/h3/extend-view'
 import { RefineView } from '@/components/h3/refine-view'
@@ -14,7 +15,6 @@ import { FaceRefineView } from '@/components/h3/face-refine-view'
 import { GalleryView } from '@/components/h3/gallery-view'
 import { MontageView } from '@/components/h3/montage-view' // (правка 720)
 import { LearnView } from '@/components/h3/learn/learn-view'
-import { QueueIndicator } from '@/components/queue-indicator'
 import { SettingsDialog } from '@/components/h3/settings-dialog'
 import { PrefsSync } from '@/components/h3/prefs-sync' // (правка 804)
 import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
@@ -217,40 +217,41 @@ export default function Home() {
   const ContentComponent = TAB_CONTENT[activeTab]
 
   return (
-    <div className="h-full w-full flex overflow-hidden">
-      {/* Sidebar */}
-      <StudioSidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
+    <div className="h-full w-full flex flex-col overflow-hidden">
+      {/* (правка 987) Верхняя панель на всю ширину — на всех вкладках */}
+      <AppTopBar activeTab={activeTab} />
 
-      {/* Main Content */}
-      <main className="flex-1 min-w-0 relative flex flex-col">
-        {/* Models not downloaded warning */}
-        <ModelsWarningBanner onOpenSettings={() => setSettingsOpen(true)} />
-        {/* (правка 911) Ядро ComfyUI старее нужного — установщик не запускался */}
-        <CoreWarningBanner />
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* Sidebar */}
+        <StudioSidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
 
-        <div className="flex-1 min-h-0 relative">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="h-full flex"
-          >
-            <ContentComponent />
-          </motion.div>
-        </AnimatePresence>
-        </div>
+        {/* Main Content */}
+        <main className="flex-1 min-w-0 relative flex flex-col">
+          {/* Models not downloaded warning */}
+          <ModelsWarningBanner onOpenSettings={() => setSettingsOpen(true)} />
+          {/* (правка 911) Ядро ComfyUI старее нужного — установщик не запускался */}
+          <CoreWarningBanner />
 
-        {/* Queue indicator — bottom-right floating; (правка 442) сдвигается
-            левее панели ассистента на вкладках «Генерация»/«Продление» */}
-        <QueueIndicator activeTab={activeTab} />
-      </main>
+          <div className="flex-1 min-h-0 relative">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease: 'easeInOut' }}
+              className="h-full flex"
+            >
+              <ContentComponent />
+            </motion.div>
+          </AnimatePresence>
+          </div>
+        </main>
+      </div>
 
       {/* Settings dialog (connection, GPU memory) — opened from the sidebar */}
       <PrefsSync />

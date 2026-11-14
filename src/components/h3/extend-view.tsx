@@ -20,13 +20,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Maximize2Icon,
-  PlayIcon,
   PlusIcon,
   SparklesIcon,
   XIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -58,6 +56,7 @@ import { RefPreviewThumb } from './ref-preview-thumb'
 // (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
 import { applyCropToRef, comfyInputUrl, cropOriginalSrc } from '@/lib/crop'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
 
 function detectKind(name: string): VideoRefItem['kind'] | null {
   const ext = name.slice(name.lastIndexOf('.')).toLowerCase()
@@ -79,6 +78,8 @@ export function ExtendView() {
   const videoStartedAt = useGenProgress((s) => s.video.startedAt)
 
   const video = useGenStore((s) => s.video)
+  const outputFolder = useOutputFolderStore((s) => s.folders.extend) // (правка 997)
+  const setOutputFolder = useOutputFolderStore((s) => s.setFolder)
   const patchVideo = useGenStore((s) => s.patchVideo)
 
   const isGenerating = phase === 'submitting' || phase === 'queued' || phase === 'running'
@@ -591,7 +592,7 @@ export function ExtendView() {
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
       latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
-      outputSubfolder: v.extendSourceSubfolder ?? (v.outputFolder || ''), // (правка 363) галерея-источник → папка оригинала
+      outputSubfolder: outputFolder, // (правка 997) вручную выбранная папка
       })
     } catch {
       // (правка 729) Ошибки generate() уже показаны тостом внутри хука —
@@ -633,7 +634,7 @@ export function ExtendView() {
     <div className="flex-1 flex min-h-0 min-w-0">
       {/* ═══════════ LEFT: Settings panel (400px) ═══════════ */}
       {/* (правка 472) фон — surface-1, как у Refine/Tile/FPS (единый вид) */}
-      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[390px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
           {/* Header */}
@@ -768,13 +769,10 @@ export function ExtendView() {
                 e.target.value = ''
               }}
             />
-            {/* (правка 363) Куда сохранится результат: источник из галереи —
-                папка оригинала; файл с диска — как на вкладке «Генерация». */}
+            {/* (правка 997) Папка выбирается вручную над кнопкой запуска. */}
             {sourceVideoPath && (
               <p className="text-[10px] text-muted-foreground/60">
-                {t("Папка результата:")}{' '} {video.extendSourceSubfolder !== null
-                  ? t("{{p1}} (по оригиналу)", { p1: video.extendSourceSubfolder || 'общая' })
-                  : (video.outputFolder || 'общая')}
+                {t("Папка результата:")}{' '} {outputFolder || t("общая")}
               </p>
             )}
           </div>
@@ -1074,6 +1072,17 @@ export function ExtendView() {
             statusMessage={statusMessage}
             error={error}
             onInterrupt={interrupt}
+            // (правка 984) кнопка запуска/остановки переехала под превью
+            onGenerate={() => void handleGenerate()}
+            generateLabel={t("Сгенерировать продление")}
+            generateDisabled={!canGenerateNow}
+            outputFolder={outputFolder}
+            onOutputFolderChange={(f) => setOutputFolder('extend', f)}
+            generateTitle={
+              assistantBusy
+                ? t("💬 Ассистент отвечает — дождитесь ответа или прервите его")
+                : t("Сгенерировать продление (Ctrl+Enter)")
+            }
             // (правка 433) «Попробовать снова»: был no-op — баннер ошибки
             // не убирался. Теперь реальный reset (фаза idle + очистка error),
             // как на вкладках Генерация/Refine.
@@ -1261,26 +1270,6 @@ export function ExtendView() {
             <div className="flex flex-wrap items-center gap-1.5">{badges}</div>
           </div>
 
-          {/* Generate button (правка 295) — размер как в generate-view */}
-          <div className="pt-2 flex justify-end">
-            <Button
-              onClick={() => void handleGenerate()}
-              disabled={!canGenerateNow}
-              title={
-                assistantBusy
-                  ? t("💬 Ассистент отвечает — дождитесь ответа или прервите его")
-                  : t("Сгенерировать продление (Ctrl+Enter)")
-              }
-              className="h-11 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-sm font-semibold shadow-lg shadow-cyan-500/20"
-            >
-              {isGenerating ? t("Ещё в очередь") : (
-                <>
-                  <PlayIcon className="w-4 h-4 mr-2" />
-                  {' '}{t("Сгенерировать продление")}
-                </>
-              )}
-            </Button>
-          </div>
         </div>
 
         {/* (правка 302) Results gallery — flex-1 + overflow-y-auto.

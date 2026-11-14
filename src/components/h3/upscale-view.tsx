@@ -33,6 +33,7 @@ import { motion } from 'framer-motion'
 import {
   SparklesIcon,
   PlayIcon,
+  PlusIcon,
   SquareIcon,
   UploadCloudIcon,
   RefreshCwIcon,
@@ -77,6 +78,8 @@ import {
   sweepOrphanUpscaleItems,
 } from '@/lib/upscale-queue'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
+import { OutputFolderPicker } from '@/components/h3/output-folder-picker'
 import { t as tt } from '@/lib/i18n' // (правка 955)
 
 /* ────────────────────────────────────────────────────────────────
@@ -371,6 +374,8 @@ const VIDEO_EXTS =
 
 export function UpscaleView() {
   const { t: tt } = useTranslation() // (правка 955)
+  const outputFolder = useOutputFolderStore((s) => s.folders['upscale'])
+  const setOutputFolder = useOutputFolderStore((s) => s.setFolder)
 
   /* (правка 77) Состояние сервиса — синглтон-стор: переживает unmount
    * вкладок, тосты fire'ятся в цикле (один раз), автозапуск — в tick. */
@@ -615,8 +620,8 @@ export function UpscaleView() {
       input: file.path,
       options: base,
       sourceName: file.name,
-      // (правка 727) Результат — в папку исходника из галереи.
-      subfolder: file.subfolder || '',
+      // (правка 997) Папка выбирается вручную.
+      subfolder: outputFolder,
     })
     toast.info(tt("Upscale поставлен в очередь: {{p1}}", { p1: file.name }))
   }, [canRun, file, featureKey, opts])
@@ -713,7 +718,7 @@ export function UpscaleView() {
   return (
     <div className="flex-1 flex min-h-0">
       {/* LEFT: панель параметров (как во вкладке «Генерация»; правка 472 — фон surface-1, как у Refine/Tile/FPS) */}
-      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[390px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
@@ -845,10 +850,7 @@ export function UpscaleView() {
 
         </div>
 
-        {/* Закреплённый блок: статус job (аналог GenerationStatus).
-            В idle (нет джоба) не показываем — инструкция переехала в тултип
-            лейбла «Режим обработки». */}
-        {(isBusy || job) && (
+        {/* Закреплённый блок: статус job + единая кнопка запуска/остановки. */}
         <div className="shrink-0 border-t border-border p-3 bg-[var(--surface-1)]/90 backdrop-blur-sm">
           {/* (правка 475) панель статуса/превью — surface-1, в цвет панели настроек */}
           {isBusy ? (
@@ -875,10 +877,6 @@ export function UpscaleView() {
               )}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] text-muted-foreground/60">{tt("GPU занята — дождитесь")}</span>
-                <Button variant="outline" size="sm" onClick={() => cancel()} disabled={cancelBusy}>
-                  <SquareIcon />
-                  {cancelBusy ? tt("Отмена…") : tt("Отменить")}
-                </Button>
               </div>
             </div>
           ) : job?.status === 'done' ? (
@@ -901,8 +899,49 @@ export function UpscaleView() {
           ) : job?.status === 'cancelled' ? (
             <p className="text-xs text-muted-foreground">{tt("Обработка отменена.")}</p>
           ) : null}
+          <OutputFolderPicker
+            value={outputFolder}
+            onChange={(f) => setOutputFolder('upscale', f)}
+          />
+          <div className="pt-2">
+            {isBusy ? (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  onClick={() => cancel()}
+                  disabled={cancelBusy}
+                  className="flex-1 h-9 gap-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-xs font-semibold"
+                >
+                  <SquareIcon className="w-3.5 h-3.5 fill-current" />
+                  {cancelBusy ? tt("Отмена…") : tt("Остановить")}
+                </Button>
+                <Button
+                  onClick={() => void run()}
+                  disabled={!canRun}
+                  title={tt("Добавить ещё в очередь")}
+                  aria-label={tt("Добавить ещё в очередь")}
+                  className="h-9 w-11 shrink-0 px-0 gap-0.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-cyan-300 border border-cyan-500/30 text-xs font-bold disabled:opacity-40"
+                >
+                  <PlusIcon className="w-3.5 h-3.5" />
+                  1
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => void run()}
+                disabled={!canRun}
+                title={
+                  file
+                    ? tt("Запустить обработку (DLSS 5)")
+                    : tt("Сначала загрузите видео")
+                }
+                className="w-full h-9 gap-1.5 bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white border-0 text-xs font-semibold shadow-lg shadow-violet-500/20 disabled:opacity-50"
+              >
+                <PlayIcon className="w-3.5 h-3.5" />
+                {tt("Запустить")}
+              </Button>
+            )}
+          </div>
         </div>
-        )}
       </div>
 
       {/* RIGHT: режим + файл + CTA, снизу — общая галерея */}
@@ -1086,21 +1125,6 @@ export function UpscaleView() {
                 </Badge>
               )}
             </div>
-            <Button
-              onClick={() => void run()}
-              disabled={!canRun}
-              title={
-                isBusy
-                  ? tt("Идёт обработка")
-                  : file
-                    ? tt("Запустить обработку (DLSS 5)")
-                    : tt("Сначала загрузите видео")
-              }
-              className="h-11 px-6 bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white border-0 text-sm font-semibold shadow-lg shadow-violet-500/20"
-            >
-              {isBusy ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
-              {isBusy ? tt("Ещё в очередь") : tt("Запустить")}
-            </Button>
           </div>
         </div>
 

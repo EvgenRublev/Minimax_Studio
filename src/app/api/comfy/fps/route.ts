@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       sourceFilename?: string
       sourceSubfolder?: string
+      outputSubfolder?: string
       mode?: 'rife' | 'film'
       multiplier?: number
       rifeBatchSize?: number
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
     // (правка 495) Вложенные папки: subfolder — многоуровневый относительный
     // путь ('a/b'); сегменты '.'/'..' отбрасываются (правка 317).
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
+    const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
     const safeName = path.basename(body.sourceFilename ?? '')
 
     const workflowParams = {
@@ -206,7 +208,7 @@ export async function POST(req: NextRequest) {
     const srcFps = probe.fps ?? Math.max(1, Math.min(120, Math.round((probe.frames / Math.max(probe.durationSec, 0.01)) * 100) / 100))
     const run = await runGeneration(() =>
       submitWorkflowJson(
-        buildFpsWorkflow({ sourceVideo: destName, sourceFps: srcFps, ...workflowParams, outputSubfolder: sub, videoFormat: getVideoFormatSettings() }), // (правка 367) результат — в папку оригинала
+        buildFpsWorkflow({ sourceVideo: destName, sourceFps: srcFps, ...workflowParams, outputSubfolder: outSub, videoFormat: getVideoFormatSettings() }), // (правка 367) результат — в папку оригинала
       ),
     )
     if (!run.ok) {

@@ -19,7 +19,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ScanFaceIcon,
   CrosshairIcon,
-  PlayIcon,
   FileVideoIcon,
   ImageIcon,
   Loader2Icon,
@@ -27,7 +26,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -53,6 +51,7 @@ import { useFaceRefineJob } from '@/lib/face-refine-job-store'
 import { uploadInputFile } from '@/lib/upload'
 import type { FaceSelectMode } from '@/lib/comfy/face-refine-template'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
 
 const SELECT_MODES: Array<{ value: FaceSelectMode; label: string }> = [
   { value: 'largest_face', label: 'Самое крупное лицо' },
@@ -69,6 +68,8 @@ const SELECT_MODES: Array<{ value: FaceSelectMode; label: string }> = [
 
 export function FaceRefineView() {
   const { t } = useTranslation() // (правка 955)
+  const outputFolder = useOutputFolderStore((s) => s.folders['face-refine'] )
+  const setOutputFolder = useOutputFolderStore((s) => s.setFolder)
 
   const storeTarget = useFaceRefineTarget((s) => s.target)
   const clearStoreTarget = useFaceRefineTarget((s) => s.clear)
@@ -246,6 +247,7 @@ export function FaceRefineView() {
     }
 
     const body: Record<string, unknown> = {
+      outputSubfolder: outputFolder,
       ...(src.inputSource
         ? { inputSource: src.inputSource }
         : { sourceFilename: src.filename, sourceSubfolder: src.subfolder ?? '' }),
@@ -346,7 +348,7 @@ export function FaceRefineView() {
   return (
     <div className="flex h-full w-full min-w-0">
       {/* ═══ Панель параметров ═══ */}
-      <aside className="w-[360px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
+      <aside className="w-[390px] shrink-0 border-r border-border bg-[var(--surface-1)] flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex items-center gap-2">
             <ScanFaceIcon className="w-4 h-4 text-yellow-400" />
@@ -890,14 +892,6 @@ export function FaceRefineView() {
               </div>
             )}
           </div>
-
-          {/* Запуск */}
-          <div className="flex gap-2 pt-1">
-            <Button onClick={start} disabled={!source} className="flex-1 gap-1.5">
-              <PlayIcon className="w-4 h-4" />
-              {busy ? t("Ещё в очередь") : t("Запустить Face Refine")}
-            </Button>
-          </div>
         </div>
 
         {/* Статус */}
@@ -909,6 +903,11 @@ export function FaceRefineView() {
             statusMessage={null}
             error={error}
             onInterrupt={cancel}
+            onGenerate={start}
+            outputFolder={outputFolder}
+            onOutputFolderChange={(f) => setOutputFolder('face-refine', f)}
+            generateLabel={t("Запустить Face Refine")}
+            generateDisabled={!source}
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}

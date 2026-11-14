@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       sourceFilename?: string
       sourceSubfolder?: string
+      outputSubfolder?: string
       prompt?: string
       seed?: number
       tileSize?: number
@@ -91,6 +92,7 @@ export async function POST(req: NextRequest) {
     // (правка 495) Вложенные папки: subfolder — многоуровневый относительный
     // путь ('a/b'); сегменты '.'/'..' отбрасываются (правка 317).
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
+    const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
     const safeName = path.basename(body.sourceFilename ?? '')
 
     // (правка 722) Параметры тайлового апскейла — в сайдкар. Раньше в
@@ -308,7 +310,7 @@ export async function POST(req: NextRequest) {
           chunkFrames: body.chunkFrames,
           temporalOverlap: body.temporalOverlap,
           anchorStrength: body.anchorStrength,
-          outputSubfolder: sub,
+          outputSubfolder: outSub,
           targetResolution: body.targetResolution,
           denoise: body.denoise,
           steps: body.steps,

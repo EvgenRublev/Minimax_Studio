@@ -20,6 +20,8 @@ import {
   FilmIcon,
   Wand2Icon,
   Grid3x3Icon,
+  LayoutGridIcon,
+  Loader2Icon,
   MoreVerticalIcon,
   ScissorsIcon,
   ClapperboardIcon, // (правка 855) «В Монтаж»
@@ -46,7 +48,9 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { VideoLightbox } from './video-lightbox'
+import { RefPreviewThumb } from './ref-preview-thumb'
 import { useGenDurations, formatDuration, formatSeconds } from '@/lib/gen-duration-store'
+import { useGenQueue } from '@/lib/gen-queue-store'
 import { restoreFromMeta } from '@/lib/restore-from-meta'
 import { useUpscaleTarget } from '@/lib/upscale-target-store'
 import { useRefineTarget } from '@/lib/refine-target-store'
@@ -173,6 +177,103 @@ function posterUrl(file: VideoGalleryFile): string {
   return thumbUrl(file)
 }
 
+// (правка 989) Живая карточка генерации: появляется сразу после запуска,
+// сначала со спиннером, затем показывает кадр preview и исчезает, когда
+// готовый файл появляется в галерее.
+function LiveGenerationCard() {
+  // (правка 996) Берём активную задачу из ОБЩЕЙ очереди, а не из видео-стора:
+  // Refine/Tile/FPS/Face/Upscale пишут прогресс в свои job-сторы, поэтому
+  // карточка раньше появлялась только на «Генерации».
+  const items = useGenQueue((s) => s.items)
+  const current =
+    items.find((i) => i.status === 'running') ??
+    items.find((i) => i.status === 'submitting') ??
+    items.find((i) => i.status === 'queued')
+  const active = !!current
+  const promptId = current?.promptId ?? null
+  const [preview, setPreview] = useState<{ url: string; mime: string; step: number; total: number } | null>(null)
+
+  useEffect(() => {
+    setPreview(null)
+    if (!active || !promptId) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/comfy/preview?prompt_id=${encodeURIComponent(promptId)}&_t=${Date.now()}`)
+        if (!res.ok) return
+        const data = await res.json() as {
+          preview?: { image?: string; mime?: string; step?: number; total?: number }
+        }
+        const img = data.preview?.image
+        if (!cancelled && img) {
+          setPreview({
+            url: img,
+            mime: typeof data.preview?.mime === 'string' ? data.preview.mime : 'image/webp',
+            step: typeof data.preview?.step === 'number' ? data.preview.step : 0,
+            total: typeof data.preview?.total === 'number' ? data.preview.total : 0,
+          })
+        }
+      } catch { /* preview ещё не готов */ }
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 1200)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [active, promptId])
+
+  if (!current) return null
+  const pct = current.progressMax > 0 ? Math.min(100, Math.round((current.progressValue / current.progressMax) * 100)) : 0
+  const isVideo = preview?.mime.startsWith('video/')
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="group relative aspect-video overflow-hidden rounded-lg border border-cyan-500/40 bg-[var(--surface-2)]"
+    >
+      {preview ? (
+        <RefPreviewThumb
+          kind={isVideo ? 'video' : 'image'}
+          name="Превью генерации"
+          url={preview.url}
+          videoIcon={false}
+          className="absolute inset-0 block h-full w-full"
+          title="Открыть превью генерации в плеере"
+        >
+          {isVideo ? (
+            <video src={preview.url} autoPlay loop muted playsInline className="h-full w-full object-cover" />
+          ) : (
+            <img src={preview.url} alt="Превью генерации" className="h-full w-full object-cover" draggable={false} />
+          )}
+        </RefPreviewThumb>
+      ) : (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--surface-2)]">
+          <Loader2Icon className="h-7 w-7 animate-spin text-cyan-400" />
+          <span className="text-[11px] text-muted-foreground">
+            {current.status === 'submitting' ? 'Отправка…' : current.status === 'queued' ? 'В очереди' : 'Генерация…'}
+          </span>
+        </div>
+      )}
+
+      <div className="pointer-events-none absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-md border border-cyan-400/40 bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 backdrop-blur-sm">
+        <Loader2Icon className="h-2.5 w-2.5 animate-spin" />
+        Генерация
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 p-1.5">
+        <span className="text-[10px] font-mono text-white/70">
+          {preview && preview.total > 0 ? `шаг ${preview.step}/${preview.total}` : '…'}
+        </span>
+        <span className="text-[10px] font-mono tabular-nums text-cyan-300/80">{pct}%</span>
+      </div>
+      {preview && <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />}
+    </motion.div>
+  )
+}
+
 export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   files,
   loading = false,
@@ -185,6 +286,32 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   likedCount,
 }: VideoGalleryGridProps) {
   const { t: tt } = useTranslation() // (правка 955)
+  const generationActive = useGenQueue((s) =>
+    s.items.some((i) => i.status === 'submitting' || i.status === 'queued' || i.status === 'running'),
+  )
+
+  // (правка 981) Три размера превью — общая настройка для всех вкладок.
+  // Минимум 270px: в карточку гарантированно влезают номер, длительность и
+  // бейджи; меньше делать нельзя, иначе текст на превью не читается.
+  type PreviewSize = 'large' | 'medium' | 'small'
+  const PREVIEW_COLUMNS: Record<PreviewSize, string> = {
+    large: 'grid-cols-[repeat(auto-fill,minmax(450px,1fr))]',
+    medium: 'grid-cols-[repeat(auto-fill,minmax(330px,1fr))]',
+    small: 'grid-cols-[repeat(auto-fill,minmax(270px,1fr))]',
+  }
+  const PREVIEW_SIZE_KEY = 'minimax.gallery.preview-size'
+  const [previewSize, setPreviewSize] = useState<PreviewSize>('medium')
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(PREVIEW_SIZE_KEY)
+      if (saved === 'large' || saved === 'medium' || saved === 'small') setPreviewSize(saved)
+    } catch { /* localStorage недоступен */ }
+  }, [])
+  const changePreviewSize = (size: PreviewSize) => {
+    setPreviewSize(size)
+    try { localStorage.setItem(PREVIEW_SIZE_KEY, size) } catch { /* ignore */ }
+  }
+  const gridCols = PREVIEW_COLUMNS[previewSize]
 
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [metaIndex, setMetaIndex] = useState<number | null>(null)
@@ -347,7 +474,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   }, [pendingDelete, handleDelete])
 
   /* ── Empty state ── */
-  if (!loading && files.length === 0) {
+  if (!loading && files.length === 0 && !generationActive) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-12">
         <VideoIcon className="w-10 h-10 text-muted-foreground/30 mb-3" />
@@ -359,7 +486,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   /* ── Loading skeletons ── */
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+      <div className={cn('grid gap-3', gridCols)}>
         {Array.from({ length: 8 }).map((_, i) => (
           <div
             key={i}
@@ -430,6 +557,35 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               {' '}{tt("Только избранные")}{typeof likedCount === 'number' ? ` (${likedCount})` : ''}
             </button>
           )}
+          {/* (правка 981) Размер превью: крупные / средние / мелкие. */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+            role="group"
+            aria-label={tt("Размер превью")}
+          >
+            {([
+              ['large', Maximize2Icon, 'Крупные превью'],
+              ['medium', LayoutGridIcon, 'Средние превью'],
+              ['small', Grid3x3Icon, 'Мелкие превью'],
+            ] as const).map(([size, Icon, label]) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => changePreviewSize(size)}
+                className={cn(
+                  'p-1 rounded-md transition-colors',
+                  previewSize === size
+                    ? 'bg-cyan-500/20 text-cyan-300'
+                    : 'text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground',
+                )}
+                title={tt(label)}
+                aria-label={tt(label)}
+                aria-pressed={previewSize === size}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            ))}
+          </div>
           {onRefresh && (
             <button
               onClick={() => onRefresh()}
@@ -443,7 +599,8 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+      <div className={cn('grid gap-3', gridCols)}>
+        <LiveGenerationCard />
         <AnimatePresence mode="popLayout">
           {files.map((file, index) => (
             <motion.div
@@ -452,7 +609,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               className={cn(
-                'group relative aspect-video rounded-lg border border-border bg-[var(--surface-2)] cursor-pointer transition-shadow',
+                'group relative aspect-video rounded-lg bg-[var(--surface-2)] cursor-pointer transition-shadow',
                 // (правка 729) Подсветка выбранных для сравнения
                 selectedKeys.includes(`${file.subfolder}/${file.filename}`) &&
                   'ring-2 ring-cyan-400 border-cyan-400/60 shadow-[0_0_14px_rgba(34,211,238,0.35)]',
@@ -949,7 +1106,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
                     if (!label) return null
                     return (
                       <span
-                        className="text-[10px] text-cyan-300/80 font-medium shrink-0"
+                        className="text-[10px] text-cyan-300/80 font-medium shrink-0 rounded-md bg-black/55 px-1.5 py-0.5 backdrop-blur-sm"
                         title={tt("Время генерации (из метаданных)")}
                       >
                         {label}

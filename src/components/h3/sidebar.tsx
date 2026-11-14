@@ -158,26 +158,8 @@ export function StudioSidebar({ activeTab, onTabChange, onOpenSettings }: Sideba
         transition={{ duration: 0.2, ease: 'easeInOut' }}
         className="flex flex-col h-full border-r border-border bg-[var(--surface-1)] relative z-20"
       >
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 px-4 h-14 border-b border-border shrink-0">
-          <div className="w-8 h-8 rounded-lg gradient-creative flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/20">
-            <span className="text-sm font-bold text-white tracking-tight">H3</span>
-          </div>
-          {!collapsed && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="flex flex-col min-w-0"
-            >
-              <span className="text-sm font-semibold text-foreground truncate leading-tight">
-                MiniMax H3 <span className="gradient-creative-text font-bold">Studio 7</span>
-              </span>
-              <span className="text-[10px] text-muted-foreground truncate">by Evgen Rublev</span>
-            </motion.div>
-          )}
-        </div>
+        {/* (правка 987) Логотип и название переехали в общий верхний бар
+            (AppTopBar) — сайдбар начинается сразу с навигации. */}
 
         {/* Navigation */}
         <nav className="flex-1 py-3 px-2 space-y-1">

@@ -4,15 +4,16 @@
  * Generation status card — phase readout, animated progress bar, elapsed
  * timer, live ComfyUI preview and error state. Pinned to the bottom of
  * the parameters panel so it stays visible while adjusting settings.
- * (The CTA button lives next to the prompt — see GenerateView.)
+ * (правка 984) Здесь же — единая кнопка «Сгенерировать» / «Остановить».
  */
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { PlayIcon, PlusIcon, SquareIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 import { useGenProgress } from '@/lib/gen-progress-store' // (правка 696)
 // (правка 719) Превью с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
+import { OutputFolderPicker } from '@/components/h3/output-folder-picker'
 import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface GenerationStatusProps {
@@ -23,6 +24,15 @@ interface GenerationStatusProps {
   error: string | null
   onInterrupt: () => void
   onReset: () => void
+  /** (правка 984) Единая кнопка запуска под превью. Пока генерация идёт,
+   *  она заменяется на «Остановить» (onInterrupt). */
+  onGenerate?: () => void
+  generateLabel?: string
+  generateDisabled?: boolean
+  generateTitle?: string
+  /** (правка 997) Папка сохранения результата — над кнопкой запуска. */
+  outputFolder?: string
+  onOutputFolderChange?: (folder: string) => void
   /** Timestamp (Date.now()) when generation started — drives the elapsed timer. */
   startedAt?: number | null
   /** Current prompt_id for the live preview. */
@@ -89,27 +99,8 @@ function stageLabel(
   return `Pass ${stage}/${totalStages}${stage === 1 ? firstPass : ' · детализация'}`
 }
 
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000)
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = totalSec % 60
-  if (h > 0) return `${h}ч ${m}м ${s}с`
-  if (m > 0) return `${m}м ${s}с`
-  return `${s}с`
-}
-
-function ElapsedTimer({ startedAt }: { startedAt: number }) {
-  const [, forceTick] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => forceTick((n) => n + 1), 1000)
-    return () => clearInterval(t)
-  }, [])
-  return <span className="text-[10px] font-mono text-muted-foreground tabular-nums">{formatElapsed(Date.now() - startedAt)}</span>
-}
-
 /** Live preview of the current denoising step (from ComfyUI WebSocket). */
-function GenPreview({
+export function GenPreview({
   promptId,
   active,
   stageKind,
@@ -276,164 +267,68 @@ function GenPreview({
 }
 
 export function GenerationStatus({
-  phase,
   isGenerating,
-  progressPercent,
-  statusMessage,
   error,
   onInterrupt,
   onReset,
-  startedAt,
-  promptId,
-  stageKind = 'passes',
-  executingNode = null,
-  executingTitle = null,
-  nodeStep = null,
-  nodeTotal = null,
-  nodeElapsedMs = null,
-  passFullRes = false,
+  onGenerate,
+  generateLabel,
+  generateDisabled,
+  generateTitle,
+  outputFolder = '',
+  onOutputFolderChange,
 }: GenerationStatusProps) {
   const { t: tt } = useTranslation() // (правка 955)
 
-  // (правка 965) Строка «текущий узел · шаг/время» была только там, где вкладка
-  // сама прокидывала node-поля (Генерация/Продление). Refine, ControlNet,
-  // Tile, Face и FPS их не передают — тянем из общего /api/comfy/progress.
-  const [fallbackNode, setFallbackNode] = useState<{
-    title: string | null
-    node: string | null
-    step: number | null
-    total: number | null
-    elapsedMs: number | null
-  } | null>(null)
-  useEffect(() => {
-    setFallbackNode(null)
-    if (!isGenerating || !promptId || executingTitle || executingNode) return
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const r = await fetch(`/api/comfy/progress?prompt_id=${encodeURIComponent(promptId)}`)
-        if (!r.ok) return
-        const d = (await r.json()) as {
-          title?: string | null
-          node?: string | null
-          nodeMs?: number | null
-          step?: number | null
-          total?: number | null
-        }
-        if (cancelled) return
-        if (d.title || d.node) {
-          setFallbackNode({
-            title: d.title ?? null,
-            node: d.node ?? null,
-            step: typeof d.step === 'number' ? d.step : null,
-            total: typeof d.total === 'number' ? d.total : null,
-            elapsedMs: typeof d.nodeMs === 'number' ? d.nodeMs : null,
-          })
-        }
-      } catch { /* не критично */ }
-    }
-    void poll()
-    const timer = setInterval(() => void poll(), 2000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [isGenerating, promptId, executingTitle, executingNode])
-
-  const nodeLabel = executingTitle || executingNode || fallbackNode?.title || fallbackNode?.node || null
-  const effectiveStep = nodeStep ?? fallbackNode?.step ?? null
-  const effectiveTotal = nodeTotal ?? fallbackNode?.total ?? null
-  const effectiveElapsed = nodeElapsedMs ?? fallbackNode?.elapsedMs ?? null
   return (
     <div className="space-y-2">
-      {/* Phase + elapsed */}
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span
-          className={cn(
-            'font-medium shrink-0',
-            phase === 'running'
-              ? 'text-cyan-400'
-              : phase === 'queued' || phase === 'submitting'
-                ? 'text-yellow-400'
-                : phase === 'done'
-                  ? 'text-green-400'
-                  : phase === 'error'
-                    ? 'text-red-400'
-                    : 'text-muted-foreground',
-          )}
-        >
-          {phase === 'idle' && tt("Готов к генерации")}
-          {phase === 'submitting' && tt("Отправка…")}
-          {phase === 'queued' && tt("В очереди…")}
-          {phase === 'running' && (progressPercent > 0 ? tt("Генерация… {{p1}}%", { p1: progressPercent }) : tt("Генерация идёт…"))}
-          {phase === 'done' && tt("Готово ✓")}
-          {phase === 'error' && tt("Ошибка")}
-        </span>
-        <div className="flex items-center gap-2 min-w-0">
-          {startedAt && isGenerating && <ElapsedTimer startedAt={startedAt} />}
-          {statusMessage && (
-            <span className="text-muted-foreground/60 truncate max-w-[140px]" title={statusMessage}>
-              {statusMessage}
-            </span>
-          )}
-        </div>
-      </div>
+      {/* (правка 989) Превью генерации переехало в карточку галереи. */}
 
-      {/* (правка 950) Текущий узел: «3D-апскейлер · 2:14» вместо голых 0/50% */}
-      {isGenerating && phase === 'running' && nodeLabel && (
-        <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-          <span className="truncate min-w-0" title={nodeLabel}>{nodeLabel}</span>
-          <span className="shrink-0 font-mono tabular-nums text-muted-foreground/80">
-            {effectiveStep != null && effectiveTotal != null && effectiveTotal > 0 ? tt("шаг {{p1}}/{{p2}} ·", { p1: effectiveStep, p2: effectiveTotal }) : ''}
-            {effectiveElapsed != null ? formatElapsed(effectiveElapsed) : ''}
-          </span>
-        </div>
+      {/* (правка 997) Папка сохранения — прямо над кнопкой запуска. */}
+      {onOutputFolderChange && (
+        <OutputFolderPicker value={outputFolder} onChange={onOutputFolderChange} />
       )}
 
-      {/* Progress bar */}
-      <div className="h-2 bg-[var(--surface-2)] rounded-full overflow-hidden">
-        {isGenerating ? (
-          phase === 'queued' || phase === 'submitting' || (phase === 'running' && progressPercent === 0) ? (
-            <div
-              className={cn(
-                'h-full w-1/3 rounded-full animate-pulse',
-                phase === 'running'
-                  ? 'bg-gradient-to-r from-cyan-500/80 to-blue-500/80'
-                  : 'bg-gradient-to-r from-yellow-500/80 to-amber-500/80',
+      {/* (правка 984) Одна кнопка на всё: под статусом.
+          Идёт генерация → «Остановить», иначе → запуск. */}
+      {(isGenerating || onGenerate) && (
+        <div className="pt-0.5">
+          {isGenerating ? (
+            <div className="flex items-center gap-1.5">
+              <Button
+                onClick={onInterrupt}
+                className="flex-1 h-9 gap-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-xs font-semibold"
+              >
+                <SquareIcon className="w-3.5 h-3.5 fill-current" />
+                {tt("Остановить")}
+              </Button>
+              {onGenerate && (
+                <Button
+                  onClick={onGenerate}
+                  disabled={generateDisabled}
+                  title={generateTitle
+                    ? `${tt("Добавить ещё в очередь")} · ${generateTitle}`
+                    : tt("Добавить ещё в очередь")}
+                  aria-label={tt("Добавить ещё в очередь")}
+                  className="h-9 w-11 shrink-0 px-0 gap-0.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-cyan-300 border border-cyan-500/30 text-xs font-bold disabled:opacity-40"
+                >
+                  <PlusIcon className="w-3.5 h-3.5" />
+                  1
+                </Button>
               )}
-            />
-          ) : (
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progressPercent}%` }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full"
-            />
-          )
-        ) : phase === 'done' ? (
-          <div className="h-full w-full bg-gradient-to-r from-green-500/60 to-emerald-500/60 rounded-full" />
-        ) : null}
-      </div>
-
-      {/* Live preview — only while a job is active */}
-      {isGenerating && (
-        <GenPreview
-          promptId={promptId ?? null}
-          active={phase === 'running' || phase === 'queued'}
-          stageKind={stageKind}
-          isGenerating={isGenerating}
-          passFullRes={passFullRes}
-        />
-      )}
-
-      {/* Stop */}
-      {isGenerating && (
-        <button
-          onClick={onInterrupt}
-          className="w-full text-xs text-red-400/70 hover:text-red-400 py-1 transition-colors"
-        >
-          {tt("Остановить")}
-        </button>
+            </div>
+          ) : onGenerate ? (
+            <Button
+              onClick={onGenerate}
+              disabled={generateDisabled}
+              title={generateTitle}
+              className="w-full h-9 gap-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 text-xs font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-50"
+            >
+              <PlayIcon className="w-3.5 h-3.5" />
+              {generateLabel ?? tt("Сгенерировать")}
+            </Button>
+          ) : null}
+        </div>
       )}
 
       {/* Error */}

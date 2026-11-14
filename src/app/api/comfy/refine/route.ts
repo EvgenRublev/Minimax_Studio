@@ -129,6 +129,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       sourceFilename?: string
       sourceSubfolder?: string
+      /** (правка 997) куда сохранить результат; пусто = как у источника */
+      outputSubfolder?: string
       target?: 'same' | 'x2' | number
       prompt?: string
       seed?: number
@@ -297,6 +299,9 @@ export async function POST(req: NextRequest) {
     // (правка 495) Вложенные папки: subfolder — многоуровневый относительный
     // путь ('a/b'); сегменты '.'/'..' отбрасываются (правки 317/338).
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
+    const outSub = sanitizeFolderPath(
+      typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub,
+    )
     const safeName = path.basename(body.sourceFilename ?? '')
 
     // (правка 265) Источник уже в ComfyUI input/ (файл с диска, загруженный
@@ -703,7 +708,7 @@ export async function POST(req: NextRequest) {
             seed: body.seed,
             steps: body.steps,
             sigmaStart: body.sigmaStart,
-            outputSubfolder: sub,
+            outputSubfolder: outSub,
             refImageSize, // (правка 317)
             lowVramAttention: body.lowVramAttention !== false, // (правка 968)
             chunkFeedForward: body.chunkFeedForward !== false,
@@ -812,7 +817,7 @@ export async function POST(req: NextRequest) {
         ...loraParams, // (правка 483)
         // (правка 366) Результат — в папку оригинала (как у режима «Частями»);
         // источник из корня output → sub='' → общая папка, как раньше.
-        outputSubfolder: sub,
+        outputSubfolder: outSub,
         // (правка 311) Картинки-рефы из меты исходника (с ролями)
         ...(metaRefImages.length > 0 && { refImages: metaRefImages }),
       }),
