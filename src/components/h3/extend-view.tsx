@@ -726,7 +726,6 @@ export function ExtendView() {
                         preload="metadata"
                         muted
                         playsInline
-                        onClick={(e) => e.stopPropagation()}
                         className="w-full h-full object-cover"
                       />
                     </RefPreviewThumb>
@@ -1256,21 +1255,8 @@ export function ExtendView() {
                         <SparklesIcon className="w-3 h-3" />
                         {' '}{t("Исправить")}
                       </button>
-                      {/* (правка 691) «Очистить» промпт клипа — только если он непустой */}
-                      {clip.prompt.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const clips = [...video.extendClips]
-                            clips[i] = { ...clips[i], prompt: '' }
-                            patchVideo({ extendClips: clips })
-                          }}
-                          className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors"
-                          title={t("Очистить промпт клипа")}
-                        >
-                          {t("Очистить")}
-                        </button>
-                      )}
+                      {/* (правка 971) «Очистить» в шапке убрано: та же кнопка
+                          есть в PromptFieldTools ниже и дублировала действие. */}
                       <button
                         type="button"
                         onClick={() => {
@@ -1336,7 +1322,7 @@ export function ExtendView() {
                         clips[i] = { ...clips[i], duration: Math.max(3, Math.min(30, parseInt(e.target.value, 10) || 3)) }
                         patchVideo({ extendClips: clips })
                       }}
-                      className="w-16 text-xs bg-[var(--surface-3)] border border-border rounded-md px-2 py-1 text-foreground"
+                      className="w-16 text-xs bg-[var(--surface-3)] border border-border rounded-md px-2 py-1 text-foreground outline-none [color-scheme:dark] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none selection:bg-cyan-500/30 selection:text-foreground focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/30"
                     />
                     {/* (правка 291) Показываем накопленную сумму клипов +
                         итог вместе с оригиналом — пользователь видит, сколько

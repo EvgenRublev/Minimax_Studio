@@ -131,9 +131,9 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
     <div className="px-3 py-2 space-y-1.5 border-t border-border">
       {/* GPU VRAM — (правка 787) turns amber with an exclamation when nearly full */}
       {stats.gpu_available && stats.vram_total_gb > 0 && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <MonitorCogIcon className={`w-3 h-3 shrink-0 ${vramWarn ? 'text-amber-400' : 'text-cyan-400'}`} />
-          <span className={`text-[10px] w-7 shrink-0 ${vramWarn ? 'text-amber-400' : 'text-muted-foreground'}`}>VRAM</span>
+          <span className={`text-[10px] w-10 shrink-0 ${vramWarn ? 'text-amber-400' : 'text-muted-foreground'}`}>VRAM</span>
           <StatBar
             value={stats.vram_used_gb}
             max={stats.vram_total_gb}
@@ -154,9 +154,9 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
 
       {/* GPU Utilization */}
       {stats.gpu_available && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <MonitorCogIcon className="w-3 h-3 text-violet-400 shrink-0" />
-          <span className="text-[10px] text-muted-foreground w-7 shrink-0">GPU</span>
+          <span className="text-[10px] text-muted-foreground w-10 shrink-0">GPU</span>
           <div className="flex-1 h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
@@ -171,9 +171,9 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
 
       {/* RAM */}
       {stats.ram_total_gb > 0 && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <MemoryStickIcon className="w-3 h-3 text-emerald-400 shrink-0" />
-          <span className="text-[10px] text-muted-foreground w-7 shrink-0">RAM</span>
+          <span className="text-[10px] text-muted-foreground w-10 shrink-0">RAM</span>
           <StatBar value={stats.ram_used_gb} max={stats.ram_total_gb} color="#10B981" label="RAM" />
           <span className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
             {((stats.ram_used_gb / stats.ram_total_gb) * 100).toFixed(0)}%
@@ -184,7 +184,7 @@ export function SystemStatsBar({ collapsed }: { collapsed: boolean }) {
       {/* CPU */}
       <div className="flex items-center gap-1.5">
         <CpuIcon className="w-3 h-3 text-amber-400 shrink-0" />
-        <span className="text-[10px] text-muted-foreground w-7 shrink-0">CPU</span>
+        <span className="text-[10px] text-muted-foreground w-10 shrink-0">CPU</span>
         <div className="flex-1 h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-700"

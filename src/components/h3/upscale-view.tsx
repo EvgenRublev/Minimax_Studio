@@ -1002,6 +1002,7 @@ export function UpscaleView() {
                       name={file.name}
                       path={file.path}
                       url={`/api/upscale/file?path=${encodeURIComponent(file.path)}`}
+                      videoIcon={false}
                       className="flex items-center gap-2 text-left min-w-0 group"
                       title={tt("Открыть файл во весь экран")}
                     >

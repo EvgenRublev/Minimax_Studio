@@ -88,6 +88,11 @@ export async function POST(req: NextRequest) {
        *  клипа (дублированные моменты хвоста клипа i-1), не съеденный кроссфейдом.
        *  Без этой подрезки короткий fade оставлял бы повтор ~0.8 c на стыке. */
       headTrims?: number[]
+      /** (правка 971) Тональное совмещение стыков: перед жёстким cut
+       *  подтягиваем средний цвет первых кадров клипа под последний кадр
+       *  предыдущего входа. Нужно для two-pass extend, где preserved-голова
+       *  проходит апскейлер/pass 2 и темнеет относительно исходника. */
+      toneMatch?: boolean
       /** (правка 260) Параметры метаданных для сайдкара итогового файла. */
       meta?: Record<string, unknown>
       /** (правка 365) Подпапка output для итогового файла ('' = корень) —
@@ -254,6 +259,22 @@ export async function POST(req: NextRequest) {
     const evW = targetW % 2 === 0 ? targetW : targetW + 1
     const evH = targetH % 2 === 0 ? targetH : targetH + 1
 
+    // (правка 971) Тональное совмещение стыков для two-pass extend: pass 2
+    // затемняет/сдвигает первые кадры клипа относительно хвоста исходника.
+    // Жёсткий cut без этого даёт резкий перепад яркости.
+    const toneGains: Array<{ r: number; g: number; b: number } | null> = infos.map(() => null)
+    if (body.toneMatch === true) {
+      for (let i = 1; i < infos.length; i++) {
+        toneGains[i] = await seamToneGain(
+          ffmpeg,
+          resolvedPaths[i - 1],
+          infos[i - 1].duration,
+          resolvedPaths[i],
+          headTrims[i] || 0,
+        )
+      }
+    }
+
     // Build filter chain: hard-cut concat (fade=0) or xfade/acrossfade (fade>0).
     const filterParts: string[] = []
     const trim0 = sourceTrim > 0 && !!infos[0] && infos[0].duration > sourceTrim + 0.05
@@ -273,7 +294,11 @@ export async function POST(req: NextRequest) {
         // фейдом (дублированные моменты хвоста предыдущего клипа).
         const ht = headTrims[i] || 0
         const headCut = ht > 0.001 ? `trim=start=${ht.toFixed(4)},setpts=PTS-STARTPTS,` : ''
-        filterParts.push(`[${i}:v]${headCut}scale=${evW}:${evH},setsar=1,fps=${targetFps}[v${i}]`)
+        const tg = toneGains[i]
+        const tone = tg
+          ? `format=rgb24,colorchannelmixer=rr=${tg.r.toFixed(4)}:gg=${tg.g.toFixed(4)}:bb=${tg.b.toFixed(4)},`
+          : ''
+        filterParts.push(`[${i}:v]${headCut}${tone}scale=${evW}:${evH},setsar=1,fps=${targetFps}[v${i}]`)
       }
     }
 
@@ -558,4 +583,36 @@ async function probeVideo(ffmpeg: string, filePath: string): Promise<ProbeInfo |
 
   if (duration <= 0 || width <= 0 || height <= 0) return null
   return { duration, width, height, fps }
+}
+
+/** (правка 971) Средний RGB одного кадра — для тонального совмещения стыка. */
+async function frameMeanRGB(ffmpeg: string, file: string, atSec: number): Promise<[number, number, number]> {
+  const args = ['-hide_banner', '-loglevel', 'error', '-ss', Math.max(0, atSec).toFixed(4), '-i', file,
+    '-frames:v', '1', '-vf', 'scale=1:1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']
+  const out = await new Promise<Buffer>((resolve, reject) => {
+    execFile(ffmpeg, args, { encoding: 'buffer', timeout: 15_000, maxBuffer: 4096 }, (err, stdout) => {
+      if (err) reject(err)
+      else resolve(stdout as Buffer)
+    })
+  })
+  return [out[0] ?? 128, out[1] ?? 128, out[2] ?? 128]
+}
+
+/** Коэффициенты, приводящие первый показанный кадр клипа к последнему кадру
+ *  предыдущего входа. Ограничены, чтобы не «перекрасить» весь клип. */
+async function seamToneGain(
+  ffmpeg: string,
+  prevFile: string,
+  prevDuration: number,
+  curFile: string,
+  curStart: number,
+): Promise<{ r: number; g: number; b: number } | null> {
+  try {
+    const a = await frameMeanRGB(ffmpeg, prevFile, Math.max(0, prevDuration - 1 / 24))
+    const b = await frameMeanRGB(ffmpeg, curFile, curStart)
+    const g = (x: number, y: number) => Math.max(0.8, Math.min(1.25, x / Math.max(1, y)))
+    return { r: g(a[0], b[0]), g: g(a[1], b[1]), b: g(a[2], b[2]) }
+  } catch {
+    return null
+  }
 }

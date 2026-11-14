@@ -2,6 +2,8 @@
 
 /**
  * (правка 719) Кликабельное превью референса с полноэкранным просмотром.
+ * (правка 972) Видео открываются общим VideoLightbox из «Галереи»; картинки и
+ * аудио — RefViewerDialog (кроп/обрезка/громкость).
  *
  * Зачем: просмотр рефов был реализован только на «Генерации» (картинки и
  * видео) и частично на «Продлении» (только картинки). На остальных вкладках
@@ -13,7 +15,11 @@
  * body (как VideoLightbox). Родителю достаточно передать kind/name/path/url.
  */
 import { useState, type ReactNode } from 'react'
+import { PlayIcon } from 'lucide-react'
 import { RefViewerDialog, type CropRect, type RefViewerData } from './ref-viewer-dialog'
+import { VideoLightbox } from './video-lightbox'
+import { comfyInputUrl } from '@/lib/crop'
+import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next' // (правка 955)
 
 export interface RefPreviewThumbProps {
@@ -37,6 +43,9 @@ export interface RefPreviewThumbProps {
   audioVolume?: number
   /** Вызывается при открытии просмотрщика (родитель может запомнить id рефа). */
   onOpen?: (data: RefViewerData) => void
+  /** (правка 972) Показывать Play-иконку поверх видео-превью. Для карточек
+   *  источников/рефов — да; для строки файла или живого превью — нет. */
+  videoIcon?: boolean
   /**
    * Остановить всплытие клика (true — клик по превью не должен доходить до
    * родителя: например, до drop-зоны, открывающей диалог выбора файла —
@@ -69,6 +78,7 @@ export function RefPreviewThumb({
   audioVolume,
   onOpen,
   stopPropagation,
+  videoIcon = true,
   onTrimChange,
   onVolumeChange,
   crop,
@@ -78,7 +88,12 @@ export function RefPreviewThumb({
   const { t } = useTranslation() // (правка 955)
 
   const [data, setData] = useState<RefViewerData | null>(null)
-  const canOpen = !!(path || url)
+  // (правка 972) Видео открываем ОБЩИМ просмотрщиком галереи (VideoLightbox),
+  // а не RefViewerDialog: у прикреплённых видео должен быть тот же плеер,
+  // управление и звук, что и у роликов в «Галерее».
+  const [videoOpen, setVideoOpen] = useState(false)
+  const videoUrl = kind === 'video' ? (url || (path ? comfyInputUrl(path) : undefined)) : undefined
+  const canOpen = kind === 'video' ? !!videoUrl : !!(path || url)
 
   const open = (e: React.MouseEvent) => {
     if (stopPropagation) e.stopPropagation()
@@ -94,6 +109,11 @@ export function RefPreviewThumb({
       crop,
       originalSrc,
     }
+    if (kind === 'video') {
+      setVideoOpen(true)
+      onOpen?.(next)
+      return
+    }
     setData(next)
     onOpen?.(next)
   }
@@ -105,12 +125,26 @@ export function RefPreviewThumb({
         onClick={open}
         disabled={!canOpen}
         title={title ?? (canOpen ? t("Открыть во весь экран") : undefined)}
-        className={className}
+        className={cn(className, 'relative')}
       >
         {children}
+        {kind === 'video' && videoIcon && canOpen && (
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-full bg-black/55 p-1 ring-1 ring-white/20">
+              <PlayIcon className="w-3 h-3 text-white/90" />
+            </span>
+          </span>
+        )}
       </button>
+      {videoOpen && videoUrl && (
+        <VideoLightbox
+          files={[{ url: videoUrl, filename: name, subfolder: '' }]}
+          initialIndex={0}
+          onClose={() => setVideoOpen(false)}
+        />
+      )}
       <RefViewerDialog
-        data={data}
+        data={kind === 'video' ? null : data}
         onOpenChange={(v) => {
           if (!v) setData(null)
         }}

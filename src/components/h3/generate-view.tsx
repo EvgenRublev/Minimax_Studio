@@ -62,7 +62,7 @@ import { EXAMPLES } from './learn/prompt-guide'
 import { usePromptHistory } from '@/lib/prompt-history-store'
 import { isStreamActive } from '@/lib/assistant-stream'
 import { getClipboardImageFiles, getClipboardImageFromApi, hasClipboardImage } from '@/lib/paste-utils'
-import { VideoGalleryGrid } from './video-gallery-grid'
+import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from './video-gallery-grid'
 import { GenerationStatus } from './generation-status'
 // (правка 719) Общий компонент превью с полноэкранным просмотром —
 // используется на всех вкладках (Генерация/Продление/Refine/ControlNet/…).
@@ -420,6 +420,30 @@ export function GenerateView() {
       }
     },
     [addRefs, refLimits],
+  )
+
+  /** (правка 974) Видео, перетащенное из «Галереи», становится обычным
+   *  видео-референсом: забираем файл через /api/comfy/file и отдаём в тот же
+   *  addReferenceFiles (лимиты/загрузка/превью — как у файла с диска). */
+  const addGalleryVideoRef = useCallback(
+    async (filename: string, subfolder: string) => {
+      if (!filename) {
+        toast.error(tt("Не удалось прочитать перетащенное видео"))
+        return
+      }
+      try {
+        const q = new URLSearchParams({ filename })
+        if (subfolder) q.set('subfolder', subfolder)
+        const res = await fetch(`/api/comfy/file?${q.toString()}`)
+        if (!res.ok) throw new Error(`file → ${res.status}`)
+        const blob = await res.blob()
+        const file = new File([blob], filename, { type: blob.type || 'video/mp4' })
+        await addReferenceFiles([file])
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [addReferenceFiles],
   )
 
   /* (правка 146) Загрузка кадра в слот режима «Кадры»: тот же uploadInputFile,
@@ -1684,6 +1708,17 @@ export function GenerateView() {
                 onDrop={(e) => {
                   e.preventDefault()
                   setRefsDragOver(false)
+                  // (правка 974) Карточка из галереи — в видео-референсы.
+                  const raw = e.dataTransfer.getData(H3_VIDEO_DND_MIME)
+                  if (raw) {
+                    try {
+                      const parsed = JSON.parse(raw) as { filename?: string; subfolder?: string }
+                      void addGalleryVideoRef(parsed.filename ?? '', parsed.subfolder ?? '')
+                    } catch {
+                      toast.error(tt("Не удалось прочитать перетащенное видео"))
+                    }
+                    return
+                  }
                   void addReferenceFiles(Array.from(e.dataTransfer.files))
                 }}
                 onClick={() => refsInputRef.current?.click()}

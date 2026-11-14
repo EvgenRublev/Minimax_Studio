@@ -3,8 +3,9 @@
 /**
  * LearnView — Обучение.
  *
- * Contains three sub-tabs:
- *   • «Основы»    — step-by-step interactive tutorial (mockups + callouts).
+ * Contains four sub-tabs:
+ *   • «Быстрый старт» — короткий экскурс для абсолютных новичков (правка 973).
+ *   • «Подробный тур» — step-by-step interactive tutorial (mockups + callouts).
  *   • «Промпты»   — PromptGuide: detailed MiniMax H3 prompt-writing guide,
  *                   built-in LLM assistant, structured format, history,
  *                   and hover previews.
@@ -22,24 +23,29 @@ import {
   LightbulbIcon,
   WandSparklesIcon,
   RouteIcon,
+  RocketIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { LEARN_STEPS } from './learn-steps'
+import { LearnQuickStart } from './learn-quickstart' // (правка 973)
 import { PromptGuide } from './prompt-guide'
 import { LearnRecipes } from './learn-recipes' // (правка 485)
 
-type SubTab = 'basics' | 'prompts' | 'recipes'
+type SubTab = 'quick' | 'basics' | 'prompts' | 'recipes'
 
 const SUB_TABS: Array<{ id: SubTab; label: string; icon: ReactNode }> = [
-  { id: 'basics', label: 'Основы', icon: <GraduationCapIcon className="w-3.5 h-3.5" /> },
+  // (правка 973) Для новичков — короткий экскурс простыми словами; подробный
+  // пошаговый тур с подсказками остаётся отдельной вкладкой.
+  { id: 'quick', label: 'Быстрый старт', icon: <RocketIcon className="w-3.5 h-3.5" /> },
+  { id: 'basics', label: 'Подробный тур', icon: <GraduationCapIcon className="w-3.5 h-3.5" /> },
   { id: 'prompts', label: 'Промпты', icon: <WandSparklesIcon className="w-3.5 h-3.5" /> },
   // (правка 485) Готовые сценарии работы
   { id: 'recipes', label: 'Сценарии', icon: <RouteIcon className="w-3.5 h-3.5" /> },
 ]
 
 export function LearnView() {
-  const [subTab, setSubTab] = useState<SubTab>('basics')
+  const [subTab, setSubTab] = useState<SubTab>('quick')
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[var(--surface-1)]">
@@ -54,7 +60,7 @@ export function LearnView() {
               Обучение
             </h1>
             <p className="text-xs text-muted-foreground mt-1.5">
-              Как пользоваться студией и писать промпты для MiniMax H3
+              Простой экскурс для новичков: что нажимать и в каком порядке
             </p>
           </div>
         </div>
@@ -85,7 +91,18 @@ export function LearnView() {
       {/* Content — switches between the three sub-tabs */}
       <div className="flex-1 min-h-0 flex flex-col">
         <AnimatePresence mode="wait">
-          {subTab === 'basics' ? (
+          {subTab === 'quick' ? (
+            <motion.div
+              key="quick"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="select-text flex-1 min-h-0 overflow-y-auto px-6 pt-2 pb-6"
+            >
+              <LearnQuickStart />
+            </motion.div>
+          ) : subTab === 'basics' ? (
             <motion.div
               key="basics"
               initial={{ opacity: 0, y: 8 }}

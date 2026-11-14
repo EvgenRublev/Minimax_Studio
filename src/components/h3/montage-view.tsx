@@ -2361,6 +2361,37 @@ export function MontageView() {
     [shots.length, stopSeq, pushHistory],
   )
 
+  /** (правка 974) Видео с диска → в output (чтобы его видели рендер и галерея)
+   *  и сразу на таймлайн. */
+  const importAndAddVideo = useCallback(
+    async (fileObj: File, atIdx?: number) => {
+      if (shotsRef.current.length >= MAX_SHOTS) {
+        showToast(`Максимум ${MAX_SHOTS} шотов на таймлайне`, 'error')
+        return
+      }
+      const fd = new FormData()
+      fd.append('file', fileObj)
+      try {
+        const res = await fetch('/api/montage/video', { method: 'POST', body: fd })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || typeof data?.filename !== 'string') {
+          showToast(String(data?.error || 'Не удалось импортировать видео'), 'error')
+          return
+        }
+        addShot({
+          filename: data.filename,
+          subfolder: typeof data.subfolder === 'string' ? data.subfolder : '',
+          url: typeof data.url === 'string'
+            ? data.url
+            : `/api/comfy/file?filename=${encodeURIComponent(data.filename)}&type=output`,
+        }, atIdx)
+      } catch (e) {
+        showToast(`Импорт видео не удался: ${e instanceof Error ? e.message : String(e)}`, 'error')
+      }
+    },
+    [addShot],
+  )
+
   const removeShot = useCallback((key: string) => {
     pushHistory()
     stopSeq(false)
@@ -3394,11 +3425,19 @@ export function MontageView() {
       if (d?.kind === 'gallery') addLayerClip(d.file, atX, Number(lRow.dataset.layerRow) || 1)
       return
     }
-    // (правка 874) сброс на аудиоряд: файл прямо из проводника (или dragRef не галерея — игнор)
+    // (правка 874) сброс на аудиоряд: аудиофайл прямо из проводника (или dragRef не галерея — игнор)
     const aRow = el?.closest('[data-audio-row]') as HTMLElement | null
     if (aRow) {
-      const f0 = Array.from(e.dataTransfer?.files || []).find((x) => x.size > 0)
+      const files = Array.from(e.dataTransfer?.files || [])
+      const f0 = files.find((x) => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus|wma|mka|mp2)$/i.test(x.name))
       if (f0) void importAndAddAudio(f0, atX, Number(aRow.dataset.audioRow) || 1)
+      return
+    }
+    // (правка 974) видеофайл из проводника — на видео-дорожку таймлайна
+    const files = Array.from(e.dataTransfer?.files || [])
+    const fVideo = files.find((x) => x.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v|wmv|flv|ts|mts|m2ts|3gp|mpg|mpeg)$/i.test(x.name))
+    if (!d && fVideo) {
+      void importAndAddVideo(fVideo, idx)
       return
     }
     if (!d) return
@@ -3417,7 +3456,7 @@ export function MontageView() {
       next.splice(Math.max(0, Math.min(to, next.length)), 0, moved)
       return next
     })
-  }, [addShot, addLayerClip, importAndAddAudio, computeDropIdx, pushHistory])
+  }, [addShot, addLayerClip, importAndAddAudio, importAndAddVideo, computeDropIdx, pushHistory])
 
   /** тяга за край блока — подрезка в секундах (+ подсказка новой длительности и живой кадр в превью) */
   const startTrimDrag = useCallback(

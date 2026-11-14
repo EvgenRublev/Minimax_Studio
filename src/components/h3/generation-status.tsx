@@ -241,6 +241,7 @@ function GenPreview({
         kind={isVideo ? 'video' : 'image'}
         name="Превью генерации"
         url={previewData.url}
+        videoIcon={false}
         className="block w-full"
         title={tt("Открыть превью во весь экран")}
       >

@@ -107,6 +107,7 @@ export function MockSidebar({ active = 'generate' }: { active?: 'generate' | 'up
         {item('Face Refine', '#FACC15', false)}
         {item('DLSS', '#F472B6', active === 'upscale')}
         {item('Галерея', '#8B5CF6', active === 'gallery')}
+        {item('Монтаж', '#F59E0B', false)}
         {item('Обучение', '#10B981', active === 'learn')}
       </div>
       <div className="px-2.5 py-2 border-t border-border space-y-1.5">

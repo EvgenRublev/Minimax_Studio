@@ -736,8 +736,8 @@ export function useVideoGen() {
                         // к последнему кадру клипа i-1 → смешивание = дубль).
                         // Seam-фейд на стыке «исходник → клип 0» остаётся (8/24 с).
                         fade: 0,
-                        seamFadeSeconds: _twoPassExtend ? 0 : 8 / 24,
-                        ...(_twoPassExtend && { headTrims: [0, 8 / 24] }),
+                        seamFadeSeconds: _twoPassExtend ? 3 / 24 : 8 / 24,
+                        ...(_twoPassExtend && { headTrims: [0, 5 / 24], toneMatch: true }),
                         outName: 'Minimax_Studio_combined',
                         // (правка 364) Итоговый склеенный файл — в ту же
                         // подпапку output, куда писались клипы задачи (папка
