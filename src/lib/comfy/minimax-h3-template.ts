@@ -753,11 +753,8 @@ export function videoSamplerStages(p: MiniMaxH3Params): string[][] {
     const clips = p.extendClips && p.extendClips.length > 0
       ? p.extendClips
       : [{ prompt: p.prompt, duration: p.duration, seed: p.seed }]
-    return clips.flatMap((_, i) =>
-      p.extendTwoPass === true
-        ? [[`ext_samp_${i}`], [`ext_samp2_${i}`]]
-        : [[`ext_samp_${i}`]],
-    )
+    // (правка 979) Extend всегда однопроходный — pass 2 в продлении убран.
+    return clips.map((_, i) => [`ext_samp_${i}`])
   }
   return p.pipeline === 'draft' ? [['46:21']] : [['46:21'], ['46:16']]
 }
@@ -1788,7 +1785,9 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // При выключенном флаге поведение однопроходное (правка 247), passW = final.
   // Темпоральная геометрия (токены/срезы/маски по времени) в обоих проходах
   // ИДЕНТИЧНА — апскейлер меняет только пространственные оси.
-  const twoPass = p.extendTwoPass === true
+  // (правка 979) Двухпроходный extend убран полностью. Параметр оставлен
+  // только для совместимости старых запросов — всегда один проход.
+  const twoPass: boolean = false
   const finalMP = (final.genW * final.genH) / (1024 * 1024)
   // (правка 424) Канва pass 1 НИ ПО ОДНОЙ ОСИ не должна превышать final:
   // MinimaxH3LatentUpscaler3D умеет только upscale (effective_scale >= 1.0,
@@ -2052,7 +2051,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
 
     // (правка 423) Двухпроходный extend: pass-2 сэмплер + вторая превью-нода
     // (как '46:18'/'13' основного билдера). Только при extendTwoPass.
-    ...(twoPass && {
+    ...(twoPass ? {
       '46:18': {
         inputs: { sampler_name: pass2Sampler },
         class_type: 'KSamplerSelect',
@@ -2073,7 +2072,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         class_type: 'ModelPreviewOverrideKJ',
         _meta: { title: 'Model Preview Override (Pass 2)' },
       },
-    }),
+    } : {}),
 
     // ═══════════════════════════════════════════════
     //  Кадры для превью (как '17' + '46:19' вкладки «Генерация»)

@@ -661,11 +661,6 @@ export function useVideoGen() {
                       })),
                   ]
                   try {
-                    // (правка 970) см. комментарий ниже: full/two-pass — жёсткий
-                    // стык без кроссфейда, draft — прежний 8-кадровый фейд.
-                    const _twoPassExtend =
-                      _genParamsEarly?.extend_two_pass === true ||
-                      _genParamsEarly?.extendTwoPass === true
                     const concatRes = await fetch('/api/comfy/concat', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -720,16 +715,12 @@ export function useVideoGen() {
                       // технический xfade, повтора контента нет). Стык «исходник →
                       // клип 0» прежний: 17 дублированных кадров, Trim 9 + Fade 8
                       // = 17 (правка 251).
-                      // (правка 976) В ДВУХПРОХОДНОМ extend preserved-голова
-                      // проходит через 3D-апскейлер и pass 2, поэтому её кадры
-                      // уже НЕ пиксельная копия хвоста исходника. Любое
-                      // смешивание этой головы с исходником даёт «плавный шов».
-                      // Другая стратегия: вообще не показывать перерисованную
-                      // голову. Источник идёт целиком, у клипа 0 срезаются все
-                      // 17 кадров preserved-головы, и стык ложится на первый
-                      // НОВЫЙ кадр модели — честный переход «оригинал →
-                      // продолжение», без двоения и без фейда. Цвет первого
-                      // нового кадра подтягиваем к последнему кадру исходника.
+                      // (правка 976) preserved-голова клипа 0 — перерисованный
+                      // (правка 980) Откат экспериментов со сшивкой: прямой стык
+                      // «исходник → новый кадр» без preserved-головы оказался
+                      // заметнее. Возвращаем проверенную однопроходную схему:
+                      // preserved-голова остаётся, стык исходник→клип 0 накрывается
+                      // 8-кадровым кроссфейдом (9+8=17 кадров перекрытия).
                       body: JSON.stringify({
                         inputs,
                         // (правка 292) fade=0: между клипами i>0 — HARD CUT (без xfade).
@@ -737,10 +728,8 @@ export function useVideoGen() {
                         // (первый кадр клипа i после среза 22 кадров визуально близок
                         // к последнему кадру клипа i-1 → смешивание = дубль).
                         fade: 0,
-                        seamFadeSeconds: _twoPassExtend ? 0 : 8 / 24,
-                        ...(_twoPassExtend
-                          ? { headTrims: [0, 17 / 24], sourceTrimSeconds: 0, toneMatch: true }
-                          : { sourceTrimSeconds: 9 / 24 }),
+                        seamFadeSeconds: 8 / 24,
+                        sourceTrimSeconds: 9 / 24,
                         outName: 'Minimax_Studio_combined',
                         // (правка 364) Итоговый склеенный файл — в ту же
                         // подпапку output, куда писались клипы задачи (папка
@@ -1222,7 +1211,7 @@ export function useVideoGen() {
           extendSourceName: genMode === 'extend' ? params.extendSourceName : undefined, // (правка 385)
           extendSourceSubfolder: genMode === 'extend' ? params.extendSourceSubfolder : undefined, // (правка 385)
           // (правка 423) extend: двухпроходный режим (low-res → апскейл → рефайн)
-          extendTwoPass: genMode === 'extend' ? params.extendTwoPass === true : undefined,
+          extendTwoPass: genMode === 'extend' ? false : undefined, // (правка 979) только один проход
           // Шаги клипа продления: undefined = «авто» (фолбэк шаблона —
           // firstSamplerSteps, а клиент при наличии меты исходника подставляет
           // его pass1_steps сам). Раньше поле терялось здесь — значение из UI
@@ -1453,7 +1442,7 @@ export function useVideoGen() {
           // (правка 176) Сколько клипов в этой задаче — для N-way склейки.
           extend_clips_count: genMode === 'extend' ? (params.extendClips?.length || 0) : 0,
           // (правка 423) extend: двухпроходный режим — в сайдкар
-          ...(genMode === 'extend' && { extend_two_pass: params.extendTwoPass === true }),
+          ...(genMode === 'extend' && { extend_two_pass: false }), // (правка 979)
           // (правка 303) extend: ВСЯ цепочка промптов клипов (осмысленные,
           // trim; «.» тестовых клипов отбрасываем) — в сайдкары клипов и
           // combined-файла. concat-роут дописывает перед ними цепочку

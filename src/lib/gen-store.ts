@@ -223,7 +223,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   extendSourceDuration: 0, // (правка 291) длительность исходника, с (0 = неизвестно)
   extendSourceSubfolder: null, // (правка 363) подпапка галереи-источника (null = с диска)
   extendSourceName: null, // (правка 385) имя файла-оригинала в output/ (null = с диска)
-  extendTwoPass: true, // (правка 437) extend: два прохода — default ON (был OFF, правка 423)
+  extendTwoPass: false, // (правка 979) extend: только один проход
   resolution: '854x480', // (правка 138) дефолт 480p 16:9 — быстрее и дешевле в VRAM
   videoLength: 60, // (правка 912) дефолт 2.5 с; минимум в UI — 1 с (24 кадра, сетка 17n+5)
   referenceDetail: 'match', // (правка 286) по умолчанию — Match (быстро)
@@ -434,12 +434,10 @@ export const useGenStore = create<GenStoreState>()(
         if (oldVersion < 6 && state?.video && state.video.vedaAttention === true) {
           state.video = { ...state.video, vedaAttention: false }
         }
-        // (правка 437) Двухпроходный extend теперь default ON: сохранённые
-        // снимки со старым дефолтом false → true (та же оговорка, что у 425:
-        // осознанный «Драфт» переживёт миграцию, только если выбрать его
-        // ПОСЛЕ неё).
-        if (oldVersion < 5 && state?.video && state.video.extendTwoPass === false) {
-          state.video = { ...state.video, extendTwoPass: true }
+        // (правка 979) Двухпроходный extend убран — принудительно выключаем
+        // сохранённый тоггл у старых снимков.
+        if (state?.video && state.video.extendTwoPass !== false) {
+          state.video = { ...state.video, extendTwoPass: false }
         }
         // Новый дефолт точки сплита pass 1: 4 → 6.
         // Сбрасываем ТОЛЬКО старое значение дефолта (4) — оно означает

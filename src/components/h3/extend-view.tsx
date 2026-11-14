@@ -155,7 +155,6 @@ export function ExtendView() {
   const [refsDragOver, setRefsDragOver] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showPass1, setShowPass1] = useState(false)
-  const [showPass2, setShowPass2] = useState(false) // (правка 473)
   // (правка 719) Просмотр рефов переехал в общий компонент RefPreviewThumb
   // (у каждого превью свой просмотрщик) — своего состояния тут больше нет.
   // (правка 443) Индекс клипа, открытого в полноэкранном редакторе промпта
@@ -546,9 +545,9 @@ export function ExtendView() {
     // повторный клик, намеренная постановка в очередь проходит всегда.
     if (Date.now() - lastSubmitAtRef.current < 1000) return
     lastSubmitAtRef.current = Date.now()
-    // (правка 696) Зафиксировать stageKind на момент старта: во время
-    // генерации переключение «Драфт/Полное» не меняет шаблон подписи.
-    useGenProgress.getState().setVideoFrozenStageKind(v.extendTwoPass ? 'clips2' : 'clips')
+    // (правка 979) Extend теперь всегда однопроходный: качество прохода
+    // больше не настраивается.
+    useGenProgress.getState().setVideoFrozenStageKind('clips')
     try {
       await generate({
       modelType: v.modelType,
@@ -562,7 +561,7 @@ export function ExtendView() {
       extendSourceVideo: v.extendSourceVideoPath || undefined,
       extendSourceName: v.extendSourceName ?? undefined, // (правка 385)
       extendSourceSubfolder: v.extendSourceSubfolder ?? undefined, // (правка 385)
-      extendTwoPass: v.extendTwoPass, // (правка 423) два прохода: low-res → апскейл → рефайн
+      extendTwoPass: false, // (правка 979) только один проход
       // (правка 174) Debug: ensure extendSourceVideoPath is not lost
       referenceDetail: v.referenceDetail || 'match', // (правка 307) — выбор Match/Max как в генерации
       lowResMP: v.lowResMP ?? 0.2,
@@ -624,20 +623,7 @@ export function ExtendView() {
       {extendRefs.length > 0 && (
         <Badge variant="secondary" className="text-[10px]">{extendRefs.length} {' '}{t("реф(ов)")}</Badge>
       )}
-      {/* (правка 247, 423, 437) По умолчанию — ДВУХПРОХОДНАЯ генерация
-          (правка 437: low-res pass 1 → апскейл латента → pass 2 рефайн до
-          размера исходника, схема «full»-пайплайна генерации). Однопроходный
-          «Драфт» — переключатель «Качество прохода» выше (Extender один на
-          канве разрешения исходника, цепочка motion-context). */}
-      {video.extendTwoPass ? (
-        <Badge className="text-[10px] bg-cyan-500/15 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/15">
-          {t("Полное (2 прохода)")}
-        </Badge>
-      ) : (
-        <Badge className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/15">
-          {t("Драфт (1 проход) ✓")}
-        </Badge>
-      )}
+      {/* (правка 979) Качество прохода убрано: extend всегда однопроходный. */}
     </>
   )
 
@@ -693,9 +679,15 @@ export function ExtendView() {
                 if (f) void handleVideoSelect(f)
                 else toast.error(t("Нужно видео"))
               }}
-              onClick={() => videoInputRef.current?.click()}
+              onClick={() => {
+                // (правка 977) Когда видео уже прикреплено, клик по карточке
+                // не должен открывать проводник: плеер/удаление — отдельные
+                // кнопки. Иначе после закрытия плеера выскакивал выбор файла.
+                if (!sourceVideo) videoInputRef.current?.click()
+              }}
               className={cn(
-                'rounded-lg border transition-all cursor-pointer',
+                'rounded-lg border transition-all',
+                sourceVideo ? '' : 'cursor-pointer',
                 (videoDragOver || refsDragOver)
                   ? 'border-cyan-400 bg-cyan-500/10'
                   : 'border-border hover:border-cyan-500/50 hover:bg-[var(--surface-2)]',
@@ -943,45 +935,6 @@ export function ExtendView() {
 
           <Separator className="bg-border opacity-50" />
 
-          {/* (правка 423) Качество прохода — как на вкладке «Генерация»:
-              «Драфт» = один проход на канве исходника (быстро, правка 247);
-              «Полное» = два прохода (low-res → апскейл латента → рефайн). */}
-          <div className="space-y-1.5">
-            <Label
-              className="text-xs text-muted-foreground"
-              title={
-                video.extendTwoPass
-                  ? t("Сначала быстрый черновик каждого клипа, затем доработка до чёткого результата. Дольше, но детальнее.")
-                  : t("Один проход сразу в разрешении исходника — быстрее. Довести до полного качества можно позже во вкладке Refine.")
-              }
-            >
-              {t("Качество прохода")}
-            </Label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {([
-                [false, 'Драфт', 'Один быстрый проход — черновое качество; довести можно вкладкой Refine'],
-                [true, 'Полное', 'Два прохода: быстрый черновик, затем детализация до качества исходника'],
-              ] as const).map(([tp, label, hint]) => (
-                <button
-                  key={label}
-                  type="button"
-                  title={t(hint)}
-                  onClick={() => patchVideo({ extendTwoPass: tp })}
-                  className={cn(
-                    'h-8 rounded-md border text-xs font-medium transition-all',
-                    (video.extendTwoPass === true) === tp
-                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
-                      : 'bg-[var(--surface-2)] border-border text-muted-foreground hover:border-emerald-500/30',
-                  )}
-                >
-                  {t(label)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Separator className="bg-border opacity-50" />
-
           {/* Collapsible: Advanced parameters */}
           <div className="space-y-2">
             <button
@@ -1008,9 +961,7 @@ export function ExtendView() {
                     onClick={() => setShowPass1(!showPass1)}
                     className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-[var(--surface-3)] border border-border/60 hover:border-cyan-500/30 transition-all text-left"
                   >
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {video.extendTwoPass ? 'Pass 1 (low-res)' : t("Проход продления (один)")}
-                    </span>
+                    <span className="text-xs font-medium text-muted-foreground">{t("Проход продления (один)")}</span>
                     <span className={cn('text-[10px] text-muted-foreground transition-transform', showPass1 && 'rotate-180')}>▼</span>
                   </button>
 
@@ -1102,70 +1053,7 @@ export function ExtendView() {
                   )}
                 </div>
 
-                {/* (правка 473) Pass 2 — только в двухпроходном режиме
-                    («Полное»). Шаблон extend уже использует sigmaVariant/
-                    pass2Sampler (minimax-h3-template.ts) — раньше настройки
-                    не были выведены в UI и pass2Sampler даже не отправлялся. */}
-                {video.extendTwoPass && (
-                  <div className="space-y-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowPass2(!showPass2)}
-                      className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-[var(--surface-3)] border border-border/60 hover:border-cyan-500/30 transition-all text-left"
-                    >
-                      <span className="text-xs font-medium text-muted-foreground">{t("Pass 2 — детализация")}</span>
-                      <span className={cn('text-[10px] text-muted-foreground transition-transform', showPass2 && 'rotate-180')}>▼</span>
-                    </button>
-
-                    {showPass2 && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        className="space-y-3 pl-1 overflow-hidden"
-                      >
-                        <div className="space-y-1">
-                          <Label
-                            className="text-xs text-muted-foreground"
-                            title={t("Сколько шагов делает финальный проход детализации. Больше — чётче картинка, но дольше.")}
-                          >
-                            {t("Sigma-профиль (шаги)")}
-                          </Label>
-                          <Select value={video.sigmaVariant || '3step'} onValueChange={(v) => patchVideo({ sigmaVariant: v })}>
-                            <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-[var(--surface-3)] border-border">
-                              <SelectItem value="3step">{t("3 шага (быстрее)")}</SelectItem>
-                              <SelectItem value="4step">{t("4 шага (баланс)")}</SelectItem>
-                              <SelectItem value="5step">{t("5 шагов (высокое)")}</SelectItem>
-                              <SelectItem value="6step">{t("6 шагов (оч. высокое)")}</SelectItem>
-                              <SelectItem value="7step">{t("7 шагов (макс.)")}</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label
-                            className="text-xs text-muted-foreground"
-                            title={t("Способ, которым модель рисует кадры на финальном проходе. Если не уверены — оставьте euler.")}
-                          >
-                            {t("Сэмплер (pass 2)")}
-                          </Label>
-                          <Select value={video.pass2Sampler || 'euler'} onValueChange={(v) => patchVideo({ pass2Sampler: v })}>
-                            <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-[var(--surface-3)] border-border">
-                              {['euler', 'er_sde', 'dpmpp_2m', 'dpmpp_3m_sde', 'heun', 'lcm', 'res_multistep'].map((s) => (
-                                <SelectItem key={s} value={s}>{s}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-                )}
+                {/* (правка 979) Pass 2 удалён — extend всегда однопроходный. */}
 
               </motion.div>
             )}
@@ -1198,7 +1086,7 @@ export function ExtendView() {
             nodeElapsedMs={nodeElapsedMs}
             // (правка 430) Двухпроходный extend: стадий clips×2 (pass 1+2 на
             // клип) — подпись «Клип N/M · проход K/2», а не «Клип N/2M».
-            stageKind={video.extendTwoPass ? 'clips2' : 'clips'}
+            stageKind="clips"
           />
         </div>
       </div>

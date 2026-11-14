@@ -265,10 +265,17 @@ export async function POST(req: NextRequest) {
     const toneGains: Array<{ r: number; g: number; b: number } | null> = infos.map(() => null)
     if (body.toneMatch === true) {
       for (let i = 1; i < infos.length; i++) {
+        // (правка 978) Для draft-стыка с xfade сравниваем кадры в НАЧАЛЕ
+        // перекрытия (source и clip0 показывают один и тот же момент), а не
+        // последний кадр источника с первым кадром клипа — иначе gain
+        // подбирался по разным моментам и давал скачок яркости.
+        const prevAt = i === 1 && seamFadeSec > 0.001
+          ? Math.max(0, infos[0].duration - sourceTrim - seamFadeSec)
+          : infos[i - 1].duration - 1 / 24
         toneGains[i] = await seamToneGain(
           ffmpeg,
           resolvedPaths[i - 1],
-          infos[i - 1].duration,
+          prevAt,
           resolvedPaths[i],
           headTrims[i] || 0,
         )
@@ -603,12 +610,12 @@ async function frameMeanRGB(ffmpeg: string, file: string, atSec: number): Promis
 async function seamToneGain(
   ffmpeg: string,
   prevFile: string,
-  prevDuration: number,
+  prevAt: number,
   curFile: string,
   curStart: number,
 ): Promise<{ r: number; g: number; b: number } | null> {
   try {
-    const a = await frameMeanRGB(ffmpeg, prevFile, Math.max(0, prevDuration - 1 / 24))
+    const a = await frameMeanRGB(ffmpeg, prevFile, Math.max(0, prevAt))
     const b = await frameMeanRGB(ffmpeg, curFile, curStart)
     const g = (x: number, y: number) => Math.max(0.8, Math.min(1.25, x / Math.max(1, y)))
     return { r: g(a[0], b[0]), g: g(a[1], b[1]), b: g(a[2], b[2]) }
