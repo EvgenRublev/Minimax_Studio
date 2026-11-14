@@ -87,6 +87,7 @@ import { useRefineTarget } from '@/lib/refine-target-store' // (правка 856
 import { useFsFullscreen } from '@/lib/use-fs-fullscreen' // (правка 869)
 import { dispersionCoeffs, dispersionMaxShift } from '@/lib/montage-dispersion' // (правка 898)
 import { collectGrainOverlays } from '@/lib/montage-grain' // (правка 910)
+import { tempShifts } from '@/lib/montage-temp' // (правка 966)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
 import { useTranslation } from 'react-i18next' // (правка 955)
@@ -453,8 +454,10 @@ function evalCurve(raw: unknown, x: number): number {
 /** (правка 859, 861) строит строку из 17 значений 0..1 для SVG <feFuncR/G/B type="table"> с учётом температуры */
 function buildChannelTable(master?: CurvePts, ch?: CurvePts, tempShift = 0): string {
   const out: string[] = []
-  for (let i = 0; i <= 16; i++) {
-    const x = i / 16
+  // (правка 966) 65 узлов вместо 17: SVG-таблица линейно интерполируется между
+  // ними, и при редкой сетке температура в превью отличалась от ffmpeg до 2/255.
+  for (let i = 0; i <= 64; i++) {
+    const x = i / 64
     let v = evalCurve(master, evalCurve(ch, x))
     if (tempShift !== 0) {
       // мягкий сдвиг баланса белого с сохранением 0 и 1 (колокол синуса/параболы)
@@ -597,7 +600,9 @@ function FxSvgFilter({
 }) {
   const efx = effectiveFx(fx)
   const c = efx?.curves
-  const temp = efx?.temp && Math.abs(efx.temp) >= 1 ? efx.temp / 380 : 0
+  // (правка 966) Температура — из общей с рендером формулы, иначе превью и
+  // финальный файл показывали разный баланс белого.
+  const ts = tempShifts(efx?.temp)
   const disp = efx?.dispersion && efx.dispersion > 0 ? efx.dispersion : 0
   const maskPct = typeof efx?.dispersionMask === 'number' ? Math.max(0, Math.min(90, Math.round(efx.dispersionMask))) : 35
   const mapUrl = disp > 0 ? (createRadialDispMapDataUrl(disp, maskPct, aspect) || dispMap) : dispMap
@@ -606,9 +611,9 @@ function FxSvgFilter({
      максимальное смещение (в углах) = dispersionMaxShift * полудиагональ кадра.
      Отсюда scale. */
   const dispScale = disp > 0 && diagPx > 0 ? 2 * dispersionMaxShift(disp, maskPct) * diagPx : 0
-  const rTab = buildChannelTable(c?.master, c?.r, temp)
-  const gTab = buildChannelTable(c?.master, c?.g, temp * 0.18)
-  const bTab = buildChannelTable(c?.master, c?.b, -temp)
+  const rTab = buildChannelTable(c?.master, c?.r, ts.r)
+  const gTab = buildChannelTable(c?.master, c?.g, ts.g)
+  const bTab = buildChannelTable(c?.master, c?.b, ts.b)
   return (
     /* (правка 897) Регион фильтра — ровно кадр: раньше x/y/width/height
        расширяли его на 4%, и «нулевая» кромка карты дисперсии оказывалась за
@@ -5327,7 +5332,7 @@ export function MontageView() {
       </section>
 
       {/* (правка 859) правая панель: 3 вкладки — Галерея | Свойства | Эффекты */}
-      <aside className="flex w-[350px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)] text-foreground">
+      <aside className="flex w-[360px] shrink-0 flex-col border-l border-border bg-[var(--surface-1)] text-foreground">
         {/* переключатель вкладок */}
         <div className="border-b border-border p-2">
           <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-[var(--surface-2)] p-0.5">

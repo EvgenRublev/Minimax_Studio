@@ -647,12 +647,15 @@ export function ExtendView() {
     <div className="flex-1 flex min-h-0 min-w-0">
       {/* ═══════════ LEFT: Settings panel (400px) ═══════════ */}
       {/* (правка 472) фон — surface-1, как у Refine/Tile/FPS (единый вид) */}
-      <div className="w-[400px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">{t("Параметры продления")}</h2>
+            <div className="flex items-center gap-2 min-w-0">
+              <SparklesIcon className="w-4 h-4 text-cyan-400 shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground truncate">{t("Параметры продления")}</h2>
+            </div>
             <Badge className="text-[10px] bg-cyan-500/15 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/15">
               MiniMax H3
             </Badge>
@@ -692,12 +695,17 @@ export function ExtendView() {
               }}
               onClick={() => videoInputRef.current?.click()}
               className={cn(
-                'border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-all',
-                (videoDragOver || refsDragOver) ? 'border-cyan-400 bg-cyan-500/10' : 'border-border hover:border-cyan-500/50 hover:bg-[var(--surface-2)]',
+                'rounded-lg border transition-all cursor-pointer',
+                (videoDragOver || refsDragOver)
+                  ? 'border-cyan-400 bg-cyan-500/10'
+                  : 'border-border hover:border-cyan-500/50 hover:bg-[var(--surface-2)]',
+                sourceVideo
+                  ? 'flex items-center gap-3 bg-[var(--surface-2)] p-2'
+                  : 'flex items-center gap-2 border-dashed p-3 text-xs text-muted-foreground',
               )}
             >
               {sourceVideo ? (
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     {/* (правка 455) Живое превью исходника вместо голой иконки:
                         preload="metadata" + muted — WebView2 показывает первый
@@ -709,7 +717,7 @@ export function ExtendView() {
                       kind="video"
                       name={sourceVideo.name}
                       url={sourceVideo.previewUrl}
-                      className="h-16 w-28 rounded-md object-cover bg-black shrink-0"
+                      className="h-12 w-20 rounded-md object-cover bg-black shrink-0"
                       title={t("Открыть исходное видео во весь экран")}
                       stopPropagation
                     >

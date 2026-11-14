@@ -38,7 +38,7 @@ interface GenerationStatusProps {
    * 'tile' — «Tile Upscale» (правка 478: у вкладки Tile Upscale метка была
    *   'Refine', потому что она делила вид 'single' с рефайном целиком).
    */
-  stageKind?: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet'
+  stageKind?: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet' | 'face' | 'fps'
   /**
    * (правка 950) Текущий узел ComfyUI и время на нём — из /api/comfy/progress.
    * Показываем рядом с процентами, чтобы «0%»/«50%» не выглядели зависанием.
@@ -57,11 +57,15 @@ interface GenerationStatusProps {
 
 /** Подпись текущей стадии с учётом вида вкладки (правка 255, 478). */
 function stageLabel(
-  kind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet',
+  kind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet' | 'face' | 'fps',
   stage: number,
   totalStages: number,
   fullResPass1 = false,
 ): string {
+  // (правка 965) свои подписи у Face Refine и FPS: раньше обе делили
+  // 'single' с Refine и подписывались «Refine» на чужой вкладке.
+  if (kind === 'face') return 'Face Refine'
+  if (kind === 'fps') return 'FPS'
   // (правка 478+479) метка вкладки Tile Upscale: «Тайл X/Y»
   if (kind === 'tile') return totalStages > 0 ? `Тайл ${stage}/${totalStages}` : 'Tile Upscale'
   // (правка 497) вкладка ControlNet — один проход, без нумерации
@@ -114,7 +118,7 @@ function GenPreview({
 }: {
   promptId: string | null
   active: boolean
-  stageKind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet'
+  stageKind: 'passes' | 'clips' | 'clips2' | 'chunks' | 'single' | 'tile' | 'controlnet' | 'face' | 'fps'
   /** (правка 696) true во время активной генерации — используем frozen kind. */
   isGenerating: boolean
   /** (правка 950) FLF: Pass 1 в полном разрешении. */
@@ -290,7 +294,55 @@ export function GenerationStatus({
 }: GenerationStatusProps) {
   const { t: tt } = useTranslation() // (правка 955)
 
-  const nodeLabel = executingTitle || executingNode
+  // (правка 965) Строка «текущий узел · шаг/время» была только там, где вкладка
+  // сама прокидывала node-поля (Генерация/Продление). Refine, ControlNet,
+  // Tile, Face и FPS их не передают — тянем из общего /api/comfy/progress.
+  const [fallbackNode, setFallbackNode] = useState<{
+    title: string | null
+    node: string | null
+    step: number | null
+    total: number | null
+    elapsedMs: number | null
+  } | null>(null)
+  useEffect(() => {
+    setFallbackNode(null)
+    if (!isGenerating || !promptId || executingTitle || executingNode) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/comfy/progress?prompt_id=${encodeURIComponent(promptId)}`)
+        if (!r.ok) return
+        const d = (await r.json()) as {
+          title?: string | null
+          node?: string | null
+          nodeMs?: number | null
+          step?: number | null
+          total?: number | null
+        }
+        if (cancelled) return
+        if (d.title || d.node) {
+          setFallbackNode({
+            title: d.title ?? null,
+            node: d.node ?? null,
+            step: typeof d.step === 'number' ? d.step : null,
+            total: typeof d.total === 'number' ? d.total : null,
+            elapsedMs: typeof d.nodeMs === 'number' ? d.nodeMs : null,
+          })
+        }
+      } catch { /* не критично */ }
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 2000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [isGenerating, promptId, executingTitle, executingNode])
+
+  const nodeLabel = executingTitle || executingNode || fallbackNode?.title || fallbackNode?.node || null
+  const effectiveStep = nodeStep ?? fallbackNode?.step ?? null
+  const effectiveTotal = nodeTotal ?? fallbackNode?.total ?? null
+  const effectiveElapsed = nodeElapsedMs ?? fallbackNode?.elapsedMs ?? null
   return (
     <div className="space-y-2">
       {/* Phase + elapsed */}
@@ -331,8 +383,8 @@ export function GenerationStatus({
         <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
           <span className="truncate min-w-0" title={nodeLabel}>{nodeLabel}</span>
           <span className="shrink-0 font-mono tabular-nums text-muted-foreground/80">
-            {nodeStep != null && nodeTotal != null && nodeTotal > 0 ? tt("шаг {{p1}}/{{p2}} ·", { p1: nodeStep, p2: nodeTotal }) : ''}
-            {nodeElapsedMs != null ? formatElapsed(nodeElapsedMs) : ''}
+            {effectiveStep != null && effectiveTotal != null && effectiveTotal > 0 ? tt("шаг {{p1}}/{{p2}} ·", { p1: effectiveStep, p2: effectiveTotal }) : ''}
+            {effectiveElapsed != null ? formatElapsed(effectiveElapsed) : ''}
           </span>
         </div>
       )}

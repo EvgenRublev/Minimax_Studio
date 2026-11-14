@@ -62,6 +62,7 @@ import {
 import { SettingSlider } from '@/components/h3/setting-slider'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from '@/components/h3/video-gallery-grid'
 import { GenerationStatus } from '@/components/h3/generation-status'
+import { HintIcon } from '@/components/h3/settings-ui'
 import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useControlNetTarget, type ControlNetSource } from '@/lib/controlnet-target-store'
 import { MIN_FIRST_PASS_STEPS, DEFAULT_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правки 890, 892)
@@ -495,10 +496,8 @@ export function ControlNetView() {
           <div className="flex items-center gap-2">
             <WaypointsIcon className="w-4 h-4 text-orange-400" />
             <h2 className="text-sm font-semibold text-foreground">ControlNet</h2>
+            <HintIcon text={tt("Генерация видео, следующего движению контрольного ролика (3D-болванка, превиз или референс) покадрово.")} />
           </div>
-          <p className="text-[10px] text-muted-foreground/70 -mt-2">
-            {tt("Генерация видео, следующего движению контрольного ролика (3D-болванка, превиз или референс) покадрово.")}
-          </p>
 
           {/* Баннер недостающих моделей */}
           {modelsMissing && (
@@ -743,9 +742,6 @@ export function ControlNetView() {
                 ))}
               </div>
             )}
-            <p className="text-[10px] text-muted-foreground/60">
-              {tt("В промпте ссылайтесь на них как &lt;Picture 1&gt;, &lt;Picture 2&gt;…")}
-            </p>
 
             {/* (правка 505) Рефы: режим размера — как на вкладке «Генерация»
                 (правка 277): Match — быстрее, Max — точнее детали. */}
@@ -808,7 +804,7 @@ export function ControlNetView() {
           <div className="space-y-1">
             <SettingSlider
               label={tt("Длительность, сек")}
-              labelTitle="Длительность результата в секундах."
+              labelTitle="Длительность результата в секундах. Если контрольное видео короче — длительность обрежется под него."
               value={params.duration}
               min={1}
               max={30}
@@ -816,9 +812,6 @@ export function ControlNetView() {
               onChange={(v) => patchParams({ duration: Math.round(v) })}
               formatValue={(v) => tt("{{p1}} с", { p1: v })}
             />
-            <p className="text-[10px] text-muted-foreground/60">
-              {tt("Если контрольное видео короче — длительность обрежется под него.")}
-            </p>
           </div>
 
           {/* Короткая сторона */}

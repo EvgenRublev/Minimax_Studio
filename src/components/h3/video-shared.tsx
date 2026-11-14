@@ -17,6 +17,7 @@ import type { ModelOptions } from '@/hooks/use-model-options'
 import { uploadInputFile } from '@/lib/upload'
 import { framesForDuration } from '@/lib/comfy/minimax-h3-template'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { HintIcon } from '@/components/h3/settings-ui' // (правка 969)
 
 /* ──────────────── Shared helpers ──────────────── */
 
@@ -164,7 +165,10 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground flex items-center justify-between gap-2">
-        <span>{t("Длительность")}</span>
+        <span className="flex items-center gap-1.5">
+          {t("Длительность")}
+          <HintIcon text={`${fps} ${t("кадр/с · от")} ${secMin} ${t("до")} ${secMax} ${t("с, шаг 1 с")}${hint ? ` · ${hint}` : ''} · ${t("ручной ввод в секундах:")} ${secMin}–${secMax} ${t("с.")}`} />
+        </span>
         <span className="flex items-center gap-1.5">
           <input
             type="text"
@@ -214,11 +218,6 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
         disabled={disabled}
         className="w-full accent-cyan-500"
       />
-      <p className="text-[10px] text-muted-foreground/60">
-        {fps} {' '}{t("кадр/с · от")}{' '} {secMin} {' '}{t("до")}{' '} {secMax} {' '}{t("с, шаг 1 с")}{hint ? ` · ${hint}` : ''}
-        {' · '}
-        <span title={t("Секунда переводится в ближайшее валидное число кадров модели; вне диапазона — к границе")}>{t("ручной ввод в секундах:")}{' '} {secMin}–{secMax} {' '}{t("с.")}</span>
-      </p>
     </div>
   )
 }

@@ -661,6 +661,11 @@ export function useVideoGen() {
                       })),
                   ]
                   try {
+                    // (правка 970) см. комментарий ниже: full/two-pass — жёсткий
+                    // стык без кроссфейда, draft — прежний 8-кадровый фейд.
+                    const _twoPassExtend =
+                      _genParamsEarly?.extend_two_pass === true ||
+                      _genParamsEarly?.extendTwoPass === true
                     const concatRes = await fetch('/api/comfy/concat', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -715,6 +720,14 @@ export function useVideoGen() {
                       // технический xfade, повтора контента нет). Стык «исходник →
                       // клип 0» прежний: 17 дублированных кадров, Trim 9 + Fade 8
                       // = 17 (правка 251).
+                      // (правка 970) В ДВУХПРОХОДНОМ extend preserved-голова
+                      // проходит через 3D-апскейлер и pass 2, поэтому кадры
+                      // клипа 0 уже НЕ пиксельная копия хвоста исходника.
+                      // Кроссфейд 8 кадров смешивал похожие, но разные кадры —
+                      // на полном режиме это читалось как «плавный шов».
+                      // Теперь full/two-pass: жёсткий стык, а 8 кадров головы
+                      // клипа 0 срезаются (они дублируют уже показанный хвост).
+                      // Draft (один проход) сохраняет прежний кроссфейд.
                       body: JSON.stringify({
                         inputs,
                         // (правка 292) fade=0: между клипами i>0 — HARD CUT (без xfade).
@@ -723,7 +736,8 @@ export function useVideoGen() {
                         // к последнему кадру клипа i-1 → смешивание = дубль).
                         // Seam-фейд на стыке «исходник → клип 0» остаётся (8/24 с).
                         fade: 0,
-                        seamFadeSeconds: 8 / 24,
+                        seamFadeSeconds: _twoPassExtend ? 0 : 8 / 24,
+                        ...(_twoPassExtend && { headTrims: [0, 8 / 24] }),
                         outName: 'Minimax_Studio_combined',
                         // (правка 364) Итоговый склеенный файл — в ту же
                         // подпапку output, куда писались клипы задачи (папка

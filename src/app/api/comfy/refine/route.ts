@@ -164,6 +164,13 @@ export async function POST(req: NextRequest) {
       sparseEndPercent?: number
       sparseMinTokens?: number
       sparseExtraTokens?: number
+      /** (правка 968) Low VRAM Attention / Chunk FeedForward — из настроек;
+       *  раньше Refine всегда включал их, игнорируя тогглы. */
+      lowVramAttention?: boolean
+      chunkFeedForward?: boolean
+      /** (правка 968) тюнинг Chunk FF из настроек. */
+      chunkFFChunks?: number
+      chunkFFThreshold?: number
       /** (правка 494) «Свободное разрешение»: цель в мегапикселях (до 4K =
        *  8.3 Мп). Перебивает target — конвертация в короткую сторону здесь,
        *  по реальным размерам источника (канва латента в lossless-ветке). */
@@ -267,14 +274,15 @@ export async function POST(req: NextRequest) {
     // НЕ БЫЛО пайплайна, шагов, сэмплера и настроек внимания — по сайдкару
     // нельзя было понять, чем именно считался ролик. Значения — как в
     // refine-template.ts: сэмплер euler (res_multistep на «лёгком» 2-шаговом
-    // проходе), LowVRAMAttention + ChunkFeedForward всегда включены.
+    // проходе), LowVRAMAttention + ChunkFeedForward — из настроек (по умолчанию
+    // включены).
     const refineCommonMeta = {
       pipeline: 'full',
       pass1_steps: body.steps ?? 3,
       pass1_sampler: body.steps === 2 ? 'res_multistep' : 'euler',
       pass1_scheduler: body.steps === 2 ? 'simple' : 'manual-sigmas',
-      low_vram_attention: true,
-      chunk_feed_forward: true,
+      low_vram_attention: body.lowVramAttention !== false,
+      chunk_feed_forward: body.chunkFeedForward !== false,
       // (правка 736, 737) Audio Guide по дорожке исходника теперь всегда
       // в графе рефайна — фиксируем в сайдкаре, как у Generate-ref.
       audio_guide: true,
@@ -362,6 +370,10 @@ export async function POST(req: NextRequest) {
               steps: body.steps,
               sigmaStart: body.sigmaStart,
               refImageSize, // (правка 317)
+              lowVramAttention: body.lowVramAttention !== false, // (правка 968)
+              chunkFeedForward: body.chunkFeedForward !== false,
+              chunkFFChunks: body.chunkFFChunks,
+              chunkFFThreshold: body.chunkFFThreshold,
               outputSubfolder: '',
               ...veda, // (правка 408)
               ...sparse, // (правка 466)
@@ -432,6 +444,10 @@ export async function POST(req: NextRequest) {
           steps: body.steps,
           sigmaStart: body.sigmaStart,
           refImageSize, // (правка 317)
+          lowVramAttention: body.lowVramAttention !== false, // (правка 968)
+          chunkFeedForward: body.chunkFeedForward !== false,
+              chunkFFChunks: body.chunkFFChunks,
+              chunkFFThreshold: body.chunkFFThreshold,
           ...veda, // (правка 408)
           ...sparse, // (правка 466)
           ...loraParams, // (правка 483)
@@ -689,6 +705,10 @@ export async function POST(req: NextRequest) {
             sigmaStart: body.sigmaStart,
             outputSubfolder: sub,
             refImageSize, // (правка 317)
+            lowVramAttention: body.lowVramAttention !== false, // (правка 968)
+            chunkFeedForward: body.chunkFeedForward !== false,
+              chunkFFChunks: body.chunkFFChunks,
+              chunkFFThreshold: body.chunkFFThreshold,
             ...veda, // (правка 408)
             ...sparse, // (правка 466)
             ...loraParams, // (правка 483)
@@ -783,6 +803,10 @@ export async function POST(req: NextRequest) {
         frameCap: body.frameCap,
         chunkJob: body.chunkJob,
         refImageSize, // (правка 317)
+        lowVramAttention: body.lowVramAttention !== false, // (правка 968)
+        chunkFeedForward: body.chunkFeedForward !== false,
+              chunkFFChunks: body.chunkFFChunks,
+              chunkFFThreshold: body.chunkFFThreshold,
         ...veda, // (правка 408)
         ...sparse, // (правка 466)
         ...loraParams, // (правка 483)

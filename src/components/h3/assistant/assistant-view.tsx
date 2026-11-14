@@ -102,6 +102,24 @@ function llmDisplayName(modelId?: string | null, modelName?: string | null): str
   return 'Qwen3.5 9B (по умолчанию)'
 }
 
+/**
+ * (правка 970) Старые быстрые запросы extend-чата содержали техническую
+ * инструкцию про ```text fence и `clip: N` — она уходила в пузырь пользователя
+ * как непонятный системный текст. Показываем человеческую формулировку, не
+ * переписывая сохранённую историю (модель всё равно получает system-промпт).
+ */
+function displayUserText(text: string): string {
+  if (!text.includes('```text fence')) return text
+  const all = text.match(/всех\s+(\d+)\s+клипов/i)
+  if (all) {
+    return `Заполни (или улучши) промпты всех ${all[1]} клипов продления по контексту исходника — по одному описанию на каждый клип.`
+  }
+  if (/Предложи\s+2[–-]3\s+клипа/i.test(text)) {
+    return 'Предложи 2–3 клипа продления по контексту исходного видео — с номерами клипов, я создам для них карточки.'
+  }
+  return text
+}
+
 export function AssistantView({
   panelMode,
   onCollapse,
@@ -1097,7 +1115,7 @@ export function AssistantView({
                   <p className="text-sm text-muted-foreground">
                     {/* (правка 427) Приветствие зависит от режима чата. */}
                     {isExtendChat
-                      ? tt("Опишите, как продолжить видео — ассистент соберёт промпты клипов (каждый отдельным блоком с меткой clip: N) с учётом исходника и референсов продления.")
+                      ? tt("Опишите, как продолжить видео — ассистент соберёт промпты клипов (по одному на клип) с учётом исходника и референсов продления.")
                       : isControlNetChat
                         ? tt("Опишите сцену — ассистент соберёт промпт для ControlNet. Движение и камеру задаёт контрольное видео, в промпте — только сцена, внешность, стиль, свет и звук.")
                         : tt("Опишите идею видео по-русски — ассистент соберёт готовый промпт (на английском, с тегами ваших референсов) и запомнит диалог.")}
@@ -1173,7 +1191,7 @@ export function AssistantView({
                         «генерируется…» к сообщению юзера. Fence-карточки нужны
                         только в ответах ассистента. */}
                     {m.role === 'user'
-                      ? (<div className="leading-relaxed break-words"><MarkdownText text={m.content} previewFor={previewFor} onRefClick={openRefByTag} /></div>)
+                      ? (<div className="leading-relaxed break-words"><MarkdownText text={displayUserText(m.content)} previewFor={previewFor} onRefClick={openRefByTag} /></div>)
                       : (renderChatContent(m.content) || '')}
                     {/* (правка 427) Вставка — по режиму чата: «В промпт»
                         только в чатах «Генерация»; в чатах «Продление» —
@@ -1223,7 +1241,14 @@ export function AssistantView({
                       // fence — ряд ручного выбора один раз. Нестыковка
                       // (fence'ов больше клипов) — ряды с подписью номера
                       // промпта, чтобы отличались.
+                      // (правка 970) Если PROMPT-кнопки уже размечены по всем
+                      // существующим клипам, ручной ряд «В клип: …» — дубль
+                      // (ровно этот случай: модель предложила 2 клипа, а создан
+                      // 1 — под сообщением висели ДВЕ кнопки для клипа 1).
+                      const markedClips = new Set(marked.map((p) => p.clip))
+                      const hideUnmarked = extendClipsCount > 0 && markedClips.size >= extendClipsCount
                       const positional =
+                        !hideUnmarked &&
                         marked.length === 0 &&
                         unmarked.length >= 2 &&
                         unmarked.length <= extendClipsCount
@@ -1257,7 +1282,7 @@ export function AssistantView({
                               </div>
                             ))
                           )}
-                          {positional ? (
+                          {!hideUnmarked && (positional ? (
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -1302,7 +1327,7 @@ export function AssistantView({
                                 </div>
                               )
                             })
-                          )}
+                          ))}
                         </div>
                       )
                     })()}
@@ -1332,8 +1357,8 @@ export function AssistantView({
                     onClick={() => {
                       void send(
                         extendClipsCount > 0
-                          ? `Заполни (или улучши) промпты всех ${extendClipsCount} клипов продления по контексту исходника — для каждого клипа отдельный \`\`\`text fence с первой строкой \`clip: N\`.`
-                          : 'Предложи 2–3 клипа продления по контексту исходного видео: для каждого — отдельный ```text fence с первой строкой `clip: N` (я создам карточки клипов с этими номерами).',
+                          ? `Заполни (или улучши) промпты всех ${extendClipsCount} клипов продления по контексту исходника — по одному описанию на каждый клип.`
+                          : 'Предложи 2–3 клипа продления по контексту исходного видео — с номерами клипов, я создам для них карточки.',
                       )
                     }}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors"

@@ -52,6 +52,7 @@ import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveFfmpeg } from '@/lib/thumb'
 import { dispersionCoeffs } from '@/lib/montage-dispersion'
+import { tempShifts, tempLutExpr } from '@/lib/montage-temp' // (правка 966)
 import { st as stT } from '@/lib/i18n/server'
 
 export const runtime = 'nodejs'
@@ -209,7 +210,7 @@ interface ShotFx {
   contrast?: number | null
   /** насыщенность 0..2 (eq saturation, 1 = норма) */
   sat?: number | null
-  /** (правка 861) температура −100..100 (холоднее..теплее, colorbalance) */
+  /** (правка 861, 966) температура −100..100 (холоднее..теплее, общий LUT с превью) */
   temp?: number | null
   /** (правка 861) сдвиг оттенка HUE −180..180 град */
   hue?: number | null
@@ -468,10 +469,11 @@ function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): stri
     if (cparts.length) fxv.push(`curves=${cparts.join(':')}`)
   }
   if (fx.temp && Math.abs(fx.temp) >= 1) {
-    const t = +(fx.temp / 250).toFixed(3)
-    const g = +(t * 0.2).toFixed(3)
-    const th = +(t * 0.6).toFixed(3)
-    fxv.push(`colorbalance=rs=${t}:gs=${g}:bs=${-t}:rm=${t}:gm=${g}:bm=${-t}:rh=${th}:bh=${-th}`)
+    // (правка 966) Та же кривая, что в превью (montage-temp.ts): раньше здесь
+    // был colorbalance с другим делителем (250 vs 380) и раздельными
+    // тенями/средними/светами — превью и файл выглядели по-разному.
+    const s = tempShifts(fx.temp)
+    fxv.push(`format=rgb24,lutrgb=r='${tempLutExpr(s.r)}':g='${tempLutExpr(s.g)}':b='${tempLutExpr(s.b)}'`)
   }
   if (fx.dispersion && fx.dispersion > 0) {
     // (правка 861, 862, 884) радиальная дисперсия с настраиваемой маской центра:
@@ -501,9 +503,14 @@ function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): stri
     fxv.push(`format=yuv420p,hue=h=${fx.hue.toFixed(1)}`)
   }
   const satv = fx.sat ?? 1
-  if (fx.bright || fx.contrast || satv !== 1) {
+  // (правка 966) Яркость в превью — CSS brightness (умножение), а eq brightness
+  // в ffmpeg прибавляет константу: на тенях это давало разные результаты.
+  if (fx.bright) {
+    const g = Math.max(0.2, 1 + fx.bright).toFixed(4)
+    fxv.push(`format=rgb24,colorchannelmixer=rr=${g}:gg=${g}:bb=${g}`)
+  }
+  if (fx.contrast || satv !== 1) {
     const eq: string[] = []
-    if (fx.bright) eq.push(`brightness=${fx.bright.toFixed(3)}`)
     if (fx.contrast) eq.push(`contrast=${(1 + fx.contrast).toFixed(3)}`)
     eq.push(`saturation=${satv.toFixed(3)}`)
     fxv.push(`format=yuv420p,eq=${eq.join(':')}`)

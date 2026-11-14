@@ -713,11 +713,14 @@ export function UpscaleView() {
   return (
     <div className="flex-1 flex min-h-0">
       {/* LEFT: панель параметров (как во вкладке «Генерация»; правка 472 — фон surface-1, как у Refine/Tile/FPS) */}
-      <div className="w-[400px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">{tt("Параметры")}</h2>
+            <div className="flex items-center gap-2 min-w-0">
+              <SparklesIcon className="w-4 h-4 text-violet-400 shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground truncate">{tt("Параметры")}</h2>
+            </div>
             <Badge className="text-[10px] bg-violet-500/15 text-violet-400 border-violet-500/30 hover:bg-violet-500/15">
               DLSS 5
             </Badge>

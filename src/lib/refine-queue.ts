@@ -54,6 +54,12 @@ export interface RefineTask {
   sparseEndPercent?: number
   sparseMinTokens?: number
   sparseExtraTokens?: number
+  /** (правка 968) Low VRAM Attention / Chunk FeedForward из настроек. */
+  lowVramAttention?: boolean
+  chunkFeedForward?: boolean
+  /** (правка 968) тюнинг Chunk FF из настроек. */
+  chunkFFChunks?: number
+  chunkFFThreshold?: number
   /** (правка 509) Картинки-референсы от пользователя (имена в input/) —
    *  для источников с диска без метаданных. */
   refImages?: string[]
@@ -242,6 +248,12 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
         sparseExtraTokens: task.sparseExtraTokens,
       }),
       ...(task.mode === 'chunks' ? { mode: 'chunks', chunkSeconds: task.chunkSeconds } : {}),
+      // (правка 968) тогглы оптимизаций из настроек — иначе Refine всегда
+      // включал LowVRAM/Chunk FF, даже если пользователь их выключил.
+      ...(task.lowVramAttention !== undefined && { lowVramAttention: task.lowVramAttention }),
+      ...(task.chunkFeedForward !== undefined && { chunkFeedForward: task.chunkFeedForward }),
+      ...(task.chunkFFChunks !== undefined && { chunkFFChunks: task.chunkFFChunks }),
+      ...(task.chunkFFThreshold !== undefined && { chunkFFThreshold: task.chunkFFThreshold }),
       // (правка 509) Референсы от пользователя (источник с диска)
       ...(task.refImages && task.refImages.length > 0 && { refImages: task.refImages }),
     }),

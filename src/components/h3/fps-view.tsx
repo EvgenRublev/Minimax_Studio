@@ -317,6 +317,7 @@ export function FpsView() {
                   type="button"
                   onClick={() => patchParams({ mode: m.id })}
                   disabled={busy}
+                  title={t(m.hint)}
                   className={cn(
                     'rounded-lg border px-3 py-2 text-left transition-colors',
                     params.mode === m.id
@@ -328,7 +329,6 @@ export function FpsView() {
                     <m.icon className="w-3.5 h-3.5 text-cyan-400" />
                     <span className="text-xs font-medium text-foreground">{t(m.label)}</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{t(m.hint)}</p>
                 </button>
               ))}
             </div>
@@ -513,7 +513,7 @@ export function FpsView() {
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}
-            stageKind="single"
+            stageKind="fps"
           />
         </div>
       </aside>

@@ -39,6 +39,7 @@ import {
 import { SettingSlider } from '@/components/h3/setting-slider'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from '@/components/h3/video-gallery-grid'
 import { GenerationStatus } from '@/components/h3/generation-status'
+import { HintIcon } from '@/components/h3/settings-ui'
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
 // (правка 908) Общий кроп картинок-референсов (загрузка PNG + поля оригинала).
 import { applyCropToRef, cropOriginalSrc, type CropableRef } from '@/lib/crop'
@@ -350,11 +351,8 @@ export function FaceRefineView() {
           <div className="flex items-center gap-2">
             <ScanFaceIcon className="w-4 h-4 text-yellow-400" />
             <h2 className="text-sm font-semibold text-foreground">Face Refine</h2>
+            <HintIcon text={t("H3 плохо рисует лица, когда голова занимает малую долю кадра. Нода находит лицо, перерисовывает его крупно и вклеивает обратно — остальной кадр остаётся исходным.")} />
           </div>
-
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            {t("H3 плохо рисует лица, когда голова занимает малую долю кадра. Нода находит лицо, перерисовывает его крупно и вклеивает обратно — остальной кадр остаётся исходным.")}
-          </p>
 
           {/* Источник */}
           <div className="space-y-2">
@@ -914,7 +912,7 @@ export function FaceRefineView() {
             onReset={reset}
             startedAt={startedAt}
             promptId={promptId}
-            stageKind="single"
+            stageKind="face"
           />
         </div>
       </aside>

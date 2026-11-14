@@ -92,6 +92,15 @@ const patchDir = join(ROOT, 'install', 'comfy-patches')
 expect(existsSync(patchDir), 'есть папка install/comfy-patches')
 const nodePatch = join(patchDir, 'comfy_extras', 'nodes_minimax_h3.py')
 expect(existsSync(nodePatch), 'патч comfy_extras/nodes_minimax_h3.py на месте')
+// (правка 967) без патча main.py ползунок «Запас свободной VRAM» мёртв:
+// ядро 0.44 парсит --vram-headroom, но в comfy-aimdo передаёт только reserve.
+const mainPatch = join(patchDir, 'main.py')
+expect(existsSync(mainPatch), 'патч main.py (vram-headroom) на месте')
+if (existsSync(mainPatch)) {
+  const py = readFileSync(mainPatch, 'utf-8')
+  expect(/vram_headroom/.test(py) && /_keep_free_gb/.test(py),
+    'main.py передаёт reserve+headroom в comfy-aimdo')
+}
 if (existsSync(nodePatch)) {
   const py = readFileSync(nodePatch, 'utf-8')
   expect(/node_id\s*=\s*["']MiniMaxH3AddGuide["']/.test(py), 'патч содержит MiniMaxH3AddGuide')

@@ -158,6 +158,7 @@ function AudioRefsBlock({
         onDropFiles(Array.from(e.dataTransfer.files))
       }}
       onClick={onPick}
+      title={hint}
       className={cn(
         'border-2 border-dashed rounded-lg py-3 text-center cursor-pointer transition-all',
         dragOver ? 'border-cyan-400 bg-cyan-500/10' : 'border-border hover:border-cyan-500/50 hover:bg-[var(--surface-2)]',
@@ -171,7 +172,6 @@ function AudioRefsBlock({
           <p className="text-xs text-muted-foreground">
             {tt("Аудио-референсы")}{' '} <span className="text-[10px] text-muted-foreground/60">({counts})</span>
           </p>
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5">{hint}</p>
         </>
       )}
     </div>
@@ -1109,7 +1109,7 @@ export function GenerateView() {
     return (
       <div className="flex-1 flex min-h-0">
         {/* (правка 472) панель — surface-1, как у Refine/Tile/FPS (единый вид) */}
-        <div className="w-[400px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+        <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
           <div className="flex-1 flex items-center justify-center p-4">
             <div className="text-xs text-muted-foreground">{tt("Загрузка…")}</div>
           </div>
@@ -1176,12 +1176,15 @@ export function GenerateView() {
       // а не только при фокусе внутри дерева; onPaste на корне удалён.
     >
       {/* LEFT: Settings panel (правка 472: surface-1, как у Refine/Tile/FPS) */}
-      <div className="w-[400px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
+      <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-[var(--surface-1)]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">{tt("Параметры")}</h2>
+            <div className="flex items-center gap-2 min-w-0">
+              <SparklesIcon className="w-4 h-4 text-cyan-400 shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground truncate">{tt("Параметры")}</h2>
+            </div>
             <Badge className="text-[10px] bg-cyan-500/15 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/15">
               MiniMax H3
             </Badge>
@@ -1708,9 +1711,6 @@ export function GenerateView() {
                     <p className="text-xs text-muted-foreground">
                       {tt("Перетащите,")}{' '} <span className="text-cyan-400 underline">{tt("выберите")}</span> {' '}{tt("или вставьте по")}{' '}
                       <span className="font-mono text-cyan-400">Ctrl+V</span>
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                      {tt("картинки, видео и аудио — до")}{' '} {refLimits.total} {' '}{tt("шт.")}
                     </p>
                   </>
                 )}

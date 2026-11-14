@@ -390,6 +390,11 @@ export function RefineView() {
       ...(userRefs.length > 0 && { refImages: userRefs.map((r) => r.path) }),
       chunkSeconds: parseInt(chunkSec, 10),
       refImageSize: refDetail, // (правка 276)
+      // (правка 968) оптимизации памяти — из общих настроек, как в Generate
+      lowVramAttention: useGenStore.getState().video.lowVramAttention,
+      chunkFeedForward: useGenStore.getState().video.chunkFeedForward,
+      chunkFFChunks: useGenStore.getState().video.chunkFFChunks,
+      chunkFFThreshold: useGenStore.getState().video.chunkFFThreshold,
       // (правка 407) Veda-настройки из общих настроек программы (gen-store)
       ...(useGenStore.getState().video.vedaAttention === true && {
         vedaAttention: true,
@@ -749,9 +754,6 @@ export function RefineView() {
                   ))}
                 </div>
               )}
-              <p className="text-[10px] text-muted-foreground/60">
-                {t("На картинки в промпте ссылайтесь как &lt;Picture 1&gt;, &lt;Picture 2&gt;… Первый кадр видео добавится якорем последним слотом автоматически.")}
-              </p>
             </div>
           )}
 

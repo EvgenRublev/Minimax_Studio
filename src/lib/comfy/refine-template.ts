@@ -126,6 +126,9 @@ export interface RefineParams {
   lowVramAttention?: boolean
   /** MiniMaxChunkFeedForward (default true). */
   chunkFeedForward?: boolean
+  /** (правка 968) тюнинг Chunk FF — из настроек, как в Generate. */
+  chunkFFChunks?: number
+  chunkFFThreshold?: number
   /** MiniMaxSparseAttention / Sol-Attn (default true). */
   sparseAttention?: boolean
   /** (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params). */
@@ -303,7 +306,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   }
   if (chunkFF) {
     modelNodes['46:40'] = {
-      inputs: { chunks: 2, seq_threshold: 4096, model: modelSrc },
+      inputs: {
+          chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+          seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
+          model: modelSrc,
+        },
       class_type: 'MiniMaxChunkFeedForward',
       _meta: { title: 'Chunk FeedForward' },
     }
@@ -946,6 +953,9 @@ export interface ChunkedRefineParams {
   outputSubfolder?: string
   lowVramAttention?: boolean
   chunkFeedForward?: boolean
+  /** (правка 968) тюнинг Chunk FF — из настроек. */
+  chunkFFChunks?: number
+  chunkFFThreshold?: number
   sparseAttention?: boolean
   // (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params)
   sparseTau?: number
@@ -1217,7 +1227,11 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   }
   if (chunkFF) {
     modelNodes['46:40'] = {
-      inputs: { chunks: 2, seq_threshold: 4096, model: modelSrc },
+      inputs: {
+          chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+          seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
+          model: modelSrc,
+        },
       class_type: 'MiniMaxChunkFeedForward',
       _meta: { title: 'Chunk FeedForward' },
     }
