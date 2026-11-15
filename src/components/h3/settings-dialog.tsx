@@ -66,6 +66,7 @@ import { useGenQueue } from '@/lib/gen-queue-store'
 import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
 import { useControlNetJob } from '@/lib/controlnet-job-store'
 import { useFpsJob } from '@/lib/fps-job-store'
+import { applyUiScale, UI_SCALE_KEY, UI_SCALE_DEFAULT } from '@/lib/ui-scale'
 import { SettingSlider } from './setting-slider'
 import { LanguageSwitcher } from './language-switcher' // (правка 955)
 import { UpdatePanel } from './update-panel' // (правка 790)
@@ -2136,36 +2137,25 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
  * в layout.tsx (без вспышки немасштабированного UI). Механизм — см. 451 ниже.
  */
 const UI_SCALE_PRESETS = [80, 90, 100, 110, 125] as const
-const UI_SCALE_KEY = 'h3-ui-scale'
 
 /**
- * (правка 451) ФИНАЛЬНЫЙ вариант: масштаб ТОЛЬКО через root font-size.
- * История: CSS `zoom` (445) не пересчитывал vw/vh → пустые поля (фикс 446
- * компенсацией width/height); затем выяснилось, что у пользователя движок
- * zoom молча игнорирует, а компенсация ширины применялась → контент уезжал
- * за экран; детект CSS.supports (450) не спас — supports=true, а рендер
- * zoom всё равно не происходит, и эффективность zoom из JS не измерить
- * (getBoundingClientRect возвращает НЕмасштабированные layout-пиксели).
- * font-size на <html>: весь Tailwind в rem → масштабируется вся раскладка
- * с текстом, честный reflow, побега за экран быть не может. Побочка:
- * жёсткие px-значения (text-[10px], w-[420px] и т.п.) не масштабируются.
+ * (правка 1003) Масштабируем весь интерфейс нативным Chromium zoom
+ * (`webFrame.setZoomFactor`): панели с px-ширинами, кнопки, отступы и текст.
+ * Старый вариант через root font-size менял только rem-шрифт, поэтому
+ * панели оставались прежнего размера. Браузерный fallback — в ui-scale.ts.
  */
-function applyUiScale(pct: number) {
-  document.documentElement.style.fontSize = pct === 100 ? '' : `${pct}%`
-}
 
 function UiScaleSwitcher() {
   const { t: tt } = useTranslation() // (правка 955)
 
   // (правка 579) дефолт масштаба UI — 80%
-  const [scale, setScale] = useState(80)
+  const [scale, setScale] = useState(UI_SCALE_DEFAULT)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
     try {
-      // (правка 579) дефолт масштаба UI — 80%
-      const s = parseInt(localStorage.getItem(UI_SCALE_KEY) || '80', 10)
+      const s = parseInt(localStorage.getItem(UI_SCALE_KEY) || String(UI_SCALE_DEFAULT), 10)
       if (!Number.isNaN(s)) setScale(s)
     } catch { /* приватный режим */ }
   }, [])
@@ -2205,7 +2195,7 @@ function UiScaleSwitcher() {
         ))}
       </div>
       <p className="text-[10px] text-muted-foreground/60">
-        {tt("Меняет базовый размер шрифта — за ним масштабируется весь интерфейс. Применяется сразу и запоминается.")}
+        {tt("Масштабирует весь интерфейс: панели, кнопки, отступы и шрифт. Применяется сразу и запоминается.")}
       </p>
     </div>
   )

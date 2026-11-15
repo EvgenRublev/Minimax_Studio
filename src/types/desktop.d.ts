@@ -7,6 +7,8 @@
 export type ConsoleOp = ['a' | 'r', string]
 
 export interface H3DesktopBridge {
+  /** (правка 1003) Нативный масштаб всего интерфейса (Chromium webFrame). */
+  setZoom?: (factor: number) => void
   minimize: () => void
   maximizeToggle: () => void
   close: () => void

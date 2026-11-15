@@ -13,6 +13,7 @@
  * к DOM (компонент PrefsSync вызывает это вместе с setTheme).
  */
 import { pickNewer } from '@/lib/settings-storage'
+import { applyUiScale, UI_SCALE_DEFAULT } from '@/lib/ui-scale'
 
 /** Ключ зеркала; сами prefs — обычные ключи localStorage (см. PREF_KEYS). */
 export const PREFS_MIRROR_KEY = 'h3-simple-prefs'
@@ -150,8 +151,8 @@ export async function pullPrefs(onTheme: (theme: string) => void): Promise<boole
       store.setItem(AT_KEY, String(server.updatedAt))
     } catch { /* приватный режим */ }
     // применяем к DOM то, что обычно делает инлайн-скрипт layout.tsx
-    const scale = parseInt(server.data['h3-ui-scale'] ?? '80', 10)
-    if (!Number.isNaN(scale)) document.documentElement.style.fontSize = scale === 100 ? '' : `${scale}%`
+    const scale = parseInt(server.data['h3-ui-scale'] ?? String(UI_SCALE_DEFAULT), 10)
+    if (!Number.isNaN(scale)) applyUiScale(scale)
     if (server.data['h3-selectable-text'] === '1') document.documentElement.setAttribute('data-select-text', '1')
     else document.documentElement.removeAttribute('data-select-text')
     if (typeof server.data['theme'] === 'string') onTheme(server.data['theme'])

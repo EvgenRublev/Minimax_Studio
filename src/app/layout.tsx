@@ -48,7 +48,7 @@ export default function RootLayout({
           <script
             suppressHydrationWarning
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null)?'80':s;var p=parseInt(v,10);if(!isNaN(p))document.documentElement.style.fontSize=(p===100?'':p+'%');}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}try{var lg=${JSON.stringify(lang)};window.__h3lang=lg;document.documentElement.setAttribute('lang',lg);}catch(e){}})();`,
+              __html: `(function(){try{var k='theme';var t=localStorage.getItem(k);if(t==='aurora'||t==='light'){localStorage.setItem(k,'dark-gray');var d=document.documentElement;d.classList.remove('aurora','light');d.classList.add('dark-gray');}}catch(e){}try{var s=localStorage.getItem('h3-ui-scale');var v=(s==null)?'80':s;var p=parseInt(v,10);if(!isNaN(p)){if(window.h3desktop&&window.h3desktop.setZoom){window.h3desktop.setZoom(p/100);document.documentElement.style.fontSize='';}else{document.documentElement.style.fontSize=(p===100?'':p+'%');}}}catch(e){}try{if(localStorage.getItem('h3-selectable-text')==='1')document.documentElement.setAttribute('data-select-text','1');}catch(e){}try{var lg=${JSON.stringify(lang)};window.__h3lang=lg;document.documentElement.setAttribute('lang',lg);}catch(e){}})();`,
             }}
           />
           {/* (правка 955) применяет сохранённый язык сразу после гидратации */}

@@ -5,9 +5,16 @@
  * ТОЛЬКО три метода управления окном через contextBridge, никакого доступа
  * к Node/IPC напрямую.
  */
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
 contextBridge.exposeInMainWorld('h3desktop', {
+  // (правка 1003) Масштаб всего интерфейса — нативный Chromium zoom.
+  // Раньше масштабировался только root font-size, панели с px-ширинами
+  // оставались прежними; webFrame масштабирует и layout, и текст.
+  setZoom: (factor) => {
+    const f = Number(factor)
+    if (Number.isFinite(f) && f >= 0.25 && f <= 4) webFrame.setZoomFactor(f)
+  },
   minimize: () => ipcRenderer.send('h3:window-minimize'),
   maximizeToggle: () => ipcRenderer.send('h3:window-maximize-toggle'),
   close: () => ipcRenderer.send('h3:window-close'),
