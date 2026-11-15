@@ -515,8 +515,7 @@ export async function POST(req: NextRequest) {
           await execFileAsync(
             py,
             [script, '--input', outPath, '--output', polished,
-              '--seams', seamFrames.join(','), '--fade-span', '24', '--radius', '2',
-              '--crossfade-frames', '2',
+              '--seams', seamFrames.join(','), '--fade-span', '24', '--radius', '3',
               '--ffmpeg', ffmpeg],
             { timeout: 900_000, maxBuffer: 16 * 1024 * 1024 },
           )

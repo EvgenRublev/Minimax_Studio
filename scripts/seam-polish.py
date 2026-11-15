@@ -82,8 +82,11 @@ def seam_smooth(frames, seam, radius):
     x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
 
     # 1) Первый кадр B после диффузии часто «тормозит» — слегка двигаем его к B+1.
+    # (правка 1002) Значения как в референсной ноде MiniMaxH3VideoMerge:
+    # advance_frac 0.20, seam_frac 0.15, веса 0.85/0.15. Более агрессивные
+    # 0.25/0.25/80-20 сами создавали неравномерность движения.
     flow_b = _flow(b_first, b_second)
-    adv = 0.25
+    adv = 0.20
     b0 = b_first.astype(np.float32)
     b1 = b_second.astype(np.float32)
     fwd = cv2.remap(b0, (x - flow_b[..., 0] * adv), (y - flow_b[..., 1] * adv), cv2.INTER_LINEAR)
@@ -92,13 +95,13 @@ def seam_smooth(frames, seam, radius):
 
     # 2) Балансируем движение между последним A и первым B.
     flow_s = _flow(a_last, b_first_adv)
-    frac = 0.25
+    frac = 0.15
     a_f = a_last.astype(np.float32)
     warped_a = cv2.remap(a_f, (x - flow_s[..., 0] * frac), (y - flow_s[..., 1] * frac), cv2.INTER_LINEAR)
     warped_b = cv2.remap(b_first_adv, (x + flow_s[..., 0] * frac), (y + flow_s[..., 1] * frac), cv2.INTER_LINEAR)
 
-    frames[seam - 1] = np.clip(0.80 * a_f + 0.20 * warped_b, 0, 255).astype(np.uint8)
-    frames[seam] = np.clip(0.80 * b_first_adv + 0.20 * warped_a, 0, 255).astype(np.uint8)
+    frames[seam - 1] = np.clip(0.85 * a_f + 0.15 * warped_b, 0, 255).astype(np.uint8)
+    frames[seam] = np.clip(0.85 * b_first_adv + 0.15 * warped_a, 0, 255).astype(np.uint8)
 
     # 3) Радиус 2+ — мягко размазываем дрожание на соседние кадры.
     if radius >= 2:
@@ -223,15 +226,15 @@ def main():
     for s in seams:
         seam_smooth(frames, s, args.radius)
 
-    # (правка 999) Короткий настоящий xfade на самом стыке: 2 кадра (~83 мс).
-    frames = crossfade_video(frames, seams, args.crossfade_frames)
-
-    # Короткий fade в звуке убран: теперь звук получает такой же xfade, как
-    # видео, и длина обоих треков уменьшается одинаково.
+    # (правка 1002) Никакого xfade: референсная нода MiniMaxH3VideoMerge
+    # рекомендует blend_frames=0 при seam_smooth. Перекрытие двух разных
+    # моментов само даёт «резиновый» неравномерный переход. Движение правим
+    # оптическим потоком в окне radius кадров, таймлайн не меняется.
     audio_path = args.output + ".audio.wav"
     audio = decode_audio(args.ffmpeg, args.input)
     if audio is not None and len(audio) > 0:
-        audio = crossfade_audio(audio, seams, fps, args.crossfade_frames)
+        # звук не растягиваем: только 10 мс де-клик на стыке
+        audio = declick_audio(audio, seams, fps)
         write_wav(audio_path, audio)
     else:
         audio_path = None
