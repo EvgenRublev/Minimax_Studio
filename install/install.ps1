@@ -761,13 +761,25 @@ function Get-Download {
             $have = [int64]0
             if (Test-Path $part) { try { $have = (Get-Item $part).Length } catch { } }
             $resume = ''
-            if ($have -gt 0 -and ($size -le 0 -or $have -lt $size)) {
+            # (правка 1004) codeload.github.com отдаёт GitHub-архив без
+            # Content-Length и Accept-Ranges (chunked). Раньше при size=0
+            # установщик всё равно слал `-C -`, curl дописывал НОВУЮ копию
+            # к недокачанному хвосту, и архив гарантированно портился:
+            # «скачано 12.9 МБ» повторялось до бесконечности.
+            # Продолжаем только при известном размере И подтверждённом Range;
+            # иначе начинаем файл заново.
+            $canResume = ($have -gt 0 -and $size -gt 0 -and $have -lt $size -and $meta.Ranges)
+            if ($canResume) {
                 $resume = '-C - '
                 if ($attempt -ge 2) { Info ('  продолжаю с ' + [Math]::Round($have / 1MB, 1) + ' МБ') }
+            } elseif ($have -gt 0) {
+                Info '  сервер не поддерживает докачку — начинаю файл заново'
+                Remove-Item $part -Force -ErrorAction SilentlyContinue
+                $have = 0
             }
             $proc = $null
             try {
-                $proc = Start-CurlProc ($resume + '-L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o "' + $part + '" "' + $Url + '"')
+                $proc = Start-CurlProc ($resume + '-L --fail --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 -o "' + $part + '" "' + $Url + '"')
             } catch { $proc = $null }
             if ($proc) {
                 $t0 = Get-Date
@@ -832,6 +844,25 @@ function Get-Download {
             Remove-StaleCacheFile $part
         }
     }
+    }
+    # (правка 1004) Последний шанс: Windows-загрузчик с системным прокси.
+    # Если curl/codeload стабильно рвётся на этом провайдере, Invoke-WebRequest
+    # часто проходит через другой стек. Файл качаем начисто.
+    if (-not $ok) {
+        Remove-Item $part -Force -ErrorAction SilentlyContinue
+        try {
+            Info '  пробую запасной загрузчик Windows...'
+            Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 180
+            if ((Test-ArchiveFile $part -Rel (Get-CacheRel $Dest) -Kind (Get-ExpectedKind $Dest) -CheckPin)) {
+                $ok = $true
+            } else {
+                Info ('  запасной загрузчик: ' + $script:IntegrityError)
+                Remove-StaleCacheFile $part
+            }
+        } catch {
+            Info ('  запасной загрузчик не смог: ' + $_.Exception.Message)
+            Remove-StaleCacheFile $part
+        }
     }
     $sw.Stop()
     if (-not $ok) {
@@ -2007,7 +2038,10 @@ $backup = Join-Path $Root 'ComfyUI.old'
 # (gate_compress, minimax_h3_layout, block_index), плюс новые ноды H3 и PDD.
 $ComfyVersion = '0.44.0'
 $ComfyZipName = 'ComfyUI-v0.44.0.zip'
+# (правка 1004) Сначала прямой codeload: без 301/302-редиректа и стабильнее
+# на прокси. Официальный github-URL — запасное зеркало.
 $ComfyUrl = 'https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v0.44.0.zip'
+$ComfyCodeloadUrl = 'https://codeload.github.com/Comfy-Org/ComfyUI/zip/refs/tags/v0.44.0'
 
 # Версия ядра: сначала comfyui_version.py (его пишет сборка ComfyUI), затем
 # pyproject.toml. Пустая строка - версию определить не удалось.
@@ -2138,7 +2172,7 @@ if (-not $SkipComfy) {
         }
 
         $zip = Join-Path $Cache $ComfyZipName
-        Get-Download $ComfyUrl $zip
+        Get-DownloadAny @($ComfyCodeloadUrl, $ComfyUrl) $zip
         $tmp = Join-Path $Cache 'comfy-extract'
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         Expand-ZipSafe $zip $tmp

@@ -138,6 +138,10 @@ for (const [needle, msg] of need) ok(inst.includes(needle), `install.ps1: ${msg}
 const td = inst.match(/function Get-Download \{[\s\S]*?\n\}/)
 ok(!!td && /Test-ArchiveFile/.test(td[0]), 'Get-Download не проверяет скачанный файл')
 ok(!!td && /Remove-StaleCacheFile/.test(td[0]), 'Get-Download не чистит битый кэш')
+  // (правка 1004) codeload не отдаёт Content-Length/Range: нельзя продолжать
+  // `-C -` при неизвестном размере — иначе curl дописывает вторую копию.
+  ok(inst.includes('$canResume') && inst.includes('$meta.Ranges'), 'Get-Download продолжает закачку без подтверждённого Range')
+  ok(/Get-DownloadAny @\(\$ComfyCodeloadUrl/.test(inst), 'ComfyUI качается только с одного github-URL (нет codeload-зеркала)')
 const ez = inst.match(/function Expand-ZipSafe \{[\s\S]*?\n\}/)
 ok(!!ez && /Test-ArchiveFile/.test(ez[0]), 'Expand-ZipSafe не проверяет архив перед распаковкой')
 ok(!!ez && /Expand-Archive/.test(ez[0]), 'Expand-ZipSafe: нет запасного движка Expand-Archive')
