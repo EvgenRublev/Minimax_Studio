@@ -527,9 +527,28 @@ export function GenerateView() {
    * Дедупликация: обе ветки могут сработать на один и тот же Ctrl+V,
    * поэтому фиксируем метку времени и вторая ветка отбрасывает повтор.
    */
-  // (правка 1006) Ctrl+V → референс на всей вкладке — общий хук, тот же
-  // механизм используется в Refine, ControlNet и Face Refine.
-  usePasteImageFiles(addReferenceFiles)
+  // (правка 1009) Ctrl+V в режиме «Кадры»: первая картинка — в первый кадр,
+  // если он уже занят — во второй; две картинки заполняют оба слота.
+  const addPastedFrames = useCallback(async (files: File[]) => {
+    const images = files.slice(0, 2)
+    for (const file of images) {
+      const cur = useGenStore.getState().video
+      const target: 'start' | 'end' =
+        !cur.startFrame ? 'start' : !cur.endFrame ? 'end' : 'start'
+      await addFrameFile(file, target)
+    }
+  }, [addFrameFile])
+
+  const handlePasteImages = useCallback((files: File[]) => {
+    if (useGenStore.getState().video.mode === 'flf') {
+      void addPastedFrames(files)
+      return
+    }
+    void addReferenceFiles(files)
+  }, [addPastedFrames, addReferenceFiles])
+
+  // (правка 1006) Ctrl+V → реф-картинки/кадры на всей вкладке.
+  usePasteImageFiles(handlePasteImages)
 
 
   /* ──────────── Prompt mentions (from refs) ──────────── */
@@ -864,8 +883,6 @@ export function GenerateView() {
       loop: v.mode !== 'extend' && v.loop === true,
       loopPadClips: v.loopPadClips,
       loopViews: v.loopViews,
-      loopRotate: v.loopRotate,
-      loopInterpolate: v.loopInterpolate,
       latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
       outputSubfolder: v.outputFolder || '', // (правка 91) папка проекта
       })
@@ -1297,36 +1314,15 @@ export function GenerateView() {
                             ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
                             : 'border-border text-muted-foreground hover:border-cyan-500/30',
                         )}
-                        title={tt("Один вид быстрее; включите «сдвигать склейку», чтобы уменьшить скачок движения в лупе.")}
+                        title={tt("Один вид быстрее; сдвиг точки склейки включён автоматически.")}
                       >
                         1 · {tt("движение")}
                       </button>
                     </div>
-                    {video.loopViews === 1 && (
-                      <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={video.loopRotate !== false}
-                          onChange={(e) => patchVideo({ loopRotate: e.target.checked })}
-                        />
-                        {tt("Сдвигать точку склейки на каждом шаге")}
-                      </label>
-                    )}
-                    <label
-                      className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer"
-                      title={tt("RIFE ×2 интерполирует весь цикл, включая переход последний→первый кадр, и делает видео 48 fps без изменения длительности. Нужен ComfyUI-Frame-Interpolation: недостающий RIFE скачается при первом запуске.")}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={video.loopInterpolate === true}
-                        onChange={(e) => patchVideo({ loopInterpolate: e.target.checked })}
-                      />
-                      {tt("Плавный луп (RIFE ×2, 48 fps)")}
-                    </label>
                     <p className="text-[10px] leading-relaxed text-muted-foreground/70">
                       {video.loopViews === 1
-                        ? tt("1 вид + сдвиг: ровнее движение на стыке. Если звук на стыке «кашей» — верните 2 вида.")
-                        : tt("2 вида: чище звук на стыке. Если дёргается картинка — попробуйте 1 вид + сдвиг.")}
+                        ? tt("1 вид: точка склейки сдвигается на каждом шаге автоматически. Если звук на стыке «кашей» — верните 2 вида.")
+                        : tt("2 вида: чище звук на стыке. Если дёргается картинка — попробуйте 1 вид со сдвигом склейки.")}
                     </p>
                   </div>
                 )}

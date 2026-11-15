@@ -33,13 +33,19 @@ export function usePasteImageFiles(
     if (!enabled) return
     const DEDUP_MS = 2000
     let lastPasteAt = 0
+    let lastSignature = ''
 
-    const add = (files: File[], viaPasteEvent: boolean) => {
+    const add = (files: File[], _viaPasteEvent: boolean) => {
+      if (files.length === 0) return
       const now = Date.now()
-      if (now - lastPasteAt < DEDUP_MS) return
+      // (правка 1009) Гасим только повтор ТОЙ ЖЕ картинки (paste + keydown-
+      // fallback на один Ctrl+V). Разные картинки можно вставлять подряд —
+      // это важно для двух кадров во FLF, между вставками не нужно ждать 2 с.
+      const sig = files.map((f) => `${f.size}:${f.type}`).join('|')
+      if (sig === lastSignature && now - lastPasteAt < DEDUP_MS) return
       lastPasteAt = now
-      if (!viaPasteEvent && files.length === 0) return
-      if (files.length > 0) handlerRef.current(files)
+      lastSignature = sig
+      handlerRef.current(files)
     }
 
     const onPaste = (e: ClipboardEvent) => {

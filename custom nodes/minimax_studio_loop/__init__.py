@@ -282,6 +282,33 @@ class MiniMaxStudioLoopDecode:
         per_latent = out["waveform"].shape[-1] // a.shape[-1]
         out["waveform"] = out["waveform"][..., pa * per_latent:(pa + na) * per_latent]
 
+        # (правка 1010) Аудио-сетка H3 короче видео на несколько мс (68
+        # кадров = 2.833 с, а VAE отдаёт 2.816 с). В MP4 это давало зазор
+        # на конце цикла: звук заканчивался раньше картинки и при повторе
+        # стартовал не с начала следующего цикла. Подрезаем/добиваем звук
+        # ровно до длительности видео, повторяя начало цикла.
+        sr = int(out.get("sample_rate") or 32000)
+        target_samples = int(round((clips * 17 / 24.0) * sr))
+        wave = out["waveform"]
+        cur_samples = int(wave.shape[-1])
+        if target_samples > 0 and cur_samples != target_samples:
+            if cur_samples <= 0:
+                wave = torch.zeros(
+                    (*wave.shape[:-1], target_samples),
+                    dtype=wave.dtype, device=wave.device,
+                )
+            elif cur_samples < target_samples:
+                reps = -(-target_samples // cur_samples)
+                reps_shape = [1] * (wave.ndim - 1) + [reps]
+                wave = wave.repeat(*reps_shape)[..., :target_samples]
+            else:
+                wave = wave[..., :target_samples]
+            out["waveform"] = wave
+            LOG.info(
+                "MiniMax Studio Loop Decode: звук выровнен по видео %d -> %d сэмплов (%d Гц)",
+                cur_samples, target_samples, sr,
+            )
+
         # (правка 745) диагностика: геометрия и замер шва прямо по кадрам.
         # Шов — разница «последний кадр → первый»: у готовой петли она такая же,
         # как разница любых соседних кадров (отношение ≈ 1).

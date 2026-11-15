@@ -208,10 +208,6 @@ export interface VideoGenState {
   /** (правка 829) «Зациклено»: 2 (default) — второй вид со сдвигом на
    *  полцикла для звука (~1.8× времени сэмплинга); 1 — один вид. */
   loopViews: number
-  /** (правка 1008) Сдвигать точку склейки на клип на каждом шаге (views=1). */
-  loopRotate: boolean
-  /** (правка 1008) Интерполировать цикл RIFE ×2, включая last→first. */
-  loopInterpolate: boolean
 }
 
 export const DEFAULT_VIDEO_STATE: VideoGenState = {
@@ -273,10 +269,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   // (правка 829) «Зациклено» — по умолчанию выкл.
   loop: false,
   loopPadClips: 1,
-  loopViews: 2,
-  // (правка 1008) для views=1: сдвигать точку склейки на каждом шаге
-  loopRotate: true,
-  loopInterpolate: false,
+  loopViews: 1,
 }
 
 /* ──────────────────────────── Store ──────────────────────────── */
@@ -415,7 +408,10 @@ export const useGenStore = create<GenStoreState>()(
       // (правки 890, 892) version 9: нижняя граница шагов первого прохода — 4
       // (выставлять вручную можно от 4; стандарт — 6). Сохранённые 2–3 поднимаются
       // до 4: на них результат почти никогда не сходится.
-      version: 9,
+      // (правка 1012) version 10: дефолт вида лупа — 1 (движение/rotate),
+      // а не 2 (звук). Старый дефолт 2 мигрируем один раз; осознанный выбор
+      // 2 после миграции сохраняется.
+      version: 10,
       // (правка 804) Настройки пишутся в два места: localStorage + файл на сервере
       // (data/settings/h3-gen-store.json). Выбирается более свежая копия, поэтому
       // жёсткое убийство процесса на выходе, чистка профиля или смена origin
@@ -467,6 +463,10 @@ export const useGenStore = create<GenStoreState>()(
           if (typeof v.firstSamplerSteps === 'number' && v.firstSamplerSteps < MIN_FIRST_PASS_STEPS) patch.firstSamplerSteps = MIN_FIRST_PASS_STEPS
           if (typeof v.extendClipSteps === 'number' && v.extendClipSteps < MIN_FIRST_PASS_STEPS) patch.extendClipSteps = MIN_FIRST_PASS_STEPS
           if (Object.keys(patch).length) state.video = { ...v, ...patch }
+        }
+        // (правка 1012) version 10: старый дефолт вида лупа 2 → новый 1.
+        if (oldVersion < 10 && state?.video && state.video.loopViews === 2) {
+          state.video = { ...state.video, loopViews: 1 }
         }
         return state
       },
@@ -566,12 +566,6 @@ export const useGenStore = create<GenStoreState>()(
           }
           if (result.video.loopViews !== 1 && result.video.loopViews !== 2) {
             result.video.loopViews = DEFAULT_VIDEO_STATE.loopViews
-          }
-          if (typeof result.video.loopRotate !== 'boolean') {
-            result.video.loopRotate = DEFAULT_VIDEO_STATE.loopRotate
-          }
-          if (typeof result.video.loopInterpolate !== 'boolean') {
-            result.video.loopInterpolate = DEFAULT_VIDEO_STATE.loopInterpolate
           }
           if (!Array.isArray(result.video.refs)) {
             result.video.refs = []
