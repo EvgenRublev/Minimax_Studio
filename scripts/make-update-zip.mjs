@@ -27,7 +27,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
@@ -45,9 +45,30 @@ function run(label, cmd, args) {
   }
 }
 
+/** (правка 1000) Защита от гигантского update.zip: без prune .next весит ~1.5 ГБ. */
+function dirSize(dir) {
+  let total = 0
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name)
+    total += e.isDirectory() ? dirSize(p) : statSync(p).size
+  }
+  return total
+}
+
 // .next обязан быть собранным и ужатым.
 if (!existsSync(join(ROOT, '.next', 'BUILD_ID'))) {
   console.error('[update-zip] .next не собран — сначала выполните `npm run release`')
+  process.exit(1)
+}
+
+// (правка 1000) Не даём случайно опубликовать 170+ МБ архив: старый путь
+// забывал prune-build, хотя для обновления хватает ~10 МБ .next.
+const nextBytes = dirSize(join(ROOT, '.next'))
+if (nextBytes > 150 * 1024 * 1024) {
+  console.error(
+    `[update-zip] .next весит ${(nextBytes / 1024 / 1024).toFixed(0)} МБ — ` +
+    'сначала выполните `node scripts/prune-build.mjs` (без prune архив раздувается до ~175 МБ)',
+  )
   process.exit(1)
 }
 
