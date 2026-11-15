@@ -1200,6 +1200,8 @@ export function useVideoGen() {
           loop: genMode !== 'extend' && params.loop === true ? true : undefined,
           loopPadClips: genMode !== 'extend' && params.loop === true ? params.loopPadClips : undefined,
           loopViews: genMode !== 'extend' && params.loop === true ? params.loopViews : undefined,
+          loopRotate: genMode !== 'extend' && params.loop === true ? params.loopRotate : undefined,
+          loopInterpolate: genMode !== 'extend' && params.loop === true ? params.loopInterpolate === true : undefined,
           outputSubfolder: params.outputSubfolder || '', // (правка 91)
           // (правка 161) extend-режим: клипы + рефы (refImages → extendRefs)
           extendClips: genMode === 'extend' ? (params.extendClips || []) : undefined,
@@ -1354,6 +1356,8 @@ export function useVideoGen() {
             loop_frames: Math.max(17, videoLengthFrames - 5),
             loop_pad_clips: params.loopPadClips ?? 1,
             loop_views: params.loopViews ?? 2,
+            loop_rotate: params.loopRotate !== false,
+            loop_interpolate: params.loopInterpolate === true,
           }),
           seed: actualSeed,
           resolution: `${metaOutW}x${metaOutH}`,
@@ -1374,12 +1378,14 @@ export function useVideoGen() {
             return Math.round(((p1.w * p1.h) / (1024 * 1024)) * 1000) / 1000
           })(),
           video_length: genMode !== 'extend' && params.loop === true
-            ? Math.max(17, videoLengthFrames - 5)
+            ? Math.max(17, videoLengthFrames - 5) * (params.loopInterpolate === true ? 2 : 1)
             : videoLengthFrames,
           duration_seconds: (genMode !== 'extend' && params.loop === true
             ? Math.max(17, videoLengthFrames - 5)
             : videoLengthFrames) / fps,
-          fps,
+          fps: genMode !== 'extend' && params.loop === true && params.loopInterpolate === true
+            ? fps * 2
+            : fps,
           // Extend: фактические шаги КЛИПА (override > шаги исходника/first) —
           // мету результата читает следующее продление как «авто».
           pass1_steps: genMode === 'extend'

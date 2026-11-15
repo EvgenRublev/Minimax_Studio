@@ -208,6 +208,10 @@ export interface VideoGenState {
   /** (правка 829) «Зациклено»: 2 (default) — второй вид со сдвигом на
    *  полцикла для звука (~1.8× времени сэмплинга); 1 — один вид. */
   loopViews: number
+  /** (правка 1008) Сдвигать точку склейки на клип на каждом шаге (views=1). */
+  loopRotate: boolean
+  /** (правка 1008) Интерполировать цикл RIFE ×2, включая last→first. */
+  loopInterpolate: boolean
 }
 
 export const DEFAULT_VIDEO_STATE: VideoGenState = {
@@ -270,6 +274,9 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   loop: false,
   loopPadClips: 1,
   loopViews: 2,
+  // (правка 1008) для views=1: сдвигать точку склейки на каждом шаге
+  loopRotate: true,
+  loopInterpolate: false,
 }
 
 /* ──────────────────────────── Store ──────────────────────────── */
@@ -559,6 +566,12 @@ export const useGenStore = create<GenStoreState>()(
           }
           if (result.video.loopViews !== 1 && result.video.loopViews !== 2) {
             result.video.loopViews = DEFAULT_VIDEO_STATE.loopViews
+          }
+          if (typeof result.video.loopRotate !== 'boolean') {
+            result.video.loopRotate = DEFAULT_VIDEO_STATE.loopRotate
+          }
+          if (typeof result.video.loopInterpolate !== 'boolean') {
+            result.video.loopInterpolate = DEFAULT_VIDEO_STATE.loopInterpolate
           }
           if (!Array.isArray(result.video.refs)) {
             result.video.refs = []

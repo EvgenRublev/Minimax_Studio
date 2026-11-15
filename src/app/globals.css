@@ -529,6 +529,30 @@ select {
   color-scheme: dark;
 }
 
+/* (правка 1005) Чекбоксы в стиле программы: раньше нативный белый квадрат
+   выбивался из тёмного интерфейса. Оставляем нативный контрол (у него
+   гарантированно рисуется галочка), но включаем тёмную схему и фиолетовый
+   accent-color — фон тёмный, галочка фирменная. */
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  vertical-align: middle;
+  accent-color: #8b5cf6;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, #22d3ee 55%, transparent);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 :root:not(.dark):not(.dark-gray):not(.dark-calm) select {
   color-scheme: light;
 }

@@ -49,6 +49,7 @@ import { isStreamActive } from '@/lib/assistant-stream'
 import { useExtendTarget } from '@/lib/extend-target-store' // (правка 370) цель «Продлить» из галереи
 import { MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template' // (правка 890)
 import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правка 427) «Улучшить промпт клипа» → extend-чат
+import { usePasteImageFiles } from '@/hooks/use-paste-image-files' // (правка 1006)
 import { AssistantPanel } from './assistant/assistant-panel' // (правка 442) ассистент — правая панель вкладки
 import { PromptEditorDialog, PromptFixDialog, PromptFixButton, PromptClearButton, PromptFieldTools } from './prompt-editor-dialog' // (правка 443) редактор клипа + (правка 691) диалог «Исправить» + (правка 692) кнопки на поле
 // (правка 719) Превью с полноэкранным просмотром — как на «Генерации».
@@ -290,6 +291,9 @@ export function ExtendView() {
       setUploadingRefs(false)
     }
   }, [patchVideo])
+
+  // (правка 1006) Ctrl+V на вкладке добавляет картинку в «Картинки-рефы».
+  usePasteImageFiles(addExtendImageFiles)
 
   const [uploadingVideo, setUploadingVideo] = useState(false)
 

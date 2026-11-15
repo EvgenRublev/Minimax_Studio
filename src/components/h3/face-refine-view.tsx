@@ -52,6 +52,7 @@ import { uploadInputFile } from '@/lib/upload'
 import type { FaceSelectMode } from '@/lib/comfy/face-refine-template'
 import { useTranslation } from 'react-i18next' // (правка 955)
 import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
+import { usePasteImageFiles } from '@/hooks/use-paste-image-files' // (правка 1006)
 
 const SELECT_MODES: Array<{ value: FaceSelectMode; label: string }> = [
   { value: 'largest_face', label: 'Самое крупное лицо' },
@@ -234,6 +235,12 @@ export function FaceRefineView() {
       setUploadingRef(false)
     }
   }, [setIdentityRef, facePoint, setFacePoint, patchParams])
+
+  // (правка 1006) Ctrl+V на вкладке загружает референс лица (одна картинка).
+  usePasteImageFiles((files) => {
+    const f = files[0]
+    if (f) void uploadIdentityRef(f)
+  })
 
   const start = useCallback(async () => {
     const src = sourceRef.current

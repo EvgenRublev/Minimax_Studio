@@ -58,7 +58,7 @@ import { PromptQuality } from './prompt-quality'
 import { EXAMPLES } from './learn/prompt-guide'
 import { usePromptHistory } from '@/lib/prompt-history-store'
 import { isStreamActive } from '@/lib/assistant-stream'
-import { getClipboardImageFiles, getClipboardImageFromApi, hasClipboardImage } from '@/lib/paste-utils'
+import { usePasteImageFiles } from '@/hooks/use-paste-image-files'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from './video-gallery-grid'
 import { GenerationStatus } from './generation-status'
 // (правка 719) Общий компонент превью с полноэкранным просмотром —
@@ -286,6 +286,21 @@ export function GenerateView() {
     }
   }, [video.videoLength, video.loopPadClips, fps, framesMin])
 
+  // (правка 1007) «Зациклено» требует минимум 8 шагов на первом проходе,
+  // иначе модель не успевает свести концы. Ставим автоматически при включении
+  // и при переключении Драфт/Полное, но не снижаем уже выставленные 8+.
+  const LOOP_MIN_FIRST_STEPS = 8
+  useEffect(() => {
+    if (video.loop !== true || video.mode === 'extend') return
+    if (video.pipeline === 'draft') {
+      if ((video.draftSteps ?? 0) < LOOP_MIN_FIRST_STEPS) {
+        patchVideo({ draftSteps: LOOP_MIN_FIRST_STEPS })
+      }
+    } else if ((video.firstSamplerSteps ?? 0) < LOOP_MIN_FIRST_STEPS) {
+      patchVideo({ firstSamplerSteps: LOOP_MIN_FIRST_STEPS })
+    }
+  }, [video.loop, video.mode, video.pipeline, video.draftSteps, video.firstSamplerSteps, patchVideo])
+
   /* ──────────── Reference uploads ──────────── */
 
   const [uploadingRefs, setUploadingRefs] = useState(false)
@@ -512,65 +527,10 @@ export function GenerateView() {
    * Дедупликация: обе ветки могут сработать на один и тот же Ctrl+V,
    * поэтому фиксируем метку времени и вторая ветка отбрасывает повтор.
    */
-  const lastRefPasteAt = useRef(0)
-  useEffect(() => {
-    const DEDUP_MS = 2000
-    const tryAddFiles = (files: File[], viaPasteEvent: boolean): boolean => {
-      const now = Date.now()
-      if (now - lastRefPasteAt.current < DEDUP_MS) return false
-      lastRefPasteAt.current = now
-      if (!viaPasteEvent && files.length === 0) return false
-      void addReferenceFiles(files)
-      return true
-    }
+  // (правка 1006) Ctrl+V → референс на всей вкладке — общий хук, тот же
+  // механизм используется в Refine, ControlNet и Face Refine.
+  usePasteImageFiles(addReferenceFiles)
 
-    // (правка 587) Перехват только «нецелевых» вставок: если paste/keydown
-    // случился ВНУТРИ редактируемого поля (чат ассистента, textarea промпта,
-    // input), событие принадлежит ему — capture-фаза + stopPropagation раньше
-    // отбирали картинку у onPaste чата (вставка вложением была недоступна).
-    const isEditableTarget = (t: EventTarget | null): boolean => {
-      if (!(t instanceof HTMLElement)) return false
-      if (t.isContentEditable) return true
-      const tag = t.tagName
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-    }
-
-    const onPaste = (e: ClipboardEvent) => {
-      if (e.defaultPrevented) return
-      if (isEditableTarget(e.target)) return // поле ввода само разберётся
-      if (!hasClipboardImage(e.clipboardData)) return
-      // Синхронно — до любых await, иначе браузер отклонит отмену.
-      e.preventDefault()
-      e.stopPropagation()
-      const files = getClipboardImageFiles(e.clipboardData).then((list) => {
-        // Метка ставится здесь (синхронно в микротаске), чтобы keydown-фолбэк
-        // не добавил ту же картинку дважды.
-        lastRefPasteAt.current = Date.now()
-        if (list.length > 0) void addReferenceFiles(list)
-      })
-      void files
-    }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'v') {
-        if (isEditableTarget(e.target)) return // Ctrl+V в поле ввода — не наш
-        void (async () => {
-          // Даём шанс обычному paste-событию (оно приходит в том же тике
-          // ввода и ставит метку раньше, чем разрешится clipboard.read()).
-          const file = await getClipboardImageFromApi()
-          if (!file) return // в буфере нет картинки — обычная текстовая вставка
-          tryAddFiles([file], false)
-        })()
-      }
-    }
-
-    document.addEventListener('paste', onPaste, true)
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      document.removeEventListener('paste', onPaste, true)
-      window.removeEventListener('keydown', onKeyDown, true)
-    }
-  }, [addReferenceFiles])
 
   /* ──────────── Prompt mentions (from refs) ──────────── */
 
@@ -904,6 +864,8 @@ export function GenerateView() {
       loop: v.mode !== 'extend' && v.loop === true,
       loopPadClips: v.loopPadClips,
       loopViews: v.loopViews,
+      loopRotate: v.loopRotate,
+      loopInterpolate: v.loopInterpolate,
       latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
       outputSubfolder: v.outputFolder || '', // (правка 91) папка проекта
       })
@@ -1241,13 +1203,6 @@ export function GenerateView() {
                 </button>
               ))}
             </div>
-            {/* (правка 950) FLF не делает низкоразрешённый Pass 1: оба прохода
-                идут в целевом разрешении — по времени это заметно дороже t2v. */}
-            {video.mode === 'flf' && (
-              <div className="text-[10px] text-amber-300/80">
-                {tt("Оба прохода идут в полном разрешении (3D-апскейлер пропускается) — «Кадры» дороже обычного «Текста» примерно вдвое. Для пробы возьмите 720p или драфт.")}
-              </div>
-            )}
           </div>
 
           {/* (правка 829) «Зациклено»: бесшовный цикл — конец переходит в начало.
@@ -1257,9 +1212,6 @@ export function GenerateView() {
           {(() => {
             const loopDisabled = video.mode === 'extend'
             const loopOn = video.loop === true && !loopDisabled
-            const stepsNow = video.pipeline === 'draft'
-              ? Math.max(MIN_FIRST_PASS_STEPS, video.draftSteps ?? 6)
-              : Math.max(MIN_FIRST_PASS_STEPS, video.firstSamplerSteps ?? 6)
             return (
               <div className="space-y-1.5">
                 <label
@@ -1279,7 +1231,19 @@ export function GenerateView() {
                     type="checkbox"
                     checked={loopOn}
                     disabled={loopDisabled}
-                    onChange={(e) => patchVideo({ loop: e.target.checked })}
+                    onChange={(e) => {
+                      const on = e.target.checked
+                      // (правка 1007) при включении сразу поднимаем первый проход
+                      // до 8 шагов; выше уже выставленное значение не трогаем.
+                      patchVideo(on
+                        ? {
+                          loop: true,
+                          ...(video.pipeline === 'draft'
+                            ? { draftSteps: Math.max(8, video.draftSteps ?? 0) }
+                            : { firstSamplerSteps: Math.max(8, video.firstSamplerSteps ?? 0) }),
+                        }
+                        : { loop: false })
+                    }}
                     className="mt-0.5 accent-violet-400"
                   />
                   <span className="min-w-0 flex-1 space-y-1">
@@ -1300,15 +1264,71 @@ export function GenerateView() {
                     </span>
                     {loopOn && (
                       <span className="block text-[10px] leading-relaxed text-muted-foreground/80">
-                        {tt("Для чистого стыка: статичная камера и циклическое движение (дыхание, покачивание, ветер) — без dоlly/pan и разовых действий.")}
+                        {tt("Описывайте состояние, а не события: статичная камера, одно циклическое движение, без «потом» и накопительных эффектов. Референс-картинка помогает; first/last-frame якоря — мешают.")}
                       </span>
                     )}
                   </span>
                 </label>
-                {loopOn && stepsNow < 8 && (
-                  <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">
-                    {tt("Сейчас")}{' '} {stepsNow} {' '}{tt("шаг(а) — модель может не успеть свести концы. Для чистого стыка поставьте 8+ шагов или включите «Полное».")}
-                  </p>
+                {/* (правка 1008) Настройки лупа: 2 вида — чистый звук,
+                   1 вид + rotate — ровнее движение в точке стыка. */}
+                {loopOn && (
+                  <div className="space-y-1 px-1">
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="shrink-0">{tt("Видов:")}</span>
+                      <button
+                        type="button"
+                        onClick={() => patchVideo({ loopViews: 2 })}
+                        className={cn(
+                          'rounded-md border px-1.5 py-0.5 transition-colors',
+                          video.loopViews !== 1
+                            ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                            : 'border-border text-muted-foreground hover:border-cyan-500/30',
+                        )}
+                        title={tt("Второй вид со сдвигом на полцикла убирает «кашу» в звуке на стыке, но занимает примерно вдвое больше времени.")}
+                      >
+                        2 · {tt("звук")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => patchVideo({ loopViews: 1 })}
+                        className={cn(
+                          'rounded-md border px-1.5 py-0.5 transition-colors',
+                          video.loopViews === 1
+                            ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                            : 'border-border text-muted-foreground hover:border-cyan-500/30',
+                        )}
+                        title={tt("Один вид быстрее; включите «сдвигать склейку», чтобы уменьшить скачок движения в лупе.")}
+                      >
+                        1 · {tt("движение")}
+                      </button>
+                    </div>
+                    {video.loopViews === 1 && (
+                      <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={video.loopRotate !== false}
+                          onChange={(e) => patchVideo({ loopRotate: e.target.checked })}
+                        />
+                        {tt("Сдвигать точку склейки на каждом шаге")}
+                      </label>
+                    )}
+                    <label
+                      className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer"
+                      title={tt("RIFE ×2 интерполирует весь цикл, включая переход последний→первый кадр, и делает видео 48 fps без изменения длительности. Нужен ComfyUI-Frame-Interpolation: недостающий RIFE скачается при первом запуске.")}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={video.loopInterpolate === true}
+                        onChange={(e) => patchVideo({ loopInterpolate: e.target.checked })}
+                      />
+                      {tt("Плавный луп (RIFE ×2, 48 fps)")}
+                    </label>
+                    <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                      {video.loopViews === 1
+                        ? tt("1 вид + сдвиг: ровнее движение на стыке. Если звук на стыке «кашей» — верните 2 вида.")
+                        : tt("2 вида: чище звук на стыке. Если дёргается картинка — попробуйте 1 вид + сдвиг.")}
+                    </p>
+                  </div>
                 )}
                 {loopOn && loopInfo.overTrained && (
                   <p className="text-[10px] leading-relaxed text-amber-400/90 px-1">

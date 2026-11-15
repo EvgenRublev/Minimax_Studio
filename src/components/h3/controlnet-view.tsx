@@ -39,6 +39,7 @@ import { MentionTextarea, type MentionItem } from './mention-textarea' // (пр�
 // История промптов + Готовые примеры (портал-дропдауны).
 import { PromptEditorDialog, PromptEditButton, PromptFixButton, PromptClearButton, PromptFixDialog, PromptFieldTools } from './prompt-editor-dialog'
 import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правка 691) «Исправить» прямо из поля
+import { usePasteImageFiles } from '@/hooks/use-paste-image-files' // (правка 1006)
 import { PromptQuality } from './prompt-quality'
 // (правка 719) Превью рефов с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from './ref-preview-thumb'
@@ -313,6 +314,9 @@ export function ControlNetView() {
       setUploadingRefs(false)
     }
   }, [downscaleRef])
+
+  // (правка 1006) Ctrl+V на вкладке добавляет картинку в референсы.
+  usePasteImageFiles(addRefFiles)
 
   const removeRef = useCallback((id: string) => {
     useControlNetTarget.getState().removeRefImage(id)

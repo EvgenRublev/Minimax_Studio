@@ -303,6 +303,10 @@ export interface MiniMaxH3Params {
    *  полцикла для звука (убирает «кашу»/перегруз на стыке, ~1.8× времени
    *  сэмплинга); 1 — один вид. */
   loopViews?: number
+  /** (правка 1008) views=1: сдвигать точку склейки на клип каждый шаг. */
+  loopRotate?: boolean
+  /** (правка 1008) RIFE ×2 через стык (нужен ComfyUI-Frame-Interpolation). */
+  loopInterpolate?: boolean
 }
 
 /** Node IDs for reference images (up to 9). */
@@ -1182,14 +1186,19 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   const loopOn = p.loop === true
   const loopPadClips = Math.max(1, Math.min(8, Math.round(p.loopPadClips ?? 1)))
   const loopViews = p.loopViews === 1 ? 1 : 2
+  // (правка 1008) Интерполяция всего лупа после декода: RIFE/FILM должен
+  // видеть переход last→first; иначе он интерполирует только соседние кадры.
+  const loopInterpolate = loopOn && p.loopInterpolate === true
+  const loopFps = loopInterpolate ? 48 : 24
   // (правка 829) хвост цепочки модели: sparse-нода, если включена, иначе backend
   const modelChainTail: [string, number] = (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0]
   // «Зациклено»: патч цикла — ПОСЛЕДНИМ в цепочке, чтобы сэмплер, гайдер и
   // превью получили модель с уже навешенной обёрткой.
   const modelTail: [string, number] = loopOn ? ['46:60', 0] : modelChainTail
-  // (правка 829) Источники кадров/звука для кропа и VHS: обычный декод или Loop Decode.
+  // Источники кадров/звука для кропа и VHS: обычный декод или Loop Decode.
   const decodeImageSrc: [string, number] = loopOn ? ['46:60:dec', 0] : ['46:25', 0]
   const decodeAudioSrc: [string, number] = loopOn ? ['46:60:dec', 1] : ['46:14', 0]
+  const outputImageSrc: [string, number] = loopInterpolate ? ['46:61', 0] : decodeImageSrc
 
   const workflow: Record<string, unknown> = {
     // ═══════════════════════════════════════════════
@@ -1327,6 +1336,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
           model: modelChainTail,
           pad_clips: loopPadClips,
           views: loopViews,
+          rotate: p.loopRotate !== false,
         },
         class_type: 'MiniMaxStudioLoop',
         _meta: { title: `Loop: бесшовный цикл (pad ${loopPadClips}, views ${loopViews})` },
@@ -1616,6 +1626,22 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       },
     }),
 
+    // (правка 1008) Loop Interpolate: RIFE ×2 по всему циклу, включая
+    // переход last→first. Кадров становится вдвое больше, fps — 48,
+    // длительность не меняется; звук остаётся исходным.
+    ...(loopInterpolate ? {
+      '46:61': {
+        inputs: {
+          images: decodeImageSrc,
+          method: 'RIFE 4.9',
+          multiplier: 2,
+          fps: 24,
+        },
+        class_type: 'LoopInterpolate',
+        _meta: { title: 'Loop Interpolate (RIFE ×2)' },
+      },
+    } : {}),
+
     // (правка 124) Кроп gen-разрешения (кратное 32, чуть больше номинала)
     // до ТОЧНОГО номинала (например 16:9 1080p: 1920×1088 → 1920×1080).
     // Нода ставится только когда gen ≠ номинал — иначе цепочка без изменений.
@@ -1625,7 +1651,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     ...(needsCrop && {
       '46:48': {
         inputs: {
-          image: decodeImageSrc,
+          image: outputImageSrc,
           width: final.outW,
           height: final.outH,
           x: final.cropX,
@@ -1652,7 +1678,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
 
     '45': {
       inputs: {
-        frame_rate: 24,
+        frame_rate: loopFps,
         loop_count: 0,
         // (правка 91) Подпапка = папка проекта: VHS пишет в output/<folder>/.
         // Имя уже санитизировано на сервере (generate-роут, один сегмент).
@@ -1664,7 +1690,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         save_output: true,
         // (правка 121) через кроп-ноду, если соотношению нужен точный кроп
         // (правка 930) — во всех пайплайнах, включая «Драфт» и «Кадры»
-        images: needsCrop ? ['46:48', 0] : decodeImageSrc,
+        images: needsCrop ? ['46:48', 0] : outputImageSrc,
         audio: decodeAudioSrc,
       },
       class_type: 'VHS_VideoCombine',

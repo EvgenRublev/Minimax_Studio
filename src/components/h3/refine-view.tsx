@@ -51,6 +51,7 @@ import {
 import { VideoGalleryGrid, type VideoGalleryFile } from '@/components/h3/video-gallery-grid'
 import { PromptFixDialog } from '@/components/h3/prompt-editor-dialog' // (правка 691) «Исправить промпт» из поля
 import { requestImprovePrompt } from '@/hooks/use-improve-prompt' // (правка 691) задание → чат ассистента
+import { usePasteImageFiles } from '@/hooks/use-paste-image-files' // (правка 1006)
 import { GenerationStatus } from '@/components/h3/generation-status'
 // (правка 719) Превью рефов с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
@@ -255,6 +256,10 @@ export function RefineView() {
       setUploadingRefs(false)
     }
   }, [])
+
+  // (правка 1006) Ctrl+V на вкладке добавляет картинку в референсы.
+  // Референсы у Refine доступны только для источника с диска (inputSource).
+  usePasteImageFiles(addRefFiles, Boolean(source?.inputSource))
 
   const removeRef = useCallback((id: string) => {
     useRefineTarget.getState().removeUserRef(id)

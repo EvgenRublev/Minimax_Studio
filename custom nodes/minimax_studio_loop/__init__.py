@@ -38,6 +38,7 @@ import torch
 
 import comfy.patcher_extension
 import comfy.utils
+import nodes
 from comfy_extras.nodes_audio import vae_decode_audio
 
 # 17 кадров ↔ 5 видео-латентов; хвост 5 кадров ↔ 2 латента
@@ -169,7 +170,11 @@ def loop_wrapper(executor, x, timestep, context, transformer_options, **kwargs):
                      sig, probe(out[0]), probe(out[1]))
         return out[0][:, :, pv:pv + n].roll(-sv, dims=2), out[1][..., pa:pa + na].roll(-sa, dims=-1)
 
-    v, a = view(0)
+    # (правка 1008) rotate: с views=1 точка склейки сдвигается на клип
+    # на каждом шаге сэмплинга. Это убирает скачок движения в точке лупа
+    # (приём из upstream ComfyUI-MiniMaxH3-Loop); с views=2 не применяется.
+    step = transformer_options.get("minimax_studio_loop_step")
+    v, a = view(step(transformer_options["sigmas"]) % clips if step else 0)
     if int(transformer_options["minimax_studio_loop_views"]) == 2 and clips > 1:
         half = clips // 2
         _, a2 = view(half)
@@ -196,6 +201,15 @@ def loop_sampler_wrapper(executor, guider, sigmas, extra_args, callback, noise, 
         generator = torch.Generator().manual_seed(((extra_args.get("seed") or 0) + 1) % 2 ** 64)
         swap = torch.randn(video_noise.shape, generator=generator, dtype=video_noise.dtype).to(video_noise.device) - video_noise
     extra_args["model_options"].setdefault("transformer_options", {})["minimax_studio_loop_noise_swap"] = swap
+    # (правка 1008) rotate для views=1: номер шага по сигме, чтобы на каждом
+    # шаге оборачивать латент на другой клип.
+    to = extra_args["model_options"].setdefault("transformer_options", {})
+    to["minimax_studio_loop_step"] = None
+    if to.get("minimax_studio_loop_rotate") and int(to.get("minimax_studio_loop_views", 2)) == 1:
+        schedule = sigmas[:-1].detach().float().cpu()
+        to["minimax_studio_loop_step"] = lambda sigma: int(
+            (schedule - float(sigma.flatten()[0])).abs().argmin()
+        )
     return executor(guider, sigmas, extra_args, callback, noise, *args, **kwargs)
 
 
@@ -209,6 +223,8 @@ class MiniMaxStudioLoop:
         }, "optional": {
             "views": ("INT", {"default": 2, "min": 1, "max": 2,
                               "tooltip": "2 — дополнительно сэмплировать цикл со сдвигом на полцикла и брать звук вокруг стыка оттуда. Убирает «кашу» в звуке на стыке; время сэмплинга примерно вдвое."}),
+            "rotate": ("BOOLEAN", {"default": True,
+                                   "tooltip": "Только для views=1: сдвигать точку склейки на клип на каждом шаге сэмплинга. Убирает скачок движения в лупе."}),
         }}
 
     RETURN_TYPES = ("MODEL",)
@@ -217,11 +233,12 @@ class MiniMaxStudioLoop:
     DESCRIPTION = ("Seamless H3 loop: sample the latent with its end wrapped around to its start. "
                    "Set the latent length to 17k+5 frames; the loop is 17k frames. Decode with MiniMax Studio Loop Decode.")
 
-    def patch(self, model, pad_clips, views=2):
+    def patch(self, model, pad_clips, views=2, rotate=True):
         model = model.clone()
         to = model.model_options.setdefault("transformer_options", {})
         to["minimax_studio_loop_pad_clips"] = int(pad_clips)
         to["minimax_studio_loop_views"] = int(views)
+        to["minimax_studio_loop_rotate"] = bool(rotate)
         model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
                                    "minimax_studio_loop", loop_wrapper)
         model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE,
@@ -286,13 +303,53 @@ class MiniMaxStudioLoopDecode:
         return (images, out)
 
 
+INTERPOLATORS = {
+    "FILM": ("FILM VFI", "film_net_fp32.pt", {}),
+    "RIFE 4.9": ("RIFE VFI", "rife49.pth", {"fast_mode": True, "ensemble": True}),
+}
+
+
+class LoopInterpolate:
+    """(правка 1008) Интерполяция всего цикла, включая кадры между последним
+    и первым. Без неё RIFE/FILM не видят перехода «конец → начало»."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE",),
+            "method": (list(INTERPOLATORS),),
+            "multiplier": ("INT", {"default": 2, "min": 2, "max": 8}),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 1.0}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "FLOAT")
+    RETURN_NAMES = ("IMAGE", "fps")
+    FUNCTION = "interpolate"
+    CATEGORY = "MiniMax Studio"
+    DESCRIPTION = "Frame-interpolate a looping clip, including last→first; needs ComfyUI-Frame-Interpolation."
+
+    def interpolate(self, images, method, multiplier, fps):
+        node_name, ckpt, extra = INTERPOLATORS[method]
+        if node_name not in nodes.NODE_CLASS_MAPPINGS:
+            raise RuntimeError("Loop Interpolate needs ComfyUI-Frame-Interpolation installed")
+        # Замыкаем цикл первым кадром, интерполируем и убираем дубль в конце:
+        # N кадров × multiplier, та же длительность при fps × multiplier.
+        frames = torch.cat((images, images[:1]), dim=0)
+        out = nodes.NODE_CLASS_MAPPINGS[node_name]().vfi(
+            ckpt, frames, multiplier=multiplier, **extra,
+        )[0]
+        return (out[:-1], fps * multiplier)
+
+
 NODE_CLASS_MAPPINGS = {
     "MiniMaxStudioLoop": MiniMaxStudioLoop,
     "MiniMaxStudioLoopDecode": MiniMaxStudioLoopDecode,
+    "LoopInterpolate": LoopInterpolate,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxStudioLoop": "MiniMax Studio · Loop",
     "MiniMaxStudioLoopDecode": "MiniMax Studio · Loop Decode",
+    "LoopInterpolate": "MiniMax Studio · Loop Interpolate",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
