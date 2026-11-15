@@ -501,6 +501,7 @@ export function TileUpscaleView() {
       <section className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto p-3">
           <VideoGalleryGrid
+            folder={outputFolder}
             files={gallery.files}
             loading={gallery.loading}
             onRefresh={() => void gallery.load()}

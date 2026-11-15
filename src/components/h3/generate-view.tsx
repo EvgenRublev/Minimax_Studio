@@ -651,13 +651,6 @@ export function GenerateView() {
    * (правка 495) Вложенные папки: фильтр включает содержимое подпапок
    * (префиксное совпадение путей 'a/b'). */
   const outputFolder = video.outputFolder || ''
-  const visibleGalleryFiles = useMemo(
-    () => galleryFiles.filter((f) => {
-      const sub = f.subfolder || ''
-      return outputFolder === '' ? sub === '' : sub === outputFolder || sub.startsWith(outputFolder + '/')
-    }),
-    [galleryFiles, outputFolder],
-  )
 
   /* ──────────── Generation ──────────── */
 
@@ -2354,7 +2347,8 @@ export function GenerateView() {
         {/* Results */}
         <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           <VideoGalleryGrid
-            files={visibleGalleryFiles}
+            folder={outputFolder}
+            files={galleryFiles}
             loading={galleryLoading}
             onRefresh={loadGallery}
             onDeleteFile={deleteFile}

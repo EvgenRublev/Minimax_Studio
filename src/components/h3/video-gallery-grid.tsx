@@ -96,6 +96,9 @@ interface VideoGalleryGridProps {
   onToggleOnlyLiked?: () => void
   /** Сколько избранных видео в текущем фильтре — для подписи чипа. */
   likedCount?: number
+  /** (правка 1001) Показывать только видео из этой папки.
+   *  '' = «Общая папка» — показывать все видео. */
+  folder?: string
 }
 
 /**
@@ -284,6 +287,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   onlyLiked = false,
   onToggleOnlyLiked,
   likedCount,
+  folder,
 }: VideoGalleryGridProps) {
   const { t: tt } = useTranslation() // (правка 955)
   const generationActive = useGenQueue((s) =>
@@ -313,6 +317,17 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   }
   const gridCols = PREVIEW_COLUMNS[previewSize]
 
+  // (правка 1001) Фильтр по выбранной папке — одинаковый на всех вкладках:
+  // «Общая папка» показывает ВСЕ видео (включая папки), конкретная папка —
+  // только её и её подпапки.
+  const shownFiles = useMemo(() => {
+    if (folder === undefined || folder === '') return files
+    return files.filter((f) => {
+      const sub = f.subfolder || ''
+      return sub === folder || sub.startsWith(folder + '/')
+    })
+  }, [files, folder])
+
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [metaIndex, setMetaIndex] = useState<number | null>(null)
   /** Удаление, ожидающее подтверждения (диалог «Удалить видео?»). */
@@ -341,18 +356,18 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   /** Выбранные файлы могли исчезнуть (удаление/обновление списка) — чистим. */
   useEffect(() => {
     setSelectedKeys((prev) => {
-      const next = prev.filter((k) => files.some((f) => `${f.subfolder}/${f.filename}` === k))
+      const next = prev.filter((k) => shownFiles.some((f) => `${f.subfolder}/${f.filename}` === k))
       return next.length === prev.length ? prev : next
     })
-  }, [files])
+  }, [shownFiles])
 
   const openCompare = useCallback(() => {
     if (selectedKeys.length !== 2) return
-    const a = files.find((f) => `${f.subfolder}/${f.filename}` === selectedKeys[0])
-    const b = files.find((f) => `${f.subfolder}/${f.filename}` === selectedKeys[1])
+    const a = shownFiles.find((f) => `${f.subfolder}/${f.filename}` === selectedKeys[0])
+    const b = shownFiles.find((f) => `${f.subfolder}/${f.filename}` === selectedKeys[1])
     if (!a || !b) return
     setCompare({ a, b })
-  }, [selectedKeys, files])
+  }, [selectedKeys, shownFiles])
 
   /* (правка 730) Esc — снять выделение, Enter (при двух выбранных) — сравнение.
      Пока открыт какой-нибудь диалог, клавиши не трогаем: ими управляет диалог. */
@@ -388,8 +403,8 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   // элементы удалённых карточек продолжали жить в videoRefs и на hover
   // по старому индексу мог проигрываться чужой <video>.
   useEffect(() => {
-    videoRefs.current.length = files.length
-  }, [files])
+    videoRefs.current.length = shownFiles.length
+  }, [shownFiles])
   const durations = useGenDurations((s) => s.entries)
 
   // Build a filename → entry map. Entries without a filename (very old
@@ -474,7 +489,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
   }, [pendingDelete, handleDelete])
 
   /* ── Empty state ── */
-  if (!loading && files.length === 0 && !generationActive) {
+  if (!loading && shownFiles.length === 0 && !generationActive) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-12">
         <VideoIcon className="w-10 h-10 text-muted-foreground/30 mb-3" />
@@ -503,7 +518,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 min-w-0">
           <Badge variant="secondary" className="text-xs shrink-0">
-            {files.length} {' '}{tt("видео")}
+            {shownFiles.length} {' '}{tt("видео")}
           </Badge>
           {/* (правка 729) Подсказка о сравнении: Ctrl+клик по двум карточкам */}
           {selectedKeys.length === 0 ? (
@@ -602,7 +617,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
       <div className={cn('grid gap-3', gridCols)}>
         <LiveGenerationCard />
         <AnimatePresence mode="popLayout">
-          {files.map((file, index) => (
+          {shownFiles.map((file, index) => (
             <motion.div
               key={`${file.subfolder}/${file.filename}`}
               initial={{ opacity: 0, scale: 0.9 }}
@@ -1088,7 +1103,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
               <div className="absolute bottom-0 left-0 right-0 rounded-b-lg p-1.5">
                 <div className="flex items-center justify-between gap-1">
                   <p className="text-[10px] text-white/70 truncate font-mono">
-                    {String(files.length - index).padStart(3, '0')}
+                    {String(shownFiles.length - index).padStart(3, '0')}
                   </p>
                   {(() => {
                     // Время генерации: приоритет — значение из метаданных
@@ -1125,7 +1140,7 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
           (раньше было двойное подтверждение). */}
       {lightboxIndex !== null && (
         <VideoLightbox
-          files={files.map((f) => ({ url: f.url, filename: f.filename, subfolder: f.subfolder }))}
+          files={shownFiles.map((f) => ({ url: f.url, filename: f.filename, subfolder: f.subfolder }))}
           initialIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onDelete={onDeleteFile ? (filename, subfolder) => handleDelete(filename, subfolder) : undefined}
@@ -1133,10 +1148,10 @@ export const VideoGalleryGrid = memo(function VideoGalleryGrid({
       )}
 
       {/* Metadata dialog */}
-      {metaIndex !== null && files[metaIndex] && (
+      {metaIndex !== null && shownFiles[metaIndex] && (
         <MetaDialog
-          filePath={`${files[metaIndex].subfolder}/${files[metaIndex].filename}`}
-          filename={files[metaIndex].filename}
+          filePath={`${shownFiles[metaIndex].subfolder}/${shownFiles[metaIndex].filename}`}
+          filename={shownFiles[metaIndex].filename}
           onClose={() => setMetaIndex(null)}
         />
       )}

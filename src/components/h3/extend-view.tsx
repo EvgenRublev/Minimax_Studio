@@ -1276,6 +1276,7 @@ export function ExtendView() {
             Галерея получает оставшееся место, скроллится вертикально. */}
         <div style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto' }} className="px-5 pb-5">
           <VideoGalleryGrid
+            folder={outputFolder}
             files={galleryFiles}
             loading={galleryLoading}
             onRefresh={loadGallery}

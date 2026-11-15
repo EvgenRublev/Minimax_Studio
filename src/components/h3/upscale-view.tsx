@@ -1131,6 +1131,7 @@ export function UpscaleView() {
         {/* Results — ОБЩАЯ галерея (та же, что в «Генерация» и «Галерея») */}
         <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           <VideoGalleryGrid
+            folder={outputFolder}
             files={galleryFiles}
             loading={galleryLoading}
             onRefresh={loadGallery}
