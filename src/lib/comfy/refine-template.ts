@@ -1962,7 +1962,9 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
       // латенте один и тот же участок таймлайна лежит дважды: хвост
       // предыдущего рендера и перерисованная голова следующего окна.
       // Смешиваем пару (prev→win, 0→1) и выбрасываем дубли — на выходе
-      // ровно исходная длина, а стык становится 17-кадровым переходом.
+      // ровно исходная длина. (правка 1022) Смешиваем только последние
+      // 5 кадров, а не весь 17-кадровый перехлёст, чтобы не было двойной
+      // экспозиции; геометрия/длина не меняются.
       if (blendSeams.length > 0) {
         const blendParts: string[] = []
         let cursorFrames = 0
@@ -1987,9 +1989,17 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             class_type: 'ImageFromBatch',
             _meta: { title: `Стык ${idx + 1}: перерисованная голова (${s.frames} кадр.)` },
           }
+          const visibleBlend = Math.max(1, Math.min(5, s.frames))
+          const blendStart = Math.max(0, s.frames - visibleBlend)
           nodes[`csmask_${idx}`] = {
             inputs: {
-              points_string: `0:(0.0),\n${Math.max(1, s.frames - 1)}:(1.0)`,
+              // (правка 1022) Длинный 17-кадровый кроссфейд давал «наложение»
+              // двух рендеров. Геометрию окон не меняем (17 кадров дублей),
+              // но смешиваем только последние 5 кадров перехлёста: до этого
+              // идёт хвост прошлого рендера, после — уже новый рендер.
+              points_string: blendStart > 0
+                ? `0:(0.0),\n${blendStart}:(0.0),\n${s.frames - 1}:(1.0)`
+                : `0:(0.0),\n${s.frames - 1}:(1.0)`,
               invert: false,
               frames: s.frames,
               width: 16,
@@ -1997,7 +2007,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
               interpolation: 'linear',
             },
             class_type: 'CreateFadeMaskAdvanced',
-            _meta: { title: `Стык ${idx + 1}: кроссфейд ${s.frames} кадр.` },
+            _meta: { title: `Стык ${idx + 1}: кроссфейд ${visibleBlend}/${s.frames} кадр.` },
           }
           nodes[`cseam_${idx}`] = {
             inputs: {

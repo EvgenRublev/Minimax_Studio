@@ -2198,21 +2198,19 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       'extv_tres': {
         inputs: {
           image: ['extv_tail', 0],
-          // (правка 247) Хвост кодируется под канву Extender'а = разрешение
-          // исходника (final) — low-res канвы в однопроходной схеме нет.
-          // (правка 423) В двухпроходном режиме — под канву pass 1 (lowRes):
-          // сид-латент должен совпадать по пространству с латентом клипа.
-          width: passW,
-          height: passH,
-          upscale_method: 'lanczos',
-          keep_proportion: 'stretch',
-          pad_color: '0, 0, 0',
-          crop_position: 'center',
-          divisible_by: 16,
-          device: 'cpu',
+          // (правка 1016) НЕ ресайз и НЕ stretch: при 1296×720 канва
+          // Extender'а 1312×736, и любой масштаб менял размер лица/фона.
+          // Дополняем кадр полями 1:1; выходной ImageCrop уберёт их обратно.
+          left: final.cropX,
+          right: final.genW - final.outW - final.cropX,
+          top: final.cropY,
+          bottom: final.genH - final.outH - final.cropY,
+          extra_padding: 0,
+          pad_mode: 'edge',
+          color: '0, 0, 0',
         },
-        class_type: 'ImageResizeKJv2',
-        _meta: { title: `Хвост → ${passW}×${passH} (канва Extender)` },
+        class_type: 'ImagePadKJ',
+        _meta: { title: `Хвост → ${passW}×${passH} (канва Extender, без масштаба)` },
       },
       // (правка 419) Референс исходника для кондишнинга: ВЕСЬ клин (батч
       // кадров), поданный как ref_image (картинка) — как в эталоне
@@ -2223,17 +2221,17 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       'extv_fres': {
         inputs: {
           image: ['extv_load', 0],
-          width: final.genW,
-          height: final.genH,
-          upscale_method: 'lanczos',
-          keep_proportion: 'stretch',
-          pad_color: '0, 0, 0',
-          crop_position: 'center',
-          divisible_by: 16,
-          device: 'cpu',
+          // (правка 1016) см. extv_tres: сохраняем масштаб исходника 1:1.
+          left: final.cropX,
+          right: final.genW - final.outW - final.cropX,
+          top: final.cropY,
+          bottom: final.genH - final.outH - final.cropY,
+          extra_padding: 0,
+          pad_mode: 'edge',
+          color: '0, 0, 0',
         },
-        class_type: 'ImageResizeKJv2',
-        _meta: { title: `Исходник-реф → ${final.genW}×${final.genH} (весь клин)` },
+        class_type: 'ImagePadKJ',
+        _meta: { title: `Исходник-реф → ${final.genW}×${final.genH} (весь клин, без масштаба)` },
       },
       'extv_tenc': {
         inputs: {

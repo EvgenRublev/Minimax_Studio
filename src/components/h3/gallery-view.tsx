@@ -25,6 +25,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   FilmIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -36,6 +38,13 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useGenStore } from '@/lib/gen-store'
 import { VideoGalleryGrid, H3_VIDEO_DND_MIME } from './video-gallery-grid'
 import { useVideoGallery } from './use-video-gallery'
@@ -84,6 +93,11 @@ export function GalleryView() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
+  // (правка 1014) Свёрнутые папки: путь родителя → его подпапки скрыты.
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
+  // (правка 1015) Тематическое подтверждение удаления вместо нативного белого окна.
+  const [folderToDelete, setFolderToDelete] = useState<string | null>(null)
+  const [deletingFolder, setDeletingFolder] = useState(false)
   const newInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
 
@@ -97,6 +111,46 @@ export function GalleryView() {
       renameInputRef.current?.select()
     }
   }, [renaming])
+
+  /** (правка 1014) Есть ли у папки вложенные папки. */
+  const hasSubfolders = useCallback(
+    (folder: string) => folders.some((f) => f.startsWith(folder + '/')),
+    [folders],
+  )
+
+  /** (правка 1014) Дерево с учётом свёрнутых родителей. */
+  const visibleFolders = useMemo(() => {
+    return folders.filter((f) => {
+      const parts = f.split('/')
+      for (let i = 1; i < parts.length; i++) {
+        if (collapsedFolders.has(parts.slice(0, i).join('/'))) return false
+      }
+      return true
+    })
+  }, [folders, collapsedFolders])
+
+  // Если активной стала подпапка свёрнутого родителя — раскрываем её.
+  useEffect(() => {
+    if (filter === '__all__' || filter === '') return
+    const parts = filter.split('/')
+    const ancestors = Array.from({ length: Math.max(0, parts.length - 1) }, (_, i) =>
+      parts.slice(0, i + 1).join('/'),
+    )
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      for (const a of ancestors) next.delete(a)
+      return next.size === prev.size ? prev : next
+    })
+  }, [filter])
+
+  const toggleFolder = useCallback((folder: string) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(folder)) next.delete(folder)
+      else next.add(folder)
+      return next
+    })
+  }, [])
 
   /** (правка 495) Счётчики — с учётом вложенных папок (префикс). */
   const countFor = useCallback(
@@ -135,6 +189,15 @@ export function GalleryView() {
     setCreateParent(parent)
     setNewName('')
     setCreating(true)
+    // (правка 1014) Создаём подпапку — раскрываем родителя.
+    if (parent) {
+      setCollapsedFolders((prev) => {
+        if (!prev.has(parent)) return prev
+        const next = new Set(prev)
+        next.delete(parent)
+        return next
+      })
+    }
   }, [])
 
   const createFolder = useCallback(async () => {
@@ -193,9 +256,6 @@ export function GalleryView() {
   }, [renameValue, filter, load])
 
   const deleteFolder = useCallback(async (name: string) => {
-    // (правка 955) ключ с переносом строки: в ru i18next вернёт его же (с \n),
-    // в en — значение из каталога с тем же переносом
-    if (!confirm(t('Удалить папку «{{p1}}»?\nПапка должна быть пустой (без видео и подпапок) — содержимое не пострадает.', { p1: name }))) return
     try {
       const r = await fetch('/api/comfy/folders', {
         method: 'DELETE',
@@ -206,7 +266,7 @@ export function GalleryView() {
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
       toast.success(t("Папка удалена"))
       // (правка 495) Фильтр мог указывать на удалённую папку или её потомка.
-      if (filter !== '__all__' && inFolder(filter, name) ) setFilter('__all__')
+      if (filter !== '__all__' && inFolder(filter, name)) setFilter('__all__')
       await load(true)
     } catch (err) {
       toast.error(t("Не удалось удалить папку"), { description: err instanceof Error ? err.message : String(err) })
@@ -246,7 +306,16 @@ export function GalleryView() {
     key: FolderFilter,
     icon: React.ReactNode,
     label: string,
-    opts?: { onDelete?: boolean; onRename?: boolean; onAddChild?: boolean; depth?: number },
+    opts?: {
+      onDelete?: boolean
+      onRename?: boolean
+      onAddChild?: boolean
+      depth?: number
+      /** (правка 1014) Показывать стрелку сворачивания. */
+      hasChildren?: boolean
+      collapsed?: boolean
+      onToggle?: () => void
+    },
   ) => {
     const active = filter === key
     const count = countFor(key)
@@ -274,6 +343,21 @@ export function GalleryView() {
         )}
       >
         <span className={cn('shrink-0', active ? 'text-violet-400' : 'text-muted-foreground/60')}>{icon}</span>
+        {opts?.hasChildren && opts.onToggle ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); opts.onToggle?.() }}
+            className="shrink-0 w-4 h-4 -ml-1 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-white/10"
+            title={opts.collapsed ? t("Развернуть подпапки") : t("Свернуть подпапки")}
+            aria-label={opts.collapsed ? t("Развернуть подпапки") : t("Свернуть подпапки")}
+          >
+            {opts.collapsed
+              ? <ChevronRightIcon className="w-3.5 h-3.5" />
+              : <ChevronDownIcon className="w-3.5 h-3.5" />}
+          </button>
+        ) : (
+          <span className="shrink-0 w-4 -ml-1" aria-hidden />
+        )}
         {isRenaming ? (
           /* (правка 122) inline-переименование вместо имени */
           <span
@@ -344,7 +428,7 @@ export function GalleryView() {
         {opts?.onDelete && !isRenaming && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); void deleteFolder(key) }}
+            onClick={(e) => { e.stopPropagation(); setFolderToDelete(key) }}
             className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
             title={t("Удалить папку (только пустую)")}
           >
@@ -404,8 +488,8 @@ export function GalleryView() {
         </motion.div>
       </div>
 
-      {/* Right rail: folders (правка 91) */}
-      <div className="w-56 border-l border-border flex flex-col bg-[var(--surface-0)]/60 shrink-0">
+      {/* Right rail: folders (правка 91) — (правка 1014) шире и со сворачиванием. */}
+      <div className="w-[340px] border-l border-border flex flex-col bg-[var(--surface-0)]/60 shrink-0">
         <div className="p-3 border-b border-border flex items-center gap-2">
           <span className="text-xs font-medium text-foreground flex-1">{t("Папки")}</span>
           <Button
@@ -455,20 +539,88 @@ export function GalleryView() {
           {folderItem('', <FilmIcon className="w-3.5 h-3.5" />, t("Общая"), { onAddChild: true })}
           {/* (правка 495) Папки приходят отсортированными (родитель раньше
               детей) — рисуем дерево отступами по глубине пути. */}
-          {folders.map((f) =>
+          {visibleFolders.map((f) =>
             folderItem(
               f,
               <FolderIcon className="w-3.5 h-3.5" />,
               leafName(f),
-              { onRename: true, onDelete: true, onAddChild: true, depth: f.split('/').length - 1 },
+              {
+                onRename: true,
+                onDelete: true,
+                onAddChild: true,
+                depth: f.split('/').length - 1,
+                hasChildren: hasSubfolders(f),
+                collapsed: collapsedFolders.has(f),
+                onToggle: () => toggleFolder(f),
+              },
             ),
           )}
         </div>
 
         <p className="px-3 py-2 text-[10px] text-muted-foreground/50 border-t border-border/60 leading-snug">
-          {t("Перетащите видео на папку, чтобы переместить его. «+» на строке папки создаёт подпапку; папку можно переименовать (карандаш) или удалить (крестик, только пустую). Папку можно выбрать и на вкладке «Генерация» — новые видео будут ложиться в неё.")}
+          {t("Перетащите видео на папку, чтобы переместить его. Стрелка сворачивает подпапки; «+» на строке папки создаёт подпапку; папку можно переименовать (карандаш) или удалить (крестик, только пустую). Папку можно выбрать и на вкладке «Генерация» — новые видео будут ложиться в неё.")}
         </p>
       </div>
+
+      {/* (правка 1015) Подтверждение удаления папки в стиле приложения. */}
+      <Dialog
+        open={folderToDelete !== null}
+        onOpenChange={(open) => { if (!open && !deletingFolder) setFolderToDelete(null) }}
+      >
+        <DialogContent
+          className="max-w-md"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && folderToDelete && !deletingFolder) {
+              e.preventDefault()
+              setDeletingFolder(true)
+              void deleteFolder(folderToDelete).finally(() => {
+                setDeletingFolder(false)
+                setFolderToDelete(null)
+              })
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2Icon className="w-4 h-4 text-red-400" />
+              {' '}{t("Удалить папку?")}
+            </DialogTitle>
+            <DialogDescription>
+              {t("Папка «{{p1}}» должна быть пустой (без видео и подпапок) — содержимое не пострадает.", { p1: folderToDelete ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={deletingFolder}
+              onClick={() => setFolderToDelete(null)}
+            >
+              {t("Отмена")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              autoFocus
+              disabled={deletingFolder}
+              onClick={() => {
+                if (!folderToDelete) return
+                setDeletingFolder(true)
+                void deleteFolder(folderToDelete).finally(() => {
+                  setDeletingFolder(false)
+                  setFolderToDelete(null)
+                })
+              }}
+            >
+              <Trash2Icon className="w-3.5 h-3.5" />
+              {' '}{deletingFolder ? t("Удаление…") : t("Удалить")}
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground/50 text-right -mt-1">
+            {t("Enter — удалить · Esc — отмена")}
+          </p>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

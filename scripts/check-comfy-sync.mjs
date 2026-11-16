@@ -65,6 +65,14 @@ if (existsSync(cnDir)) {
   for (const d of dirs) {
     expect(existsSync(join(cnDir, d, '__init__.py')), `нода ${d}: есть __init__.py`)
   }
+  // (правка 1013) Патч FaceRefine: точка и identity_reference должны работать
+  // вместе. Проверяем, что бандл не откатился на upstream-версию без патча.
+  const faceNode = join(cnDir, 'ComfyUI-H3-FaceRefine', 'nodes.py')
+  if (existsSync(faceNode)) {
+    const faceSrc = readFileSync(faceNode, 'utf8')
+    expect(faceSrc.includes('point_seg') && faceSrc.includes('point_here'),
+      'FaceRefine: точка + референс совмещены (патч 1013)')
+  }
 }
 
 // 4b. (правка 924) Frame-Interpolation не импортируется без config.yaml:

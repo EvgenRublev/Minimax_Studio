@@ -223,9 +223,9 @@ export function FaceRefineView() {
         previewUrl: URL.createObjectURL(file),
       })
       if (facePoint) {
-        setFacePoint(null)
-        patchParams({ select: 'largest_face' })
-        toast.success(t("Референс лица загружен — точка на кадре снята"))
+        // (правка 1013) Точка теперь не снимается: она задаёт, кого вести,
+        // а референс помогает удержать именно этого человека дальше.
+        toast.success(t("Референс лица загружен — точка остаётся стартовой"))
       } else {
         toast.success(t("Референс лица загружен"))
       }
@@ -234,7 +234,7 @@ export function FaceRefineView() {
     } finally {
       setUploadingRef(false)
     }
-  }, [setIdentityRef, facePoint, setFacePoint, patchParams])
+  }, [setIdentityRef, facePoint])
 
   // (правка 1006) Ctrl+V на вкладке загружает референс лица (одна картинка).
   usePasteImageFiles((files) => {
@@ -496,7 +496,7 @@ export function FaceRefineView() {
                   if (mode !== 'closest_to_xy') setFacePoint(null)
                   else if (!facePoint) setPickOpen(true)
                 }}
-                disabled={busy || identityOverridesSelection}
+                disabled={busy || identityOverridesSelection || Boolean(facePoint)}
               >
                 <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
                   <SelectValue />
@@ -639,12 +639,10 @@ export function FaceRefineView() {
                   e.target.value = ''
                 }}
               />
-              {/* (правка 723) Пока лицо указано кликом, трекер выбирает его
-                  геометрией, а не по фото — предупреждаем, чтобы не гадать,
-                  почему фото «не сработало». */}
+              {/* (правка 1013) Точка и фото теперь работают вместе. */}
               {facePoint && identityRef && (
-                <p className="text-[10px] text-yellow-400/90 leading-snug">
-                  {t("Не используется: лицо выбрано кликом, трекер берёт его с точки. Уберите точку (✕ в карточке) или загрузите фото заново, чтобы искать человека по лицу.")}
+                <p className="text-[10px] text-cyan-300/90 leading-snug">
+                  {t("Точка задаёт, кого вести на выбранном кадре; референс помогает удерживать этого человека дальше.")}
                 </p>
               )}
             </div>

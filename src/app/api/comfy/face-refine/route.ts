@@ -229,16 +229,16 @@ export async function POST(req: NextRequest) {
 
     // Референс лица «этого человека» должен лежать в input/.
     //
-    // (правка 723) Точка клика главнее фото: при подключённом identity_reference
-    // нода вообще не смотрит на X/Y — в отчёте это строка «ignored -
-    // identity_reference decides», и в живом прогоне так и получилось чужое
-    // лицо (совпадение с фото 0.48 прошло порог 0.28). Пока лицо выбрано
-    // кликом, референс в воркфлоу не подаём; в мете он остаётся с пометкой,
-    // поэтому снять точку и вернуться к фото можно тем же повтором.
+    // (правка 1013) Точка выбирает конкретное лицо на кадре (X/Y),
+    // identity_reference помогает удерживать этого человека дальше.
+    // Раньше при точке референс вообще не подавался в workflow — теперь оба
+    // параметра идут вместе.
     const identityReference = body.identityReference
       ? path.basename(body.identityReference)
       : undefined
-    const identityReferenceForRun = facePoint ? undefined : identityReference
+    // (правка 1013) Точка и референс теперь работают вместе: точка выбирает
+    // конкретное лицо на кадре, референс дальше помогает удержать именно его.
+    const identityReferenceForRun = identityReference
     if (identityReferenceForRun && !existsSync(path.join(cfg.inputDir, identityReferenceForRun))) {
       return NextResponse.json(
         { error: st("Референс лица не найден в input: {{p1}}", { p1: identityReferenceForRun }) },
@@ -341,7 +341,6 @@ export async function POST(req: NextRequest) {
           face_point: { x: facePoint.x, y: facePoint.y, frame: facePoint.frame },
         }),
         ...(identityReferenceForRun && { identity_reference: identityReferenceForRun }),
-        ...(facePoint && identityReference && { identity_reference_ignored: identityReference }),
         ...(body.identityModel && { identity_model: body.identityModel }),
         // (правка 889) галочка «Использовать аудио» — в сайдкар для повторов.
         audio_guide: body.audioGuide === true,

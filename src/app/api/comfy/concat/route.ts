@@ -516,6 +516,8 @@ export async function POST(req: NextRequest) {
             py,
             [script, '--input', outPath, '--output', polished,
               '--seams', seamFrames.join(','), '--fade-span', '24', '--radius', '3',
+              // (правка 1018) длиннее tone-fade: на 8 кадрах остаток ещё виден
+              '--tone-fade-frames', '16', '--tone-fade-max', '3',
               '--ffmpeg', ffmpeg],
             { timeout: 900_000, maxBuffer: 16 * 1024 * 1024 },
           )

@@ -31,6 +31,10 @@ def parse_args():
     p.add_argument("--radius", type=int, default=1)
     p.add_argument("--crossfade-frames", type=int, default=0,
                    help="сколько кадров перекрыть на стыке (2 = ~83 мс)")
+    p.add_argument("--tone-fade-frames", type=int, default=16,
+                   help="короткий локальный tone-fade после стыка (0 = выкл.)")
+    p.add_argument("--tone-fade-max", type=float, default=3.0,
+                   help="максимальная поправка тона на кадр, 0–255")
     p.add_argument("--ffmpeg", required=True)
     return p.parse_args()
 
@@ -56,6 +60,49 @@ def color_match_seam_fade(frames, seam, fade_span):
     corrected = (b - m_t) / s_t * s_s + m_s
     corrected = np.clip(corrected, 0.0, 1.0)
     frames[seam:] = np.clip(corrected * 255.0, 0, 255).astype(np.uint8)
+
+
+def local_tone_delta(frames, seam, max_delta=3.0):
+    """Низкочастотная разница тона A→B для локального tone-fade.
+
+    Считается ДО color_match/seam_smooth: сравниваем родные последний кадр A
+    и первый кадр B. Иначе глобальная коррекция уже «съест» разницу, а на
+    персонаже она останется.
+    """
+    if seam <= 0 or seam >= len(frames):
+        return None
+    a = frames[seam - 1].astype(np.float32)
+    b = frames[seam].astype(np.float32)
+    if a.shape != b.shape:
+        return None
+    h, w = a.shape[:2]
+    sigma = max(3.0, min(h, w) / 90.0)
+    da = cv2.GaussianBlur(a, (0, 0), sigma)
+    db = cv2.GaussianBlur(b, (0, 0), sigma)
+    delta = np.clip(da - db, -max_delta, max_delta)
+    mag = np.max(np.abs(delta), axis=2, keepdims=True)
+    mask = np.clip((mag - 0.05) / 0.25, 0.0, 1.0)
+    return delta * mask
+
+
+def apply_local_tone_fade(frames, seam, delta, span=16):
+    """(правка 1017) Плавно гасит заранее снятую разницу тона за span кадров."""
+    if delta is None or span <= 0 or seam <= 0 or seam >= len(frames):
+        return
+    n = min(int(span), len(frames) - seam)
+    if n <= 0:
+        return
+    peak = float(np.max(np.abs(delta)))
+    if peak < 0.05:
+        return
+    print(f"[tone-fade] seam {seam}: dmax={peak:.2f}, span={n}")
+    for k in range(n):
+        # 1 → 0 по косинусу: первый кадр B уже в тоне A, затем плавно
+        # возвращается к родному тону продолжения.
+        w = 0.5 * (1.0 + math.cos(math.pi * k / max(1, n - 1)))
+        frames[seam + k] = np.clip(
+            frames[seam + k].astype(np.float32) + delta * w, 0, 255
+        ).astype(np.uint8)
 
 
 def _gray_u8(rgb):
@@ -223,8 +270,16 @@ def main():
     seams = sorted({s for s in seams if 0 < s < len(frames)})
     for s in seams:
         color_match_seam_fade(frames, s, args.fade_span)
+    # (правка 1017) После глобальной коррекции остаётся разница именно на
+    # персонаже. Её снимаем коротким локальным tone-fade.
+    tone_maps = {
+        s: local_tone_delta(frames, s, args.tone_fade_max)
+        for s in seams
+    } if args.tone_fade_frames > 0 else {}
     for s in seams:
         seam_smooth(frames, s, args.radius)
+    for s in seams:
+        apply_local_tone_fade(frames, s, tone_maps.get(s), args.tone_fade_frames)
 
     # (правка 1002) Никакого xfade: референсная нода MiniMaxH3VideoMerge
     # рекомендует blend_frames=0 при seam_smooth. Перекрытие двух разных

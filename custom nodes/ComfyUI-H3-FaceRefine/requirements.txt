@@ -1,0 +1,9 @@
+ultralytics
+scipy
+insightface
+scenedetect>=0.7
+
+# Optional, for identity_model="ccip" (anime identity matching):
+#   pip install dghs-imgutils
+# Not listed as a dependency on purpose - it pins numpy<2 and pulls
+# opencv-contrib-python, which shadows the OpenCV build ComfyUI ships.

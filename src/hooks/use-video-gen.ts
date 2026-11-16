@@ -920,9 +920,13 @@ export function useVideoGen() {
     }
     const cur = useGenProgress.getState().video
     if (cur.phase === 'idle' || !cur.promptId) {
+      // (правка 1023) Только ВИДЕО-задачи. Раньше сюда попадала любая
+      // активная задача (Refine/ControlNet/…), и вкладки «Генерация»/
+      // «Продление» считали чужую генерацию своей: показывали «Остановить»
+      // и путали состояние очереди. Чужие задачи идут через свои job-сторы.
       const next =
-        items.find((i) => i.status === 'running' && i.promptId) ??
-        items.find((i) => ['submitting', 'queued'].includes(i.status) && i.promptId)
+        items.find((i) => i.type === 'video' && i.status === 'running' && i.promptId) ??
+        items.find((i) => i.type === 'video' && ['submitting', 'queued'].includes(i.status) && i.promptId)
       if (next?.promptId) {
         useGenProgress.getState().startVideoGen(next.promptId)
       }
