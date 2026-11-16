@@ -1505,7 +1505,7 @@ export function GenerateView() {
             max={framesMax}
             step={framesStep}
             fps={fps}
-            hint={tt("внутри — ближайшие валидные кадры модели (до 30 с)")}
+            hint={tt("ползунок — до 29 с; больше — введите число в поле вручную")}
           />
 
           <Separator className="bg-border opacity-50" />

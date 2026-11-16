@@ -164,6 +164,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [dynamicVram, setDynamicVram] = useState(true)
   // (правка 490) Доп. запас свободной VRAM (--vram-headroom), 0 = выкл
   const [vramHeadroom, setVramHeadroom] = useState(1)
+  // (правка 1029) Принудительный --fast-disk; по умолчанию выкл (auto).
+  const [fastDisk, setFastDisk] = useState(false)
   const [llmDevice, setLlmDevice] = useState<'auto' | 'gpu' | 'cpu'>('auto')
   // (правка 257) своя LLM (.gguf + mmproj)
   const [llmCustomModel, setLlmCustomModel] = useState('')
@@ -230,6 +232,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           setReserveVram(typeof d.reserve_gb === 'number' ? d.reserve_gb : 1)
           setDynamicVram(d.dynamic_vram !== false)
           setVramHeadroom(typeof d.vram_headroom === 'number' ? d.vram_headroom : 1) // (правка 490)
+          setFastDisk(d.fast_disk === true) // (правка 1029)
           if (['auto', 'gpu', 'cpu'].includes(d.llm_device)) setLlmDevice(d.llm_device)
           if (typeof d.llm_context_size === 'number') setLlmCtxSize(d.llm_context_size)
           if (typeof d.llm_max_output_tokens === 'number') setLlmMaxOut(d.llm_max_output_tokens)
@@ -330,6 +333,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           reserve_gb: reserveVram,
           dynamic_vram: dynamicVram,
           vram_headroom: vramHeadroom, // (правка 490)
+          fast_disk: fastDisk, // (правка 1029)
         }),
       })
       if (res.ok) {
@@ -344,7 +348,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     } finally {
       setSaving(false)
     }
-  }, [reserveVram, dynamicVram, vramHeadroom]) // (правка 490) + vramHeadroom
+  }, [reserveVram, dynamicVram, vramHeadroom, fastDisk]) // (правка 490) + vramHeadroom; (1029) + fastDisk
 
   /** (правка 386) Сохранить формат сохранения видео ([video] config.ini). */
   const saveVideoFormat = useCallback(async () => {
@@ -518,6 +522,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         setReserveVram(1) // (правка 803)
         setDynamicVram(true)
         setVramHeadroom(1) // (правка 490, 803)
+        setFastDisk(false) // (правка 1029)
         setLlmDevice('auto')
         setLlmCtxSize(25600)
         setLlmMaxOut(4096)
@@ -1055,6 +1060,34 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
                   {tt("Дополнительный запас, который учитывает нативный слой DynamicVRAM (comfy-aimdo) при распределении VRAM — с учётом и чужих приложений. Гарантированный рычаг — «Резерв VRAM»: его менеджер моделей ComfyUI вычитает при загрузке весов.")}
                 </p>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-border">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs text-muted-foreground">{tt("Принудительный fast-disk")}</span>
+                    <p className="text-[10px] text-muted-foreground/60">
+                      {tt("Дисковый режим ComfyUI для DynamicVRAM. По умолчанию выкл. Может помочь на быстром NVMe; на SATA SSD может быть медленнее.")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={fastDisk}
+                    onClick={() => setFastDisk(!fastDisk)}
+                    className={cn(
+                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
+                      fastDisk ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
+                        fastDisk && 'translate-x-[18px]',
+                      )}
+                    />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-1.5 pt-2 border-t border-border">

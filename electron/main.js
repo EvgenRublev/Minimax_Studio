@@ -357,7 +357,7 @@ function killPortListeners(port) {
 function parseIniVram() {
   // (правка 814) Заводские значения 1/1 — те же, что в app-config.ts и
   // config.ini. Здесь они используются только если файла конфига нет вовсе.
-  const v = { reserveGb: '1', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '1' }
+  const v = { reserveGb: '1', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '1', fastDisk: 'auto' }
   if (!existsSync(CONFIG_INI)) return v
   let text = ''
   try {
@@ -381,6 +381,10 @@ function parseIniVram() {
   v.dynamicVram = num(grab('dynamic_vram'), '1', /^[01]$/)
   v.asyncOffload = num(grab('async_offload'), '0', /^[01]$/)
   v.vramHeadroom = num(grab('vram_headroom'), '1', /^[0-9][0-9.]*$/)
+  // (правка 1029) fast_disk=auto|1|0: ComfyUI по умолчанию сам считает
+  // fast только NVMe; на SATA SSD auto даёт false. 1 = --fast-disk,
+  // 0 = --disable-fast-disk.  auto — не передаём флаг.
+  v.fastDisk = num(grab('fast_disk'), 'auto', /^(?:auto|0|1)$/)
   return v
 }
 
@@ -432,6 +436,8 @@ function startComfy() {
   if (v.dynamicVram === '0') args.push('--disable-dynamic-vram')
   if (v.asyncOffload !== '1') args.push('--disable-async-offload', '--disable-pinned-memory')
   if (v.vramHeadroom !== '0') args.push('--vram-headroom', v.vramHeadroom)
+  if (v.fastDisk === '1') args.push('--fast-disk')
+  else if (v.fastDisk === '0') args.push('--disable-fast-disk')
   console.log(`[desktop] ComfyUI: ${args.join(' ')}`)
   const child = spawnChild(COMFY_PY, args)
   // (правка 950) держим ссылку для «Перезапустить ComfyUI» из «Консоли»

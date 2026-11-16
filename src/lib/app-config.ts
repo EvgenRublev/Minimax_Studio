@@ -31,6 +31,11 @@ export interface AppConfig {
    *  следит по NVML, включая чужие приложения), а не в точках решений —
    *  защита от всплесков активаций, которые перепрыгивают резерв. */
   vramHeadroom: number
+  /** (правка 1029) Принудительный --fast-disk для ComfyUI.
+   *  false = auto (ComfyUI сам решает; на SATA SSD обычно false).
+   *  true = --fast-disk; принудительное выключение (--disable-fast-disk)
+   *  остаётся доступно только через config.ini fast_disk=0. */
+  fastDisk: boolean
   /** LLM assistant device: 'auto' (VRAM-based) | 'gpu' | 'cpu'. */
   llmDevice: 'auto' | 'gpu' | 'cpu'
   /** LLM context window size in tokens. */
@@ -252,6 +257,9 @@ export function getAppConfig(): AppConfig {
     // (правка 803) По умолчанию 1 ГБ вместо 2: при DynamicVRAM этот запас
     // складывается с reserve_gb, поэтому суммарно держим ~2 ГБ.
     vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '1') || 0)),
+    // (правка 1029) Принудительный fast-disk: только явный 1 включает.
+    // auto/0/отсутствие ключа — UI показывает выключенную галочку.
+    fastDisk: (ini['vram.fast_disk'] ?? 'auto').trim() === '1',
     // Canonical home is [vram]; [comfy]/bare kept as read fallbacks for
     // configs written by older versions.
     dynamicVram: (ini['vram.dynamic_vram'] ?? ini['comfy.dynamic_vram'] ?? ini['dynamic_vram'] ?? '1') !== '0',
@@ -417,6 +425,8 @@ dynamic_vram=1
 ; 0 = синхронная загрузка моделей (стабильно), 1 = async-офлоад
 async_offload=0
 vram_headroom=1
+; auto = ComfyUI сам решает; 1 = принудительный --fast-disk; 0 = --disable-fast-disk
+fast_disk=auto
 
 [comfy]
 turbo_lora=

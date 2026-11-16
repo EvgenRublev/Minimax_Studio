@@ -122,7 +122,10 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
   const setVideoLength = useGenStore((s) => s.setVideoLength)
   // Guard against undefined/NaN from stale localStorage
   const safeLength = typeof videoLength === 'number' && !isNaN(videoLength) ? videoLength : min
-  const clamped = Math.min(Math.max(safeLength, min), max)
+  // (правка 1025) Ползунок по-прежнему ограничен max модели, но ручной ввод —
+  // нет: длиннее 29 с можно задать только числом. Поэтому здесь только
+  // нижняя граница; верхняя проверяется отдельно в commitLength.
+  const currentFrames = Math.max(safeLength, min)
 
   /**
    * (правка 894) UI длительности — В ЦЕЛЫХ СЕКУНДАХ. В сторе по-прежнему
@@ -132,32 +135,42 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
    * поэтому «5 с» в интерфейсе = честные ~5.0–5.2 с в генерации.
    */
   const framesForSec = React.useCallback(
-    (sec: number) => Math.max(min, Math.min(max, framesForDuration(sec, fps))),
-    [fps, min, max],
+    (sec: number) => Math.max(min, framesForDuration(sec, fps)),
+    [fps, min],
   )
-  /** допустимый диапазон ЦЕЛЫХ секунд: от первой валидной до последней */
+  /** допустимый диапазон ЦЕЛЫХ секунд для ПОЛЗУНКА: от первой валидной до последней */
   const secMin = Math.ceil(min / fps)
   const secMax = Math.max(secMin, Math.floor(max / fps))
   /** текущее значение в целых секундах: сначала ищем секунду, которая даёт
    *  ровно эти кадры (иначе 1 с → 39 кадров показывались бы как 2 с),
    *  и только потом — ближайшую секунду к сохранённым кадрам. */
   const curSec = React.useMemo(() => {
-    for (let sec = secMin; sec <= secMax; sec++) {
-      if (framesForSec(sec) === clamped) return sec
+    // (правка 1025) Ручной ввод может дать длительность больше max модели.
+    // Для неё ползунок показывает крайнее правое положение, а число в поле —
+    // фактическую длительность. Ищем именно ту целую секунду, которая дала
+    // эти кадры: иначе 30 с превращались бы в 31 с из-за snap 17n+5.
+    if (currentFrames > max) {
+      const approx = Math.max(secMin, Math.round(currentFrames / fps))
+      for (let sec = Math.max(secMin, approx - 2); sec <= approx + 2; sec++) {
+        if (framesForSec(sec) === currentFrames) return sec
+      }
+      return approx
     }
-    return Math.max(secMin, Math.min(secMax, Math.round(clamped / fps)))
-  }, [clamped, secMin, secMax, framesForSec, fps])
+    for (let sec = secMin; sec <= secMax; sec++) {
+      if (framesForSec(sec) === currentFrames) return sec
+    }
+    return Math.max(secMin, Math.min(secMax, Math.round(currentFrames / fps)))
+  }, [currentFrames, max, secMin, secMax, framesForSec, fps])
 
-  // (правка 107) Ручной ввод. Длительность НЕ выходит за границы модели:
-  // бэкенд тихо климпает вне диапазона, поэтому при коммите значение
-  // привязывается к ближайшей валидной сетке кадров и к [secMin, secMax].
+  // (правка 107) Ручной ввод. (правка 1025) Ползунок ограничен max, а ручной
+  // ввод — нет: сверх 29 с длительность задаётся только числом.
   const [draft, setDraft] = React.useState<string | null>(null)
   const commitLength = () => {
     if (draft === null) return
     const n = Number.parseFloat(draft.replace(',', '.'))
     setDraft(null)
     if (!Number.isFinite(n)) return // некорректно — откат к текущему
-    const sec = Math.max(secMin, Math.min(secMax, Math.round(n)))
+    const sec = Math.max(secMin, Math.round(n))
     const v = framesForSec(sec)
     if (v !== safeLength) setVideoLength(v)
   }
@@ -167,14 +180,14 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
       <Label className="text-xs text-muted-foreground flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5">
           {t("Длительность")}
-          <HintIcon text={`${fps} ${t("кадр/с · от")} ${secMin} ${t("до")} ${secMax} ${t("с, шаг 1 с")}${hint ? ` · ${hint}` : ''} · ${t("ручной ввод в секундах:")} ${secMin}–${secMax} ${t("с.")}`} />
+          <HintIcon text={`${fps} ${t("кадр/с · ползунок")}: ${secMin}–${secMax} ${t("с, шаг 1 с")}; ${t("ручной ввод — от")} ${secMin} ${t("с без верхнего предела")}${hint ? ` · ${hint}` : ''}`} />
         </span>
         <span className="flex items-center gap-1.5">
           <input
             type="text"
             inputMode="numeric"
-            aria-label={t("Длительность: ручной ввод в секундах ({{p1}}–{{p2}} с)", { p1: secMin, p2: secMax })}
-            title={t("Секунды: {{p1}}–{{p2}} · внутри — ближайшие валидные кадры ({{p3}}–{{p4}}, 17n+5, {{p5}} fps)", { p1: secMin, p2: secMax, p3: min, p4: max, p5: fps })}
+            aria-label={t("Длительность: ручной ввод в секундах (от {{p1}} с, без верхнего предела)", { p1: secMin })}
+            title={t("Секунды: от {{p1}} с без верхнего предела · внутри — ближайшие валидные кадры ({{p2}}+, 17n+5, {{p3}} fps). Ползунок — только до {{p4}} с.", { p1: secMin, p2: min, p3: fps, p4: secMax })}
             value={draft ?? String(curSec)}
             onChange={(e) => setDraft(e.target.value)}
             onFocus={(e) => {
@@ -202,7 +215,7 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
           <Badge
             variant="secondary"
             className="text-xs"
-            title={t("Фактически: {{p1}} с · {{p2}} кадров", { p1: (clamped / fps).toFixed(2), p2: clamped })}
+            title={t("Фактически: {{p1}} с · {{p2}} кадров", { p1: (currentFrames / fps).toFixed(2), p2: currentFrames })}
           >
             {curSec} {' '}{t("с")}
           </Badge>
@@ -213,7 +226,8 @@ export function DurationSlider({ min, max, fps, hint, disabled }: DurationSlider
         min={secMin}
         max={secMax}
         step={1}
-        value={curSec}
+        value={Math.min(curSec, secMax)}
+        title={t("Ползунок: до {{p1}} с. Дольше — введите число в поле слева.", { p1: secMax })}
         onChange={(e) => setVideoLength(framesForSec(Number(e.target.value)))}
         disabled={disabled}
         className="w-full accent-cyan-500"

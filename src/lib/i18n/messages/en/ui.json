@@ -853,5 +853,14 @@
   "STT-сервис остановлен (память освобождена)": "STT service stopped (memory freed)",
   "STT-сервис:": "STT service:",
   "Tiled latent upscale (вкладка «Tile Upscale»)": "Tiled latent upscale (\"Tile Upscale\" tab)",
-  "Upscale поставлен в очередь: {{p1}}": "Upscale queued: {{p1}}"
+  "Upscale поставлен в очередь: {{p1}}": "Upscale queued: {{p1}}",
+  "кадр/с · ползунок": "frames/s · slider",
+  "ручной ввод — от": "manual input from",
+  "с без верхнего предела": "s with no upper limit",
+  "Длительность: ручной ввод в секундах (от {{p1}} с, без верхнего предела)": "Duration: manual input in seconds (from {{p1}} s, no upper limit)",
+  "Секунды: от {{p1}} с без верхнего предела · внутри — ближайшие валидные кадры ({{p2}}+, 17n+5, {{p3}} fps). Ползунок — только до {{p4}} с.": "Seconds: from {{p1}} s with no upper limit · internally snapped to the nearest valid frame count ({{p2}}+, 17n+5, {{p3}} fps). The slider goes only up to {{p4}} s.",
+  "Ползунок: до {{p1}} с. Дольше — введите число в поле слева.": "Slider: up to {{p1}} s. For longer values, type the number in the field on the left.",
+  "ползунок — до 29 с; больше — введите число в поле вручную": "slider — up to 29 s; for longer values, enter the number manually",
+  "Принудительный fast-disk": "Force fast-disk",
+  "Дисковый режим ComfyUI для DynamicVRAM. По умолчанию выкл. Может помочь на быстром NVMe; на SATA SSD может быть медленнее.": "ComfyUI disk-backed mode for DynamicVRAM. Off by default. May help on fast NVMe; can be slower on a SATA SSD."
 }

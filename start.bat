@@ -386,25 +386,35 @@ set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
 set "ASYNC_OFFLOAD="
 set "VRAM_HEADROOM="
+set "FAST_DISK="
 if exist config\config.ini (
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"reserve_gb" config\config.ini 2^>nul') do if not defined RESERVE_VRAM set "RESERVE_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"dynamic_vram" config\config.ini 2^>nul') do if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"async_offload" config\config.ini 2^>nul') do if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=%%a"
     REM (правка 521) vram_headroom — доп. запас свободной VRAM для DynamicVRAM
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"vram_headroom" config\config.ini 2^>nul') do if not defined VRAM_HEADROOM set "VRAM_HEADROOM=%%a"
+    REM (правка 1029) fast_disk=auto|1|0 — авто/принудительно вкл/выкл
+    for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"fast_disk" config\config.ini 2^>nul') do if not defined FAST_DISK set "FAST_DISK=%%a"
 )
 if not defined RESERVE_VRAM set "RESERVE_VRAM=1"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
 if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=0"
 if not defined VRAM_HEADROOM set "VRAM_HEADROOM=1"
+if not defined FAST_DISK set "FAST_DISK=auto"
 set "RESERVE_VRAM=%RESERVE_VRAM:"=%"
 set "DYNAMIC_VRAM=%DYNAMIC_VRAM:"=%"
 set "ASYNC_OFFLOAD=%ASYNC_OFFLOAD:"=%"
 set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
+set "FAST_DISK=%FAST_DISK:"=%"
 echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
 echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
+set "FAST_DISK_VALID="
+if /i "%FAST_DISK%"=="auto" set "FAST_DISK_VALID=1"
+if "%FAST_DISK%"=="1" set "FAST_DISK_VALID=1"
+if "%FAST_DISK%"=="0" set "FAST_DISK_VALID=1"
+if not defined FAST_DISK_VALID set "FAST_DISK=auto"
 set "EXTRA_FLAGS="
 if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
 REM (правка 521) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит
@@ -416,9 +426,12 @@ REM (правка 551) dynamic_vram=0 → --disable-dynamic-vram (как в star
 REM раньше этот флаг из start.bat не передавался вовсе).
 set "DYN_FLAG="
 if "%DYNAMIC_VRAM%"=="0" set "DYN_FLAG=--disable-dynamic-vram"
+set "FASTDISK_FLAG="
+if "%FAST_DISK%"=="1" set "FASTDISK_FLAG=--fast-disk"
+if "%FAST_DISK%"=="0" set "FASTDISK_FLAG=--disable-fast-disk"
 
 REM Запускаем ComfyUI напрямую
-start /b "" "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %DYN_FLAG% %EXTRA_FLAGS% %HEADROOM_FLAG%
+start /b "" "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %DYN_FLAG% %EXTRA_FLAGS% %HEADROOM_FLAG% %FASTDISK_FLAG%
 
 REM Wait for ComfyUI to be ready (заставка в браузере покажет это сама)
 echo       Waiting for ComfyUI (first start can take 30-90s)...
