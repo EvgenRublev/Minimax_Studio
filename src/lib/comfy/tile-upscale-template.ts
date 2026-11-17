@@ -1,4 +1,5 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (правка 386)
+import { clampPreviewFrames, PREVIEW_MAX_FRAMES } from './preview-limit'
 /**
  * Tile Upscale — латентный tiled-апскейл готового видео
  * (MMH3UltimateUpscale — монолитная нода: temporal chunks → latent upscale →
@@ -299,6 +300,14 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   // коротких прогонов лишний лимит безвреден, сабсэмплинга нет); taeh3 —
   // taesd-декодер H3 (24 ch). Scheduler (tu_sigmas) модель берёт БЕЗ обёртки —
   // как в refine, обёртка нужна только пути сэмплинга.
+  // (правка 1045) KJ-нода принимает preview_frames 1..1024; длинная
+  // генерация не должна падать из-за превью.
+  const previewFramesSrc: number | [string, number] = latentMode ? framesGrid : ['tu_src', 1]
+  const previewFrames: number | [string, number] =
+    typeof previewFramesSrc === 'number'
+      ? clampPreviewFrames(previewFramesSrc)
+      : ['tu_prev_clamp', 1]
+  const needsPreviewClampNode = typeof previewFramesSrc !== 'number'
   modelNodes['tu_preview'] = {
     inputs: {
       model: modelSrc,
@@ -307,7 +316,7 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
       max_resolution: 1024,
       jpeg_quality: 80,
       suppress_default_preview: true,
-      preview_frames: latentMode ? framesGrid : ['tu_src', 1],
+      preview_frames: previewFrames,
       preview_fps: 6,
     },
     class_type: 'ModelPreviewOverrideKJ',
@@ -350,6 +359,13 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
       class_type: 'VAELoader',
       _meta: { title: 'VAE (audio)' },
     },
+    ...(needsPreviewClampNode ? {
+      'tu_prev_clamp': {
+        inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
+        class_type: 'ComfyMathExpression',
+        _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      },
+    } : {}),
     ...modelNodes,
 
     // ═══════════════════════════════════════════════

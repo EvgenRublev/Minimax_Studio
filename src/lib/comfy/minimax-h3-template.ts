@@ -1,4 +1,5 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (правка 386)
+import { PREVIEW_MAX_FRAMES } from './preview-limit'
 /**
  * MiniMax H3 Reference-to-Video — Two-Pass Latent Upscaler workflow.
  *
@@ -1217,6 +1218,16 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       class_type: 'ComfyMathExpression',
       _meta: { title: 'Frames Calculation' },
     },
+    // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
+    // Превью не должно валить длинную генерацию; сама генерация не ограничена.
+    '46:19c': {
+      inputs: {
+        expression: `min(a, ${PREVIEW_MAX_FRAMES})`,
+        'values.a': ['46:19', 1],
+      },
+      class_type: 'ComfyMathExpression',
+      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+    },
 
     // Low-res resolution is computed server-side (selectResolution) and fed
     // to the H3 node as plain ints — no ResolutionSelector node needed
@@ -1350,7 +1361,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         max_resolution: 1024,
         jpeg_quality: 80,
         suppress_default_preview: true,
-        preview_frames: ['46:19', 1],
+        preview_frames: ['46:19c', 1],
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',
@@ -1563,7 +1574,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
           max_resolution: 1024,
           jpeg_quality: 80,
           suppress_default_preview: true,
-          preview_frames: ['46:19', 1],
+          preview_frames: ['46:19c', 1],
           preview_fps: 6,
         },
         class_type: 'ModelPreviewOverrideKJ',
@@ -2096,7 +2107,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           max_resolution: 1024,
           jpeg_quality: 80,
           suppress_default_preview: true,
-          preview_frames: ['46:19', 1],
+          preview_frames: ['46:19c', 1],
           preview_fps: 6,
         },
         class_type: 'ModelPreviewOverrideKJ',
@@ -2120,6 +2131,16 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       class_type: 'ComfyMathExpression',
       _meta: { title: 'Frames Calculation' },
     },
+    // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
+    // Превью не должно валить длинную генерацию; сама генерация не ограничена.
+    '46:19c': {
+      inputs: {
+        expression: `min(a, ${PREVIEW_MAX_FRAMES})`,
+        'values.a': ['46:19', 1],
+      },
+      class_type: 'ComfyMathExpression',
+      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+    },
 
     // ═══════════════════════════════════════════════
     //  LIVE PREVIEW — настройки ноды '12' вкладки «Генерация».
@@ -2135,7 +2156,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         max_resolution: 1024,
         jpeg_quality: 80,
         suppress_default_preview: true,
-        preview_frames: ['46:19', 1],
+        preview_frames: ['46:19c', 1],
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',

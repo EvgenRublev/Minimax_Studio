@@ -4,6 +4,7 @@ import { clampVedaSparsity, sanitizeVedaIndexList, buildCustomLoraNodes, getLast
 // (правка 723) Лестница сигм/пресет Pass 2 вынесены в отдельный модуль без импортов,
 // чтобы вкладка Refine могла их импортировать, не таща в клиентский бандл весь шаблон.
 import { refineSigmaLadder } from './refine-sigmas'
+import { clampPreviewFrames, PREVIEW_MAX_FRAMES } from './preview-limit'
 /**
  * Refine — генеративный v2v-апскейл готового видео (латентная схема Pass 2).
  *
@@ -297,6 +298,20 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     : p.windowed
       ? ['46:70', 0]
       : ['46:37', 0]
+
+  // (правка 1045) Превью не должно ломать длинную генерацию: KJ-нода
+  // принимает preview_frames только 1..1024. Числовое значение клампим,
+  // для linked-значений добавляем MathExpression min(a, 1024).
+  const previewFramesSrc: number | [string, number] = loopOn
+    ? ['r_len', 1]
+    : latentMode
+      ? framesGrid
+      : ['r_cap', 1]
+  const previewFrames: number | [string, number] =
+    typeof previewFramesSrc === 'number'
+      ? clampPreviewFrames(previewFramesSrc)
+      : ['prev_clamp', 1]
+  const needsPreviewClampNode = typeof previewFramesSrc !== 'number'
 
   // ─── Model optimization chain: UNET → [LowVRAM] → [ChunkFF] ───
   const lowVram = p.lowVramAttention !== false
@@ -770,6 +785,13 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           class_type: 'ManualSigmas',
           _meta: { title: `Pass 2 Sigmas (${ladder.split(',').length - 1} шагов)` },
         },
+    ...(needsPreviewClampNode ? {
+      'prev_clamp': {
+        inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
+        class_type: 'ComfyMathExpression',
+        _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      },
+    } : {}),
     '12': {
       inputs: {
         model: modelTail,
@@ -781,7 +803,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         // Как на вкладке «Генерация» ('46:19'): превью покрывает всё видео
         // (кадры по сетке 17k+5; (правка 376) в latent-ветке — от сервера;
         // (правка 829) в цикле — 17k+5 ('r_len')), playback 6 fps.
-        preview_frames: loopOn ? ['r_len', 1] : latentMode ? framesGrid : ['r_cap', 1],
+        preview_frames: previewFrames,
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',
@@ -1351,7 +1373,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // Как на вкладке «Генерация»: превью покрывает весь кусок (у более
         // коротких окон лишний лимит безвреден — сабсэмплинга нет), 6 fps.
         // (правка 382) latent-ветка: от эффективных длин окон.
-        preview_frames: Math.max(...winGeo.map((g) => g.effCap)),
+        preview_frames: clampPreviewFrames(Math.max(...winGeo.map((g) => g.effCap))),
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',

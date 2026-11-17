@@ -1,4 +1,5 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format'
+import { PREVIEW_MAX_FRAMES } from './preview-limit'
 
 /**
  * Face Refine — перерисовка мелких лиц в готовом видео MiniMax H3.
@@ -265,7 +266,7 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       max_resolution: 1024,
       jpeg_quality: 80,
       suppress_default_preview: true,
-      preview_frames: ['fr_track', 6],
+      preview_frames: ['fr_prev_clamp', 1],
       preview_fps: 6,
     },
     class_type: 'ModelPreviewOverrideKJ',
@@ -571,6 +572,11 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
         }
       : {}),
 
+    'fr_prev_clamp': {
+      inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': ['fr_track', 6] },
+      class_type: 'ComfyMathExpression',
+      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+    },
     ...modelNodes,
 
     // Картинка-референс «этого человека» (для identity_reference).
