@@ -9,6 +9,20 @@
 
 ---
 
+## [7.1.33] — 2026-11-17
+
+### Исправление загрузки LoRA/моделей (правка 1043)
+
+- Next 16 при наличии `proxy.ts` буферизует тело запроса с лимитом **10 МБ**,
+  поэтому большие LoRA обрезались: клиент показывал 100 %, а в списке LoRA
+  оставался файл ~10 МБ и падал с `safetensors corrupt`.
+- Тяжёлые upload-роуты (`loras`, `comfy/upload`, `comfy/diffusion-models`,
+  `upscale/upload`, `montage/video`, `montage/audio`, `assistant/attachment`,
+  `stt/transcribe`) выведены из proxy matcher'а и проверяют host/origin
+  сами — без буферизации тела.
+- Добавлен `scripts/check-upload-guard.mjs` в релизную проверку: регрессия
+  не сможет вернуться незаметно.
+
 ## [7.1.32] — 2026-11-17
 
 ### Полный setup.exe: DLSS runtime обязателен (правка 1042)

@@ -17,12 +17,15 @@ import {
 } from '@/lib/multipart-stream'
 import { getAppConfig } from '@/lib/app-config'
 import { st as stT } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 const MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024
 const UNSAFE_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.wmv', '.flv', '.ts', '.mts', '.m2ts', '.3gp', '.mpg', '.mpeg'])
 
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   let part: MultipartFilePart | null = null
   let destPath: string | null = null
   try {

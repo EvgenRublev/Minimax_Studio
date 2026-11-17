@@ -15,12 +15,15 @@ import {
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
 import { st as stT } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 /**
  * GET /api/loras
  * Returns the list of available LoRAs (files in folder) merged with settings.
  */
 export async function GET(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   try {
     // Турбо-лора в общем списке: включена по умолчанию, как и остальные
     // файлы, приходит из loras.json (loadLoras добавляет запись, если её нет).
@@ -89,6 +92,8 @@ export async function GET(req: NextRequest) {
  * (на больших загрузках он вызывал ECONNRESET под Next.js).
  */
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   let tmpDest = ''
   let part: MultipartFilePart | null = null
   try {
@@ -191,7 +196,8 @@ function abortUpload(part: MultipartFilePart | null): void {
  * повторном включении. Сброс идёт в фоне — не блокирует ответ.
  */
 export async function PUT(req: NextRequest) {
-
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   try {
     const body = await req.json()
     const { name, strength, enabled, trigger } = body as { name: string; strength?: number; enabled?: boolean; trigger?: string }
@@ -275,6 +281,8 @@ export async function PUT(req: NextRequest) {
  * Removes LoRA from settings. If deleteFile=true, also deletes the file.
  */
 export async function DELETE(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   try {
     const body = await req.json()
     const { name, deleteFile } = body as { name: string; deleteFile?: boolean }

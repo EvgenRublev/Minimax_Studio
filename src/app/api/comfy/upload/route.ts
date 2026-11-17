@@ -14,6 +14,7 @@ import {
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
 import { st } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 /**
  * POST /api/comfy/upload
@@ -37,6 +38,8 @@ const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 const UNSAFE_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
 
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
 
   let tmpPath: string | null = null
   let part: MultipartFilePart | null = null

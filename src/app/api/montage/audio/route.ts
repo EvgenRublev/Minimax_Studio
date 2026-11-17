@@ -24,6 +24,7 @@ import { resolveFfprobe } from '@/lib/video-probe'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { st as stT } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 const execFileAsync = promisify(execFile)
 
@@ -67,6 +68,8 @@ async function probeAudioDuration(file: string): Promise<number> {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
 
   let part: MultipartFilePart | null = null
   let destPath: string | null = null
@@ -139,6 +142,8 @@ export async function POST(req: NextRequest) {
 
 /** (правка 874) GET с Range — <audio> в превью требует seek по звуку. */
 export async function GET(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
 
   const f = req.nextUrl.searchParams.get('f') || ''
   if (!f) return NextResponse.json({ error: stT("Не указано f") }, { status: 400 })

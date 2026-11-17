@@ -10,6 +10,7 @@ import {
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
 import { st as stT } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 /**
  * (правка 108) Вложения чата ассистента — ИЗОЛИРОВАННОЕ хранилище.
@@ -67,6 +68,8 @@ async function safeAttachPath(filename: string): Promise<string | null> {
 
 /* ─── POST: upload ─── */
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
 
   let part: MultipartFilePart | null = null
   try {
@@ -134,6 +137,8 @@ export async function POST(req: NextRequest) {
 
 /* ─── GET: serve (Range-capable for video seeking) ─── */
 export async function GET(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   const filename = req.nextUrl.searchParams.get('filename')
   if (!filename) {
     return new Response('Missing filename', { status: 400 })
@@ -149,6 +154,8 @@ export async function GET(req: NextRequest) {
 
 /* ─── DELETE: remove (best-effort, called when a chat is deleted) ─── */
 export async function DELETE(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   const filename = req.nextUrl.searchParams.get('filename')
   if (!filename) {
     return NextResponse.json({ error: 'Missing filename' }, { status: 400 })

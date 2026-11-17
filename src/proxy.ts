@@ -24,45 +24,16 @@
  */
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
-const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-
-/** Loopback-имя или IP-литерал (IPv4/IPv6)? Домены — нет (rebinding). */
-function isLocalHostname(name: string): boolean {
-  const n = name.toLowerCase()
-  if (n === 'localhost' || n === '127.0.0.1' || n === '[::1]') return true
-  if (n.startsWith('[') && n.endsWith(']')) return true // IPv6-литерал
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(n)) return true // IPv4-литерал
-  return false
-}
-
+/**
+ * (правка 1043) Host/origin guard вынесен в localRequestGuard: те же проверки
+ * нужны upload-роутам, которые исключены из matcher'а, чтобы Next не
+ * буферизовал их тела с лимитом 10 МБ.
+ */
 export function proxy(request: NextRequest) {
-  const host = (request.headers.get('host') || '').toLowerCase()
-  const m = /^(\[[^\]]+\]|[^:]+?)(?::\d+)?$/.exec(host)
-  const hostname = m ? m[1] : host
-  if (!isLocalHostname(hostname)) {
-    return NextResponse.json({ error: 'Forbidden host' }, { status: 403 })
-  }
-
-  if (MUTATING.has(request.method)) {
-    const origin = request.headers.get('origin')
-    if (origin) {
-      let originHost = ''
-      try {
-        originHost = new URL(origin).host.toLowerCase()
-      } catch {
-        originHost = ''
-      }
-      if (!originHost || originHost !== host) {
-        return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 })
-      }
-    } else {
-      const site = (request.headers.get('sec-fetch-site') || '').toLowerCase()
-      if (site && site !== 'same-origin' && site !== 'same-site') {
-        return NextResponse.json({ error: 'Forbidden cross-site request' }, { status: 403 })
-      }
-    }
-  }
+  const blocked = localRequestGuard(request)
+  if (blocked) return blocked
 
   const res = NextResponse.next()
   res.headers.set('X-Frame-Options', 'DENY')
@@ -71,6 +42,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Всё, кроме статики: страницы + /api/* (в т.ч. проверка Host для GET).
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Всё, кроме статики и тяжёлых upload-роутов. Для upload'ов guard вызывается
+  // внутри самих роутов: proxy буферизует тело и обрезает его по 10 МБ (Next 16).
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|api/(?:loras|comfy/upload|comfy/diffusion-models|upscale/upload|montage/video|montage/audio|assistant/attachment|stt/transcribe)).*)',
+  ],
 }

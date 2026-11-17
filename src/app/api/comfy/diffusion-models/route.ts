@@ -8,6 +8,7 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 /**
  * GET /api/comfy/diffusion-models
@@ -36,7 +37,9 @@ export const dynamic = 'force-dynamic'
 // (правка 293) Основная модель — вернули обратно (была лучше по качеству)
 const DEFAULT_MODEL = 'minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   let config: ReturnType<typeof getAppConfig> | null = null
   try {
     config = getAppConfig()
@@ -74,6 +77,8 @@ function abortUpload(part: MultipartFilePart | null): void {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
   let tmpDest = ''
   let part: MultipartFilePart | null = null
   try {

@@ -87,6 +87,10 @@ if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.m
 // пересборке setup payload. Полный релиз без него не выпускаем.
 if (!run('dlss runtime check', process.execPath, ['scripts/check-dlss-runtime.mjs'])) process.exit(1);
 
+// (правка 1043) Большие upload-роуты обязаны быть вне proxy: иначе Next 16
+// режет тело по 10 МБ и LoRA/модели сохраняются битыми.
+if (!run('upload guard check', process.execPath, ['scripts/check-upload-guard.mjs'])) process.exit(1);
+
 // (правка 939) Целостность установщика: офлайн-бандл (install/cache) сверяется по
 // sha256 с install/checksums.json, версии в install.ps1/package.json — с именами
 // файлов бандла, и на месте вся механика проверки загрузок. Битый архив внутри

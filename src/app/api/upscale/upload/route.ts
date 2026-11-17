@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync, renameSync, unlinkSync } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { st } from '@/lib/i18n/server'
+import { localRequestGuard } from '@/lib/local-request-guard'
 
 /**
  * (правка 74) POST /api/upscale/upload
@@ -194,6 +195,8 @@ async function streamMultipartFile(
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = localRequestGuard(req)
+  if (blocked) return blocked
 
   let destPath = ''
   try {
