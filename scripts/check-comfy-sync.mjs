@@ -135,6 +135,19 @@ expect(/function\s+readComfyVersion\s*\(/.test(sync),
 expect(/CORE_MIN_VERSION\s*=\s*['"]0\.44\.0['"]/.test(sync),
   'sync_custom_nodes.js: патчи применяются только к ядру 0.44+')
 
+// (правка 1040) «Refine частями» использует встроенную ноду ядра
+// MiniMaxH3ContextWindows. Её нет в старых ядрах, поэтому релиз должен
+// собираться только с ядром, где она действительно есть.
+{
+  const ctxCore = join(ROOT, 'ComfyUI', 'comfy_extras', 'nodes_context_windows.py')
+  expect(existsSync(ctxCore), 'ядро 0.44: nodes_context_windows.py на месте')
+  if (existsSync(ctxCore)) {
+    const ctxSrc = readFileSync(ctxCore, 'utf-8')
+    expect(/class\s+MiniMaxH3ContextWindowsNode\b/.test(ctxSrc),
+      'ядро 0.44: есть MiniMaxH3ContextWindows (нужна для Refine «частями»)')
+  }
+}
+
 const installPs1 = read('install/install.ps1')
 expect(/\$ComfyVersion\s*=\s*['"]0\.44\.0['"]/.test(installPs1),
   'install.ps1: ядро пиновано на 0.44.0')
