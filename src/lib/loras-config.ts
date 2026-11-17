@@ -107,6 +107,106 @@ export function listLoraFiles(): string[] {
   }
 }
 
+/** Предел шапки safetensors: у LoRA это десятки/сотни КБ, 64 МБ — с запасом. */
+const MAX_SAFETENSORS_HEADER = 64 * 1024 * 1024
+
+/**
+ * (правка 1046) Проверить .safetensors по шапке, НЕ читая тензоры: заголовок
+ * парсится, тензоры объявлены, данных в файле хватает. ComfyUI проверяет ровно
+ * это при загрузке LoRA и на ошибке обрывает ВЕСЬ промпт английским трейсбеком
+ * («The safetensors file is corrupt or invalid») уже после загрузки моделей.
+ * Битый/недокачанный файл ловим здесь — до постановки джоба.
+ */
+export function checkSafetensorsFile(fullPath: string): { ok: boolean; reason?: string } {
+  let fd: number | null = null
+  try {
+    const size = fs.statSync(fullPath).size
+    if (size < 8) return { ok: false, reason: 'файл пуст' }
+    fd = fs.openSync(fullPath, 'r')
+    const lenBuf = Buffer.alloc(8)
+    if (fs.readSync(fd, lenBuf, 0, 8, 0) < 8) return { ok: false, reason: 'обрезан заголовок' }
+    const headerLen = Number(lenBuf.readBigUInt64LE(0))
+    if (!Number.isFinite(headerLen) || headerLen <= 0 || headerLen > MAX_SAFETENSORS_HEADER || 8 + headerLen > size) {
+      return { ok: false, reason: 'повреждён заголовок safetensors' }
+    }
+    const headBuf = Buffer.alloc(headerLen)
+    if (fs.readSync(fd, headBuf, 0, headerLen, 8) < headerLen) {
+      return { ok: false, reason: 'повреждён заголовок safetensors' }
+    }
+    let header: unknown
+    try {
+      header = JSON.parse(headBuf.toString('utf-8'))
+    } catch {
+      return { ok: false, reason: 'не safetensors: заголовок не JSON' }
+    }
+    if (!header || typeof header !== 'object' || Array.isArray(header)) {
+      return { ok: false, reason: 'повреждён заголовок safetensors' }
+    }
+    let tensors = 0
+    let dataEnd = 0
+    for (const [key, value] of Object.entries(header as Record<string, unknown>)) {
+      if (key === '__metadata__') continue
+      const offsets = (value as { data_offsets?: unknown } | null)?.data_offsets
+      if (
+        !Array.isArray(offsets) || offsets.length !== 2 ||
+        !Number.isFinite(offsets[0]) || !Number.isFinite(offsets[1]) ||
+        offsets[0] < 0 || offsets[1] < offsets[0]
+      ) {
+        return { ok: false, reason: 'повреждённая шапка тензоров' }
+      }
+      tensors++
+      dataEnd = Math.max(dataEnd, offsets[1])
+    }
+    if (tensors === 0) return { ok: false, reason: 'в файле нет тензоров' }
+    if (8 + headerLen + dataEnd > size) return { ok: false, reason: 'файл обрезан — веса не помещаются' }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd) } catch { /* уже закрыт */ }
+    }
+  }
+}
+
+/** Путь к файлу LoRA: локальная папка студии, затем внешние папки (правка 257). */
+function resolveLoraFile(name: string): string | null {
+  const rel = name.split('/').join(path.sep)
+  const localRoot = path.resolve(lorasDir())
+  const local = path.resolve(localRoot, rel)
+  if (isInsideDir(localRoot, local) && fs.existsSync(local)) return local
+  for (const entry of getAppConfig().modelExtraPaths) {
+    if (entry.category !== 'loras') continue
+    const root = path.resolve(entry.path)
+    const full = path.resolve(root, rel)
+    if (isInsideDir(root, full) && fs.existsSync(full)) return full
+  }
+  return null
+}
+
+/** win32 — без учёта регистра (как в latent-file.ts). */
+function isInsideDir(root: string, full: string): boolean {
+  const norm = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p)
+  return norm(full).startsWith(norm(root) + path.sep)
+}
+
+/** (правка 1046) Проверка LoRA по имени из loras.json: файл есть, шапка цела. */
+export function checkLoraFile(name: string): { ok: boolean; reason?: string } {
+  const full = resolveLoraFile(name)
+  if (!full) return { ok: false, reason: 'файл не найден' }
+  return checkSafetensorsFile(full)
+}
+
+/** (правка 1046) Убрать повреждённые LoRA из набора для воркфлоу: ComfyUI не
+ *  умеет «пропустить» битую лору — падает загрузкой и обрывает весь промпт. */
+export function filterBrokenLoras<T extends { name: string }>(entries: T[]): T[] {
+  return entries.filter((e) => {
+    const check = checkLoraFile(e.name)
+    if (!check.ok) console.warn(`[loras] «${e.name}» пропущена: ${check.reason}`)
+    return check.ok
+  })
+}
+
 /**
  * (правка 483) Включённые LoRA для роутов refine / tile-upscale / controlnet
  * (generate-роут собирает список сам — ему нужно отдельно пропускать турбо
@@ -117,8 +217,8 @@ export function listLoraFiles(): string[] {
  */
 export function enabledCustomLoras(): Array<{ name: string; strength: number; trigger?: string }> {
   const files = new Set(listLoraFiles())
-  return loadLoras()
-    .filter((e) => e.enabled && files.has(e.name))
+  // (правка 1046) Битая LoRA не доезжает до ComfyUI — генерация не падает.
+  return filterBrokenLoras(loadLoras().filter((e) => e.enabled && files.has(e.name)))
     .map((e) => ({ name: e.name, strength: e.strength, trigger: e.trigger }))
 }
 

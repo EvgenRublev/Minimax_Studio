@@ -6,6 +6,8 @@ import {
   saveLoras,
   lorasDir,
   listLoraFiles,
+  checkSafetensorsFile,
+  checkLoraFile,
   TURBO_LORA_NAME,
 } from '@/lib/loras-config'
 import { comfyBusy } from '@/lib/vram-arbiter'
@@ -59,7 +61,12 @@ export async function GET(req: NextRequest) {
     // trigger) — безвозвратно.
     const fileSet = new Set(files)
     if (fileSet.size > 0) {
-      const pruned = settings.filter((e) => fileSet.has(e.name))
+      // (правка 1046) Включённая повреждённая LoRA не доезжает до ComfyUI
+      // (filterBrokenLoras), поэтому «вкл» в панели врал бы — гасим флаг.
+      const broken = new Set(files.filter((n) => !checkLoraFile(n).ok))
+      const pruned = settings
+        .filter((e) => fileSet.has(e.name))
+        .map((e) => (broken.has(e.name) && e.enabled ? { ...e, enabled: false } : e))
       const unchanged =
         pruned.length === settings.length &&
         pruned.every((e, i) => e === settings[i])
@@ -155,6 +162,23 @@ export async function POST(req: NextRequest) {
     fs.renameSync(tmpDest, dest)
     tmpDest = '' // успех — cleanup не нужен
 
+    // (правка 1046) Битый/недокачанный файл не должен попасть в список: ComfyUI
+    // падает на его загрузке и обрывает ВСЮ генерацию уже после загрузки
+    // моделей («The safetensors file is corrupt or invalid»). Проверяем шапку
+    // здесь и удаляем брак — иначе он всплывёт только в логе ComfyUI.
+    const check = checkSafetensorsFile(dest)
+    if (!check.ok) {
+      try { fs.unlinkSync(dest) } catch { /* ignore */ }
+      return NextResponse.json(
+        {
+          error: stT("Файл не похож на .safetensors ({{p1}}). Загрузите LoRA заново.", {
+            p1: check.reason ?? 'нет шапки',
+          }),
+        },
+        { status: 400 },
+      )
+    }
+
     // Add to settings.
     // (правка 256) Только что ЗАГРУЖЕННАЯ лора включается сразу: загрузка —
     // само по себе намерение использовать (жалоба с YouTube «постоянно
@@ -205,6 +229,22 @@ export async function PUT(req: NextRequest) {
     // сохранялся в loras.json и getFileSize отдавал размер файла вне папки loras.
     if (!name || typeof name !== 'string' || path.basename(name) !== name) {
       return NextResponse.json({ error: 'Invalid LoRA name' }, { status: 400 })
+    }
+    // (правка 1046) Включить повреждённую LoRA нельзя: ComfyUI упадёт на её
+    // загрузке и оборвёт промпт. Причина — сразу в тосте, а не в логе.
+    if (enabled === true) {
+      const check = checkLoraFile(name)
+      if (!check.ok) {
+        return NextResponse.json(
+          {
+            error: stT("LoRA «{{p1}}» повреждена: {{p2}}. Удалите её и загрузите заново.", {
+              p1: name,
+              p2: check.reason ?? 'файл не читается',
+            }),
+          },
+          { status: 400 },
+        )
+      }
     }
 
     const entries = loadLoras()

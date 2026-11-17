@@ -9,7 +9,7 @@ import { setActivePrompt } from '@/lib/comfy/progress-tracker'
 import { readStaged, deleteStaged } from '@/lib/staging'
 import { recordPendingMeta } from '@/lib/pending-meta'
 import { recordInflight } from '@/lib/inflight-journal'
-import { loadLoras, listLoraFiles, TURBO_LORA_NAME } from '@/lib/loras-config'
+import { loadLoras, listLoraFiles, filterBrokenLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveSourceLatent } from '@/lib/refine-meta' // (правка 420)
@@ -370,18 +370,23 @@ export async function POST(req: NextRequest) {
     // умолчанию) и идёт через ту же цепочку customLoras. Исключение:
     // режим «Кадры» (flf) с добавленным аудио — там турбо-лора пропускается
     // (аудио-гайд стабильнее без 4-шагового ускорителя). Обычные LoRA
-    // пользователя не фильтруются никогда.
+    // пользователя не фильтруются никогда, кроме физически битых файлов
+    // (правка 1046) — их ComfyUI не может загрузить.
     const loraFiles = new Set(listLoraFiles())
     const allEntries = loadLoras()
     const flfWithAudio = body.mode === 'flf' && (body.refAudios?.length ?? 0) > 0
     // ref + Audio Guide: как flf+audio, 4-шаговая турбо-лора мешает
     // стабильности аудио-гайда — на время такого прогона её пропускаем.
     const refAudioGuide = body.mode === 'ref' && body.audioGuide === true && (body.refAudios?.length ?? 0) > 0
-    const loraEntries = allEntries.filter(
-      (e) =>
-        e.enabled &&
-        loraFiles.has(e.name) &&
-        !((flfWithAudio || refAudioGuide) && e.name === TURBO_LORA_NAME),
+    // (правка 1046) Повреждённые файлы (пустая/недокачанная LoRA) отсекаем:
+    // ComfyUI падает на LoraLoaderModelOnly и обрывает промпт целиком.
+    const loraEntries = filterBrokenLoras(
+      allEntries.filter(
+        (e) =>
+          e.enabled &&
+          loraFiles.has(e.name) &&
+          !((flfWithAudio || refAudioGuide) && e.name === TURBO_LORA_NAME),
+      ),
     )
     // Турбо-лора применяется через customLoras, а не отдельной нодой шаблона;
     // поля оставляем согласованными на случай, если их прочитает другой код.
