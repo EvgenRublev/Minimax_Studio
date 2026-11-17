@@ -143,6 +143,13 @@ export interface MiniMaxH3Params {
    *  склейки сохраняется одним файлом для lossless-рефайна/апскейла.
    *  Нет файла — исходник энкодится целиком один раз в графе. */
   extendSourceLatentFile?: string
+  /** (правка 1044) Реальная spatial-канва latent-файла в пикселях (из шапки).
+   *  У генераций с финальным crop она может быть больше mp4 (например,
+   *  latent 704×288, mp4 672×288). Перед пост-сборкой extend такой латент
+   *  центрированно обрезается до целевой канвы, иначе LatentConcat падает:
+   *  Expected size 44 but got 42. */
+  extendSourceLatentWidth?: number
+  extendSourceLatentHeight?: number
   /** extend: число overlap-кадров между клипами (24 fps). Default 48 (2 sec). */
   extendOverlapFrames?: number
   /** (правка 423) extend: двухпроходный режим — клипы генерятся на low-res
@@ -1777,6 +1784,28 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     : finalDimsFromMegapixels(p.aspectRatio || '16:9 (Widescreen)', finalRes)
   const needsCrop = final.genW !== final.outW || final.genH !== final.outH
 
+  // (правка 1044) Латент исходника мог быть сохранён на большей канве, чем
+  // итоговый mp4: генерация рисует ceil32-канву, а финальный точный кроп
+  // уменьшает картинку (например 704×288 latent → 672×288 mp4). Для extend
+  // пост-сборка должна резать исходник на ТУ ЖЕ канву, что и клипы, иначе
+  // LatentConcat падает «Expected size 44 but got 42».
+  const sourceLatentCrop = (() => {
+    const swPx = p.extendSourceLatentWidth
+    const shPx = p.extendSourceLatentHeight
+    if (!p.extendSourceLatentFile || !swPx || !shPx) return null
+    const sw = Math.max(1, Math.round(swPx / 16))
+    const sh = Math.max(1, Math.round(shPx / 16))
+    const tw = Math.max(1, Math.round(final.genW / 16))
+    const th = Math.max(1, Math.round(final.genH / 16))
+    if (sw < tw || sh < th) return null
+    return {
+      needed: sw !== tw || sh !== th,
+      sw, sh, tw, th,
+      dx: Math.floor((sw - tw) / 2),
+      dy: Math.floor((sh - th) / 2),
+    }
+  })()
+
   // (правка 423) Двухпроходный extend (опция, default OFF): pass 1 клипов
   // работает на low-res канве (lowResMP, как «full»-пайплайн генерации),
   // затем каждый клип апскейлится LatentUpscaler3D до размера исходника
@@ -2290,6 +2319,28 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           class_type: 'LTXVSeparateAVLatent',
           _meta: { title: 'Разделение латента исходника' },
         },
+        ...(sourceLatentCrop?.needed ? {
+          'ext_srcfit_w': {
+            inputs: {
+              samples: ['ext_srclsep', 0],
+              dim: 'x',
+              index: sourceLatentCrop.dx,
+              amount: sourceLatentCrop.tw,
+            },
+            class_type: 'LatentCut',
+            _meta: { title: `Исходник: кроп ширины ${sourceLatentCrop.sw}→${sourceLatentCrop.tw}` },
+          },
+          'ext_srcfit': {
+            inputs: {
+              samples: ['ext_srcfit_w', 0],
+              dim: 'y',
+              index: sourceLatentCrop.dy,
+              amount: sourceLatentCrop.th,
+            },
+            class_type: 'LatentCut',
+            _meta: { title: `Исходник: кроп высоты ${sourceLatentCrop.sh}→${sourceLatentCrop.th}` },
+          },
+        } : {}),
       } : {
         'extv_fenc': {
           inputs: {
@@ -2966,7 +3017,9 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       const srcF = Math.max(5, p.extendSourceFrames ?? tailFrames)
       const srcCutTok = tok(Math.max(5, srcF - 17))
       const srcCutA = Math.round((Math.max(5, srcF - 17) * 5) / 3)
-      const srcV: [string, number] = p.extendSourceLatentFile ? ['ext_srclsep', 0] : ['extv_fenc', 0]
+      const srcV: [string, number] = p.extendSourceLatentFile
+        ? (sourceLatentCrop?.needed ? ['ext_srcfit', 0] : ['ext_srclsep', 0])
+        : ['extv_fenc', 0]
       const srcA: [string, number] = p.extendSourceLatentFile ? ['ext_srclsep', 1] : ['extv_aful', 0]
 
       // Куски клипов: клип 0 — от среза шва (sliceStart), i>0 — от головы 56

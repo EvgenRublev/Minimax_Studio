@@ -291,6 +291,10 @@ export async function POST(req: NextRequest) {
             )
             if (resolved) {
               body.extendSourceLatentFile = resolved.file
+              // (правка 1044) канва latent-файла может быть шире mp4 после
+              // финального crop; билдер центрированно обрежет её до цели.
+              body.extendSourceLatentWidth = resolved.width
+              body.extendSourceLatentHeight = resolved.height
             }
           }
         }
