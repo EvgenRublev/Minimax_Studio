@@ -112,8 +112,12 @@ const seven = findTool('SEVEN_ZIP', [
   'C:\\Program Files (x86)\\7-Zip\\7z.exe',
 ])
 if (seven) {
-  const list = spawnSync(seven, ['l', setupPath], { encoding: 'utf8' })
-  if (list.status !== 0) fail(`7z не смог открыть ${setupPath}`)
+  // Листинг NSIS-архива большой (тысячи файлов) — дефолтный maxBuffer
+  // Node (~1 МБ) даёт ENOBUFS и ложное «7z не открыл setup».
+  const list = spawnSync(seven, ['l', setupPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  if (list.error || list.status !== 0) {
+    fail(`7z не смог открыть ${setupPath}: ${list.error?.message || `exit ${list.status}`}`)
+  }
   const listing = String(list.stdout || '').replace(/\//g, '\\')
   const missing = REQUIRED_DLSS_RUNTIME.filter((rel) => !listing.includes(rel.replace(/\//g, '\\')))
   if (missing.length) fail(`в setup.exe нет DLSS-файлов: ${missing.join(', ')}`)
