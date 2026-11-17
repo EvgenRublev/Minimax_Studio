@@ -21,6 +21,8 @@ import { useMontageReturn } from './montage-return-store' // (правка 857)
 
 export interface RefineTask {
   mode: 'whole' | 'chunks'
+  /** (правка 1034) Оконный forward модели в одном латентном проходе. */
+  windowed?: boolean
   /** Оригинал из галереи (output), из которого делается рефайн. */
   source: { filename: string; subfolder: string }
   /** (правка 997) Папка сохранения результата ('' = общая). */
@@ -251,6 +253,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
         sparseExtraTokens: task.sparseExtraTokens,
       }),
       ...(task.mode === 'chunks' ? { mode: 'chunks', chunkSeconds: task.chunkSeconds } : {}),
+      ...(task.windowed === true && { windowed: true }),
       // (правка 968) тогглы оптимизаций из настроек — иначе Refine всегда
       // включал LowVRAM/Chunk FF, даже если пользователь их выключил.
       ...(task.lowVramAttention !== undefined && { lowVramAttention: task.lowVramAttention }),

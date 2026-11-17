@@ -122,6 +122,9 @@ export interface RefineParams {
   diffusionModel?: string
   /** Подпапка вывода (папка проекта галереи; '' = общая). */
   outputSubfolder?: string
+  /** (правка 1034) Оконный forward модели: один общий латентный проход,
+   *  внутри forward — перекрывающиеся временные окна. */
+  windowed?: boolean
   /** MiniMaxLowVRAMAttention (default true). */
   lowVramAttention?: boolean
   /** MiniMaxChunkFeedForward (default true). */
@@ -289,7 +292,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   const decodedImage: [string, number] = loopOn ? (['46:60:decr', 0] as [string, number]) : (['46:25', 0] as [string, number])
   // (правка 829) хвост цепочки моделей для прогона — после Loop ('46:60r');
   // когда цикл не собирается, это Attention Backend (эквивалент прежнего wiring).
-  const modelTail: [string, number] = loopOn ? ['46:60r', 0] : ['46:37', 0]
+  const modelTail: [string, number] = loopOn
+    ? ['46:60r', 0]
+    : p.windowed
+      ? ['46:70', 0]
+      : ['46:37', 0]
 
   // ─── Model optimization chain: UNET → [LowVRAM] → [ChunkFF] ───
   const lowVram = p.lowVramAttention !== false
@@ -394,6 +401,24 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       class_type: 'ModelAttentionBackend',
       _meta: { title: 'Attention Backend' },
     },
+    // (правка 1040) Встроенные Context Windows ComfyUI для H3: окна
+    // режутся на 17-кадровой сетке, аудио и видео синхронизированы,
+    // слияние — pyramid + FreeNoise. Это официальный путь для видео
+    // длиннее одного окна модели, а не самодельный forward-wrapper.
+    ...(p.windowed && !loopOn ? {
+      '46:70': {
+        inputs: {
+          model: ['46:37', 0],
+          context_length: 124,   // 5 c: 17*7 + 5
+          context_overlap: 39,   // 17*2 + 5
+          fuse_method: 'pyramid',
+          freenoise: true,
+          split_conds_to_windows: false,
+        },
+        class_type: 'MiniMaxH3ContextWindows',
+        _meta: { title: 'MiniMax H3 Context Windows (pyramid, FreeNoise)' },
+      },
+    } : {}),
     // (правка 829) «Зациклено»: патч кругового латент-паддинга — последним
     // в цепочке, чтобы сэмплер, гайдер и превью получили обёрнутую модель.
     ...(loopOn ? {
@@ -892,12 +917,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
  *  пиксельной склейки между кусками нет, файлы кусков соединяются
  *  жёсткой конкатенацией; звук — из целого оригинала (сшивка).
  *
- *  Геометрия: O = 39 (сетка 17k+5, 12 токенов) — контекст головы до правки
- *  953. Теперь preserved-голова = 7 токенов (22 кадра), а оставшиеся 17
- *  кадров окно рефинит заново: они перекрываются с предыдущим рендером и
- *  смешиваются пиксельным кроссфейдом в финальной сборке (дубли
- *  выбрасываются). Окно T = сетка около chunkSeconds×24; новое содержимое
- *  куска = T − 39 кадров (у куска 0 — T).
+ *  Геометрия: O = 39 (сетка 17k+5, 12 токенов) — полный preserved-контекст
+ *  головы. (правка 1028) Перехлёст больше не перерисовывается вторым окном:
+ *  preserved-голова целиком берётся из уже перегенерированного прошлого
+ *  куска, новый рендер начинается после неё. Окно T = сетка около
+ *  chunkSeconds×24; новое содержимое куска = T − 39 кадров (у куска 0 — T).
  *  Токены: tok(F) = ((F−5)/17)·5+2; аудио-шаги = round(F·5/3).
  *
  *  (правка 314) Латентная склейка + сегментный декод — ОДИН файл на выходе.
@@ -907,13 +931,13 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
  *  полный латент режется на сегменты по SEG_DECODE_TOK токенов (экономия
  *  VRAM), каждый декодируется своим VAEDecode, кадры склеиваются
  *  ImageBatchMulti, и ОДИН VHS_VideoCombine кодирует h264 один раз.
- *  (правка 953) Для декода используется цепочка С ДУБЛЯМИ перехлёста: после
- *  сегментного декода пары кадров «хвост прошлого окна ↔ голова нового»
- *  смешиваются ImageCompositeMasked (17 кадров) и выбрасываются — на выходе
- *  исходная длина, стык превращается в плавный переход. Чистая цепочка без
- *  дублей остаётся для сохранения AV-латента. Аудио: склейка аудио-латентов
- *  → один VAEDecodeAudio → звук в тот же combine; в финал всегда идёт
- *  ОРИГИНАЛЬНАЯ дорожка исходника (см. ниже).
+ *  (правка 1028) В обычной геометрии дублей и пиксельного кроссфейда нет:
+ *  новый рендер начинается ровно после полного preserved-перехлёста.
+ *  Кроссфейд остаётся только для нештатных окон с фактическим перехлёстом
+ *  больше 39 кадров. Чистая цепочка без дублей остаётся для сохранения
+ *  AV-латента. Аудио: склейка аудио-латентов → один VAEDecodeAudio → звук
+ *  в тот же combine; в финал всегда идёт ОРИГИНАЛЬНАЯ дорожка исходника
+ *  (см. ниже).
  *  ffmpeg-стейдж (/api/comfy/refine/stitch) новым воркфлоу не вызывается.
  */
 export interface ChunkedRefineParams {
@@ -1082,8 +1106,15 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   // промпт теперь уходит ВСЕМ окнам, если текст описывает один план.
   // Многосценные промпты («[Shot 1] … [Shot 2] …», блоки «—») прежние:
   // там описание чужих планов окно путает.
-  const multiScenePrompt =
-    (basePrompt.match(/\[\s*(?:shot|scene|сцена|кадр)\s*\d+/gi) || []).length >= 2
+  // (правка 1026) Считать многосценным только текст с РАЗНЫМИ номерами
+  // шотов. Раньше считались все вхождения: один и тот же план, продублированный
+  // в промпте (частый случай после «Улучшить» — два одинаковых [Shot 1]), давал
+  // multiScene=true, и окна 1+ оставались вообще без сюжетного промпта — только
+  // с подписями референсов. На стыках это выглядело как деформация сцены.
+  const shotIds = [...basePrompt.matchAll(/\[\s*(?:shot|scene|сцена|кадр)\s*(\d+)/gi)]
+    .map((m) => Number.parseInt(m[1], 10))
+    .filter((n) => Number.isFinite(n))
+  const multiScenePrompt = new Set(shotIds).size >= 2
   const promptRest = multiScenePrompt ? captions + pSuffix : promptFirst
   const windows = planChunkWindows(p.sourceFrames, p.chunkSeconds ?? 5)
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
@@ -1146,29 +1177,31 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
     while (framesForTok(t + 1) <= f) t++
     return Math.max(1, t)
   }
-  /** (правка 314) Размер сегмента сегментного декода, токенов (кратно 5).
-   *  25 токенов ≈ 85 кадров: раньше покусочно декодировались окна до
-   *  tokOf(T)=37 токенов (chunkSeconds=5 → T=124) — работало; 25 консервативно
-   *  ниже, а кратность 5 держит позиционный паттерн FPT (см. выше): каждый
-   *  сегмент начинается с k%5==0, кадры суммируются без дрейфа. */
+  /** (правка 314) Размер сегмента декода, токенов (кратно 5):
+   *  внутренний temporal-VAE H3 всё равно работает блоками по 5 токенов,
+   *  поэтому границы сегментов выровнены по этой сетке. */
   const SEG_DECODE_TOK = 25
-
   /**
-   * (правка 953) Перехлёст НОВОГО контента между окнами для плавного стыка.
+   * (правка 1028) Перехлёст больше НЕ перерисовывается вторым окном.
    *
-   * Раньше preserved-голова (12 ток. = 39 кадров) была только контекстом:
-   * новые кадры окна k начинались ровно там, где закончилось окно k−1, и
-   * граница «новый контент ↔ новый контент» читалась как шов (особенно на
-   * 3-секундных окнах). Теперь голова короче на SEAM_BLEND_TOK (5 ток. =
-   * 17 кадров): окно рефинит и эти 17 кадров заново, а сборка смешивает их
-   * с предыдущим рендером и выбрасывает дубли. 17 кадров — родная сетка
-   * сегментного декода (5 токенов), фаза FPT сохраняется.
+   * Почему: preserved-голова теперь корректно берёт начало перехлёста, но
+   * оставшиеся 17 кадров всё равно генерировались новым окном без доступа
+   * к уже перегенерированному хвосту предыдущего. Два независимых рендера
+   * одного и того же участка неизбежно расходятся по геометрии, а alpha-
+   * blend лишь маскирует это. Поэтому сохраняем ВЕСЬ перехлёст из прошлого
+   * рендера и генерируем только новый контент после него. Стык становится
+   * границей «preserved → новое», но она опирается на полный 39-кадровый
+   * контекст, а не на смесь двух разных рендеров.
+   *
+   * Если понадобится вернуть перерисовку — здесь задаётся число токенов,
+   * которые второе окно генерирует заново (было 5 = 17 кадров).
    */
-  const SEAM_BLEND_TOK = 5
-  const headTok = Math.max(1, oTok - SEAM_BLEND_TOK) // 7 ток. = 22 кадра контекста
-  const headFrames = framesForTok(headTok) // 22
-  /** Аудио-эквивалент укороченной головы (5/3 шага на кадр). */
-  const aHead = Math.round((headFrames * 5) / 3) // 37
+  const SEAM_RERENDER_TOK = 0
+  const SEAM_BLEND_TOK = SEAM_RERENDER_TOK
+  const headTok = Math.max(1, oTok - SEAM_BLEND_TOK) // 12 ток. = 39 кадров
+  const headFrames = framesForTok(headTok) // 39
+  /** Аудио-эквивалент сохранённой головы (5/3 шага на кадр). */
+  const aHead = Math.round((headFrames * 5) / 3) // 65
 
   // ─── (правка 382) Lossless-ветка: окна из сохранённого латента ───
   const latentMode = !!p.sourceLatent
@@ -1358,6 +1391,27 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         class_type: 'LTXVSeparateAVLatent',
         _meta: { title: 'Separate AV Latent (загруженный)' },
       },
+      // (правка 1031) Один общий 3D-апскейл исходного латента на весь ролик.
+      // Окна ниже режутся уже из r_up, а не апскейлятся по отдельности.
+      ...(needsUpscale ? {
+        'r_up': {
+          inputs: {
+            model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
+            mode: 'target dimensions',
+            'mode.width': final.genW,
+            'mode.height': final.genH,
+            align: 32,
+            enable_chunking: true,
+            enable_temporal_chunking: true,
+            force_unload: true,
+            device: 'cuda',
+            precision: 'fp16',
+            latent: ['r_lsep', 0],
+          },
+          class_type: 'MinimaxH3LatentUpscaler3D',
+          _meta: { title: `Latent Upscaler (3D) → ${final.genW}×${final.genH}` },
+        },
+      } : {}),
       'r_f0src': {
         inputs: {
           video: p.sourceVideo,
@@ -1400,6 +1454,15 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // голова aHead (37 шагов), чтобы новый контент перехлёстывался так же,
         // как видео; чистая сборка ниже по-прежнему режет 65 шагов.
         const aOver = chained ? aHead : 0
+        // (правка 1027) Фактический перехлёст этого окна с предыдущим — в
+        // кадрах и в аудио-шагах. Нужен, чтобы preserved-голова бралась из
+        // НАЧАЛА перехлёста, а не из его конца (см. ниже).
+        const prevG = chained ? winGeo[k - 1] : null
+        const overlapFrames = prevG
+          ? Math.max(CHAIN_OVERLAP, prevG.effSkip + prevG.effCap - geo.effSkip)
+          : 0
+        const prevOverlapTok = prevG ? tokHeadAtMost(overlapFrames) : 0
+        const prevAudioOverlap = prevG ? Math.round((overlapFrames * 5) / 3) : 0
 
         // Видео-латент окна (правка 382 — два пути):
         //  • mp4: пиксельный срез [skip, skip+cap) → resize → VAEEncode;
@@ -1408,11 +1471,16 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // Дальше оба пути едины: [апскейл до gen-канвы] → латент окна.
         let encLatent: [string, number]
         if (latentMode) {
-          // (правка 395) sTok/tTok при длинном источнике (>~39 мин видео)
-          // превышают MAX_RESOLUTION=16384 — дробим chainLatentCut'ом.
+          // (правка 1031) Lossless-ветка: апскейлим ИСХОДНЫЙ латент ОДИН раз
+          // (r_up, уже построен выше) и режем окна уже из него. Раньше каждое
+          // окно апскейлилось отдельно (cu_k): временной 3D-апскейлер получал
+          // разный контекст на границах, и соседние окна выходили с чуть
+          // разным масштабом/геометрией — это читалось как деформация сцены
+          // на стыке. Один общий апскейл гарантирует одну шкалу на всё видео.
+          const latentSrc: [string, number] = needsUpscale ? ['r_up', 0] : ['r_lsep', 0]
           encLatent = chainLatentCut(
             nodes, `cl_${k}`,
-            ['r_lsep', 0],
+            latentSrc,
             't', geo.sTok, tTok,
             `Окно ${k + 1}: токены [${geo.sTok}, ${geo.sTok + tTok}) ≈ кадры [${effSkip}, ${effSkip + effCap})`,
           )
@@ -1444,7 +1512,10 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           }
           encLatent = [`ce_${k}`, 0]
         }
-        const genLatent: [string, number] = needsUpscale
+        // (правка 1031) В latent-ветке апскейл уже сделан один раз над всем
+        // исходником (r_up). Повторный cu_k на каждом окне только сбивал
+        // масштаб на стыках. В mp4-ветке по-прежнему апскейлим окно.
+        const genLatent: [string, number] = (needsUpscale && !latentMode)
           ? (() => {
               nodes[`cu_${k}`] = {
                 inputs: {
@@ -1520,29 +1591,36 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
 
         // Видео-латент куска (правка 272, схема D-версии — рабочая):
         // k=0: окно целиком (маска не нужна).
-        // k>0: LatentCut + LatentConcat — срез головы O токенов у кодированного
-        // окна + preserved-хвост предыдущего рендера (css_{k-1}). Т.е.
-        // латентная цепочка: выход куска k-1 → хвост → concat с новым
-        // контентом куска k. Noise mask: чёрная на хвосте (не рефинится),
-        // белая на новом (рефинится). Это доказанная рабочая схема —
-        // стыки непрерывны по построению (хвост куска k-1 = голова куска k),
-        // жёсткая concat без скачка.
+        // k>0: LatentCut + LatentConcat — срез головы окна + первые
+        // headTok токенов фактического перехлёста из css_{k-1}. Т.е.
+        // латентная цепочка: выход куска k-1 → preserved-голова → concat с
+        // новым контентом куска k. Noise mask: чёрная на голове (не
+        // рефинится), белая на новом (рефинится). Стыки непрерывны по
+        // таймлайну: preserved-голова = начало перехлёста текущего окна.
         let videoForJoin: [string, number]
         if (!chained) {
           videoForJoin = genLatent
         } else {
-          // Срез головы: убрать первые headTok токенов (они = хвост предыдущего
-          // рендера; (правка 953) голова укорочена на 17 кадров перехлёста)
+          // Срез головы: убрать первые headTok токенов (они = preserved-
+          // перехлёст из предыдущего рендера; правка 1028 — без перерисовки)
           nodes[`cvc_${k}`] = {
             inputs: { samples: genLatent, dim: 't', index: headTok, amount: tTok - headTok },
             class_type: 'LatentCut',
             _meta: { title: `Окно без головы (${headTok} ток.)` },
           }
-          // Preserved-хвост предыдущего рендера: последние headTok токенов
+          // (правка 1027) Голова предыдущего рендера — первые headTok токенов
+          // ФАКТИЧЕСКОГО перехлёста. Раньше здесь брались последние headTok:
+          // при укороченной голове (7 вместо 12 ток.) это сдвигало контекст
+          // на 17 кадров и выбрасывало начало текущего окна.
           nodes[`cpt_${k}`] = {
-            inputs: { samples: [`css_${k - 1}`, 0], dim: 't', index: -headTok, amount: headTok },
+            inputs: {
+              samples: [`css_${k - 1}`, 0],
+              dim: 't',
+              index: -prevOverlapTok,
+              amount: headTok,
+            },
             class_type: 'LatentCut',
-            _meta: { title: `Preserved-хвост куска ${k}` },
+            _meta: { title: `Preserved-голова куска ${k} (${headTok} ток.)` },
           }
           // Concat: хвост + новый контент = полное окно
           nodes[`ccc_${k}`] = {
@@ -1592,11 +1670,18 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         if (!chained) {
           audioForJoin = [`cane_${k}`, 0]
         } else {
-          // Preserved-хвост аудио предыдущего рендера: последние aOver
+          // (правка 1027) Symmetric to video: first aOver audio steps of the
+          // actual overlap, not the last aOver. Otherwise the audio guide is
+          // shifted relative to the preserved video head.
           nodes[`caold_${k}`] = {
-            inputs: { samples: [`css_${k - 1}`, 1], dim: 'x', index: -aOver, amount: aOver },
+            inputs: {
+              samples: [`css_${k - 1}`, 1],
+              dim: 'x',
+              index: -prevAudioOverlap,
+              amount: aOver,
+            },
             class_type: 'LatentCut',
-            _meta: { title: `Аудио-хвост куска ${k}` },
+            _meta: { title: `Аудио-голова куска ${k}` },
           }
           // Concat: хвост + новое = полное окно
           nodes[`cacc_${k}`] = {
@@ -1637,6 +1722,25 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // ПОСЛЕДНИМ (<Picture k+1>; без меты — <Picture 1>). length = длина
         // именно этого окна (последнее короче). Латент-выход ноды не
         // используется — только conditioning.
+        // (правка 1032) Якорь текущего окна из исходника. Раньше в latent-
+        // ветке conditioning вообще не получал картинку-якорь: только текст и
+        // мета-рефы. На высоком sigma модель могла «переиграть» геометрию
+        // сцены от окна к окну. Берём кадр исходника в начале НОВОГО контента
+        // этого окна (для окна 0 — кадр 0) и подаём как <Picture N>.
+        const anchorFrame = Math.max(0, Math.round(effSkip + (chained ? headFrames : 0)))
+        nodes[`c_anchor_${k}`] = {
+          inputs: {
+            video: p.sourceVideo,
+            force_rate: 24,
+            custom_width: 0,
+            custom_height: 0,
+            frame_load_cap: 1,
+            skip_first_frames: anchorFrame,
+            select_every_nth: 1,
+          },
+          class_type: 'VHS_LoadVideo',
+          _meta: { title: `Окно ${k + 1}: source-якорь @${anchorFrame}` },
+        }
         nodes[`ccond_${k}`] = {
           inputs: {
             // (правка 923) Сюжетный промпт уходит всем окнам, если текст
@@ -1655,13 +1759,11 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             ...Object.fromEntries(
               metaRefs.map((_, i) => [`ref_images.ref_image_${i}`, [`c_ref_${i}`, 0]]),
             ),
-            // (правка 587) В латент-цепи якорь первого кадра НЕ включается
-            ...(!latentMode && { [`ref_images.ref_image_${metaRefs.length}`]: ['r_f0c', 0] }),
+            // источник-якорь текущего окна — последним слотом
+            [`ref_images.ref_image_${metaRefs.length}`]: [`c_anchor_${k}`, 0],
           },
           class_type: 'MiniMaxH3ReferenceToVideo',
-          _meta: { title: latentMode
-            ? `Conditioning окна ${k + 1} (${metaRefs.length} мета-рефов, без якоря кадра)`
-            : `Conditioning окна ${k + 1} (${1 + metaRefs.length} рефов)` },
+          _meta: { title: `Conditioning окна ${k + 1} (${1 + metaRefs.length} рефов)` },
         }
         nodes[`cg_${k}`] = {
           inputs: {
@@ -1721,22 +1823,11 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
       // ЭФФЕКТИВСКИХ границ — режется оно, а не фиксированные 39 кадров.
       let fullVideo: [string, number] = [`css_0`, 0]
       let fullAudio: [string, number] = [`css_0`, 1]
-      // (правка 953) Для ДЕКОДА используется «дублированная» цепочка: окно k>0
-      // начинается на 17 кадров раньше конца предыдущего рендера. Эти кадры
-      // существуют дважды (хвост предыдущего окна и перерисованная голова
-      // нового), после декода смешиваются кроссфейдом и выбрасываются.
-      // Чистая цепочка выше (`fullVideo`) остаётся для сохранения AV-латента:
-      // повторный lossless-рефайн получает латент без дублей.
-      let dupVideo: [string, number] = [`css_0`, 0]
+      // (правка 1033) Чистая непрерывная цепочка без дублей. tTokTotal —
+      // число токенов fullVideo; seamToks — позиции стыков окон в этой
+      // цепочке (их нежелательно попадать в кроссфейд сегментного декода).
       let tTokTotal = winGeo[0].tTok
-      let covered = winGeo[0].effSkip + winGeo[0].effCap
-      // (правка 921) Границы нового контента в токенах дублированного латента —
-      // нужны планировщику сегментов декода (см. ниже).
       const seamToks: number[] = []
-      // (правка 953) Где в дублированном таймлайне лежат пары кадров для
-      // пиксельного кроссфейда: [prevDup, winDup) и [winDup, winDup+f) —
-      // один и тот же участок таймлайна, отрендеренный двумя окнами.
-      const blendSeams: Array<{ prevDup: number; winDup: number; frames: number }> = []
       for (let k = 1; k < windows.length; k++) {
         const g = winGeo[k]
         const prevG = winGeo[k - 1]
@@ -1757,35 +1848,10 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           _meta: { title: `Полный латент после окна ${k + 1}` },
         }
         fullVideo = [`cfull_${k}`, 0]
-        // (правка 953) Дублированная цепочка: голова короче на 17 кадров,
-        // поэтому перехлёст с предыдущим рендером попадает в декод дважды.
-        const dupAmount = Math.max(1, tTok - headTok)
-        const dupFramesBefore = framesForTok(tTokTotal)
-        const newStart = g.effSkip + headFrames
-        const oFrames = Math.max(0, Math.min(covered - newStart, framesForTok(dupAmount)))
-        nodes[`cfjd_${k}`] = {
-          inputs: { samples: [`css_${k}`, 0], dim: 't', index: headTok, amount: dupAmount },
-          class_type: 'LatentCut',
-          _meta: { title: `Выход окна ${k + 1} (перехлёст ${headTok} ток.)` },
-        }
-        nodes[`cfullD_${k}`] = {
-          inputs: { samples1: dupVideo, samples2: [`cfjd_${k}`, 0], dim: 't' },
-          class_type: 'LatentConcat',
-          _meta: { title: `Латент для декода после окна ${k + 1} (с перехлёстом)` },
-        }
-        dupVideo = [`cfullD_${k}`, 0]
-        if (oFrames > 0) {
-          // новый контент этого окна начинается через oFrames кадров от
-          // начала блока — эта граница не должна попасть в кроссфейд декода.
-          seamToks.push(tTokTotal + tokCover(oFrames))
-          blendSeams.push({
-            prevDup: dupFramesBefore - oFrames,
-            winDup: dupFramesBefore,
-            frames: oFrames,
-          })
-        }
-        tTokTotal += dupAmount
-        covered = g.effSkip + g.effCap
+        // Стык окна в чистой цепочке — по текущей длине до добавления
+        // нового контента.
+        seamToks.push(tTokTotal)
+        tTokTotal += tTok - cutTok
         nodes[`caf_${k}`] = {
           inputs: { samples: [`css_${k}`, 1], dim: 'x', index: aCut, amount: aTotal - aCut },
           class_type: 'LatentCut',
@@ -1817,31 +1883,16 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         _meta: { title: 'Save AV Latent (для lossless-рефайна)' },
       }
 
-      // Сегментный декод: полный латент режется на сегменты по SEG_DECODE_TOK
-      // токенов (VRAM: пик декода ограничен сегментом, а не всем роликом),
-      // каждый декодируется своим VAEDecode.
-      // (правка 412) ПЕРЕКРЫТИЕ 5 токенов (=17 кадров, границы кратны 5 —
-      // паттерн FPT сохраняется): temporal VAE нелокален на краях, декод
-      // сегментов «встык» давал разрыв картинки на каждой границе.
-      // (правка 820) Жёсткий срез перекрытия заменён кроссфейдом. Каждый
-      // VAEDecode считает свой сегмент независимо и даёт небольшой сдвиг
-      // яркости/деталей, из-за чего на границе (кадры 85, 170, …) был виден
-      // 1–2-кадровый «моргающий» стык — именно он ощущался как шов между
-      // кусками. Теперь последние OVL_FRAMES кадров сегмента i линейно
-      // смешиваются с первыми OVL_FRAMES кадрами сегмента i+1: сдвиг
-      // размазывается на 17 кадров (0,7 с) и становится незаметным.
+      // (правка 1033) Декодируем ОДНУ чистую непрерывную латентную цепочку
+      // fullVideo (без дублей и без pyxel-crossfade между окнами).
+      // Соседние кадры на стыке окон приходят из одного и того же латента,
+      // поэтому перехода между двумя рендерами там нет по определению.
+      // Единственный легитимный фейд остаётся на стыках сегментов декода:
+      // temporal-VAE нелокален на краях, и каждый VAEDecode даёт небольшой
+      // сдвиг деталей. Перекрытие 5 токенов (17 кадров) смешивает почти
+      // одинаковые кадры из непрерывного латента.
       const OVL_TOK = 5
       const OVL_FRAMES = framesForTok(OVL_TOK) // 17
-      // (правка 921) Границы сегментов декода не должны попадать на стыки
-      // окон. Кроссфейд правки 820 смешивает два НЕЗАВИСИМЫХ декода на
-      // последних OVL_TOK токенах сегмента: если там же лежит стык окон
-      // (граница нового латента), смена содержимого размазывается на 17
-      // кадров и читается как видимый шов. Шаг стыков при «Частями» равен
-      // шагу окна: при 3 с это каждые 10 токенов, поэтому граница
-      // 25-токенного сегмента регулярно оказывается рядом со стыком
-      // (для ~6 с видео — ровно в середине ролика). Сдвигаем границу на
-      // ближайшую свободную, кратно 5 токенам (фаза FPT сохраняется,
-      // кадровая арифметика сегментов точная), предпочитая сдвиг назад.
       const segEnds: number[] = []
       {
         let start = 0
@@ -1865,10 +1916,6 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           start = end
         }
       }
-      // Хвост короче головы перекрытия — ПРИСОЕДИНЯЕМ к предыдущему сегменту.
-      // (правка 953) Раньше `segEnds.pop()` просто выбрасывал последний
-      // короткий сегмент: последние до 17 кадров не декодировались вовсе.
-      // Теперь предыдущий сегмент растягивается до самого конца.
       while (segEnds.length > 1 && tTokTotal - segEnds[segEnds.length - 2] <= OVL_TOK) {
         segEnds.pop()
         segEnds[segEnds.length - 1] = tTokTotal
@@ -1881,10 +1928,9 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         const index = i > 0 ? segStart - OVL_TOK : 0
         const amount = end - segStart + (i > 0 ? OVL_TOK : 0)
         segFrames.push(framesForTok(amount))
-        // (правка 395) index при ролике >~39 мин > MAX_RESOLUTION — дробим.
         const segRef = chainLatentCut(
           nodes, `cds_${i}`,
-          dupVideo,
+          fullVideo,
           't', index, amount,
           `Сегмент декода ${i + 1}/${segCount} (${amount} ток.)`,
         )
@@ -1895,8 +1941,6 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         }
         segStart = end
       }
-      // (правка 820) Сборка: тело сегмента без перекрытий + кроссфейд на
-      // каждом стыке (tail сегмента i ↔ head сегмента i+1).
       let framesAll: [string, number] = ['cdd_0', 0]
       if (segCount > 1) {
         const parts: string[] = []
@@ -1914,12 +1958,12 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             nodes[`ctail_${i}`] = {
               inputs: { image: [`cdd_${i}`, 0], batch_index: len - OVL_FRAMES, length: OVL_FRAMES },
               class_type: 'ImageFromBatch',
-              _meta: { title: `Сегмент ${i + 1}: хвост перекрытия (${OVL_FRAMES} кадр.)` },
+              _meta: { title: `Сегмент ${i + 1}: хвост перекрытия` },
             }
             nodes[`chead_${i}`] = {
               inputs: { image: [`cdd_${i + 1}`, 0], batch_index: 0, length: OVL_FRAMES },
               class_type: 'ImageFromBatch',
-              _meta: { title: `Сегмент ${i + 2}: голова перекрытия (${OVL_FRAMES} кадр.)` },
+              _meta: { title: `Сегмент ${i + 2}: голова перекрытия` },
             }
             nodes[`cmask_${i}`] = {
               inputs: {
@@ -1931,7 +1975,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
                 interpolation: 'linear',
               },
               class_type: 'CreateFadeMaskAdvanced',
-              _meta: { title: `Кроссфейд ${i + 1}: маска 0→1 (${OVL_FRAMES} кадр.)` },
+              _meta: { title: `Кроссфейд сегментов ${i + 1}→${i + 2}` },
             }
             nodes[`cblend_${i}`] = {
               inputs: {
@@ -1954,94 +1998,9 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             ...Object.fromEntries(parts.map((id, i) => [`image_${i + 1}`, [id, 0]])),
           },
           class_type: 'ImageBatchMulti',
-          _meta: { title: `Склейка кадров (${segCount} сегм., кроссфейд)` },
+          _meta: { title: `Склейка декодированных сегментов (${segCount})` },
         }
         framesAll = ['cbatch', 0]
-      }
-      // (правка 953) Пиксельный кроссфейд перехлёста окон. В дублированном
-      // латенте один и тот же участок таймлайна лежит дважды: хвост
-      // предыдущего рендера и перерисованная голова следующего окна.
-      // Смешиваем пару (prev→win, 0→1) и выбрасываем дубли — на выходе
-      // ровно исходная длина. (правка 1022) Смешиваем только последние
-      // 5 кадров, а не весь 17-кадровый перехлёст, чтобы не было двойной
-      // экспозиции; геометрия/длина не меняются.
-      if (blendSeams.length > 0) {
-        const blendParts: string[] = []
-        let cursorFrames = 0
-        const totalDupFrames = framesForTok(tTokTotal)
-        blendSeams.forEach((s, idx) => {
-          const bodyLen = s.prevDup - cursorFrames
-          if (bodyLen > 0) {
-            nodes[`cbd_${idx}`] = {
-              inputs: { image: framesAll, batch_index: cursorFrames, length: bodyLen },
-              class_type: 'ImageFromBatch',
-              _meta: { title: `Тело таймлайна до стыка ${idx + 1}` },
-            }
-            blendParts.push(`cbd_${idx}`)
-          }
-          nodes[`cprev_${idx}`] = {
-            inputs: { image: framesAll, batch_index: s.prevDup, length: s.frames },
-            class_type: 'ImageFromBatch',
-            _meta: { title: `Стык ${idx + 1}: хвост прошлого окна (${s.frames} кадр.)` },
-          }
-          nodes[`cwin_${idx}`] = {
-            inputs: { image: framesAll, batch_index: s.winDup, length: s.frames },
-            class_type: 'ImageFromBatch',
-            _meta: { title: `Стык ${idx + 1}: перерисованная голова (${s.frames} кадр.)` },
-          }
-          const visibleBlend = Math.max(1, Math.min(5, s.frames))
-          const blendStart = Math.max(0, s.frames - visibleBlend)
-          nodes[`csmask_${idx}`] = {
-            inputs: {
-              // (правка 1022) Длинный 17-кадровый кроссфейд давал «наложение»
-              // двух рендеров. Геометрию окон не меняем (17 кадров дублей),
-              // но смешиваем только последние 5 кадров перехлёста: до этого
-              // идёт хвост прошлого рендера, после — уже новый рендер.
-              points_string: blendStart > 0
-                ? `0:(0.0),\n${blendStart}:(0.0),\n${s.frames - 1}:(1.0)`
-                : `0:(0.0),\n${s.frames - 1}:(1.0)`,
-              invert: false,
-              frames: s.frames,
-              width: 16,
-              height: 16,
-              interpolation: 'linear',
-            },
-            class_type: 'CreateFadeMaskAdvanced',
-            _meta: { title: `Стык ${idx + 1}: кроссфейд ${visibleBlend}/${s.frames} кадр.` },
-          }
-          nodes[`cseam_${idx}`] = {
-            inputs: {
-              destination: [`cprev_${idx}`, 0],
-              source: [`cwin_${idx}`, 0],
-              x: 0,
-              y: 0,
-              resize_source: false,
-              mask: [`csmask_${idx}`, 0],
-            },
-            class_type: 'ImageCompositeMasked',
-            _meta: { title: `Стык ${idx + 1}: смешение двух рендеров` },
-          }
-          blendParts.push(`cseam_${idx}`)
-          cursorFrames = s.winDup + s.frames
-        })
-        const tailLen = totalDupFrames - cursorFrames
-        if (tailLen > 0) {
-          nodes['cbtail'] = {
-            inputs: { image: framesAll, batch_index: cursorFrames, length: tailLen },
-            class_type: 'ImageFromBatch',
-            _meta: { title: 'Таймлайн после последнего стыка' },
-          }
-          blendParts.push('cbtail')
-        }
-        nodes['cbfin'] = {
-          inputs: {
-            inputcount: blendParts.length,
-            ...Object.fromEntries(blendParts.map((id, i) => [`image_${i + 1}`, [id, 0]])),
-          },
-          class_type: 'ImageBatchMulti',
-          _meta: { title: `Склейка стыков с кроссфейдом (${blendSeams.length})` },
-        }
-        framesAll = ['cbfin', 0]
       }
       // Кроп до номинала — ОДИН раз на полном батче (раньше ccrop_k покусочно)
       if (needsCrop) {

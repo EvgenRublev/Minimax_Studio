@@ -381,7 +381,10 @@ export function RefineView() {
     setLastError(null)
 
     const task = {
-      mode: mode as 'whole' | 'chunks',
+      // (правка 1040) «Частями» — один непрерывный латентный проход с
+      // официальными Context Windows ComfyUI. «Целиком» остаётся без окон.
+      mode: 'whole' as const,
+      windowed: mode === 'chunks',
       outputSubfolder: outputFolder,
       source: { filename: src.filename, subfolder: src.subfolder ?? '' },
       ...(src.inputSource ? { inputSource: src.inputSource } : {}),

@@ -145,6 +145,8 @@ export async function POST(req: NextRequest) {
       sourceHeight?: number
       /** (правка 253) 'chunks' — единый латент-маскированный воркфлоу. */
       mode?: 'whole' | 'chunks'
+      /** (правка 1034) Оконный forward модели внутри одного прохода. */
+      windowed?: boolean
       chunkSeconds?: number
       /** (правка 265) Имя файла, уже лежащего в ComfyUI input/ (файл с диска,
           загруженный через /api/comfy/upload). Источником считается этот файл,
@@ -441,6 +443,7 @@ export async function POST(req: NextRequest) {
         submitRefine({
           sourceVideo: inName,
           diffusionModel: cfg.diffusionModel || undefined,
+          windowed: body.windowed === true,
           sourceWidth: srcW,
           sourceHeight: srcH,
           targetShortSide: target,
@@ -792,6 +795,7 @@ export async function POST(req: NextRequest) {
       submitRefine({
         sourceVideo: destName,
         diffusionModel: cfg.diffusionModel || undefined,
+        windowed: body.windowed === true,
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)
         ...(sourceLatent && { sourceLatent, sourceFrames: probe.frames }),
