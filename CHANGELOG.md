@@ -9,6 +9,20 @@
 
 ---
 
+## [7.1.32] — 2026-11-17
+
+### Полный setup.exe: DLSS runtime обязателен (правка 1042)
+
+- Полный установщик теперь собирается только через
+  `node scripts/build-setup.mjs`: скрипт заново готовит payload из `git HEAD`,
+  добавляет `install/cache`, `upscale/bin` и **проверяет DLSS-файлы и в
+  payload, и в готовом setup.exe**.
+- В релизную проверку добавлен `scripts/check-dlss-runtime.mjs`: без
+  `upscale/bin/runtime` релиз не собирается.
+- Правило закреплено в `AGENTS.md`: `Minimax_Studio_update.zip` не носит DLSS
+  (обновление не трогает вендорный runtime), чистая установка — только через
+  полный setup.exe.
+
 ## [7.1.31] — 2026-11-17
 
 ### Refine «частями»: официальные MiniMaxH3 Context Windows (правка 1040)

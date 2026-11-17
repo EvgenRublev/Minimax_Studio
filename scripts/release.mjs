@@ -83,6 +83,10 @@ console.log(`\n[release] === verify ===`);
 // при запуске должна оставаться на месте. Подробности — AGENTS.md.
 if (!run('comfy node sync check', process.execPath, ['scripts/check-comfy-sync.mjs'])) process.exit(1);
 
+// (правка 1042) Вендорный DLSS runtime не в git и легко теряется при
+// пересборке setup payload. Полный релиз без него не выпускаем.
+if (!run('dlss runtime check', process.execPath, ['scripts/check-dlss-runtime.mjs'])) process.exit(1);
+
 // (правка 939) Целостность установщика: офлайн-бандл (install/cache) сверяется по
 // sha256 с install/checksums.json, версии в install.ps1/package.json — с именами
 // файлов бандла, и на месте вся механика проверки загрузок. Битый архив внутри
