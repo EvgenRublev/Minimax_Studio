@@ -937,11 +937,12 @@ export function RefineView() {
                 className="space-y-1.5 pt-1"
                 title={t("Длинное видео обрабатывается кусками с небольшим нахлёстом, затем куски незаметно склеиваются. Звук перегенерируется вместе с видео — галочка «Оставить оригинальный звук» ниже подставит дорожку исходника.")}
               >
-                <Select value={chunkSec} onValueChange={(v) => patchParams({ chunkSec: v as '3' | '5' | '8' })}>
+                <Select value={chunkSec} onValueChange={(v) => patchParams({ chunkSec: v as '2' | '3' | '5' | '8' })}>
                   <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
                     <SelectValue placeholder={t("Длина куска")} />
                   </SelectTrigger>
                   <SelectContent className="bg-[var(--surface-3)] border-border">
+                    <SelectItem value="2">{t("~2 с (минимум VRAM)")}</SelectItem>
                     <SelectItem value="3">{t("~3 с (меньше VRAM)")}</SelectItem>
                     <SelectItem value="5">{t("~5 с (рекомендуется)")}</SelectItem>
                     <SelectItem value="8">{t("~8 с (быстрее в сумме)")}</SelectItem>

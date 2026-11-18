@@ -445,6 +445,8 @@ export async function POST(req: NextRequest) {
           sourceVideo: inName,
           diffusionModel: cfg.diffusionModel || undefined,
           windowed: body.windowed === true,
+          // (правка 1056) «Частями»: длина части → геометрия окон H3
+          chunkSeconds: Number(body.chunkSeconds) || 5,
           sourceWidth: srcW,
           sourceHeight: srcH,
           targetShortSide: target,
@@ -797,6 +799,8 @@ export async function POST(req: NextRequest) {
         sourceVideo: destName,
         diffusionModel: cfg.diffusionModel || undefined,
         windowed: body.windowed === true,
+        // (правка 1056) «Частями»: длина части → геометрия окон H3
+        chunkSeconds: Number(body.chunkSeconds) || 5,
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)
         ...(sourceLatent && { sourceLatent, sourceFrames: probe.frames }),

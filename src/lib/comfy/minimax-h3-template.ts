@@ -1459,9 +1459,17 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     // ═══════════════════════════════════════════════
 
     ...(!draft && {
+      // (правка 1055) Сброс после Pass 1: выгрузить DiT/TE и флашить аллокатор
+      // до загрузки апскейлера и Pass 2 — при нескольких прогонах модели в одной
+      // задаче резидентность VBAR деградирует (comfy-aimdo #117/#118/#133).
+      'h3_rst_mid': {
+        inputs: { flow: ['46:21', 1], label: 'после Pass 1' },
+        class_type: 'MiniMaxStudioVRAMReset',
+        _meta: { title: 'VRAM Reset (Pass 1 → Upscale)' },
+      },
       // Separate AV latent from pass 1
       '46:35': {
-        inputs: { av_latent: ['46:21', 1] },
+        inputs: { av_latent: ['h3_rst_mid', 0] },
         class_type: 'LTXVSeparateAVLatent',
         _meta: { title: 'Separate AV Latent' },
       },
@@ -1609,6 +1617,16 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     //  DECODE (separate video + audio)
     // ═══════════════════════════════════════════════
 
+    // (правка 1055) Сброс перед декодом: сэмплерные модели больше не нужны,
+    // освободить всплеск VAE-декода и NVENC; все три потребителя латента
+    // ('46:25'/'46:14'/LoopDecode) и сохранение латента идут через сброс,
+    // чтобы порядок «сначала флаш» был гарантирован.
+    'h3_rst_dec': {
+      inputs: { flow: draft ? ['46:21', 0] : ['46:16', 0], label: 'перед декодом' },
+      class_type: 'MiniMaxStudioVRAMReset',
+      _meta: { title: 'VRAM Reset (Sampler → Decode)' },
+    },
+
     // (правка 829) «Зациклено»: один узел вместо VAEDecode + VAEDecodeAudio.
     // VAE получает латент с обёрнутым контекстом с двух сторон, поэтому
     // декодер не начинается и не заканчивается внутри цикла (иначе шов
@@ -1617,7 +1635,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     ...(loopOn ? {
       '46:60:dec': {
         inputs: {
-          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          samples: ['h3_rst_dec', 0],
           vae: ['46:3', 0],
           audio_vae: ['46:4', 0],
           pad_clips: loopPadClips,
@@ -1629,7 +1647,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       '46:25': {
         inputs: {
           // 'draft': единственный проход ('46:21'); 'full': Pass 2 ('46:16')
-          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          samples: ['h3_rst_dec', 0],
           vae: ['46:3', 0],
         },
         class_type: 'VAEDecode',
@@ -1659,7 +1677,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     ...(!loopOn ? {
       '46:14': {
         inputs: {
-          samples: draft ? ['46:21', 0] : ['46:16', 0],
+          samples: ['h3_rst_dec', 0],
           vae: ['46:4', 0],
         },
         class_type: 'VAEDecodeAudio',
@@ -1710,7 +1728,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     ...(!loopOn ? {
     '46:49': {
       inputs: {
-        samples: draft ? ['46:21', 0] : ['46:16', 0],
+        samples: ['h3_rst_dec', 0],
         filename_prefix: p.outputSubfolder
           ? `${p.outputSubfolder}/latents/Minimax_Studio`
           : 'latents/Minimax_Studio',
@@ -2785,8 +2803,16 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           class_type: 'RandomNoise',
           _meta: { title: `Шум клип ${i + 1}` },
         }
+        // (правка 1055) Сброс после сэмплера клипа: каждый сегмент продления
+        // живёт в одной задаче, без флаша резидентность VBAR накапливается
+        // от клипа к клипу (comfy-aimdo #117/#118/#133).
+        nodes[`ext_rst_${i}`] = {
+          inputs: { flow: [`ext_samp_${i}`, 0], label: `клип ${i + 1}, после сэмплера` },
+          class_type: 'MiniMaxStudioVRAMReset',
+          _meta: { title: `VRAM Reset клип ${i + 1}` },
+        }
         nodes[`ext_ssep_${i}`] = {
-          inputs: { av_latent: [`ext_samp_${i}`, 0] },
+          inputs: { av_latent: [`ext_rst_${i}`, 0] },
           class_type: 'LTXVSeparateAVLatent',
           _meta: { title: `Separate выхода ${i + 1}` },
         }
@@ -2894,8 +2920,13 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             class_type: 'SamplerCustomAdvanced',
             _meta: { title: `Сэмплер клип ${i + 1} (pass 2, рефайн)` },
           }
+          nodes[`ext_rst2_${i}`] = {
+            inputs: { flow: [`ext_samp2_${i}`, 0], label: `клип ${i + 1}, перед декодом` },
+            class_type: 'MiniMaxStudioVRAMReset',
+            _meta: { title: `VRAM Reset клип ${i + 1} (pass 2)` },
+          }
           nodes[`ext_ssep2_${i}`] = {
-            inputs: { av_latent: [`ext_samp2_${i}`, 0] },
+            inputs: { av_latent: [`ext_rst2_${i}`, 0] },
             class_type: 'LTXVSeparateAVLatent',
             _meta: { title: `Separate выхода ${i + 1} (pass 2)` },
           }

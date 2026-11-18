@@ -126,6 +126,9 @@ export interface RefineParams {
   /** (правка 1034) Оконный forward модели: один общий латентный проход,
    *  внутри forward — перекрывающиеся временные окна. */
   windowed?: boolean
+  /** (правка 1056) Выбранная длина части для «Частями» (сек). Окно и нахлёст
+   *  приводят к сетке H3 17n+5 кадров: 2→56, 3→73, 5→124, 8→192. */
+  chunkSeconds?: number
   /** MiniMaxLowVRAMAttention (default true). */
   lowVramAttention?: boolean
   /** MiniMaxChunkFeedForward (default true). */
@@ -202,6 +205,27 @@ export function refineDimensions(
   }
   const final = computeFinalDimensions(nominalW, nominalH)
   return { ...final, nominalW, nominalH }
+}
+
+/**
+ * (правка 1056) Геометрия окон режима «Частями». MiniMaxH3ContextWindows
+ * принимает длину и нахлёст только вида 17n+5 кадров (клип 17 к + хвост 5 к —
+ * родная сетка H3, на ней синхронизировано аудио). Выбранные секунды
+ * приклеиваются к ближайшему узлу сетки, нахлёст — ~31.5% окна на той же
+ * сетке: это ровно воспроизводит исторические 124/39 для 5 с и даёт
+ *   2 с → 56/22, 3 с → 73/22, 5 с → 124/39, 8 с → 192/56.
+ * Шаг окна (длина − нахлёст) в латент-токенах кратен 5 — фазовый график
+ * правки 1052 остаётся корректным для любой из этих пар.
+ */
+export function windowedH3Geometry(chunkSeconds?: number): {
+  context_length: number
+  context_overlap: number
+} {
+  const sec = Math.max(2, Math.min(15, Number(chunkSeconds) || 5))
+  const length = 17 * Math.max(1, Math.round((sec * 24 - 5) / 17)) + 5
+  const overlap = 17 * Math.max(0, Math.round((0.315 * length - 5) / 17)) + 5
+  // Нахлёст не может съедать окно целиком: минимум один клип нового содержимого.
+  return { context_length: length, context_overlap: Math.min(overlap, length - 17) }
 }
 
 /**
@@ -424,8 +448,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       '46:70': {
         inputs: {
           model: ['46:37', 0],
-          context_length: 124,   // 5 c: 17*7 + 5
-          context_overlap: 39,   // 17*2 + 5
+          // (правка 1056) размер окна — из выбора «длина части» (сек → сетка 17n+5)
+          ...windowedH3Geometry(p.chunkSeconds),
           fuse_method: 'pyramid',
           freenoise: true,
           split_conds_to_windows: false,
@@ -834,6 +858,16 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       _meta: { title: 'Refine Sampler (Pass 2)' },
     },
 
+    // (правка 1055) Сброс после рефайн-сэмплера: DiT/TE больше не нужны,
+    // освободить всплеск VAE-декода и NVENC; все потребители латента идут
+    // через сброс, чтобы флаш гарантированно был раньше декода
+    // (comfy-aimdo #117/#118/#133).
+    'r_rst': {
+      inputs: { flow: ['46:21', 0], label: 'рефайн, перед декодом' },
+      class_type: 'MiniMaxStudioVRAMReset',
+      _meta: { title: 'VRAM Reset (Refine → Decode)' },
+    },
+
     // (правка 471) Сохраняем AV-латент результата — повторный рефайн и
     // тайловый апскейл этого видео стартует с первозданного латента
     // (lossless), как у обычной генерации ('46:49'). Финализация меты
@@ -845,7 +879,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     ...(!p.chunkJob && !loopOn && {
       'r_savelat': {
         inputs: {
-          samples: ['46:21', 0],
+          samples: ['r_rst', 0],
           filename_prefix: `${sub}latents/Minimax_Studio_refine`,
           vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors',
         },
@@ -863,7 +897,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     ...(loopOn ? {
       '46:60:decr': {
         inputs: {
-          samples: ['46:21', 0],
+          samples: ['r_rst', 0],
           vae: ['46:3', 0],
           audio_vae: ['46:4', 0],
           pad_clips: loopPad,
@@ -873,7 +907,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       },
     } : {
       '46:35': {
-        inputs: { av_latent: ['46:21', 0] },
+        inputs: { av_latent: ['r_rst', 0] },
         class_type: 'LTXVSeparateAVLatent',
         _meta: { title: 'Separate AV Latent' },
       },

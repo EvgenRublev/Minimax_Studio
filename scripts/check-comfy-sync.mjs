@@ -327,6 +327,20 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   expect(!/\|\s*'image'/.test(queue), 'очередь: тип image удалён')
 }
 
+// 13. (правка 1055) Нода-сброс VRAM обязана доезжать до ComfyUI
+//     (custom nodes/minimax_studio_vram_reset) и использоваться в H3-шаблонах:
+//     генерация/продление/refine. Шаблоны без ноды или нода без шаблонов —
+//     тот же класс рассинхрона, что правка 866 (missing_node_type у юзера).
+{
+  const reset = read('custom nodes/minimax_studio_vram_reset/__init__.py')
+  expect(/"MiniMaxStudioVRAMReset"\s*:\s*MiniMaxStudioVRAMReset/.test(reset),
+    'minimax_studio_vram_reset: нода зарегистрирована в NODE_CLASS_MAPPINGS')
+  for (const t of ['src/lib/comfy/minimax-h3-template.ts', 'src/lib/comfy/refine-template.ts']) {
+    expect(/class_type: 'MiniMaxStudioVRAMReset'/.test(read(t)),
+      `${t}: шаблон использует MiniMaxStudioVRAMReset`)
+  }
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

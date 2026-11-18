@@ -38,7 +38,7 @@ export interface RefineUiParams {
   /** (правка 494) 'free' — свободное разрешение в Мп (см. targetMp). */
   target: 'same' | '720' | '1080' | 'free'
   mode: 'whole' | 'chunks'
-  chunkSec: '3' | '5' | '8'
+  chunkSec: '2' | '3' | '5' | '8'
   /** '2' = лёгкий ×2-рецепт (BasicScheduler 2 шага, denoise 0.2).
    *  '6'/'7' — те же лестницы сигм, что у Pass 2 генерации (6step/7step). */
   steps: '2' | '3' | '4' | '5' | '6' | '7'
