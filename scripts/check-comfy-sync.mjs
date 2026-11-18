@@ -341,6 +341,19 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   }
 }
 
+// 13b. (правка 1057) Тайловый тракт Refine «Частями» (Tessera): пак забандлен
+//      в custom nodes/, регистрирует нужные ноды и шаблоны их вызывают.
+{
+  const tessera = read('custom nodes/ComfyUI-Tessera/tessera/nodes.py')
+  for (const c of ['TesseraEncode', 'TesseraRefine', 'TesseraPlan', 'TesseraDecode']) {
+    expect(tessera.includes('class ' + c), `ComfyUI-Tessera: нода ${c} на месте`)
+  }
+  const rt = read('src/lib/comfy/refine-template.ts')
+  for (const c of ['TesseraEncode', 'TesseraRefine', 'TesseraPlan']) {
+    expect(rt.includes(`class_type: '${c}'`), `refine-template: тракт использует ${c}`)
+  }
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

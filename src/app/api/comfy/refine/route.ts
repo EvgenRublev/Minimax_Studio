@@ -148,6 +148,11 @@ export async function POST(req: NextRequest) {
       /** (правка 1034) Оконный forward модели внутри одного прохода. */
       windowed?: boolean
       chunkSeconds?: number
+      /** (правка 1057) «Частями по тайлам» (Tessera) — тайлы + чанки со
+       *  стриминговым энкодом/декодом, тракт под слабые ГПУ (8 ГБ). */
+      tessera?: boolean
+      /** (правка 1057) 3D-апскейлер для пластинки в тайловом тракте. */
+      latentUpscaler3D?: boolean
       /** (правка 265) Имя файла, уже лежащего в ComfyUI input/ (файл с диска,
           загруженный через /api/comfy/upload). Источником считается этот файл,
           а не копия из output. */
@@ -447,6 +452,9 @@ export async function POST(req: NextRequest) {
           windowed: body.windowed === true,
           // (правка 1056) «Частями»: длина части → геометрия окон H3
           chunkSeconds: Number(body.chunkSeconds) || 5,
+          // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
+          tessera: body.tessera === true,
+          latentUpscaler3D: body.latentUpscaler3D !== false,
           sourceWidth: srcW,
           sourceHeight: srcH,
           targetShortSide: target,
@@ -801,6 +809,9 @@ export async function POST(req: NextRequest) {
         windowed: body.windowed === true,
         // (правка 1056) «Частями»: длина части → геометрия окон H3
         chunkSeconds: Number(body.chunkSeconds) || 5,
+        // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
+        tessera: body.tessera === true,
+        latentUpscaler3D: body.latentUpscaler3D !== false,
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)
         ...(sourceLatent && { sourceLatent, sourceFrames: probe.frames }),

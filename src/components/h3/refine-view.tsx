@@ -117,7 +117,7 @@ export function RefineView() {
 
   const params = useRefineTarget((s) => s.params)
   const patchParams = useRefineTarget((s) => s.patchParams)
-  const { target, steps, strength, mode, chunkSec, refDetail, targetMp } = params
+  const { target, steps, strength, mode, chunkSec, tessera, refDetail, targetMp } = params
 
   // (правка 509) Промпт — в сторе (переживает переключение вкладок);
   // вводится вручную для источников с диска (у них нет .meta.json).
@@ -385,6 +385,8 @@ export function RefineView() {
       // официальными Context Windows ComfyUI. «Целиком» остаётся без окон.
       mode: 'whole' as const,
       windowed: mode === 'chunks',
+      // (правка 1057) «по тайлам» — только поверх «Частями»
+      ...(mode === 'chunks' && tessera ? { tessera: true } : {}),
       outputSubfolder: outputFolder,
       source: { filename: src.filename, subfolder: src.subfolder ?? '' },
       ...(src.inputSource ? { inputSource: src.inputSource } : {}),
@@ -398,6 +400,8 @@ export function RefineView() {
       // с диска; галерейный путь сервером игнорируется — там рефы из меты)
       ...(userRefs.length > 0 && { refImages: userRefs.map((r) => r.path) }),
       chunkSeconds: parseInt(chunkSec, 10),
+      // (правка 1057) 3D-апскейлер для пластинки тайлового тракта — общая настройка
+      latentUpscaler3D: useGenStore.getState().video.latentUpscaler3D,
       refImageSize: refDetail, // (правка 276)
       // (правка 968) оптимизации памяти — из общих настроек, как в Generate
       lowVramAttention: useGenStore.getState().video.lowVramAttention,
@@ -425,7 +429,7 @@ export function RefineView() {
     }
     enqueueRefine(task)
     toast.info(t("Refine поставлен в очередь: {{p1}}", { p1: src.filename }))
-  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, uploadingSrc, refDetail, userRefs])
+  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, tessera, uploadingSrc, refDetail, userRefs])
 
   const cancel = useCallback(async () => {
     await cancelActiveRefines()
@@ -948,6 +952,26 @@ export function RefineView() {
                     <SelectItem value="8">{t("~8 с (быстрее в сумме)")}</SelectItem>
                   </SelectContent>
                 </Select>
+                {/* (правка 1057) «Частями по тайлам» (Tessera) — тракт под слабые ГПУ:
+                    пространственные тайлы + временные чанки, стриминговые энкод/декод. */}
+                <label
+                  className="flex items-start gap-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5 transition-all cursor-pointer hover:border-cyan-500/40"
+                >
+                  <input
+                    type="checkbox"
+                    checked={tessera}
+                    onChange={(e) => patchParams({ tessera: e.target.checked })}
+                    className="mt-0.5 accent-cyan-400"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-xs font-medium text-foreground">
+                      {t("Режим по тайлам (для слабых ГПУ)")}
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground leading-relaxed">
+                      {t("Видео режется на пространственные тайлы и временные чанки; кодирование и декод идут стримингом, весь клип в память не загружается вообще. Медленнее обычного «Частями», но единственный вариант для 8 ГБ на длинных или больших роликах. Выбор длины части задаёт размер чанка (до 3 с — маленький).")}
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
           </div>

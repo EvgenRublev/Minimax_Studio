@@ -41,6 +41,10 @@ export interface RefineTask {
   seed: number
   prompt: string
   chunkSeconds: number
+  /** (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ. */
+  tessera?: boolean
+  /** (правка 1057) 3D-апскейлер для пластинки в тайловом тракте. */
+  latentUpscaler3D?: boolean
   /** (правка 315) Режим размера референсов ('match' | 'max', дефолт 'max'
    *  на сервере) — переключатель вкладки Refine. */
   refImageSize?: 'match' | 'max'
@@ -254,6 +258,9 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
       }),
       ...(task.mode === 'chunks' ? { mode: 'chunks', chunkSeconds: task.chunkSeconds } : {}),
       ...(task.windowed === true && { windowed: true }),
+      // (правка 1057) «по тайлам» — только вместе с «Частями» (windowed)
+      ...(task.windowed === true && task.tessera === true && { tessera: true }),
+      ...(task.latentUpscaler3D !== undefined && { latentUpscaler3D: task.latentUpscaler3D }),
       // (правка 968) тогглы оптимизаций из настроек — иначе Refine всегда
       // включал LowVRAM/Chunk FF, даже если пользователь их выключил.
       ...(task.lowVramAttention !== undefined && { lowVramAttention: task.lowVramAttention }),

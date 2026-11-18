@@ -51,6 +51,10 @@ export interface RefineUiParams {
    *  8.3 Мп); конвертация в короткую сторону — на сервере по реальным
    *  размерам источника (как во вкладке «Генерация», но до 4K). */
   targetMp: number
+  /** (правка 1057) «Частями по тайлам» (Tessera): тайлы + временные чанки
+   *  со стриминговым энкодом/декодом. Только для режима «Частями»;
+   *  режим для слабых ГПУ (8 ГБ). */
+  tessera: boolean
 }
 
 const DEFAULT_PARAMS: RefineUiParams = {
@@ -69,6 +73,7 @@ const DEFAULT_PARAMS: RefineUiParams = {
   strength: 0.9,
   refDetail: 'max', // (правка 1) дефолт Max — требование пользователя
   targetMp: 2.0, // (правка 494)
+  tessera: false, // (правка 1057) по умолчанию — обычный оконный «Частями»
 }
 
 interface RefineTargetState {

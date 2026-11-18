@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-tessera"
+description = "Tessera: tiled, guided video refinement and upscaling. Every tile anchored to ground truth; streamed encode/decode for any resolution and clip length on fixed memory."
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/hashu786/ComfyUI-Tessera"
+
+[tool.comfy]
+DisplayName = "Tessera"
+PublisherId = "hashu786"

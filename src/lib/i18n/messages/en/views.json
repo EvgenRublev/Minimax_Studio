@@ -9,6 +9,8 @@
   "←→ — Навигация": "←→ — Navigate",
   "~2 с (минимум VRAM)": "~2 s (minimum VRAM)",
   "~3 с (меньше VRAM)": "~3 s (less VRAM)",
+  "Режим по тайлам (для слабых ГПУ)": "Tile mode (for weak GPUs)",
+  "Видео режется на пространственные тайлы и временные чанки; кодирование и декод идут стримингом, весь клип в память не загружается вообще. Медленнее обычного «Частями», но единственный вариант для 8 ГБ на длинных или больших роликах. Выбор длины части задаёт размер чанка (до 3 с — маленький).": "The video is split into spatial tiles and temporal chunks; encoding and decoding are streamed, the full clip never sits in memory. Slower than regular \"By pieces\", but the only workable option for 8 GB cards on long or large clips. The piece-length choice sets the chunk size (up to 3 s = small).",
   "~5 с (рекомендуется)": "~5 s (recommended)",
   "~8 с (быстрее в сумме)": "~8 s (faster overall)",
   "0.25 (быстрее, меньше VRAM)": "0.25 (faster, less VRAM)",

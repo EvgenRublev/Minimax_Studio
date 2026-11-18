@@ -129,6 +129,14 @@ export interface RefineParams {
   /** (правка 1056) Выбранная длина части для «Частями» (сек). Окно и нахлёст
    *  приводят к сетке H3 17n+5 кадров: 2→56, 3→73, 5→124, 8→192. */
   chunkSeconds?: number
+  /** (правка 1057) «Частями по тайлам» (Tessera): вместо оконного прогона —
+   *  пространственные тайлы + временные чанки со стриминговым энкодом/декодом.
+   *  Режим для слабых ГПУ (8 ГБ); окно-геометрия chunkSeconds задаёт
+   *  temporal_tile (<=3 c → low_vram 73 к, иначе high_vram 124 к). */
+  tessera?: boolean
+  /** (правка 1057) 3D-апскейлер латента для пластинки в тайловом режиме
+   *  (и общий выключатель настройки «Latent Upscaler 3D»). undefined = вкл. */
+  latentUpscaler3D?: boolean
   /** MiniMaxLowVRAMAttention (default true). */
   lowVramAttention?: boolean
   /** MiniMaxChunkFeedForward (default true). */
@@ -228,6 +236,27 @@ export function windowedH3Geometry(chunkSeconds?: number): {
   return { context_length: length, context_overlap: Math.min(overlap, length - 17) }
 }
 
+/* (правка 1057) Канвас тайлового режима «Частями (Tessera)». Ноды Tessera
+ * требуют кратность 32 по ОБЕИМ осям (латент-ячейка 16 × DiT-patch 2), а
+ * сами вычисляют канвас как round(src*upscale_by) — для произвольных осей
+ * это никогда не сойдётся точно. Поэтому канвас подбираем перебором пар /32
+ * (минимальная площадь ≥ номинала, пропорция источника ±2.5%), исходные
+ * кадры пред-ресейлим до него на CPU (как 'r_res' в обычном пути), а
+ * TesseraEncode идёт с upscale_by = 1.0; обратный кроп возвращает номинал. */
+function tesseraCanvas(sourceWidth: number, sourceHeight: number, outW: number, outH: number) {
+  let best: { Wt: number, Ht: number } | null = null
+  for (let Wt = Math.ceil(outW / 32) * 32; Wt <= outW + 64; Wt += 32) {
+    for (let Ht = Math.ceil(outH / 32) * 32; Ht <= outH + 64; Ht += 32) {
+      const r = (Wt / Ht) / (sourceWidth / sourceHeight)
+      if (r < 0.975 || r > 1.025) continue
+      if (!best || Wt * Ht < best.Wt * best.Ht) best = { Wt, Ht }
+    }
+  }
+  // безысходность (нестандартная пропорция): просто ceil к /32 — лёгкий stretch
+  if (!best) best = { Wt: Math.ceil(outW / 32) * 32, Ht: Math.ceil(outH / 32) * 32 }
+  return { Wt: best.Wt, Ht: best.Ht, cropX: Math.floor((best.Wt - outW) / 2), cropY: Math.floor((best.Ht - outH) / 2) }
+}
+
 /**
  * Собрать ComfyUI API-format workflow для Refine (v2v латентная схема).
  */
@@ -288,8 +317,23 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // Апскейлер не нужен, когда ген уже равен кодируемому размеру ('same').
   const needsUpscale = final.genW !== encW || final.genH !== encH
 
+  // (правка 1057) Тайловый режим: только для «Частями», не для цикла и legacy
+  // кусков; lossless-латент в нём не используется (источник всегда mp4 —
+  // стриминговый энкодер сам делает затравку окнами).
+  const tesseraOn = p.windowed === true && p.tessera === true && !p.chunkJob && p.loop !== true
+  const tess = tesseraOn ? tesseraCanvas(p.sourceWidth, p.sourceHeight, final.outW, final.outH) : null
+  // (правка 1057, след) пластинка через 3D-латентный апскейлер: когда цель
+  // заметно больше источника, ланчоз-затравка мылит результат — латент
+  // кодируется в сетке источника и поднимается обученным MinimaxH3-апскейлером
+  // (та же настройка latentUpscaler3D, что в обычном рефайне/генерации).
+  const plateUp = tesseraOn && p.latentUpscaler3D !== false
+    && (tess!.Wt / p.sourceWidth > 1.05 || tess!.Ht / p.sourceHeight > 1.05)
+  const srcGridW = tesseraOn ? Math.max(32, Math.round(p.sourceWidth / 32) * 32) : 0
+  const srcGridH = tesseraOn ? Math.max(32, Math.round(p.sourceHeight / 32) * 32) : 0
+  // кроп нужен и в тайловом режиме: их канвас — наш /16-растр вокруг номинала
+  const cropNode = tesseraOn ? (tess!.Wt !== final.outW || tess!.Ht !== final.outH) : needsCrop
   // (правка 376) Lossless-ветка: затравка из сохранённого AV-латента.
-  const latentMode = !!p.sourceLatent
+  const latentMode = !!p.sourceLatent && !tesseraOn
   // Сетка 17k+5 от фактических кадров исходника (эквивалент 'r_cap'), но
   // на сервере: в latent-ветке mp4 целиком в граф не грузится. Формула та
   // же, что у ComfyMathExpression 'r_cap': max(5, a - ((a - 5) % 17)).
@@ -302,7 +346,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // waveform из аудио-половины латента ('r_aorig'; декод нужен и для выхода).
   // Латент ноде нужен только для геометрии/длины — берём затравку сэмплера,
   // чтобы длины A/V-потоков совпали с ним.
-  const samplerSeedLatent: [string, number] = latentMode
+  const samplerSeedLatent: [string, number] = tesseraOn
+    ? ['t_cat', 0]
+    : latentMode
     ? (needsUpscale ? ['r_cat', 0] : ['r_lat', 0])
     : ['r_cat', 0]
   // (правка 829) в цикле гайд ведёт дорожка с хвостом (17k+5), чтобы
@@ -313,13 +359,18 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     : loopOn ? ['r_apad', 0] : ['r_asafe', 0]
 
   const outputAudioSrc: [string, number] = latentMode ? ['r_aorig', 0] : ['r_asafe', 0]
-  // (правка 829) картинка декода: при цикле — Loop Decode (ровно 17k кадров).
-  const decodedImage: [string, number] = loopOn ? (['46:60:decr', 0] as [string, number]) : (['46:25', 0] as [string, number])
+  // (правка 829) картинка декода: при цикле — Loop Decode (ровно 17k кадров);
+  // (правка 1057) в тайловом режиме — IMAGE-выход TesseraRefine (pixel_out).
+  const decodedImage: [string, number] = tesseraOn
+    ? (['t_ref', 2] as [string, number])
+    : loopOn
+    ? (['46:60:decr', 0] as [string, number])
+    : (['46:25', 0] as [string, number])
   // (правка 829) хвост цепочки моделей для прогона — после Loop ('46:60r');
-  // когда цикл не собирается, это Attention Backend (эквивалент прежнего wiring).
+  // когда цикл не собирается, это Attention Backend (эквивалент прежней wiring).
   const modelTail: [string, number] = loopOn
     ? ['46:60r', 0]
-    : p.windowed
+    : p.windowed && !tesseraOn
       ? ['46:70', 0]
       : ['46:37', 0]
 
@@ -444,7 +495,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // режутся на 17-кадровой сетке, аудио и видео синхронизированы,
     // слияние — pyramid + FreeNoise. Это официальный путь для видео
     // длиннее одного окна модели, а не самодельный forward-wrapper.
-    ...(p.windowed && !loopOn ? {
+    ...(p.windowed && !loopOn && !tesseraOn ? {
       '46:70': {
         inputs: {
           model: ['46:37', 0],
@@ -618,6 +669,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           _meta: { title: 'Кадры цикла + хвост' },
         },
       } : {}),
+      // (правка 1057) В тайловом режиме пиксельную цепочку ресайз→VAEEncode→
+      // апскейлер заменяет TesseraEncode: он режет окно на временные сегменты,
+      // сам апскейлит до канваса `tess` и стримингом кодирует — полный
+      // пиксельный клип в памяти не живёт никогда.
+      ...(tesseraOn ? {} : {
       // Ресайз до /32-сетки кодирования (паттерн 'extv_tres' вкладки Extend).
       'r_res': {
         inputs: {
@@ -640,6 +696,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         class_type: 'VAEEncode',
         _meta: { title: 'VAE-кодирование исходника' },
       },
+      }),
       // (правка 313) Аудио перегенерируется: дорожка исходника защищена
       // MiniMaxH3AudioOrSilent (у беззвучного видео обращение к waveform из
       // VHS_LoadVideo бросает исключение и роняло бы VAEEncodeAudio — раньше
@@ -677,7 +734,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         _meta: { title: 'Аудио → латент (правка 313)' },
       },
       // (правка 313: узлы r_len/r_spl удалены — аудио-латент больше не пустой)
-      ...(needsUpscale && {
+      ...(needsUpscale && !tesseraOn && {
         // Тот же узел/параметры, что Pass 1→2 вкладки «Генерация» ('46:26').
         'r_up': {
           inputs: {
@@ -697,6 +754,116 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           _meta: { title: `Latent Upscaler (3D) → ${final.genW}×${final.genH}` },
         },
       }),
+      ...(tesseraOn ? {
+        // (правка 1057) Стриминговый энкодер: кадры по сетке 17k+5 ('r_img')
+        // сначала пред-ресейл на CPU в точный /16-канвас (иначе Tessera
+        // ругается геометрией), затем Encode с upscale_by = 1.0: он режет
+        // окно на временные сегменты и кодирует стримингом — полный пиксельный
+        // клип в памяти не живёт никогда.
+        't_res': {
+          inputs: {
+            image: ['r_img', 0],
+            width: tess!.Wt,
+            height: tess!.Ht,
+            upscale_method: 'lanczos',
+            keep_proportion: 'stretch',
+            pad_color: '0, 0, 0',
+            crop_position: 'center',
+            divisible_by: 32,
+            device: 'cpu',
+          },
+          class_type: 'ImageResizeKJv2',
+          _meta: { title: `Исходник → ${tess!.Wt}×${tess!.Ht} (/32-канвас)` },
+        },
+        't_enc': {
+          inputs: {
+            images: ['t_res', 0],
+            vae: ['46:3', 0],
+            positive: [condNodeId, 0],
+            upscale_by: 1.0,
+            upscale_method: 'lanczos',
+            segment_frames: 56,
+          },
+          class_type: 'TesseraEncode',
+          _meta: { title: `Streamed Encode → ${tess!.Wt}×${tess!.Ht}` },
+        },
+        ...(plateUp ? {
+          // (правка 1057) Пластинка через 3D-апскейлер: код в сетке источника
+          // (дешёвый энкод), обученный MinimaxH3LatentUpscaler3D поднимает
+          // латент до канваса — вместо мыльного ланчоза в пикселях.
+          's_res': {
+            inputs: {
+              image: ['r_img', 0],
+              width: srcGridW,
+              height: srcGridH,
+              upscale_method: 'lanczos',
+              keep_proportion: 'stretch',
+              pad_color: '0, 0, 0',
+              crop_position: 'center',
+              divisible_by: 32,
+              device: 'cpu',
+            },
+            class_type: 'ImageResizeKJv2',
+            _meta: { title: `Исходник → ${srcGridW}×${srcGridH} (код для апскейлера)` },
+          },
+          's_enc': {
+            inputs: { pixels: ['s_res', 0], vae: ['46:3', 0] },
+            class_type: 'VAEEncode',
+            _meta: { title: 'VAE-кодирование (сетка источника)' },
+          },
+          's_up': {
+            inputs: {
+              model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
+              mode: 'target dimensions',
+              'mode.width': tess!.Wt,
+              'mode.height': tess!.Ht,
+              align: 32,
+              enable_chunking: true,
+              enable_temporal_chunking: true,
+              force_unload: true,
+              device: 'cuda',
+              precision: 'fp16',
+              latent: ['s_enc', 0],
+            },
+            class_type: 'MinimaxH3LatentUpscaler3D',
+            _meta: { title: `Latent Upscaler (3D) → ${tess!.Wt}×${tess!.Ht} (пластинка)` },
+          },
+        } : {}),
+        't_cat': {
+          inputs: {
+            video_latent: plateUp ? ['s_up', 0] : ['t_enc', 1],
+            // (правка 313) реальное аудио исходника, закодированное audio-VAE
+            audio_latent: ['r_aenc', 0],
+          },
+          class_type: 'LTXVConcatAVLatent',
+          _meta: { title: 'AV-латент (затравка тайлового прогона)' },
+        },
+        // (правка 1057) отключаем flat_skip: плоские тайлы НЕ сохраняем с
+        // пластинки как есть — всё пересэмплируется (иначе ланчоз-мягкие
+        // небо/дым остаются мылом); композит в латенте — один декод вместо
+        // покадровых тайловых (быстрее и стабильнее на слабых ГПУ).
+        't_args': {
+          inputs: {
+            video_ref_crop: 'per_tile',
+            image_ref_crop: 'per_tile',
+            guide_noise: 0.0,
+            guide_noise_band: 'full',
+            guide_noise_t: 'per_frame',
+            guide_release: 0.8,
+            guide_inherit: true,
+            hero_guide_noise: -1.0,
+            motion_adapt: false,
+            motion_release_floor: 0.0,
+            fine_below_sigma: 0.75,
+            tile_select: '',
+            tile_limit: 0,
+            flat_skip: 0.0,
+            composite: 'latent',
+          },
+          class_type: 'TesseraArgs',
+          _meta: { title: 'Tessera Args (flat_skip off, latent composite)' },
+        },
+      } : {
       'r_cat': {
         inputs: {
           video_latent: [needsUpscale ? 'r_up' : 'r_enc', 0],
@@ -706,6 +873,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         class_type: 'LTXVConcatAVLatent',
         _meta: { title: 'AV-латент (затравка сэмплера)' },
       },
+      }),
     }),
     // ─── Conditioning: мета-рефы (<Picture 1..k>) + ПЕРВЫЙ КАДР видео
     // ПОСЛЕДНИМ слотом (<Picture k+1>; без мета-рефов — <Picture 1>) —
@@ -741,8 +909,10 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     '46:11r': {
       inputs: {
         prompt,
-        width: final.genW,
-        height: final.genH,
+        // (правка 1057) в тайловом режиме геометрия conditioning — по канвасу
+        // Tessera (он же сетка латента затравки), иначе обычный gen-канвас.
+        width: tesseraOn ? tess!.Wt : final.genW,
+        height: tesseraOn ? tess!.Ht : final.genH,
         // (правка 376) latent-ветка: длина от сервера (кадры mp4 уже на
         // сетке 17k+5 — совпадает с T загруженного латента); mp4-ветка —
         // из графа ('r_cap'). (правка 829) в цикле — 17k+5 ('r_len').
@@ -833,6 +1003,73 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       class_type: 'ModelPreviewOverrideKJ',
       _meta: { title: 'Model Preview Override' },
     },
+    ...(tesseraOn ? {
+      // (правка 1057) Тайловый тракт: negative через ZeroOut, геометрия — из
+      // TesseraPlan (его `settings` в 't_ref.plan'), весь прогон внутри
+      // TesseraRefine (чанки по времени + тайлы по пространству, pixel_out
+      // сразу отдаёт картинку, декод стриминговый внутри ноды).
+      't_neg': {
+        // (правка 1057) в ядре 0.44 у ConditioningZeroOut вход называется
+        // `conditioning` (не `positive`) — валидатор прямо на это указал.
+        inputs: { conditioning: ['t_enc', 0] },
+        class_type: 'ConditioningZeroOut',
+        _meta: { title: 'Negative (cfg=1)' },
+      },
+      't_plan': {
+        inputs: {
+          width: ['t_enc', 2],
+          height: ['t_enc', 3],
+          frames: ['t_enc', 4],
+          spatial_tile: 'low_vram',
+          tile_width: 1024,
+          tile_height: 1024,
+          context_border: 64,
+          hero_min: 896,
+          hero_fit: 'median',
+          temporal_tile: (Number(p.chunkSeconds) || 5) <= 3 ? 'low_vram' : 'high_vram',
+          temporal_size: 124,
+          temporal_overlap: 4,
+          diagram_width: 512,
+          ref_tile: -1,
+          positive: ['t_enc', 0],
+          vae: ['46:3', 0],
+        },
+        class_type: 'TesseraPlan',
+        _meta: { title: 'Tessera Tile Plan' },
+      },
+      't_ref': {
+        inputs: {
+          model: ['12', 0],
+          spatial_tile: 'low_vram',
+          tile_width: 1024,
+          tile_height: 1024,
+          temporal_tile: (Number(p.chunkSeconds) || 5) <= 3 ? 'low_vram' : 'high_vram',
+          temporal_size: 124,
+          temporal_overlap: 4,
+          context_border: 64,
+          seam_overlap: 32,
+          hero_min: 896,
+          hero_fit: 'median',
+          cfg: 1.0,
+          seed,
+          seed_mode: 'global',
+          pixel_out: true,
+          console_progress: 'overall',
+          prompt,
+          positive: [p.chunkJob ? condNodeId : 'r_ag', 0],
+          negative: ['t_neg', 0],
+          latent: ['t_cat', 0],
+          vae: ['46:3', 0],
+          clip: ['46:15', 0],
+          sampler: ['46:18', 0],
+          sigmas: ['46:33', 0],
+          plan: ['t_plan', 3],
+          args: ['t_args', 0],
+        },
+        class_type: 'TesseraRefine',
+        _meta: { title: 'Tessera Refine (тайлы + чанки, стриминг)' },
+      },
+    } : {
     '46:29': {
       inputs: {
         model: ['12', 0],
@@ -867,6 +1104,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       class_type: 'MiniMaxStudioVRAMReset',
       _meta: { title: 'VRAM Reset (Refine → Decode)' },
     },
+    }),
 
     // (правка 471) Сохраняем AV-латент результата — повторный рефайн и
     // тайловый апскейл этого видео стартует с первозданного латента
@@ -879,7 +1117,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     ...(!p.chunkJob && !loopOn && {
       'r_savelat': {
         inputs: {
-          samples: ['r_rst', 0],
+          // (правка 1057) в тайловом режиме латент результата — выход TesseraRefine
+          samples: tesseraOn ? (['t_ref', 0] as [string, number]) : (['r_rst', 0] as [string, number]),
           filename_prefix: `${sub}latents/Minimax_Studio_refine`,
           vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors',
         },
@@ -905,7 +1144,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         class_type: 'MiniMaxStudioLoopDecode',
         _meta: { title: `Loop Decode (pad ${loopPad})` },
       },
-    } : {
+    // (правка 1057) в тайловом режиме отдельного декода нет: картинку отдаёт
+    // сам TesseraRefine (pixel_out), латент — тоже он же (выход 0).
+    } : tesseraOn ? {} : {
       '46:35': {
         inputs: { av_latent: ['r_rst', 0] },
         class_type: 'LTXVSeparateAVLatent',
@@ -921,15 +1162,17 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // проходе генерации (minimax-h3-template.ts).
     // (правка 737) На выход ВСЕГДА муксится оригинальная дорожка, поэтому
     // декод перегенерированного аудио больше не нужен — узел убран.
-    ...(needsCrop && {
+    ...(cropNode && {
       '46:48': {
         inputs: {
           // (правка 829) при цикле — картинка с LoopDecode.
+          // (правка 1057) в тайловом режиме — картинка с TesseraRefine.
           image: decodedImage,
           width: final.outW,
           height: final.outH,
-          x: final.cropX,
-          y: final.cropY,
+          // (правка 1057) координаты кропа — от канваса Tessera (/16-растр)
+          x: tesseraOn ? tess!.cropX : final.cropX,
+          y: tesseraOn ? tess!.cropY : final.cropY,
         },
         class_type: 'ImageCrop',
         _meta: { title: `Точный кроп → ${final.outW}×${final.outH}` },
@@ -954,7 +1197,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         pingpong: false,
         save_output: true,
         // (правка 829) при цикле — картинка с LoopDecode, аудио — r_apad.
-        images: needsCrop ? ['46:48', 0] : decodedImage,
+        images: cropNode ? ['46:48', 0] : decodedImage,
         ...(p.chunkJob ? {} : { audio: outputAudioSrc }),
       },
       class_type: 'VHS_VideoCombine',
