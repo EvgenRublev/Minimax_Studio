@@ -304,12 +304,13 @@ export async function POST(req: NextRequest) {
     const outSub = sanitizeFolderPath(
       typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub,
     )
-    const safeName = path.basename(body.sourceFilename ?? '')
+    // (правка 1048) строковая проверка — см. fps/route.ts
+    const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
 
     // (правка 265) Источник уже в ComfyUI input/ (файл с диска, загруженный
     // через /api/comfy/upload) — работаем с ним напрямую, без копий из output.
     // Промпт берём только из пользовательского (сайдкара у диска-файла нет).
-    if (body.inputSource) {
+    if (typeof body.inputSource === 'string' && body.inputSource) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
@@ -512,7 +513,7 @@ export async function POST(req: NextRequest) {
     // коллизии). Режим «Частями» со 2-го куска реюзит уже скопированный
     // файл (inputName + размеры из плана) — без повторной копии и пробы. ───
     const reuseName =
-      body.inputName && existsSync(path.join(cfg.inputDir, path.basename(body.inputName)))
+      typeof body.inputName === 'string' && body.inputName && existsSync(path.join(cfg.inputDir, path.basename(body.inputName)))
         ? path.basename(body.inputName)
         : null
     let destName: string

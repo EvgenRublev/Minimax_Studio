@@ -846,7 +846,9 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // ─── Reference images (max 9) — только в режиме 'ref' ───
   // (правка 266) В режиме 'extend' картинки-рефы привязываются ВНУТРИ
   // buildExtendWorkflow к ext_cond_* узлам через ref_images.ref_image_N.
-  const refCount = mode === 'ref' ? Math.min(p.refImages.length, 9) : 0
+  // (правка 1047) refImages может прийти отсутствующим при прямом вызове API
+  // (UI всегда шлёт массив) — без this guard падали на .length (500 вместо 400).
+  const refCount = mode === 'ref' ? Math.min(p.refImages?.length ?? 0, 9) : 0
   const refImageNodes: Record<string, unknown> = {}
   const refImageLinks: Record<string, unknown> = {}
 
@@ -2420,7 +2422,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       // (правка 266) Картинки-рефы: LoadImage-ноды + привязка к КАЖДОМУ
       // ext_cond_i через ref_images.ref_image_N (как в режиме 'ref').
       // Без этого рефы, загруженные пользователем, НЕ применялись к клипам.
-      const extRefCount = Math.min(p.refImages.length, 9)
+      const extRefCount = Math.min(p.refImages?.length ?? 0, 9) // (правка 1047)
       const extRefLinks: Record<string, unknown> = {}
       for (let ri = 0; ri < extRefCount; ri++) {
         const loadId = REF_IMAGE_NODE_IDS[ri]

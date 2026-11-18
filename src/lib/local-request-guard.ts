@@ -18,8 +18,9 @@ function isLocalHostname(name: string): boolean {
   const n = name.toLowerCase()
   if (n === 'localhost' || n === '127.0.0.1' || n === '[::1]') return true
   if (n.startsWith('[') && n.endsWith(']')) return true
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(n)) return true
-  return false
+  // (правка 1050) октеты обязаны быть валидными (0–255): прежний шаблон
+  // \d{1,3} пропускал абсурд вида 999.999.999.999.
+  return /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(n)
 }
 
 /**

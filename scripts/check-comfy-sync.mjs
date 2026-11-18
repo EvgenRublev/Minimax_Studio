@@ -148,6 +148,20 @@ expect(/CORE_MIN_VERSION\s*=\s*['"]0\.44\.0['"]/.test(sync),
   }
 }
 
+// (правка 1052) Патч ноды контекстных окон: у MiniMaxH3 свой «фазовый»
+// статический график окон (выравнивание по концу клипа + сдвиг на 5 токенов
+// каждый шаг). Без него хвост длинного Refine «частями» мерцает. Патч
+// доезжает через install/comfy-patches при каждом запуске ComfyUI.
+{
+  const ctxPatch = join(patchDir, 'comfy_extras', 'nodes_context_windows.py')
+  expect(existsSync(ctxPatch), 'патч comfy_extras/nodes_context_windows.py на месте')
+  if (existsSync(ctxPatch)) {
+    const py = readFileSync(ctxPatch, 'utf-8')
+    expect(/_h3_static_phased_windows/.test(py) && /h3_static_phased/.test(py),
+      'nodes_context_windows.py: MiniMaxH3 использует фазовый график окон (правка 1052)')
+  }
+}
+
 const installPs1 = read('install/install.ps1')
 expect(/\$ComfyVersion\s*=\s*['"]0\.44\.0['"]/.test(installPs1),
   'install.ps1: ядро пиновано на 0.44.0')

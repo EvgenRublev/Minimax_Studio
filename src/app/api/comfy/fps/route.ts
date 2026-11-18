@@ -71,7 +71,9 @@ export async function POST(req: NextRequest) {
     // путь ('a/b'); сегменты '.'/'..' отбрасываются (правка 317).
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
     const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
-    const safeName = path.basename(body.sourceFilename ?? '')
+    // (правка 1048) sourceFilename/inputSource обязаны быть строкой: объект
+    // проходил в path.basename и давал 500 ERR_INVALID_ARG вместо 400.
+    const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
 
     const workflowParams = {
       mode: body.mode,
@@ -107,7 +109,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Файл с диска (inputSource) ───
-    if (body.inputSource) {
+    if (typeof body.inputSource === 'string' && body.inputSource) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {

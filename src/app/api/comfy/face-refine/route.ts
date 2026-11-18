@@ -140,13 +140,14 @@ export async function POST(req: NextRequest) {
     // ─── Источник: файл с диска (input/) или копия из галереи ───
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
     const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
-    const safeName = path.basename(body.sourceFilename ?? '')
+    // (правка 1048) sourceFilename — только строка (см. fps/route.ts)
+    const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
     let inName: string
     let probe: { width: number; height: number; frames: number; durationSec: number }
     let promptSource: 'user' | 'draft-meta' | 'default' = 'user'
     let metaRefs: Array<{ path: string; role: string }> = []
 
-    if (body.inputSource) {
+    if (typeof body.inputSource === 'string' && body.inputSource) {
       inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {

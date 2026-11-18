@@ -424,7 +424,7 @@ export async function POST(req: NextRequest) {
       : null
 
     // ─── Файл с диска (inputSource) ───
-    if (body.inputSource) {
+    if (typeof body.inputSource === 'string' && body.inputSource) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {
@@ -437,7 +437,8 @@ export async function POST(req: NextRequest) {
 
     // ─── Файл из галереи (output) ───
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
-    const safeName = path.basename(body.sourceFilename ?? '')
+    // (правка 1048) sourceFilename — только строка (см. fps/route.ts)
+    const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
     const sourcePath = path.join(cfg.outputDir, sub, safeName)
     const outputRoot = path.resolve(cfg.outputDir)
     if (!path.resolve(sourcePath).startsWith(outputRoot + path.sep)) {

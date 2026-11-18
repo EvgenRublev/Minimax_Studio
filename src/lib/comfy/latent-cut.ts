@@ -31,8 +31,13 @@ export function chainLatentCut(
   amount: number,
   title: string,
 ): LatentRef {
-  const idx = Math.max(0, Math.round(index))
-  const amt = Math.max(1, Math.round(amount))
+  // (правка 1049) Нечисловые index/amount (null/'abc'/NaN из кривого тела)
+  // раньше молча строили 0 нод — воркфлоу приходил в ComfyUI с битыми
+  // ссылками. Явный выброс: роуты поймают его в свой catch и отдадут ошибку,
+  // а не «индекс вне диапазона» из execution.
+  const idx = Number.isFinite(index) ? Math.max(0, Math.round(index)) : 0
+  const amt = Number.isFinite(amount) ? Math.max(1, Math.round(amount)) : NaN
+  if (!Number.isFinite(amt)) throw new Error(`chainLatentCut: невалидный amount (${amount})`)
   if (idx <= LATENT_CUT_MAX && amt <= LATENT_CUT_MAX) {
     nodes[base] = {
       inputs: { samples, dim, index: idx, amount: amt },

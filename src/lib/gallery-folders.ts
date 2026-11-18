@@ -193,6 +193,14 @@ export async function moveOutputFile(
 
   const srcDir = folderPath(fromSafe)
   const dstDir = folderPath(toSafe)
+  // (правка 1051) Проверка источника ДО mkdir: раньше несуществующий файл
+  // «успешно перемещался» (200 ok), и попутно в output создавалась пустая
+  // папка назначения — мусорный побочный эффект на мусорном же запросе.
+  try {
+    await fs.access(path.join(srcDir, safeName))
+  } catch {
+    return { ok: false, error: st("Файл не найден: {{p1}}", { p1: safeName }) }
+  }
   try {
     await fs.mkdir(dstDir, { recursive: true })
     for (const candidate of [safeName, `${safeName}.meta.json`]) {

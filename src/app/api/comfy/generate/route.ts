@@ -18,6 +18,7 @@ import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { framesForDuration } from '@/lib/comfy/minimax-h3-template' // (правка 1047)
 import { st } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
@@ -47,7 +48,8 @@ export async function POST(req: NextRequest) {
         { status: 413 },
       )
     }
-    const body = await req.json() as MiniMaxH3Params & {
+    // (правка 1047) Битый JSON — это 400, а не «неожиданный конец ввода» в 500.
+    const body = (await req.json().catch(() => null)) as (MiniMaxH3Params & {
       refImagesBase64?: string[]
       extendRefsBase64?: string[]
       /** (правка 385, ОТКАЧЕНА правкой 417; возвращено правкой 420 в новом
@@ -56,10 +58,59 @@ export async function POST(req: NextRequest) {
        *  combined-латента (правка 420) — в генерацию не подаётся. */
       extendSourceName?: string
       extendSourceSubfolder?: string
+    }) | null
+
+    if (!body) {
+      return NextResponse.json({ error: st("Ожидается JSON-тело запроса") }, { status: 400 })
     }
 
-    if (!body?.prompt) {
+    if (typeof body?.prompt !== 'string' || !body.prompt.trim()) {
       return NextResponse.json({ error: 'Prompt is required.' }, { status: 400 })
+    }
+
+    // (правка 1047) Строгая валидация числовых и структурных полей. Без неё
+    // прямой вызов API мог уронить построение воркфлоу (500) или поставить в
+    // ComfyUI задачу на миллиарды кадров: duration уходил в framesForDuration
+    // и в узел значения без клампа, а refImages/extendClips принимались
+    // любой формы. Границы — те же, что отдаёт UI через /api/comfy/model-options
+    // (frames_maximum 719 ≈ 30 с на сетке 17n+5; запас +17 кадров на снап).
+    const MAX_GEN_FRAMES = 719 + 17
+    const durationSec = Number(body.duration ?? 5)
+    if (!Number.isFinite(durationSec) || durationSec < 1 || framesForDuration(durationSec) > MAX_GEN_FRAMES) {
+      return NextResponse.json(
+        { error: st("Недопустимая длительность: {{p1}} (разрешено 1–30 с)", { p1: String(body.duration) }) },
+        { status: 400 },
+      )
+    }
+    body.duration = durationSec
+    if (body.seed != null && !Number.isFinite(body.seed)) body.seed = -1
+    if (body.refImages != null
+        && (!Array.isArray(body.refImages) || body.refImages.some((r) => typeof r !== 'string'))) {
+      return NextResponse.json({ error: st("refImages — массив имён файлов") }, { status: 400 })
+    }
+    body.refImages = body.refImages ?? []
+    if (body.refVideos != null
+        && (!Array.isArray(body.refVideos) || body.refVideos.some((v) => !v || typeof v.path !== 'string'))) {
+      return NextResponse.json({ error: st("refVideos — массив объектов с полем path") }, { status: 400 })
+    }
+    if (body.mode === 'extend') {
+      const clips = body.extendClips ?? []
+      if (!Array.isArray(clips) || clips.length === 0 || clips.length > 64) {
+        return NextResponse.json(
+          { error: st("extendClips: от 1 до 64 клипов") },
+          { status: 400 },
+        )
+      }
+      for (const c of clips) {
+        const cd = Number(c?.duration ?? 5)
+        if (!c || typeof c.prompt !== 'string' || !Number.isFinite(cd) || cd < 1 || framesForDuration(cd) > MAX_GEN_FRAMES) {
+          return NextResponse.json(
+            { error: st("Клип продления: промпт обязателен, длительность 1–30 с") },
+            { status: 400 },
+          )
+        }
+        c.duration = cd
+      }
     }
     const cfg = getAppConfig()
 

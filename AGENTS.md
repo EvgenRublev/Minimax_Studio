@@ -119,11 +119,16 @@ ComfyUI/            ← comfyRoot == comfyCore
 Историческая справка: юзер с `I:\Minimax_Studio-main` (архив исходников вместо
 setup.exe, офлайн-бандла нет) падал на 0% именно из-за неизвлекаемого мусора в кэше.
 
-## Полный setup.exe и DLSS (обязательное правило)
+## DLSS: три инварианта (обязательное правило, правка 1053)
 
-`upscale/bin/runtime` — вендорный DLSS/RenoDX/RTX Video runtime, он **не в git**
-(сотни МБ). Именно поэтому его легко случайно потерять, если собирать setup
-вручную из неполного payload. Полный релиз без DLSS не выпускается.
+`upscale/bin/runtime` — вендорный DLSS/RenoDX/RTX Video runtime (сотни МБ).
+Правило без исключений — **где этих файлов быть можно, а где нельзя**:
+
+| Артефакт | DLSS |
+| --- | --- |
+| Полный `setup.exe` | **обязан быть** (весь `upscale/bin/runtime`) — единственный носитель DLSS |
+| `Minimax_Studio_update.zip` (автообновление) | **не должно быть** — апдейт меняет только файлы студии и `.next`, а `upscale/bin` уже лежит у пользователя; для чистой установки нужен именно setup.exe |
+| git-репозиторий GitHub | **не должно быть** — файлы в `.gitignore` (`/upscale/bin/`), в индекс не попадают |
 
 1. Собирать setup.exe только через `node scripts/build-setup.mjs`. Скрипт
    заново делает payload из `git HEAD`, добавляет `install/cache`,
@@ -135,10 +140,13 @@ setup.exe, офлайн-бандла нет) падал на 0% именно и�
    `host/dxgi.dll`, `rtx_video/nvngx_vsr.dll` и остальные файлы из
    `scripts/dlss-runtime.mjs`.
 3. `npm run release` вызывает `scripts/check-dlss-runtime.mjs` и падает, если
-   runtime на месте сборки отсутствует.
-4. `Minimax_Studio_update.zip` **специально не содержит DLSS**: автообновление
-   меняет только файлы студии и `.next`, а `upscale/bin` уже лежит у
-   пользователя. Для чистой установки нужен именно setup.exe.
+   runtime на месте сборки отсутствует **или если `upscale/bin` обнаружен
+   закоммиченным в git** (`git ls-files upscale/bin`).
+4. В `Minimax_Studio_update.zip` файлов `upscale/bin` быть не должно ни в каком
+   виде. `make-update-zip.mjs` валит сборку архива, если `upscale/bin`
+   появился в staging-дереве (например, из случайно закоммиченного в HEAD).
+   Никогда не добавляйте DLSS-рантайм в состав обновы: это раздувает каждый
+   апдейт на ~270 МБ и ломает смысл правила.
 5. Перед публикацией: `node scripts/build-setup.mjs` должен завершиться с
    `[setup] DLSS в setup.exe проверен: ...`, а размер setup.exe — быть около
    874 МБ (не ~450 МБ: это признак пустого `install/cache`/потерянного

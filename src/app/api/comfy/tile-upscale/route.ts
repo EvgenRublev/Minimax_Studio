@@ -93,7 +93,8 @@ export async function POST(req: NextRequest) {
     // путь ('a/b'); сегменты '.'/'..' отбрасываются (правка 317).
     const sub = sanitizeFolderPath(body.sourceSubfolder || '')
     const outSub = sanitizeFolderPath(typeof body.outputSubfolder === 'string' ? body.outputSubfolder : sub)
-    const safeName = path.basename(body.sourceFilename ?? '')
+    // (правка 1048) sourceFilename — только строка (см. fps/route.ts)
+    const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
 
     // (правка 722) Параметры тайлового апскейла — в сайдкар. Раньше в
     // метаданных не было НИ ОДНОГО из них (ни размера тайла, ни перекрытий,
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Файл с диска (inputSource) ───
-    if (body.inputSource) {
+    if (typeof body.inputSource === 'string' && body.inputSource) {
       const inName = path.basename(body.inputSource)
       const inPath = path.join(cfg.inputDir, inName)
       if (!existsSync(inPath)) {

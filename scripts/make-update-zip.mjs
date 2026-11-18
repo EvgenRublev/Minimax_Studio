@@ -13,6 +13,12 @@
  * отличается от пользовательского, apply_update.ps1 сам запустит окно
  * установки зависимостей.
  *
+ * (правка 1053) Запрет: в обнову НЕ должен попадать upscale/bin — вендорный
+ * DLSS/RenoDX/RTX Video runtime. DLSS доезжает только с полным setup.exe:
+ * на машинах юзера он уже лежит, а перенос его в каждом обновлении раздул
+ * бы архив на ~270 МБ. В git-репозитории этих файлов тоже быть не должно
+ * (см. AGENTS.md). Ниже — принудительная проверка staging-дерева.
+ *
  * Имя актива — Minimax_Studio_update.zip (строго как ASSET_NAME в
  * src/lib/app-update.ts, иначе приложение его не найдёт в релизе).
  *
@@ -95,6 +101,18 @@ if (refVer !== pkgVer) {
 
 console.log('[update-zip] копирование .next в дерево...')
 cpSync(join(ROOT, '.next'), join(TMP, '.next'), { recursive: true })
+
+// (правка 1053) staging = то, что упакуется: git-дерево + .next. upscale/bin
+// (DLSS) в апдейт-зипе быть не должно — проваливаем сборку, если он там
+// появился (например, runtime случайно закоммитили в HEAD).
+const stagedBin = join(TMP, 'upscale', 'bin')
+if (existsSync(stagedBin)) {
+  console.error('[update-zip] ПРОВАЛ: в дерево обновы попал upscale/bin (DLSS). ' +
+    'Правило: DLSS носит только setup.exe; в git и в update.zip его быть не должно. ' +
+    'Проверьте `git ls-files upscale/bin` и откатите коммит с рантаймом.')
+  rmSync(TMP, { recursive: true, force: true })
+  process.exit(1)
+}
 
 // (правка 955) Штамп версии для install.ps1: без .next\H3_APP_VERSION установщик
 // считает собранную из архива сборку «устаревшей», сносит её и пересобирает из
