@@ -943,7 +943,10 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     ...(!p.chunkJob && {
       'r_ag': {
         inputs: {
-          positive: [condNodeId, 0],
+          // (правка 1057) в тайловом тракте conditioning идёт ОТ TesseraEncode:
+          // он вшивает гайд пластинки ключевым кадром кадра 0 (заменяет собой
+          // видео-AddGuide), поверх него навешиваем аудио-гайд.
+          positive: tesseraOn ? (['t_enc', 0] as [string, number]) : condNodeId,
           latent: samplerSeedLatent,
           frame_idx: 0,
           // (правка 829) цикл — подровненная по длине латента дорожка.
