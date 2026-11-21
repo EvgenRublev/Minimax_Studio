@@ -16,6 +16,7 @@ import {
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
 import { getAppConfig } from '@/lib/app-config'
+import { probeHasAudio } from '@/lib/video-probe'
 import { st as stT } from '@/lib/i18n/server'
 import { localRequestGuard } from '@/lib/local-request-guard'
 
@@ -89,10 +90,16 @@ export async function POST(req: NextRequest) {
     }
     part = null
 
+    // (правка 1064) сразу сообщаем клиенту, есть ли звук: импорт с аудио
+    // раскладывается на видеоклип + аудиоклип на дорожке A1 (как в DaVinci).
+    // null = ffprobe не смог определить — клиент не отделяет звук автоматически.
+    const hasAudio = await probeHasAudio(destPath)
+
     return NextResponse.json({
       filename,
       subfolder: '',
       url: `/api/comfy/file?filename=${encodeURIComponent(filename)}&type=output`,
+      hasAudio: hasAudio === null ? null : hasAudio,
     })
   } catch (err) {
     if (part) part.cancel()

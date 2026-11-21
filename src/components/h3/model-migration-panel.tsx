@@ -15,6 +15,7 @@ import {
   CheckCircleIcon,
   AlertTriangleIcon,
   ArrowRightIcon,
+  ChevronDownIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -122,101 +123,96 @@ export function ModelMigrationPanel() {
   }
 
   return (
-    <div className="space-y-2 pt-2 border-t border-border">
-      {/* Toggle button */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
+    <div className="divide-y divide-border/50">
+      {/* Строка-переключатель: раскрывает форму переноса */}
+      <button
+        type="button"
         onClick={() => setExpanded((v) => !v)}
         disabled={migrating}
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--surface-1)]"
       >
-        <FolderOpenIcon className="w-3.5 h-3.5" />
-        {' '}{t("Перенос со старой версии (модели, файлы, контент, данные)")}{' '}
-        {expanded ? (
-          <span className="ml-auto text-xs text-muted-foreground">↑</span>
-        ) : (
-          <span className="ml-auto text-xs text-muted-foreground">↓</span>
-        )}
-      </Button>
+        <FolderOpenIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 text-xs text-foreground/90">
+          {t("Выбрать папку старой версии и перенести")}
+        </span>
+        <ChevronDownIcon className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+      </button>
 
       {/* Expanded form */}
       {expanded && (
-        <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+        <div className="space-y-3 px-3.5 py-3">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">{t("Папка старой версии")}</label>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 justify-start text-left font-normal"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/dialog/folder', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: t("Выберите папку со старой версией программы") }),
-                    })
-                    const data = await res.json()
-                    if (!res.ok) {
-                      toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
-                      return
-                    }
-                    if (data.path) {
-                      setSourceDir(data.path)
-                    }
-                  } catch {
-                    toast.error(t("Не удалось открыть диалог выбора папки."))
+            <label className="text-[11px] text-muted-foreground">{t("Папка старой версии")}</label>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-full justify-start gap-1.5 text-left text-xs font-normal"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/dialog/folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: t("Выберите папку со старой версией программы") }),
+                  })
+                  const data = await res.json()
+                  if (!res.ok) {
+                    toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
+                    return
                   }
-                }}
-                disabled={migrating}
-              >
-                <FolderOpenIcon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-                <span className={cn('truncate', !sourceDir && 'text-muted-foreground/50')}>
-                  {sourceDir || 'Выбрать папку...'}
-                </span>
-              </Button>
-            </div>
+                  if (data.path) {
+                    setSourceDir(data.path)
+                  }
+                } catch {
+                  toast.error(t("Не удалось открыть диалог выбора папки."))
+                }
+              }}
+              disabled={migrating}
+            >
+              <FolderOpenIcon className="w-3.5 h-3.5 shrink-0" />
+              <span className={cn('truncate', !sourceDir && 'text-muted-foreground/60')}>
+                {sourceDir || t("Выбрать папку…")}
+              </span>
+            </Button>
           </div>
 
           {/* (правка 765) Выбор категорий переноса */}
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">{t("Что перенести")}</label>
+            <label className="text-[11px] text-muted-foreground">{t("Что перенести")}</label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-foreground/80">
                 <input
                   type="checkbox"
-                  className="accent-primary"
+                  className="h-3.5 w-3.5 accent-cyan-500"
                   checked={selModels}
                   onChange={(e) => setSelModels(e.target.checked)}
                   disabled={migrating}
                 />
                 {' '}{t("Модели")}
               </label>
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-foreground/80">
                 <input
                   type="checkbox"
-                  className="accent-primary"
+                  className="h-3.5 w-3.5 accent-cyan-500"
                   checked={selInput}
                   onChange={(e) => setSelInput(e.target.checked)}
                   disabled={migrating}
                 />
                 {' '}{t("Файлы ввода (что кидал)")}
               </label>
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-foreground/80">
                 <input
                   type="checkbox"
-                  className="accent-primary"
+                  className="h-3.5 w-3.5 accent-cyan-500"
                   checked={selOutput}
                   onChange={(e) => setSelOutput(e.target.checked)}
                   disabled={migrating}
                 />
                 {' '}{t("Контент (output)")}
               </label>
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-foreground/80">
                 <input
                   type="checkbox"
-                  className="accent-primary"
+                  className="h-3.5 w-3.5 accent-cyan-500"
                   checked={selData}
                   onChange={(e) => setSelData(e.target.checked)}
                   disabled={migrating}
@@ -228,7 +224,7 @@ export function ModelMigrationPanel() {
 
           <Button
             size="sm"
-            className="w-full"
+            className="h-8 w-fit gap-1.5 text-xs"
             onClick={handleMigrate}
             disabled={migrating || nothingSelected}
           >
@@ -245,8 +241,8 @@ export function ModelMigrationPanel() {
             )}
           </Button>
 
-          <p className="text-[10px] text-muted-foreground/50">
-            {t("Программа найдёт в выбранной папке папки \"models\", \"input\", \"output\" и \"data\" (до 3 уровней глубины) и перенесёт их содержимое в текущую установку. Файлы с одинаковым именем и размером считаются дубликатами; если файл с таким же именем ДРУГОЙ — он переносится под новым именем ( суффикс \"_restored\"), ничего не перезаписывается и не теряется.")}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {t("Программа найдёт в выбранной папке папки \"models\", \"input\", \"output\" и \"data\" (до 3 уровней глубины) и перенесёт их содержимое в текущую установку. Файлы с одинаковым именем и размером считаются дубликатами; если файл с таким же именем ДРУГОЙ — он переносится под новым именем (суффикс \"_restored\"), ничего не перезаписывается и не теряется.")}
           </p>
 
           {/* Result panels — по одной карточке на категорию */}
@@ -271,14 +267,14 @@ function CategoryCard({ label, cat, unit = 'файлов' }: { label: string; ca
   if (!cat.enabled) return null
 
   return (
-    <div className="space-y-1.5 rounded-md border border-border bg-background p-3">
-      <div className="flex items-center gap-2 text-sm">
+    <div className="space-y-1.5 rounded-md border border-border/60 bg-[var(--surface-1)] p-2.5">
+      <div className="flex items-center gap-2 text-xs">
         {cat.found ? (
-          <CheckCircleIcon className="w-4 h-4 text-emerald-500" />
+          <CheckCircleIcon className="w-3.5 h-3.5 text-emerald-500" />
         ) : (
-          <AlertTriangleIcon className="w-4 h-4 text-amber-500" />
+          <AlertTriangleIcon className="w-3.5 h-3.5 text-amber-500" />
         )}
-        <span className="font-medium">{label}</span>
+        <span className="font-medium text-foreground/90">{label}</span>
         <span className={cn('ml-auto text-xs', cat.found ? 'text-emerald-500' : 'text-amber-500')}>
           {cat.found ? t("Готово") : t("Не найдено")}
         </span>

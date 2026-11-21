@@ -30,7 +30,8 @@ import { Button } from '@/components/ui/button'
 import { LEARN_STEPS } from './learn-steps'
 import { LearnQuickStart } from './learn-quickstart' // (правка 973)
 import { PromptGuide } from './prompt-guide'
-import { LearnRecipes } from './learn-recipes' // (правка 485)
+import { LearnRecipes } from './learn-recipes'
+import { useTranslation } from 'react-i18next' // (правка 955) // (правка 485)
 
 type SubTab = 'quick' | 'basics' | 'prompts' | 'recipes'
 
@@ -45,6 +46,8 @@ const SUB_TABS: Array<{ id: SubTab; label: string; icon: ReactNode }> = [
 ]
 
 export function LearnView() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [subTab, setSubTab] = useState<SubTab>('quick')
 
   return (
@@ -57,10 +60,10 @@ export function LearnView() {
               <span className="w-9 h-9 rounded-xl gradient-creative flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
                 <GraduationCapIcon className="w-4.5 h-4.5 text-white" />
               </span>
-              Обучение
+              {' '}{tt("Обучение")}
             </h1>
             <p className="text-xs text-muted-foreground mt-1.5">
-              Простой экскурс для новичков: что нажимать и в каком порядке
+              {tt("Простой экскурс для новичков: что нажимать и в каком порядке")}
             </p>
           </div>
         </div>
@@ -81,7 +84,7 @@ export function LearnView() {
                 )}
               >
                 {t.icon}
-                {t.label}
+                {tt(t.label)}
               </button>
             )
           })}
@@ -148,6 +151,8 @@ export function LearnView() {
  * Owns its step state, keyboard navigation, progress bar and footer nav.
  */
 function TutorialContent() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   const [step, setStep] = useState(0)
   const total = LEARN_STEPS.length
   const current = LEARN_STEPS[step]
@@ -172,9 +177,9 @@ function TutorialContent() {
       <div className="px-6 pt-1 pb-3 shrink-0">
         <div className="flex items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground font-mono">
-            Шаг {step + 1} / {total}
+            {tt("Шаг")}{' '} {step + 1} / {total}
           </p>
-          <p className="text-[10px] text-muted-foreground/60">← → — листать</p>
+          <p className="text-[10px] text-muted-foreground/60">{tt("← → — листать")}</p>
         </div>
         {/* Progress bar */}
         <div className="mt-2 h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
@@ -197,7 +202,7 @@ function TutorialContent() {
             transition={{ duration: 0.2 }}
             className="pt-2 flex flex-col gap-4 min-h-full"
           >
-            <h2 className="text-base font-semibold text-foreground shrink-0">{current.title}</h2>
+            <h2 className="text-base font-semibold text-foreground shrink-0">{tt(current.title)}</h2>
 
             {/* Stage + callouts — stretch to fill available height */}
             <div className="grid lg:grid-cols-[1.5fr_1fr] gap-4 items-stretch flex-1 min-h-[280px]">
@@ -219,8 +224,8 @@ function TutorialContent() {
                       {c.n}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground leading-snug">{c.title}</p>
-                      <p className="text-xs text-muted-foreground leading-relaxed mt-1">{c.text}</p>
+                      <p className="text-sm font-medium text-foreground leading-snug">{tt(c.title)}</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed mt-1">{tt(c.text)}</p>
                     </div>
                   </div>
                 ))}
@@ -229,8 +234,8 @@ function TutorialContent() {
                   <div className="flex gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
                     <LightbulbIcon className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <p className="text-xs text-amber-200/80 leading-relaxed">
-                      <span className="font-medium text-amber-300">Совет: </span>
-                      {current.tip}
+                      <span className="font-medium text-amber-300">{tt("Совет:")} </span>
+                      {tt(current.tip)}
                     </p>
                   </div>
                 )}
@@ -242,18 +247,17 @@ function TutorialContent() {
               {/* What's next */}
               <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-3">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                  {step < total - 1 ? 'Дальше' : 'Финиш'}
+                  {step < total - 1 ? tt("Дальше") : tt("Финиш")}
                 </p>
                 {step < total - 1 ? (
                   <p className="text-xs text-foreground/90 leading-relaxed">
-                    <span className="font-medium text-cyan-400">Шаг {step + 2}. </span>
-                    {LEARN_STEPS[step + 1].title.replace(/^Шаг \d+ — /, '')} — {LEARN_STEPS[step + 1].short}
+                    <span className="font-medium text-cyan-400">{tt("Шаг")}{' '} {step + 2}. </span>
+                    {tt(LEARN_STEPS[step + 1].title).replace(/^(?:Шаг|Step)\s*\d+\s*—\s*/, '')} — {tt(LEARN_STEPS[step + 1].short)}
                   </p>
                 ) : (
                   <p className="text-xs text-foreground/90 leading-relaxed">
-                    Тур пройден! Переключайтесь на вкладку{' '}
-                    <span className="font-medium text-cyan-400">«Генерация»</span> и сделайте
-                    первое видео по чек-листу.
+                    {tt("Тур пройден! Переключайтесь на вкладку")}{' '}
+                    <span className="font-medium text-cyan-400">{tt("«Генерация»")}</span> {' '}{tt("и сделайте первое видео по чек-листу.")}
                   </p>
                 )}
               </div>
@@ -261,27 +265,27 @@ function TutorialContent() {
               {/* Hotkeys */}
               <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-3">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Горячие клавиши
+                  {tt("Горячие клавиши")}
                 </p>
                 <div className="space-y-1 text-xs text-foreground/80">
-                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl+Enter</kbd> — запуск генерации</p>
-                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl+V</kbd> — вставить изображение как референс (в чате ассистента — как вложение)</p>
-                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Space · M · Esc</kbd> — плеер</p>
-                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Esc · Enter</kbd> — в галерее: снять выделение / сравнить пару</p>
-                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">← →</kbd> — листать шаги обучения</p>
+                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl+Enter</kbd> {' '}{tt("— запуск генерации")}</p>
+                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Ctrl+V</kbd> {' '}{tt("— вставить изображение как референс (в чате ассистента — как вложение)")}</p>
+                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Space · M · Esc</kbd> {' '}{tt("— плеер")}</p>
+                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">Esc · Enter</kbd> {' '}{tt("— в галерее: снять выделение / сравнить пару")}</p>
+                  <p><kbd className="px-1.5 py-0.5 rounded border border-border bg-[var(--surface-2)] font-mono text-[10px]">← →</kbd> {' '}{tt("— листать шаги обучения")}</p>
                 </div>
               </div>
 
               {/* Mini glossary */}
               <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-3">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Словарик
+                  {tt("Словарик")}
                 </p>
                 <div className="space-y-1 text-xs text-foreground/80 leading-snug">
-                  <p><span className="text-foreground font-medium">Референс</span> — картинка/видео/аудио-образец.</p>
-                  <p><span className="text-foreground font-medium">Промпт</span> — текстовое описание сцены.</p>
-                  <p><span className="text-foreground font-medium">Pass 1 / Pass 2</span> — черновой и финальный проходы генерации.</p>
-                  <p><span className="text-foreground font-medium">Точка сплита</span> — сколько шагов забирает черновик из общего расписания.</p>
+                  <p><span className="text-foreground font-medium">{tt("Референс")}</span> {' '}{tt("— картинка/видео/аудио-образец.")}</p>
+                  <p><span className="text-foreground font-medium">{tt("Промпт")}</span> {' '}{tt("— текстовое описание сцены.")}</p>
+                  <p><span className="text-foreground font-medium">Pass 1 / Pass 2</span> {' '}{tt("— черновой и финальный проходы генерации.")}</p>
+                  <p><span className="text-foreground font-medium">{tt("Точка сплита")}</span> {' '}{tt("— сколько шагов забирает черновик из общего расписания.")}</p>
                 </div>
               </div>
             </div>
@@ -293,7 +297,7 @@ function TutorialContent() {
       <div className="shrink-0 border-t border-border px-6 py-3 bg-[var(--surface-0)]/90 backdrop-blur-sm flex items-center justify-between gap-4">
         <Button variant="outline" size="sm" onClick={prev} disabled={step === 0} className="gap-1.5">
           <ChevronLeftIcon className="w-4 h-4" />
-          Назад
+          {' '}{tt("Назад")}
         </Button>
 
         {/* Step dots */}
@@ -302,7 +306,7 @@ function TutorialContent() {
             <button
               key={s.id}
               onClick={() => setStep(i)}
-              title={s.title}
+              title={tt(s.title)}
               className={cn(
                 'h-1.5 rounded-full transition-all',
                 i === step ? 'w-6 bg-gradient-to-r from-emerald-500 to-cyan-500' : 'w-1.5 bg-[var(--surface-3)] hover:bg-muted-foreground/40',
@@ -317,13 +321,13 @@ function TutorialContent() {
             onClick={next}
             className="gap-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border-0 font-semibold"
           >
-            Далее
+            {tt("Далее")}{' '}
             <ChevronRightIcon className="w-4 h-4" />
           </Button>
         ) : (
           <Button variant="outline" size="sm" onClick={restart} className="gap-1.5">
             <RotateCcwIcon className="w-4 h-4" />
-            Пройти ещё раз
+            {' '}{tt("Пройти ещё раз")}
           </Button>
         )}
       </div>

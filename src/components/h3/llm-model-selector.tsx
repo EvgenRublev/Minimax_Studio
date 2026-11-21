@@ -7,7 +7,7 @@
  */
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
-import { BotIcon, Loader2Icon } from 'lucide-react'
+import { Loader2Icon } from 'lucide-react'
 import { MODELS } from '@/lib/models-config'
 import { useTranslation } from 'react-i18next' // (правка 955)
 
@@ -149,28 +149,26 @@ export function LlmModelSelector() {
   const customBase = customPath.split(/[\\/]/).filter(Boolean).pop() ?? ''
 
   return (
-    <div className="space-y-2 pt-2 border-t border-border">
+    <div className="max-w-[480px] space-y-2 px-3.5 py-3">
       <div className="flex items-center gap-2">
-        <BotIcon className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">{t("Модель ассистента")}</span>
-        {saving && <Loader2Icon className="w-3 h-3 animate-spin text-muted-foreground" />}
+        <select
+          value={selected}
+          onChange={(e) => handleSelect(e.target.value)}
+          disabled={saving}
+          className="h-8 w-full rounded-md border border-border bg-[var(--surface-1)] px-2.5 text-xs text-foreground focus:border-cyan-500/60 focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
+        >
+          {customPath && (
+            <option value="llm_custom">{t("Своя модель (GGUF):")}{' '} {customBase}</option>
+          )}
+          {LLM_OPTIONS.map((opt) => (
+            <option key={opt.id} value={opt.filename}>
+              {t(opt.label)} — {opt.sizeLabel}
+            </option>
+          ))}
+        </select>
+        {saving && <Loader2Icon className="w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground" />}
       </div>
-      <select
-        value={selected}
-        onChange={(e) => handleSelect(e.target.value)}
-        disabled={saving}
-        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-      >
-        {customPath && (
-          <option value="llm_custom">{t("Своя модель (GGUF):")}{' '} {customBase}</option>
-        )}
-        {LLM_OPTIONS.map((opt) => (
-          <option key={opt.id} value={opt.filename}>
-            {t(opt.label)} — {opt.sizeLabel}
-          </option>
-        ))}
-      </select>
-      <p className="text-[10px] text-muted-foreground/50">
+      <p className="text-[11px] leading-snug text-muted-foreground">
         {customPath
           ? t("Своя модель задаётся путём в поле ниже; выбор встроенной модели в списке переключает обратно (путь при этом сохраняется).")
           : t("Qwen3.5 9B — модель по умолчанию (8–12 ГБ VRAM) · Bonsai 2 27B — необязательная тернарная модель · PTQ1_0 — самая лёгкая (≤8 ГБ) · Gemma Q3 — 8 ГБ VRAM · Q4 — 12 ГБ · Q5 — 16+ ГБ")}

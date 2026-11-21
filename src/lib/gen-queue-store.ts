@@ -17,6 +17,8 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+// (правка 1069) Цвета — из общего источника, того же, что у сайдбара.
+import { MODE_COLOR } from './mode-colors'
 
 /* ──────────────────── Types ──────────────────── */
 
@@ -58,13 +60,15 @@ export interface QueueItem {
 export const TYPE_ACCENT: Record<QueueItemType, string> = {
   music: '#10B981',
   sound: '#14B8A6',
-  video: '#06B6D4',
-  refine: '#34D399', // (правка 261) рефайн в общей очереди
-  upscale: '#A78BFA', // (правка 262) upscale в общей очереди
-  controlnet: '#F97316', // (правка 512) ControlNet в общей очереди
-  fps: '#22D3EE', // (правка 554) FPS (frame interpolation) в общей очереди
-  'tile-upscale': '#F59E0B',
-  'face-refine': '#EC4899',
+  // (правка 1069) Дальше — ровно цвета вкладок из MODE_COLOR. До правки
+  // очередь жила своей копией палитры и разъехалась с сайдбаром.
+  video: MODE_COLOR.generate,
+  refine: MODE_COLOR.refine, // (правка 261) рефайн в общей очереди
+  upscale: MODE_COLOR.upscale, // (правка 262) upscale в общей очереди
+  controlnet: MODE_COLOR.controlnet, // (правка 512) ControlNet в общей очереди
+  fps: MODE_COLOR.fps, // (правка 554) FPS (frame interpolation) в общей очереди
+  'tile-upscale': MODE_COLOR['tile-upscale'],
+  'face-refine': MODE_COLOR['face-refine'],
 }
 
 export const TYPE_LABEL: Record<QueueItemType, string> = {

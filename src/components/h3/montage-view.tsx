@@ -91,6 +91,7 @@ import { tempShifts } from '@/lib/montage-temp' // (правка 966)
 import { useVideoGallery } from './use-video-gallery'
 import type { VideoGalleryFile } from './video-gallery-grid'
 import { useTranslation } from 'react-i18next' // (правка 955)
+import { createPortal } from 'react-dom' // (правка 1064) контекстное меню таймлайна
 
 /** Один шот монтажной последовательности (порядок = позиция в списке) */
 type MontageShot = {
@@ -117,6 +118,12 @@ type MontageShot = {
   fx?: ShotFx
   /** (правка 860) пустой промежуток (пауза, сек >= 0) перед этим клипом на таймлайне */
   gap?: number
+  /** (правка 1064) звук клипа отделён на аудиодорожку — свой звук выключен */
+  muted?: boolean
+  /** (правка 1064) ключ аудиоклипа, отделённого от этого клипа (A1+) */
+  audioClipKey?: string
+  /** (правка 1064) есть ли в исходнике звуковая дорожка (undefined = неизвестно) */
+  hasAudio?: boolean
 }
 
 // (правка 874, 877) клип видео-слоя (дорожки V2+): лежит поверх базовой дорожки в окне [at, at+эфф.длит.).
@@ -163,6 +170,8 @@ type AudioClip = {
   fadeOut: number
   duration: number
   muted?: boolean
+  /** (правка 1064) аудио отделено от клипа видео — ключ этого клипа */
+  fromShotKey?: string
 }
 
 /** (правка 874, 883) снимок таймлайна для истории (отмена/повтор), включая число дорожек */
@@ -279,6 +288,16 @@ const SPEED_STEPS = [0.25, 0.5, 1, 1.5, 2, 4]
 /** строка последовательности: шот + его место на шкале сборки (с учётом паузы gap перед ним) */
 type SeqRow = { shot: MontageShot; r: { start: number; end: number }; offset: number; len: number; gap: number }
 
+/** (правка 1064) пункт контекстного меню клипа (ПКМ на таймлайне) */
+type CtxMenuItem = {
+  id: string
+  label: string
+  hint?: string
+  danger?: boolean
+  disabled?: boolean
+  run: () => void
+}
+
 let shotCounter = 0
 const newShotKey = () => `shot-${Date.now()}-${++shotCounter}`
 // (правка 874) ключи клипов слоёв и аудио (тот же счётчик — ключи не пересекаются)
@@ -318,6 +337,8 @@ type MontageSaved = {
   pps?: number
   loop?: boolean
   trackH?: number
+  /** (правка 1063) высота панели таймлайна, px */
+  tlH?: number
   vScale?: number
   masterVol?: number
   muted?: boolean
@@ -889,6 +910,30 @@ export function MontageView() {
   const [loop, setLoop] = useState(false)
   /** высота дорожки таймлайна, px */
   const [trackH, setTrackH] = useState(64)
+  /** (правка 1063) высота панели таймлайна (видимая область дорожек), px.
+   *  Тянем границу превью/таймлайн — меняется ТОЛЬКО она; высота самих
+   *  дорожек фиксирована и меняется лишь Ctrl+колесо. */
+  const [tlH, setTlH] = useState(240)
+  /** (правка 1064) контекстное меню клипа (ПКМ): отделить/присоединить аудио,
+   *  удалить клип. Позиция — экранные координаты, items — пункты меню. */
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: CtxMenuItem[] } | null>(null)
+  const openCtxMenuAt = useCallback((x: number, y: number, items: CtxMenuItem[]) => {
+    const w = 262
+    const h = items.length * 46 + 14
+    setCtxMenu({
+      x: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
+      items,
+    })
+  }, [])
+
+  // (правка 1064) Esc закрывает контекстное меню клипа
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtxMenu(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [ctxMenu])
   /** масштаб превью: доля панели 0.2..1 */
   const [vScale, setVScale] = useState(0.8)
   /** (правка 898) размер панели превью в CSS px — чтобы сила дисперсии в
@@ -918,14 +963,15 @@ export function MontageView() {
   const [layers, setLayers] = useState<LayerClip[]>([])
   const layersRef = useRef<LayerClip[]>([])
   /** (правка 874) нижняя граница числа рядов слоёв в UI («+ слой» добавляет ряд) */
-  const [layerTracks, setLayerTracks] = useState(0)
-  const layerTracksRef = useRef(0)
+  /** (правка 1063) сразу два видеоряда (V1 + V2) и один аудиоряд (A1), все пустые */
+  const [layerTracks, setLayerTracks] = useState(1)
+  const layerTracksRef = useRef(1)
   const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null)
   /** (правка 874) аудиоклипы звуковых дорожек (A1+) */
   const [audios, setAudios] = useState<AudioClip[]>([])
   const audiosRef = useRef<AudioClip[]>([])
-  const [audioTracks, setAudioTracks] = useState(0)
-  const audioTracksRef = useRef(0)
+  const [audioTracks, setAudioTracks] = useState(1)
+  const audioTracksRef = useRef(1)
   const [selectedAudioKey, setSelectedAudioKey] = useState<string | null>(null)
   /** (правка 883) контейнер превью для точного лимита при растягивании таймлайна */
   const previewBoxRef = useRef<HTMLDivElement | null>(null)
@@ -1006,6 +1052,8 @@ export function MontageView() {
   const ppsRef = useRef(30)
   /** высота дорожки для обработчика ресайза */
   const trackHRef = useRef(64)
+  /** (правка 1063) высота панели таймлайна для обработчика ресайза */
+  const tlHRef = useRef(240)
   const stripBusy = useRef<Set<string>>(new Set())
   /** (правка 720 v11) зеркала переключателей транспорта для rAF-обработчика */
   const snapRef = useRef(true)
@@ -1016,6 +1064,19 @@ export function MontageView() {
   const redoRef = useRef<HistSnap[]>([])
   /** точка времени, которую держим под курсором при зуме колесом */
   const zoomAnchorRef = useRef<{ t: number; x: number } | null>(null)
+  /** (правка 1064) двигалась ли мышь при панорамировании ПКМ: после реальной
+   *  панорамы контекстное меню не открываем (иначе оно всплывает на отпускании) */
+  const panMovedRef = useRef(false)
+  /** (правка 1064) открыть меню по экранной точке — вызывается и из contextmenu,
+   *  и из отпускания ПКМ (панорамирование захватывает указатель, и contextmenu
+   *  на вложенных клипах приходит не всегда) */
+  const openClipMenuAtRef = useRef<((x: number, y: number, hint?: Element | null) => void) | null>(null)
+  /** (правка 1064) аудиоклип, который тащат прямо сейчас: рефлов привязанного
+   *  звука не должен двигать его сам — его ведёт drag, а видеоклип едет за ним */
+  const dragAudioKeyRef = useRef<string | null>(null)
+  /** (правка 1064) последнее открытие меню: один right-click даёт и contextmenu,
+   *  и pointerup — второй вызов того же места игнорируем */
+  const ctxOpenedRef = useRef<{ x: number; y: number; t: number } | null>(null)
   /** зеркало shots для обработчиков без зависимостей */
   const shotsRef = useRef<MontageShot[]>([])
   /** (правка 842) после unmount колбэки длительности/кинополос не должны звать setState */
@@ -1145,12 +1206,43 @@ export function MontageView() {
   // зеркала для rAF/клавиатурных обработчиков, чтобы не зависеть от замыканий
   const seqRef = useRef<SeqRow[]>([])
   useEffect(() => { seqRef.current = seq }, [seq])
+  /** (правка 1064) прошлые позиции видеоклипов на шкале — по ним видим, что база
+   *  перестроилась (вставка/перетаскивание/удаление клипа сдвигает соседние) */
+  const shotOffsetsRef = useRef<Record<string, number>>({})
+  /**
+   * (правка 1064) отделённый звук едет вместе со своим видеоклипом: если клип
+   * сдвинулся из-за перестроения базовой дорожки, связанный аудиоклип сдвигаем на
+   * ту же величину. Ручной перенос самого аудиоклипа на другое место не
+   * «притягивается» назад — после отделения клипы независимы.
+   */
+  useEffect(() => {
+    const prev = shotOffsetsRef.current
+    const next: Record<string, number> = {}
+    for (const r of seq) next[r.shot.key] = r.offset
+    shotOffsetsRef.current = next
+    const shift = new Map<string, number>()
+    for (const a of audios) {
+      if (!a.fromShotKey) continue
+      if (a.key === dragAudioKeyRef.current) continue
+      const p = prev[a.fromShotKey]
+      const n = next[a.fromShotKey]
+      if (p == null || n == null) continue
+      const d = +(n - p).toFixed(3)
+      if (Math.abs(d) > 0.01) shift.set(a.key, d)
+    }
+    if (!shift.size) return
+    setAudios((cur) => cur.map((a) => {
+      const d = shift.get(a.key)
+      return d ? { ...a, at: Math.max(0, +(a.at + d).toFixed(3)) } : a
+    }))
+  }, [seq, audios])
   /** (правка 879) полная длина композиции: учитывает все дорожки, не только V1 */
   const tlEndRef = useRef(0)
   useEffect(() => { tlEndRef.current = tlEnd }, [tlEnd])
   useEffect(() => { ppsRef.current = pps }, [pps])
   useEffect(() => { seqTRef.current = playT }, [playT])
   useEffect(() => { trackHRef.current = trackH }, [trackH])
+  useEffect(() => { tlHRef.current = tlH }, [tlH])
   useEffect(() => { shotsRef.current = shots }, [shots])
   // (правка 874) зеркала слоёв/аудио для обработчиков без зависимостей
   useEffect(() => { layersRef.current = layers }, [layers])
@@ -1315,9 +1407,11 @@ export function MontageView() {
         }))
       setLayers(ls)
       const savedLT = Number.isFinite(s.layerTracks as number) ? Math.max(0, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number))) : 0
-      setLayerTracks(Math.max(savedLT, ls.reduce((m, l) => Math.max(m, l.track), 0)))
+      // (правка 1063) базовая раскладка — минимум V2: пустой проект открывается
+      // с двумя видеодорожками, даже если в старом сохранении было 0
+      setLayerTracks(Math.max(1, savedLT, ls.reduce((m, l) => Math.max(m, l.track), 0)))
     } else if (Number.isFinite(s.layerTracks as number)) {
-      setLayerTracks(Math.max(0, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number))))
+      setLayerTracks(Math.max(1, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number))))
     }
     if (Array.isArray(s.audios)) {
       const as = s.audios
@@ -1337,18 +1431,23 @@ export function MontageView() {
           fadeOut: Number.isFinite(x.fadeOut as number) ? Math.max(0, x.fadeOut as number) : 0,
           duration: Number.isFinite(x.duration as number) ? Math.max(0, x.duration as number) : 0,
           muted: x.muted === true,
+          // (правка 1064) связь с видеоклипом, от которого отделён звук
+          fromShotKey: typeof x.fromShotKey === 'string' ? x.fromShotKey : undefined,
         }))
       setAudios(as)
       const savedAT = Number.isFinite(s.audioTracks as number) ? Math.max(0, Math.min(MAX_TRACKS, Math.round(s.audioTracks as number))) : 0
-      setAudioTracks(Math.max(savedAT, as.reduce((m, a) => Math.max(m, a.track), 0)))
+      // (правка 1063) минимум A1 — аудиодорожка видна сразу, пустая
+      setAudioTracks(Math.max(1, savedAT, as.reduce((m, a) => Math.max(m, a.track), 0)))
     } else if (Number.isFinite(s.audioTracks as number)) {
-      setAudioTracks(Math.max(0, Math.min(MAX_TRACKS, Math.round(s.audioTracks as number))))
+      setAudioTracks(Math.max(1, Math.min(MAX_TRACKS, Math.round(s.audioTracks as number))))
     }
     if (typeof s.selectedKey === 'string') setSelectedKey(s.selectedKey)
     if (typeof s.folderFilter === 'string') setFolderFilter(s.folderFilter)
     if (Number.isFinite(s.pps)) setPps(Math.max(8, Math.min(240, s.pps as number)))
     if (typeof s.loop === 'boolean') setLoop(s.loop)
     if (Number.isFinite(s.trackH)) setTrackH(Math.max(40, Math.min(480, s.trackH as number)))
+    // (правка 1063) высота панели таймлайна
+    if (Number.isFinite(s.tlH)) setTlH(Math.max(96, Math.min(900, s.tlH as number)))
     if (Number.isFinite(s.vScale)) setVScale(Math.max(0.2, Math.min(1, s.vScale as number)))
     if (Number.isFinite(s.masterVol)) setMasterVol(clamp01(s.masterVol as number))
     if (typeof s.muted === 'boolean') setMuted(s.muted)
@@ -1376,7 +1475,7 @@ export function MontageView() {
   useEffect(() => {
     if (!hydrated.current) return
     const payload: MontageSaved = {
-      shots, layers, audios, layerTracks, audioTracks, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seq: seqSet,
+      shots, layers, audios, layerTracks, audioTracks, selectedKey, folderFilter, pps, loop, trackH, tlH, vScale, masterVol, muted, snap, loopClip, seq: seqSet,
     }
     const save = () => {
       try {
@@ -1388,7 +1487,7 @@ export function MontageView() {
       clearTimeout(timer)
       save()
     }
-  }, [shots, layers, audios, layerTracks, audioTracks, selectedKey, folderFilter, pps, loop, trackH, vScale, masterVol, muted, snap, loopClip, seqSet])
+  }, [shots, layers, audios, layerTracks, audioTracks, selectedKey, folderFilter, pps, loop, trackH, tlH, vScale, masterVol, muted, snap, loopClip, seqSet])
 
   // (правка 858) если в сохранённом таймлайне остались шоты с duration === 0
   // (вкладку закрыли до завершения измерения), домеряем их при монтировании
@@ -1472,11 +1571,24 @@ export function MontageView() {
   )
 
   // зум таймлайна колесом мыши (вверх = крупнее), точка под курсором остаётся на месте
+  // (правка 1063) Ctrl+колесо — высота ВСЕХ дорожек сразу (дорожки фиксированы
+  // и больше не тянутся вместе с границей таймлайна).
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      if (e.ctrlKey || e.metaKey) {
+        const step = e.deltaY < 0 ? 8 : -8
+        setTrackH((h) => Math.max(40, Math.min(480, h + step)))
+        return
+      }
+      // (правка 1063) Shift+колесо — вертикальная прокрутка дорожек: обычное
+      // колесо занято зумом, а при увеличенных дорожках в панель влезают не все
+      if (e.shiftKey) {
+        el.scrollTop += e.deltaY
+        return
+      }
       const old = ppsRef.current
       const next = Math.min(240, Math.max(8, e.deltaY < 0 ? Math.round(old * 1.25) : Math.round(old / 1.25)))
       if (next === old) return
@@ -1499,29 +1611,56 @@ export function MontageView() {
     let drag: { x: number; y: number; left: number; top: number } | null = null
     const onDown = (e: PointerEvent) => {
       if (e.button !== 2) return
-      e.preventDefault()
+      // (правка 1064) здесь НЕ preventDefault: отменённый pointerdown в Chrome
+      // подавляет и contextmenu, поэтому своё меню вообще не приходило. Вместо
+      // этого на время панорамы запрещаем выделение текста.
+      panMovedRef.current = false
       drag = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }
+      el.style.userSelect = 'none'
       try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
       el.style.cursor = 'grabbing'
     }
     const onMove = (e: PointerEvent) => {
       if (!drag) return
-      e.preventDefault()
+      // (правка 1064) сдвиг засчитываем только если панель РЕАЛЬНО прокрутилась:
+      // дёрганье мыши на пару пикселей не должно отменять контекстное меню
+      const l = el.scrollLeft
+      const tp = el.scrollTop
       el.scrollLeft = drag.left - (e.clientX - drag.x)
       el.scrollTop = drag.top - (e.clientY - drag.y)
+      if (el.scrollLeft !== l || el.scrollTop !== tp) {
+        panMovedRef.current = true
+        // (правка 1075) contextmenu приходит в момент нажатия ПКМ, то есть ДО
+        // того как мы узнали, что это панорама. Меню, которое уже выскочило,
+        // убираем: иначе после прокрутки оно висит невидимым оверлеем и съедает
+        // следующий клик по таймлайну.
+        setCtxMenu(null)
+      }
     }
     const end = (e?: PointerEvent) => {
       if (!drag) return
       drag = null
       el.style.cursor = ''
+      el.style.userSelect = ''
       if (e) { try { el.releasePointerCapture(e.pointerId) } catch { /* noop */ } }
     }
     const onUp = (e: PointerEvent) => {
       if (e.button !== 2) return
+      const wasDrag = panMovedRef.current
       end(e)
+      // (правка 1064) ПКМ без движения — меню клипа под курсором
+      if (!wasDrag) openClipMenuAtRef.current?.(e.clientX, e.clientY)
     }
     const onCancel = (e: PointerEvent) => end(e)
-    const onContextMenu = (e: MouseEvent) => e.preventDefault()
+    // (правка 1064) right-click: подавляем системное меню и открываем своё. В
+    // Chrome контекстное событие приходит МЕЖДУ pointerdown и pointerup, поэтому
+    // оно и есть основной путь; pointerup оставлен запасным (разные браузеры/
+    // тачпад), дубликат отсекает защита в openClipMenuAt.
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      if (panMovedRef.current) { panMovedRef.current = false; return }
+      openClipMenuAtRef.current?.(e.clientX, e.clientY, e.target as Element | null)
+    }
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
@@ -1646,10 +1785,12 @@ export function MontageView() {
     return g
   }, [])
 
-  /** итоговая громкость клипа i: мастер × громкость клипа × фейды (если задан localT) */
+  /** итоговая громкость клипа i: мастер × громкость клипа × фейды (если задан localT).
+   *  (правка 1064) если звук клипа отделён на аудиодорожку (muted), сам видеоэлемент
+   *  молчит: иначе в превью звучали бы и видео, и его аудиоклип — двойной звук. */
   const effVol = useCallback((i: number, localT?: number): number => {
     const row = i >= 0 ? seqRef.current[i] : undefined
-    const c = row ? (row.shot.vol ?? 1) : 1
+    const c = row ? (row.shot.muted ? 0 : (row.shot.vol ?? 1)) : 1
     const f = row && localT != null ? fadeGain(row, localT) : 1
     return clamp01(masterVolRef.current * c * f)
   }, [fadeGain])
@@ -2010,6 +2151,187 @@ export function MontageView() {
     setHistTick((v) => v + 1)
   }, [])
 
+  /* ------------------------------------------------------------------
+   * (правка 1064) Отделение звука от видео — как «Detach Audio» в Resolve.
+   * Импортированное видео со звуком сразу раскладывается на видеоклип V1 и
+   * аудиоклип A1 (синхронно, с теми же подрезками), а звук видеоклипа глушится.
+   * Обратно — «Присоединить аудио»: связанный аудиоклип удаляется, звук клипа
+   * включается снова. Связь хранится в shot.audioClipKey / audio.fromShotKey.
+   * ------------------------------------------------------------------ */
+
+  /** первая аудиодорожка, где интервал [start, start+dur) свободен */
+  const pickFreeAudioTrack = useCallback((start: number, dur: number): number => {
+    const maxT = Math.min(MAX_TRACKS, Math.max(audioTracks, audiosRef.current.reduce((m, a) => Math.max(m, a.track), 0)))
+    const busy = (t: number) =>
+      audiosRef.current.some((a) => a.track === t && start < a.at + audioLen(a) - 0.01 && start + (dur || 1e9) > a.at + 0.01)
+    for (let t = 1; t <= maxT; t++) if (!busy(t)) return t
+    return Math.min(MAX_TRACKS, Math.max(1, maxT + 1))
+  }, [audioTracks, audioLen])
+
+  /**
+   * После удаления аудиоклипов (removedKeys) включаем звук тем видеоклипам, у
+   * которых не осталось ни одного связанного аудиоклипа. Связь может быть как по
+   * key (shot.audioClipKey), так и по fromShotKey — например после разреза
+   * отделённого звука на две половинки.
+   */
+  const restoreShotAudio = useCallback((removedKeys: Set<string>) => {
+    if (!removedKeys.size) return
+    const rest = audiosRef.current.filter((a) => !removedKeys.has(a.key))
+    setShots((prev) =>
+      prev.map((s) => {
+        if (!s.muted && !s.audioClipKey) return s
+        if (rest.some((a) => a.key === s.audioClipKey || a.fromShotKey === s.key)) return s
+        return s.audioClipKey || s.muted ? { ...s, muted: false, audioClipKey: undefined } : s
+      }),
+    )
+    setAudios((cur) => cur.filter((a) => !removedKeys.has(a.key)))
+    setSelectedAudioKey((cur) => (cur && removedKeys.has(cur) ? null : cur))
+    setSelExtra((p) => {
+      const keep = p.audio.filter((k) => !removedKeys.has(k))
+      return keep.length === p.audio.length ? p : { ...p, audio: keep }
+    })
+  }, [])
+
+  /**
+   * Отделить звук клипа на аудиодорожку. `at` — позиция клипа на шкале (для
+   * только что вставленного клипа состояние ещё не обновилось, поэтому передаём
+   * её явно). `auto` — тихий режим для импорта (без выделения аудиоклипа).
+   */
+  const detachAudio = useCallback(async (shotKey: string, opts?: { at?: number; auto?: boolean; shot?: MontageShot }) => {
+    const shot = opts?.shot ?? shotsRef.current.find((s) => s.key === shotKey)
+    if (!shot) return
+    if (shot.audioClipKey) {
+      if (!opts?.auto) showToast('Звук этого клипа уже на отдельной дорожке')
+      return
+    }
+    if (shot.hasAudio === false) {
+      showToast('В этом видео нет звуковой дорожки', 'error')
+      return
+    }
+    if (shotSpeed(shot) !== 1) {
+      showToast('Отделить звук можно только у клипа со скоростью 1×', 'error')
+      return
+    }
+    if (audiosRef.current.length >= MAX_AUDIO_CLIPS) {
+      showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
+      return
+    }
+    const row = seqRef.current.find((r) => r.shot.key === shotKey)
+    const at = Math.max(0, +(opts?.at ?? row?.offset ?? 0).toFixed(3))
+    try {
+      const res = await fetch('/api/montage/audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromVideo: { name: shot.filename, subfolder: shot.subfolder || undefined } }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || typeof data?.file !== 'string') {
+        // (правка 1064) «нет аудиодорожки» — штатная ситуация для галерейных
+        // клипов: запоминаем и молча выходим (иначе при добавлении каждого
+        // беззвучного ролика был бы toast)
+        if (data?.noAudio === true) {
+          setShots((prev) => prev.map((s) => (s.key === shotKey ? { ...s, hasAudio: false } : s)))
+          if (!opts?.auto) showToast('В этом видео нет звуковой дорожки', 'error')
+          return
+        }
+        if (!opts?.auto) showToast(String(data?.error || 'Не удалось отделить звук'), 'error')
+        return
+      }
+      const r = effRange(shot)
+      const dur = Number.isFinite(data.duration) && data.duration > 0 ? data.duration : (shot.duration || 0)
+      const trimStart = +Math.max(0, r.start).toFixed(3)
+      const trimEnd = shot.duration > 0 ? +Math.max(0, shot.duration - r.end).toFixed(3) : 0
+      const clip: AudioClip = {
+        key: newAudioKey(),
+        file: data.file,
+        name: typeof data.name === 'string' && data.name ? data.name : shot.name,
+        url: typeof data.url === 'string' ? data.url : `/api/montage/audio?f=${encodeURIComponent(data.file)}`,
+        at,
+        track: pickFreeAudioTrack(at, Math.max(0.05, dur - trimStart - trimEnd)),
+        trimStart,
+        trimEnd,
+        // громкость/фейды клипа переезжают на аудиоклип — звук не меняется
+        vol: Math.round(clamp01(shot.vol ?? 1) * 100),
+        fadeIn: shot.fadeIn || 0,
+        fadeOut: shot.fadeOut || 0,
+        duration: dur,
+        fromShotKey: shot.key,
+      }
+      pushHistory()
+      setAudios((prev) => [...prev, clip])
+      setAudioTracks((cur) => Math.max(cur, clip.track))
+      setShots((prev) =>
+        prev.map((s) =>
+          s.key === shotKey
+            ? { ...s, muted: true, audioClipKey: clip.key, hasAudio: true }
+            : s,
+        ),
+      )
+      setResult(null)
+      showToast(
+        opts?.auto
+          ? `Звук импортированного видео — на дорожке A${clip.track}`
+          : `Звук «${shot.name}» отделён на дорожку A${clip.track}`,
+      )
+    } catch (e) {
+      showToast(`Не удалось отделить звук: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+  }, [pickFreeAudioTrack, pushHistory])
+
+  /**
+   * (правка 1064) «Присоединить аудио» = ПРИКЛЕИТЬ аудиоклип к видеоклипу на
+   * таймлайне, а не убрать его с дорожки. Аудиоклип остаётся на своём месте со
+   * всеми своими настройками, но обзаводится связью с клипом: при перестроении
+   * базовой дорожки он едет вместе с видео, а если тащить сам звук — за ним
+   * сдвигается и видеоклип. «По временной шкале» — при приклеивании звук
+   * ставится ровно на позицию клипа.
+   */
+  const glueAudio = useCallback((shotKey: string, audioKey: string) => {
+    const shot = shotsRef.current.find((s) => s.key === shotKey)
+    const audio = audiosRef.current.find((a) => a.key === audioKey)
+    if (!shot || !audio || shot.audioClipKey === audioKey) return
+    const row = seqRef.current.find((r) => r.shot.key === shotKey)
+    const at = Math.max(0, +(row?.offset ?? audio.at).toFixed(3))
+    // у звука мог быть другой хозяин, а у клипа — другой звук: снимаем старые связи
+    const prevOwner = audio.fromShotKey && audio.fromShotKey !== shotKey ? audio.fromShotKey : null
+    pushHistory()
+    setAudios((prev) =>
+      prev.map((a) => {
+        if (a.key === audioKey) return { ...a, fromShotKey: shotKey, at }
+        if (a.fromShotKey === shotKey) return { ...a, fromShotKey: undefined }
+        return a
+      }),
+    )
+    setShots((prev) =>
+      prev.map((s) => {
+        // сущности раздельные: свой звук клипа не глушим и не включаем — привязка
+        // только про таймлайн. Разве что у прежнего хозяина возвращаем звук: его
+        // носитель теперь принадлежит другому клипу
+        if (s.key === shotKey) return { ...s, audioClipKey: audioKey }
+        if (prevOwner === s.key) return { ...s, audioClipKey: undefined, muted: false }
+        return s
+      }),
+    )
+    setResult(null)
+    showToast(`Звук приклеен к клипу «${shot.name}»`)
+  }, [pushHistory])
+
+  /**
+   * (правка 1064) «Разъединить аудио» — снять только привязку на таймлайне:
+   * аудиоклип остаётся на своей дорожке и по-прежнему несёт звук этого видео
+   * (свой звук видеоклипа всё так же глушится), но двигать их можно порознь.
+   */
+  const unglueAudio = useCallback((shotKey: string) => {
+    const shot = shotsRef.current.find((s) => s.key === shotKey)
+    if (!shot || !shot.audioClipKey) return
+    pushHistory()
+    setAudios((prev) => prev.map((a) => (a.fromShotKey === shotKey ? { ...a, fromShotKey: undefined } : a)))
+    setShots((prev) => prev.map((s) => (s.key === shotKey ? { ...s, audioClipKey: undefined } : s)))
+    setResult(null)
+    showToast(`Звук больше не привязан к клипу «${shot.name}»`)
+  }, [pushHistory])
+
+
   const undo = useCallback(() => {
     const prev = undoRef.current.pop()
     if (!prev) return
@@ -2056,23 +2378,21 @@ export function MontageView() {
     setSelectedAudioKey((cur) => (cur && next.audios.some((a) => a.key === cur) ? cur : null))
   }, [stopSeq])
 
-  /** (правка 883) тянем границу между превью и таймлайном — делим дельту мыши на
-   *  суммарный множитель всех видимых дорожек и ограничиваем упор превью (120 px),
-   *  чтобы граница шла ровно 1:1 под курсором мыши и не улетала вверх быстрее него */
+  /** (правка 883, 1063) тянем границу между превью и таймлайном — делим дельту
+   *  мыши 1:1: граница идёт ровно под курсором. В отличие от старого поведения,
+   *  меняется высота ПАНЕЛИ таймлайна (её видимая область), а не высота
+   *  дорожек: дорожки фиксированы и масштабируются только Ctrl+колесом. */
   const startTlResize = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     suppressDrag.current = true
     const startY = e.clientY
-    const startH = trackHRef.current
-    const vExtra = Math.min(MAX_TRACKS, Math.max(layerTracksRef.current, layersRef.current.reduce((m, l) => Math.max(m, l.track), 0)))
-    const aExtra = Math.min(MAX_TRACKS, Math.max(audioTracksRef.current, audiosRef.current.reduce((m, a) => Math.max(m, a.track), 0)))
-    const mult = Math.max(1, 1 + vExtra + aExtra * 0.45)
+    const startH = tlHRef.current
     const previewH = previewBoxRef.current?.getBoundingClientRect().height ?? 360
-    const maxGrowPx = Math.max(0, previewH - 120)
-    const maxH = Math.max(startH, Math.min(480, Math.floor(startH + maxGrowPx / mult)))
+    // превью не даём схлопнуться ниже 120 px — столько же оставляем таймлайну снизу
+    const maxH = Math.max(96, Math.round(startH + Math.max(0, previewH - 120)))
     const onMove = (ev: PointerEvent) => {
-      const nextH = Math.round(startH + (startY - ev.clientY) / mult)
-      setTrackH(Math.max(40, Math.min(maxH, nextH)))
+      const nextH = Math.round(startH + (startY - ev.clientY))
+      setTlH(Math.max(96, Math.min(maxH, nextH)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -2217,7 +2537,7 @@ export function MontageView() {
     // (правка 720 v11) фейды клипа действуют и в превью, по позиции currentTime
     const row = i >= 0 ? seqRef.current[i] : seqRef.current.find((r) => r.shot.key === key)
     const local = row ? Math.max(row.r.start, Math.min(row.r.end, v.currentTime)) : undefined
-    v.volume = clamp01(masterVol * (shot.vol ?? 1) * (row && local != null ? fadeGain(row, local) : 1))
+    v.volume = clamp01(masterVol * (shot.muted ? 0 : (shot.vol ?? 1)) * (row && local != null ? fadeGain(row, local) : 1))
   }, [masterVol, shots, result, previewSrc, buf, fadeGain])
 
   // ставим src на активный <video> прямо (без key), если он отличается
@@ -2348,16 +2668,17 @@ export function MontageView() {
   }, [seekTo, stopSeq, playSeq, clearClipSelection, selectClip])
 
   const addShot = useCallback(
-    (f: VideoGalleryFile, atIdx?: number) => {
-      if (shots.length >= MAX_SHOTS) {
+    (f: VideoGalleryFile, atIdx?: number, hasAudio?: boolean): MontageShot | null => {
+      if (shotsRef.current.length >= MAX_SHOTS) {
         showToast('Максимум 60 шотов на таймлайне', 'error')
-        return
+        return null
       }
       pushHistory()
       stopSeq(true)
       const shot: MontageShot = {
         key: newShotKey(), filename: f.filename, subfolder: f.subfolder || '', url: f.url,
         name: f.filename.replace(/\.[^.]+$/, ''), trimStart: '', trimEnd: '', duration: 0,
+        ...(hasAudio === undefined ? {} : { hasAudio }),
       }
       setShots((prev) => {
         const idx = atIdx == null ? prev.length : Math.max(0, Math.min(atIdx, prev.length))
@@ -2372,12 +2693,24 @@ export function MontageView() {
         // (правка 842) не дёргаем setState, если вкладка уже размонтирована
         if (d > 0 && mountedRef.current) setShots((cur) => cur.map((x) => (x.key === shot.key ? { ...x, duration: d } : x)))
       })
+      // (правка 1064) клип со звуком сразу раскладывается на видеодорожку +
+      // аудиодорожку (как Detach Audio в Resolve). Позицию считаем ДО обновления
+      // seq: состояние дорожек ещё старое. Если звука нет — detachAudio молча
+      // ставит hasAudio=false и ничего не делает.
+      if (hasAudio !== false) {
+        const sq0 = seqRef.current
+        const idx0 = atIdx == null ? sq0.length : Math.max(0, Math.min(atIdx, sq0.length))
+        const at0 = idx0 === 0 ? 0 : sq0[idx0 - 1].offset + sq0[idx0 - 1].len
+        void detachAudio(shot.key, { at: at0, auto: true, shot })
+      }
+      return shot
     },
-    [shots.length, stopSeq, pushHistory],
+    [stopSeq, pushHistory, detachAudio],
   )
 
   /** (правка 974) Видео с диска → в output (чтобы его видели рендер и галерея)
-   *  и сразу на таймлайн. */
+   *  и сразу на таймлайн. (правка 1064) если в файле есть звук — он сразу идёт
+   *  на аудиодорожку (как Detach Audio в Resolve), клип остаётся без своего звука. */
   const importAndAddVideo = useCallback(
     async (fileObj: File, atIdx?: number) => {
       if (shotsRef.current.length >= MAX_SHOTS) {
@@ -2393,13 +2726,17 @@ export function MontageView() {
           showToast(String(data?.error || 'Не удалось импортировать видео'), 'error')
           return
         }
+        // true/false/null(неизвестно). Решение о раскладке принимает addShot:
+        // при неизвестном он сам попытается отделить звук, и сервер молча
+        // сообщит, что аудиодорожки нет.
+        const audioFlag = data.hasAudio === true ? true : data.hasAudio === false ? false : undefined
         addShot({
           filename: data.filename,
           subfolder: typeof data.subfolder === 'string' ? data.subfolder : '',
           url: typeof data.url === 'string'
             ? data.url
             : `/api/comfy/file?filename=${encodeURIComponent(data.filename)}&type=output`,
-        }, atIdx)
+        }, atIdx, audioFlag)
       } catch (e) {
         showToast(`Импорт видео не удался: ${e instanceof Error ? e.message : String(e)}`, 'error')
       }
@@ -2410,6 +2747,13 @@ export function MontageView() {
   const removeShot = useCallback((key: string) => {
     pushHistory()
     stopSeq(false)
+    // (правка 1064) видеоклип и вынесенный звук — раздельные сущности: удаляя
+    // клип, его аудиоклип с дорожки НЕ выбрасываем, только снимаем привязку
+    setAudios((prev) =>
+      prev.some((a) => a.fromShotKey === key)
+        ? prev.map((a) => (a.fromShotKey === key ? { ...a, fromShotKey: undefined } : a))
+        : prev,
+    )
     setShots((prev) => {
       const i = prev.findIndex((s) => s.key === key)
       if (i < 0) return prev
@@ -2453,6 +2797,9 @@ export function MontageView() {
     if (t < a.at + 0.05 || t >= a.at + len - 0.05) return null
     const local = Math.max(0, Math.min(a.duration - 0.05, a.trimStart + (t - a.at)))
     const left: AudioClip = { ...a, trimEnd: Math.max(0, +(a.duration - local).toFixed(3)) }
+    // (правка 1064) связь с видеоклипом остаётся у обеих половинок: «присоединить
+    // аудио» должно убрать со дорожки весь звук этого клипа, а удаление одной
+    // половинки не должно включать звук видеоклипу, если вторая половина на месте
     const right: AudioClip = { ...a, key: newAudioKey(), at: +t.toFixed(3), trimStart: +local.toFixed(3) }
     return [left, right]
   }, [audioLen])
@@ -2464,6 +2811,9 @@ export function MontageView() {
     const cut = local.toFixed(2)
     const left: MontageShot = { ...row.shot, trimEnd: cut }
     // (правка 860) правая половинка идёт встык за левой (gap: 0)
+    // (правка 1064) отделённый звук остаётся связан с обеими половинками: аудиоклип
+    // на своей дорожке и так покрывает весь исходный интервал, так что звук не
+    // пропадает и не удваивается
     const right: MontageShot = { ...row.shot, key: newShotKey(), trimStart: cut, trimEnd: row.shot.trimEnd, gap: 0 }
     return [left, right]
   }, [])
@@ -2892,10 +3242,139 @@ export function MontageView() {
 
   const removeAudioClip = useCallback((key: string) => {
     pushHistory()
-    setAudios((prev) => prev.filter((a) => a.key !== key))
-    setSelectedAudioKey((cur) => (cur === key ? null : cur))
-    setSelExtra((p) => (p.audio.includes(key) ? { ...p, audio: p.audio.filter((k) => k !== key) } : p))
-  }, [pushHistory])
+    // (правка 1064) restoreShotAudio и звук возвращает, и выделение снимает
+    restoreShotAudio(new Set([key]))
+  }, [pushHistory, restoreShotAudio])
+
+  /**
+   * (правка 1064) ПКМ по таймлайну: клип под курсором → контекстное меню
+   * (отделить/присоединить аудио, удалить). Точка берётся через
+   * elementFromPoint: меню открывается и из contextmenu, и из отпускания ПКМ.
+   */
+  const openClipMenuAt = useCallback((x: number, y: number, hint?: Element | null) => {
+    // один right-click может прийти и как contextmenu, и как pointerup
+    const now = Date.now()
+    const last = ctxOpenedRef.current
+    if (last && now - last.t < 500 && Math.abs(last.x - x) < 8 && Math.abs(last.y - y) < 8) return
+    ctxOpenedRef.current = { x, y, t: now }
+
+    // элемент под курсором: сначала hit-test по точке (при захвате указателя
+    // event.target может быть сам скроллер), затем цель события
+    const cands: HTMLElement[] = []
+    const efp = document.elementFromPoint(x, y) as HTMLElement | null
+    if (efp) cands.push(efp)
+    if (hint instanceof HTMLElement && hint !== efp) cands.push(hint)
+    if (!cands.length) return
+
+    const sel = selSetRef.current
+    const clipEl = cands.map((c) => c.closest('[data-clip]') as HTMLElement | null).find(Boolean)
+    const clipKey = clipEl?.dataset.clip
+    if (clipKey) {
+      const shot = shotsRef.current.find((s) => s.key === clipKey)
+      if (!shot) return
+      // (правка 1064) если клип уже в выделении — не перевыделяем: иначе снимем
+      // выделенный аудиоклип, а именно пара «видео + аудио» и нужна для «Присоединить»
+      if (!sel.shot.has(clipKey)) selectClip('shot', clipKey)
+      const items: CtxMenuItem[] = []
+      if (!shot.audioClipKey) {
+        items.push({
+          id: 'detach',
+          label: tt("Отделить аудио"),
+          hint: shot.hasAudio === false ? tt("в клипе нет звука") : tt("на отдельную дорожку"),
+          disabled: shot.hasAudio === false,
+          run: () => void detachAudio(clipKey),
+        })
+      } else {
+        items.push({
+          id: 'unglue',
+          label: tt("Разъединить аудио"),
+          hint: tt("звук останется на своей дорожке"),
+          run: () => unglueAudio(clipKey),
+        })
+      }
+      const audioSel = Array.from(sel.audio)
+      if (audioSel.length === 1 && audioSel[0] !== shot.audioClipKey) {
+        const a = audiosRef.current.find((x) => x.key === audioSel[0])
+        if (a) {
+          items.push({
+            id: 'attach',
+            label: tt("Присоединить аудио"),
+            hint: a.name.length > 16 ? `${a.name.slice(0, 16)}…` : a.name,
+            run: () => glueAudio(clipKey, a.key),
+          })
+        }
+      }
+      items.push({ id: 'remove', label: tt("Удалить клип"), danger: true, run: () => removeShot(clipKey) })
+      openCtxMenuAt(x, y, items)
+      return
+    }
+
+    // (правка 1074) клипы на дорожках V2..Vn: раньше у них не было data-атрибута,
+    // поэтому right-click по слою не находил клип и меню вообще не появлялось.
+    const layerEl = cands.map((c) => c.closest('[data-layer-key]') as HTMLElement | null).find(Boolean)
+    const layerKey = layerEl?.dataset.layerKey
+    if (layerKey) {
+      const l = layersRef.current.find((x) => x.key === layerKey)
+      if (!l) return
+      if (!sel.layer.has(layerKey)) selectClip('layer', layerKey)
+      const items: CtxMenuItem[] = [
+        {
+          id: 'hide',
+          label: l.hidden ? tt("Показать клип") : tt("Скрыть клип"),
+          hint: tt("дорожка V{{p1}}", { p1: (l.track ?? 0) + 1 }),
+          run: () => { pushHistory(); patchLayer(layerKey, { hidden: !l.hidden }) },
+        },
+        {
+          id: 'mute',
+          label: l.muted ? tt("Включить звук") : tt("Выключить звук"),
+          run: () => { pushHistory(); patchLayer(layerKey, { muted: !l.muted }) },
+        },
+        { id: 'remove', label: tt("Удалить клип"), danger: true, run: () => removeLayerClip(layerKey) },
+      ]
+      openCtxMenuAt(x, y, items)
+      return
+    }
+
+    const audioEl = cands.map((c) => c.closest('[data-audio-key]') as HTMLElement | null).find(Boolean)
+    const audioKey = audioEl?.dataset.audioKey
+    if (audioKey) {
+      const a = audiosRef.current.find((x2) => x2.key === audioKey)
+      if (!a) return
+      if (!sel.audio.has(audioKey)) selectClip('audio', audioKey)
+      const items: CtxMenuItem[] = []
+      const shotSel = Array.from(sel.shot)
+      if (shotSel.length === 1 && shotSel[0] !== a.fromShotKey) {
+        const s = shotsRef.current.find((x2) => x2.key === shotSel[0])
+        if (s) {
+          items.push({
+            id: 'attach',
+            label: tt("Присоединить аудио"),
+            hint: s.name.length > 16 ? `${s.name.slice(0, 16)}…` : s.name,
+            run: () => glueAudio(s.key, audioKey),
+          })
+        }
+      }
+      if (a.fromShotKey) {
+        items.push({
+          id: 'unglue',
+          label: tt("Разъединить аудио"),
+          hint: tt("звук останется на своей дорожке"),
+          run: () => unglueAudio(a.fromShotKey as string),
+        })
+      }
+      items.push({ id: 'remove', label: tt("Удалить аудио"), danger: true, run: () => removeAudioClip(audioKey) })
+      openCtxMenuAt(x, y, items)
+    }
+  }, [selectClip, openCtxMenuAt, glueAudio, unglueAudio, detachAudio, removeShot, removeAudioClip, removeLayerClip, patchLayer, pushHistory, tt])
+
+  useEffect(() => { openClipMenuAtRef.current = openClipMenuAt }, [openClipMenuAt])
+
+  /** (правка 1064) React-путь того же меню (нативный contextmenu на таймлайне) */
+  const onTimelineContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    if (panMovedRef.current) { panMovedRef.current = false; return }
+    openClipMenuAt(e.clientX, e.clientY, e.target as Element | null)
+  }, [openClipMenuAt])
 
   /** (правка 899) удалить все выделенные клипы (группу) сразу, одним снимком истории;
    *  база — без ripple: освободившееся место каждого удалённого клипа переходит
@@ -2925,13 +3404,24 @@ export function MontageView() {
       })
     }
     if (sel.layer.size) setLayers((prev) => prev.filter((l) => !sel.layer.has(l.key)))
-    if (sel.audio.size) setAudios((prev) => prev.filter((a) => !sel.audio.has(a.key)))
+    // (правка 1064) видеоклип и его вынесенный звук — раздельные сущности: удаляя
+    // видеоклипы, аудиоклипы с дорожки не выбрасываем, только снимаем привязку.
+    // А у удалённых аудиоклипов возвращаем звук тем видеоклипам, у которых не
+    // осталось ни одного связанного звука (иначе клип молчал бы вечно).
+    if (sel.shot.size) {
+      setAudios((prev) =>
+        prev.some((a) => a.fromShotKey && sel.shot.has(a.fromShotKey))
+          ? prev.map((a) => (a.fromShotKey && sel.shot.has(a.fromShotKey) ? { ...a, fromShotKey: undefined } : a))
+          : prev,
+      )
+    }
+    if (sel.audio.size) restoreShotAudio(sel.audio)
     setSelectedKey(null)
     setSelectedLayerKey(null)
     setSelectedAudioKey(null)
     setSelExtra({ shot: [], layer: [], audio: [] })
     return true
-  }, [stopSeq, pushHistory])
+  }, [stopSeq, pushHistory, restoreShotAudio])
 
   /**
    * (правка 883) удаление видеодорожки:
@@ -3325,7 +3815,8 @@ export function MontageView() {
               subfolder: s.subfolder || undefined,
               trimStart: hasStart ? +r.start.toFixed(3) : undefined,
               trimEnd: hasEnd ? +r.end.toFixed(3) : undefined,
-              vol: s.vol ?? 1,
+              // (правка 1064) звук клипа отделён на аудиодорожку — свой звук молчит
+              vol: s.muted ? 0 : (s.vol ?? 1),
               fadeIn: s.fadeIn || undefined,
               fadeOut: s.fadeOut || undefined,
               // (правка 850, 859, 860) скорость, эффекты и пауза (gap) перед клипом
@@ -3781,6 +4272,14 @@ export function MontageView() {
       const startX = e.clientX
       const at0 = clip.at
       const len = kind === 'layer' ? layerLen(clip as LayerClip) : audioLen(clip as AudioClip)
+      /* (правка 1064) приклеенный звук ведёт за собой видеоклип: клип базы стоит на
+         шкале не свободно, а через свою паузу (gap) перед ним, поэтому сдвиг звука
+         превращаем в сдвиг gap'а хозяина. Рефлов на это время молчит (иначе звук
+         уехал бы дважды). */
+      const linkedShotKey = kind === 'audio' ? (clip as AudioClip).fromShotKey ?? null : null
+      const linkedRow0 = linkedShotKey ? seqRef.current.find((r) => r.shot.key === linkedShotKey) ?? null : null
+      const linkedGap0 = linkedRow0?.shot.gap ?? 0
+      if (kind === 'audio') dragAudioKeyRef.current = clip.key
       const rows: Array<{ kind: 'layer' | 'audio'; track: number; top: number; bottom: number }> = []
       for (const el of Array.from(scrollerRef.current?.querySelectorAll<HTMLElement>('[data-layer-row],[data-audio-row]') || [])) {
         const r = el.getBoundingClientRect()
@@ -3880,6 +4379,15 @@ export function MontageView() {
           if (r.kind !== kind) continue
           if (clientY >= r.top - 4 && clientY <= r.bottom + 4) { track = r.track; break }
         }
+        // (правка 1064) тащим приклеенный звук — за ним едет и видеоклип-хозяин
+        if (linkedShotKey && linkedRow0) {
+          const g = +Math.max(0, linkedGap0 + (want - at0)).toFixed(3)
+          if (Math.abs(g - linkedGap0) > 0.001) {
+            setShots((prev) =>
+              prev.map((s) => (s.key === linkedShotKey ? { ...s, gap: g < 0.01 ? undefined : g } : s)),
+            )
+          }
+        }
         curAt = +want.toFixed(3)
         curTrack = Math.min(MAX_TRACKS, Math.max(1, track))
         setClip(curAt, curTrack)
@@ -3910,6 +4418,7 @@ export function MontageView() {
         window.removeEventListener('pointerup', onUp)
         if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0 }
         setTrimBadge(null)
+        if (dragAudioKeyRef.current === clip.key) dragAudioKeyRef.current = null
         if (moved) {
           // (правка 878) вертикальные зоны: на V1 слой превращается в клип базы,
           // над верхним рядом — переносится на новый ряд V(N+1)
@@ -4682,7 +5191,7 @@ export function MontageView() {
         <div
           className="group flex h-2 shrink-0 cursor-ns-resize items-center justify-center border-t border-border bg-[var(--surface-1)] transition-colors hover:bg-[#A78BFA]/15"
           onPointerDown={startTlResize}
-          title={tt("Потяните вверх/вниз — высота таймлайна")}
+          title={tt("Потяните вверх/вниз — высота панели таймлайна (дорожки не растягиваются). Ctrl+колесо на таймлайне — высота всех дорожек")}
         >
           <div className="h-0.5 w-10 rounded-full bg-border transition-colors group-hover:bg-[#A78BFA]" />
         </div>
@@ -4962,7 +5471,9 @@ export function MontageView() {
             контейнер может сжиматься и листается по вертикали. */}
         <div
           ref={scrollerRef}
-          className="min-h-0 overflow-x-auto overflow-y-auto border-t border-border bg-[var(--surface-0)] px-3 py-2.5"
+          className="min-h-0 shrink-0 overflow-x-auto overflow-y-auto border-t border-border bg-[var(--surface-0)] px-3 py-2.5"
+          style={{ height: tlH, maxHeight: 'max(96px, calc(100% - 250px))' }}
+          onContextMenu={onTimelineContextMenu}
           onDragOver={(e) => {
             const el = e.target as HTMLElement | null
             const aRow = el?.closest('[data-audio-row]')
@@ -5058,6 +5569,7 @@ export function MontageView() {
                     return (
                       <div
                         key={l.key}
+                        data-layer-key={l.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
                         className={cn(
                           'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
@@ -5194,6 +5706,12 @@ export function MontageView() {
                     key={row.shot.key}
                     data-clip={row.shot.key}
                     onPointerDown={(e) => startClipDrag(e, row)}
+                    onContextMenu={(e) => {
+                      // (правка 1064) right-click прямо по клипу: путь на случай,
+                      // если нативный listener скроллера не навесился на узел
+                      e.preventDefault()
+                      openClipMenuAt(e.clientX, e.clientY, e.currentTarget)
+                    }}
                     className={cn(
                       'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
                       isSel
@@ -5208,7 +5726,7 @@ export function MontageView() {
                       backgroundPosition: 'center',
                       backgroundRepeat: 'no-repeat',
                     }}
-                    title={tt("{{p1}} · старт {{p2}} с · длина {{p3}} с{{p4}}", { p1: row.shot.name, p2: row.offset.toFixed(2), p3: row.len.toFixed(1), p4: row.gap >= 0.02 ? tt(" · пауза перед клипом {{p1}} с", { p1: row.gap.toFixed(2) }) : '' })}
+                    title={`${tt("{{p1}} · старт {{p2}} с · длина {{p3}} с{{p4}}", { p1: row.shot.name, p2: row.offset.toFixed(2), p3: row.len.toFixed(1), p4: row.gap >= 0.02 ? tt(" · пауза перед клипом {{p1}} с", { p1: row.gap.toFixed(2) }) : '' })}${row.shot.muted ? tt(' · звук отделён на аудиодорожку') : ''}`}
                   >
                     {!strip && (
                       <img
@@ -5222,8 +5740,12 @@ export function MontageView() {
                     )}
                     <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-1.5 pb-0.5 pt-2 text-[10px] leading-4 text-white">
                       <span className="truncate font-medium">{row.shot.name}</span>
-                      <span className="shrink-0 font-mono text-[9px] text-white/80 tabular-nums">
-                        {row.len.toFixed(1)}{tt("с")}{row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
+                      <span className="flex shrink-0 items-center gap-1 font-mono text-[9px] text-white/80 tabular-nums">
+                        {/* (правка 1064) звук ушёл на аудиодорожку */}
+                        {row.shot.muted && <VolumeXIcon className="h-2.5 w-2.5 text-white/75" />}
+                        <span>
+                          {row.len.toFixed(1)}{tt("с")}{!row.shot.muted && row.shot.vol != null && row.shot.vol !== 1 ? ` · ${Math.round(row.shot.vol * 100)}%` : ''}
+                        </span>
                       </span>
                     </div>
                     <div
@@ -5328,7 +5850,13 @@ export function MontageView() {
                     return (
                       <div
                         key={a.key}
+                        data-audio-key={a.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'audio', a)}
+                        onContextMenu={(e) => {
+                          // (правка 1064) right-click по аудиоклипу
+                          e.preventDefault()
+                          openClipMenuAt(e.clientX, e.clientY, e.currentTarget)
+                        }}
                         className={cn(
                           'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-md border bg-emerald-600/25 transition-shadow active:cursor-grabbing',
                           isSel
@@ -5755,6 +6283,35 @@ export function MontageView() {
                   <div className="mt-1.5 rounded bg-[var(--surface-3)] px-2 py-1 text-[10px] text-muted-foreground">
                     {tt("Звук дорожки A")}{selectedAudio.track} {' '}{tt("микшируется с базой без нормализации.")}
                   </div>
+                  {/* (правка 1064) это звук, отделённый от видеоклипа: он главный для
+                      этого видео, но связь только на таймлайне — её можно вернуть */}
+                  {(() => {
+                    const owner = selectedAudio.fromShotKey
+                      ? shots.find((s) => s.key === selectedAudio.fromShotKey) || null
+                      : null
+                    if (!owner) return null
+                    return (
+                      <div className="mt-1.5 flex items-center justify-between gap-2 rounded border border-border bg-[var(--surface-1)] px-2 py-1.5">
+                        <span className="truncate text-[10px] text-muted-foreground" title={owner.name}>
+                          {tt("звук клипа")} «{owner.name}»
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedAudioKey(null)
+                              setSelectedLayerKey(null)
+                              setSelectedKey(owner.key)
+                            }}
+                            className="rounded border border-border bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-foreground/85 transition-colors hover:border-[#A78BFA] hover:text-[#A78BFA]"
+                            title={tt("Выделить видеоклип на таймлайне")}
+                          >
+                            {tt("Его видео")}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
                 <div className="space-y-2.5 rounded-lg border border-border bg-[var(--surface-2)] p-2.5">
                   <div className="space-y-1.5">
@@ -5929,8 +6486,12 @@ export function MontageView() {
                   </div>
                 </div>
 
-                {/* звук клипа (громкость + ползунки плавного входа и затухания) */}
-                {(() => {
+                {/* звук клипа (громкость + ползунки плавного входа и затухания).
+                    (правка 1064) у видеоклипа с отделённым звуком блока аудио нет
+                    вообще: звук — самостоятельный клип на A-дорожке, все его
+                    настройки в панели именно этого клипа. Отделение/присоединение
+                    делаются контекстным меню на таймлайне. */}
+                {selected.muted || selected.audioClipKey ? null : (() => {
                   const clipDur = Math.max(0.5, (effRange(selected).end - effRange(selected).start) / shotSpeed(selected))
                   const maxFade = Math.max(1, Math.min(10, +clipDur.toFixed(1)))
                   return (
@@ -6755,6 +7316,40 @@ export function MontageView() {
           </div>
         )}
       </aside>
+
+      {/* (правка 1064) контекстное меню клипа (ПКМ на таймлайне). Портал в body:
+          у fixed-оверлея внутри панели transform-предки стали бы «окном», и меню
+          уехало бы за видимую область (эффект «ПКМ ничего не делает»). */}
+      {ctxMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[10060]"
+          onPointerDown={() => setCtxMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}
+        >
+          <div
+            className="absolute min-w-[252px] overflow-hidden rounded-xl border border-border bg-[var(--surface-1)] py-1 shadow-2xl ring-1 ring-black/40"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {ctxMenu.items.map((it) => (
+              <button
+                key={it.id}
+                type="button"
+                disabled={it.disabled}
+                onClick={() => { setCtxMenu(null); it.run() }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
+                  it.danger ? 'text-red-400 hover:bg-red-500/15' : 'text-foreground hover:bg-[var(--surface-3)]',
+                )}
+              >
+                <span className="whitespace-nowrap font-medium">{it.label}</span>
+                {it.hint && <span className="shrink-0 truncate text-[10px] text-muted-foreground">{it.hint}</span>}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* (правка 720 v11) подсказка новой длительности при тяге за край клипа */}
       {trimBadge && (

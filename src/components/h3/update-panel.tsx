@@ -196,7 +196,7 @@ export function UpdatePanel() {
 
   if (!data) {
     return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+      <div className="flex items-center gap-2 px-3.5 py-3 text-xs text-muted-foreground">
         <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
         {' '}{t("Проверка обновлений...")}
       </div>
@@ -231,7 +231,7 @@ export function UpdatePanel() {
   // Приложения «взведено» — ждём только перезапуска.
   if (data.armed && !dlActive) {
     return (
-      <div className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+      <div className="space-y-2 bg-emerald-500/[0.06] px-3.5 py-3">
         <div className="text-xs">
           <span className="font-medium text-emerald-400">
             {t("Обновлено скачано: v")}{data.armed.version}
@@ -273,7 +273,7 @@ export function UpdatePanel() {
   if (dlActive && dl) {
     const pct = dl.totalBytes ? Math.min(100, (dl.bytesReceived / dl.totalBytes) * 100) : 0
     return (
-      <div className="space-y-2 rounded-md border border-border/60 p-3">
+      <div className="space-y-2 px-3.5 py-3">
         <div className="flex items-center justify-between text-xs">
           <span>{t("Загрузка v")}{dl.version}...</span>
           <span className="text-muted-foreground">
@@ -305,7 +305,7 @@ export function UpdatePanel() {
   const failedDl = dl && (dl.status === 'error' || dl.status === 'cancelled') ? dl : null
 
   return (
-    <div className="space-y-2 rounded-md border border-border/60 p-3">
+    <div className="space-y-2 px-3.5 py-3">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
           {t("Обновления студии")}{' '}

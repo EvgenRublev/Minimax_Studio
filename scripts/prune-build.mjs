@@ -4,7 +4,12 @@
  *
  * Что делает:
  *   1. Удаляет `.next/cache/` (≈300 МБ) — это кэш webpack для УСКОРЕНИЯ
- *      пересборок. На работу приложения не влияет.
+ *      пересборок. На работу приложения не влияет. Так же сносит `.next/dev/`
+ *      (правка 1071): артефакты `next dev` (≈220 МБ), которые нагоняет режим
+ *      разработки. Приложение запускается как `next()` из server.js в
+ *      production-режиме и `.next/dev` не читает, а в update.zip этот мусор
+ *      раздувал архив в 20 раз и упирался в ограничение make-update-zip.mjs
+ *      (150 МБ) — релиз бы падал ещё до упаковки.
  *   2. Обрезает `.next/server` — манифесты `.nft.json` (≈530 МБ): это
  *      списки файлов, которые Next считает нужными для standalone-деплоя
  *      (output-file-tracing). Каждый перечисляет ~87 000 файлов деревьев
@@ -90,11 +95,14 @@ function walk(dir, out = []) {
 }
 
 // ── 1. Кэш сборки ─────────────────────────────────────────────────────────
-const cacheDir = join(ROOT, '.next', 'cache');
-if (existsSync(cacheDir)) {
-  const size = dirSize(cacheDir);
-  console.log(`[prune] .next/cache            ${(size / 1024 / 1024).toFixed(0)} МБ — удаляю (кэш пересборки)`);
-  if (!DRY) rmSync(cacheDir, { recursive: true, force: true });
+// (правка 1071) 'dev' — артефакты `next dev`, их тоже выкидываем: production
+// server.js их не читает, а в update.zip они удваивали бы вес архива.
+for (const junk of ['cache', 'dev']) {
+  const junkDir = join(ROOT, '.next', junk);
+  if (!existsSync(junkDir)) continue;
+  const size = dirSize(junkDir);
+  console.log(`[prune] .next/${junk.padEnd(22)} ${(size / 1024 / 1024).toFixed(0)} МБ — удаляю (${junk === 'cache' ? 'кэш пересборки' : 'артефакты next dev'})`);
+  if (!DRY) rmSync(junkDir, { recursive: true, force: true });
 }
 
 // ── 2. Манифесты .nft.json ────────────────────────────────────────────────

@@ -5,6 +5,9 @@ import { clampVedaSparsity, sanitizeVedaIndexList, buildCustomLoraNodes, getLast
 // чтобы вкладка Refine могла их импортировать, не таща в клиентский бандл весь шаблон.
 import { refineSigmaLadder } from './refine-sigmas'
 import { clampPreviewFrames, PREVIEW_MAX_FRAMES } from './preview-limit'
+// (правка 1058) Ручки тайлового режима: типы/дефолты/климпы — в отдельном
+// модуле без импортов (его же использует клиентская вкладка Refine).
+import { resolveTesseraTiles, type TesseraTileParams } from './tessera-params'
 /**
  * Refine — генеративный v2v-апскейл готового видео (латентная схема Pass 2).
  *
@@ -86,6 +89,10 @@ function firstFrameCaption(slot: number): string {
 export interface RefineParams {
   /** Имя файла исходника в ComfyUI input/ (уже скопирован роутом /api/comfy/refine). */
   sourceVideo: string
+  /** (правка 1076) Малая VRAM (<16 ГБ): живая подсказка строится tiny-VAE'ем до
+   *  1024 px, и на 12 ГБ этот декод не помещается (OOM в логе юзера). На таких
+   *  картах превью рисуется в 256 px — оно дешёвое и всё равно показывает прогресс. */
+  lowVram?: boolean
   /** (правка 376) Путь к сохранённому AV-латенту исходника, относительно
    *  output/ ComfyUI (поле latent_file в .meta.json, файл ноды
    *  MiniMaxStudioSaveAVLatent правки 372). Задан (роут уже проверил
@@ -134,11 +141,18 @@ export interface RefineParams {
    *  Режим для слабых ГПУ (8 ГБ); окно-геометрия chunkSeconds задаёт
    *  temporal_tile (<=3 c → low_vram 73 к, иначе high_vram 124 к). */
   tessera?: boolean
+  /** (правка 1058) Ручки тайлового режима (шов/контекст/чанки/композит/
+   *  референсы/гайд) — из панели «Параметры тайлов» вкладки Refine.
+   *  undefined/частично = дефолты правки 1057 (resolveTesseraTiles). */
+  tesseraParams?: Partial<TesseraTileParams>
   /** (правка 1057) 3D-апскейлер латента для пластинки в тайловом режиме
    *  (и общий выключатель настройки «Latent Upscaler 3D»). undefined = вкл. */
   latentUpscaler3D?: boolean
   /** MiniMaxLowVRAMAttention (default true). */
   lowVramAttention?: boolean
+  /** (правка 1088) Bounded attention: QKV/attention/out_proj блоками по токенам.
+   *  Включается роутом на картах <12 ГБ — Refine «Целым» без тайловых швов. */
+  boundedAttention?: boolean
   /** MiniMaxChunkFeedForward (default true). */
   chunkFeedForward?: boolean
   /** (правка 968) тюнинг Chunk FF — из настроек, как в Generate. */
@@ -322,6 +336,10 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // стриминговый энкодер сам делает затравку окнами).
   const tesseraOn = p.windowed === true && p.tessera === true && !p.chunkJob && p.loop !== true
   const tess = tesseraOn ? tesseraCanvas(p.sourceWidth, p.sourceHeight, final.outW, final.outH) : null
+  // (правка 1058) Ручки тайлового режима (шов/контекст/чанки/композит/рефы/
+  // гайд) — из UI; дефолты повторяют рецепт 1057. Климпы живут в
+  // tessera-params.ts (общий модуль с клиентским стором).
+  const tiles = resolveTesseraTiles(p.tesseraParams, p.chunkSeconds)
   // (правка 1057, след) пластинка через 3D-латентный апскейлер: когда цель
   // заметно больше источника, ланчоз-затравка мылит результат — латент
   // кодируется в сетке источника и поднимается обученным MinimaxH3-апскейлером
@@ -382,15 +400,21 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     : latentMode
       ? framesGrid
       : ['r_cap', 1]
+  // (правка 1088) В bounded-режиме tiny-VAE декодирует каждый кадр в полном
+  // разрешении: 124 кадра 1080p — 3,1 ГБ GPU на каждом шаге. 8 кадров хватает.
+  const previewCap = p.boundedAttention === true ? 8 : PREVIEW_MAX_FRAMES
   const previewFrames: number | [string, number] =
     typeof previewFramesSrc === 'number'
-      ? clampPreviewFrames(previewFramesSrc)
+      ? Math.min(previewCap, clampPreviewFrames(previewFramesSrc))
       : ['prev_clamp', 1]
   const needsPreviewClampNode = typeof previewFramesSrc !== 'number'
 
-  // ─── Model optimization chain: UNET → [LowVRAM] → [ChunkFF] ───
+  // ─── Model optimization chain: UNET → [LowVRAM] → [Bounded] → [ChunkFF] ───
   const lowVram = p.lowVramAttention !== false
-  const chunkFF = p.chunkFeedForward !== false
+  // (правка 1088) Bounded attention — Refine «Целым» без тайловых швов:
+  // на 8 ГБ QKV-буфер pass 2 не влезал, теперь режется по токенам.
+  const boundedAttn = p.boundedAttention === true
+  const chunkFF = p.chunkFeedForward !== false || boundedAttn
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
@@ -401,15 +425,25 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     }
     modelSrc = ['46:43', 0]
   }
+  if (boundedAttn) {
+    modelNodes['46:45'] = {
+      inputs: { token_chunk: 4096, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['46:45', 0]
+  }
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-          chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+          chunks: boundedAttn
+            ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
+            : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
           seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
           model: modelSrc,
         },
       class_type: 'MiniMaxChunkFeedForward',
-      _meta: { title: 'Chunk FeedForward' },
+      _meta: { title: boundedAttn ? 'Chunk FeedForward (bounded)' : 'Chunk FeedForward' },
     }
     modelSrc = ['46:40', 0]
   }
@@ -844,24 +878,25 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         // покадровых тайловых (быстрее и стабильнее на слабых ГПУ).
         't_args': {
           inputs: {
-            video_ref_crop: 'per_tile',
-            image_ref_crop: 'per_tile',
+            // (правка 1058) рефы/гайд/композит — из панели «Параметры тайлов»
+            video_ref_crop: tiles.videoRefCrop,
+            image_ref_crop: tiles.imageRefCrop,
             guide_noise: 0.0,
             guide_noise_band: 'full',
             guide_noise_t: 'per_frame',
-            guide_release: 0.8,
-            guide_inherit: true,
+            guide_release: tiles.guideRelease,
+            guide_inherit: tiles.guideInherit,
             hero_guide_noise: -1.0,
-            motion_adapt: false,
-            motion_release_floor: 0.0,
+            motion_adapt: tiles.motionAdapt,
+            motion_release_floor: tiles.motionReleaseFloor,
             fine_below_sigma: 0.75,
             tile_select: '',
             tile_limit: 0,
-            flat_skip: 0.0,
-            composite: 'latent',
+            flat_skip: tiles.flatSkip,
+            composite: tiles.composite,
           },
           class_type: 'TesseraArgs',
-          _meta: { title: 'Tessera Args (flat_skip off, latent composite)' },
+          _meta: { title: 'Tessera Args (рефы/гайд/композит)' },
         },
       } : {
       'r_cat': {
@@ -946,7 +981,11 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           // (правка 1057) в тайловом тракте conditioning идёт ОТ TesseraEncode:
           // он вшивает гайд пластинки ключевым кадром кадра 0 (заменяет собой
           // видео-AddGuide), поверх него навешиваем аудио-гайд.
-          positive: tesseraOn ? (['t_enc', 0] as [string, number]) : condNodeId,
+          // (правка 1059) В НЕтайловом тракте — ОБЯЗАТЕЛЬНО ССЫЛКА [id, 0], а не
+          // голый id: ComfyUI принимал строку '46:11r' как литерал, и
+          // MiniMaxH3AddGuide падал на positive[0][1] с «string index out of
+          // range» (0.44 читает minimax_keyframes из positive[0][1]).
+          positive: tesseraOn ? (['t_enc', 0] as [string, number]) : ([condNodeId, 0] as [string, number]),
           latent: samplerSeedLatent,
           frame_idx: 0,
           // (правка 829) цикл — подровненная по длине латента дорожка.
@@ -961,6 +1000,19 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // ═══════════════════════════════════════════════
     //  SAMPLER (RandomNoise, euler, ManualSigmas = Pass 2)
     // ═══════════════════════════════════════════════
+    // (правка 1061) Сброс ПЕРЕД тяжёлым сэмплом. Refine почти всегда идёт
+    // сразу за генерацией: H3 остаётся VBAR-резидентным с дренажнутым
+    // watermark, и первый же re-fault увеличенного латента вешает прогон на
+    // 0/.. «Model Initializing» (апстрим comfy-aimdo#117/#118, ComfyUI#16084:
+    // свежая последовательность fault'ов проходит всегда). Нода чистит
+    // prefetch-очереди/cast-буферы/watermark и выгружает модели, а загрузчик
+    // сэмплера поднимает watermark заново через prioritize при загрузке.
+    // Латент проходит насквозь без изменений.
+    'r_rst_pre': {
+      inputs: { flow: samplerSeedLatent, label: 'рефайн, перед сэмплом' },
+      class_type: 'MiniMaxStudioVRAMReset',
+      _meta: { title: 'VRAM Reset (перед Refine-сэмплом)' },
+    },
     '46:31': {
       inputs: { noise_seed: seed },
       class_type: 'RandomNoise',
@@ -984,9 +1036,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         },
     ...(needsPreviewClampNode ? {
       'prev_clamp': {
-        inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
+        inputs: { expression: `min(a, ${previewCap})`, 'values.a': previewFramesSrc },
         class_type: 'ComfyMathExpression',
-        _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+        _meta: { title: `Превью: не больше ${previewCap} кадров` },
       },
     } : {}),
     '12': {
@@ -994,7 +1046,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         model: modelTail,
         vae: ['46:3', 0],
         tiny_vae: 'taeh3.safetensors',
-        max_resolution: 1024,
+        max_resolution: p.lowVram ? 256 : 1024, // (правка 1076) на малой VRAM крошечный декод превью не влезает в 1024 px
         jpeg_quality: 80,
         suppress_default_preview: true,
         // Как на вкладке «Генерация» ('46:19'): превью покрывает всё видео
@@ -1023,15 +1075,15 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           width: ['t_enc', 2],
           height: ['t_enc', 3],
           frames: ['t_enc', 4],
-          spatial_tile: 'low_vram',
-          tile_width: 1024,
-          tile_height: 1024,
-          context_border: 64,
+          spatial_tile: tiles.spatialTile,
+          tile_width: tiles.tileWidth,
+          tile_height: tiles.tileHeight,
+          context_border: tiles.contextBorder,
           hero_min: 896,
           hero_fit: 'median',
-          temporal_tile: (Number(p.chunkSeconds) || 5) <= 3 ? 'low_vram' : 'high_vram',
-          temporal_size: 124,
-          temporal_overlap: 4,
+          temporal_tile: tiles.nodeTemporalTile,
+          temporal_size: tiles.nodeTemporalSize,
+          temporal_overlap: tiles.temporalOverlap,
           diagram_width: 512,
           ref_tile: -1,
           positive: ['t_enc', 0],
@@ -1043,14 +1095,16 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       't_ref': {
         inputs: {
           model: ['12', 0],
-          spatial_tile: 'low_vram',
-          tile_width: 1024,
-          tile_height: 1024,
-          temporal_tile: (Number(p.chunkSeconds) || 5) <= 3 ? 'low_vram' : 'high_vram',
-          temporal_size: 124,
-          temporal_overlap: 4,
-          context_border: 64,
-          seam_overlap: 32,
+          // (правка 1058) геометрия — из панели «Параметры тайлов»; при
+          // подключённом plan эти же значения всё равно перекрывает план.
+          spatial_tile: tiles.spatialTile,
+          tile_width: tiles.tileWidth,
+          tile_height: tiles.tileHeight,
+          temporal_tile: tiles.nodeTemporalTile,
+          temporal_size: tiles.nodeTemporalSize,
+          temporal_overlap: tiles.temporalOverlap,
+          context_border: tiles.contextBorder,
+          seam_overlap: tiles.seamOverlap,
           hero_min: 896,
           hero_fit: 'median',
           cfg: 1.0,
@@ -1061,7 +1115,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           prompt,
           positive: [p.chunkJob ? condNodeId : 'r_ag', 0],
           negative: ['t_neg', 0],
-          latent: ['t_cat', 0],
+          // (правка 1061) сброс резидентности перед первым fault'ом Tessera
+          latent: ['r_rst_pre', 0],
           vae: ['46:3', 0],
           clip: ['46:15', 0],
           sampler: ['46:18', 0],
@@ -1092,7 +1147,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         // (правка 376) Затравка: latent-ветка без апскейлера ('same') — сам
         // загруженный AV-латент ('r_lat'); с апскейлером — 'r_cat' (апскейл
         // видео-части + родное аудио). mp4-ветка — 'r_cat', как раньше.
-        latent_image: samplerSeedLatent,
+        // (правка 1061) через 'r_rst_pre': сброс резидентности перед первым
+        // fault'ом — иначе Refine после генерации виснет на 0%.
+        latent_image: ['r_rst_pre', 0],
       },
       class_type: 'SamplerCustomAdvanced',
       _meta: { title: 'Refine Sampler (Pass 2)' },
@@ -1244,6 +1301,8 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
  */
 export interface ChunkedRefineParams {
   sourceVideo: string
+  /** (правка 1076) см. RefineParams.lowVram — превью в 256 px вместо 1024. */
+  lowVram?: boolean
   /** (правка 382) Путь к сохранённому AV-латенту исходника (относительно
    *  output/, поле latent_file меты; роут валидировал и передал
    *  sourceWidth/sourceHeight = канву ЛАТЕНТА). Окна режутся ТОКЕНАМИ из
@@ -1278,6 +1337,8 @@ export interface ChunkedRefineParams {
   diffusionModel?: string
   outputSubfolder?: string
   lowVramAttention?: boolean
+  /** (правка 1088) Bounded attention — см. RefineParams. */
+  boundedAttention?: boolean
   chunkFeedForward?: boolean
   /** (правка 968) тюнинг Chunk FF — из настроек. */
   chunkFFChunks?: number
@@ -1549,7 +1610,10 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   })
 
   const lowVram = p.lowVramAttention !== false
-  const chunkFF = p.chunkFeedForward !== false
+  // (правка 1088) Bounded attention — и в «Частями»: окна 3–5 с на 1080p всё
+  // ещё дают 22–37 латент-кадров, QKV-буфер которых не влезает в 8 ГБ.
+  const boundedAttn = p.boundedAttention === true
+  const chunkFF = p.chunkFeedForward !== false || boundedAttn
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
@@ -1560,15 +1624,25 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
     }
     modelSrc = ['46:43', 0]
   }
+  if (boundedAttn) {
+    modelNodes['46:45'] = {
+      inputs: { token_chunk: 4096, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['46:45', 0]
+  }
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-          chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+          chunks: boundedAttn
+            ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
+            : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
           seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
           model: modelSrc,
         },
       class_type: 'MiniMaxChunkFeedForward',
-      _meta: { title: 'Chunk FeedForward' },
+      _meta: { title: boundedAttn ? 'Chunk FeedForward (bounded)' : 'Chunk FeedForward' },
     }
     modelSrc = ['46:40', 0]
   }
@@ -1647,13 +1721,16 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         model: ['46:37', 0],
         vae: ['46:3', 0],
         tiny_vae: 'taeh3.safetensors',
-        max_resolution: 1024,
+        max_resolution: p.lowVram ? 256 : 1024, // (правка 1076) на малой VRAM крошечный декод превью не влезает в 1024 px
         jpeg_quality: 80,
         suppress_default_preview: true,
         // Как на вкладке «Генерация»: превью покрывает весь кусок (у более
         // коротких окон лишний лимит безвреден — сабсэмплинга нет), 6 fps.
         // (правка 382) latent-ветка: от эффективных длин окон.
-        preview_frames: clampPreviewFrames(Math.max(...winGeo.map((g) => g.effCap))),
+        // (правка 1088) bounded: 8 кадров вместо всего окна (tiny-VAE decode).
+        preview_frames: Math.min(
+          p.boundedAttention === true ? 8 : PREVIEW_MAX_FRAMES,
+          clampPreviewFrames(Math.max(...winGeo.map((g) => g.effCap)))),
         preview_fps: 6,
       },
       class_type: 'ModelPreviewOverrideKJ',

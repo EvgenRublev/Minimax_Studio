@@ -39,7 +39,6 @@ import { sweepOrphanRefineItems } from '@/lib/refine-queue'
 // «Продлении»; событие «открыть ассистента» разворачивает панель через стор.
 import { useAssistantPanel } from '@/lib/assistant-panel-store'
 import { toast } from 'sonner' // (правка 790) тосты проверки обновлений
-import { notesSummary } from '@/components/h3/release-notes'
 import { useTranslation } from 'react-i18next' // (правка 955) // (правка 891)
 
 const TAB_CONTENT = {
@@ -168,18 +167,11 @@ export default function Home() {
       try {
         const res = await fetch('/api/update')
         const j = await res.json()
-        // (правка 891) Короткая сводка чейнджлога прямо в тосте: видно, что
-        // принёс релиз, не заходя в настройки (полный текст — там же).
-        const pendingVer = j.armed?.version ?? j.downloadedVersion ?? j.update?.version ?? null
-        const notesSrc = pendingVer
-          ? (j.update?.version === pendingVer
-              ? j.update
-              : j.latest?.version === pendingVer ? j.latest : null)
-          : null
-        const summary = notesSrc?.notes ? notesSummary(notesSrc.notes) : ''
+        // (правка 1072) В тосте только факт выхода версии и кнопка действия:
+        // длинные строки чейнджлога делали уведомление нечитаемым. Полный
+        // список изменений — Настройки → О программе.
         if (j.armed) {
-          toast.info(tt("Обновление до v{{p1}} готово — перезапустите студию для установки", { p1: j.armed.version }), {
-            description: summary || undefined,
+          toast.info(tt("Обновление v{{p1}} готово к установке", { p1: j.armed.version }), {
             // (правка 794) duration: Infinity — тост не исчезает сам, только
             // крестиком: стартовое уведомление об обновлении нельзя пропустить.
             duration: Infinity,
@@ -191,8 +183,7 @@ export default function Home() {
               : undefined,
           })
         } else if (j.update) {
-          toast.warning(tt("Доступно обновление студии: v{{p1}}", { p1: j.update.version }), {
-            description: summary || undefined,
+          toast.warning(tt("Доступна новая версия: v{{p1}}", { p1: j.update.version }), {
             // (правка 794) Не исчезает сам — см. выше.
             duration: Infinity,
             action: {

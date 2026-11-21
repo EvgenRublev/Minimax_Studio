@@ -112,6 +112,34 @@ if (comfyVer && comfyZip) ok(comfyZip === `ComfyUI-v${comfyVer}.zip`, `ComfyZipN
 if (comfyVer && comfyUrl) ok(comfyUrl.includes(`/v${comfyVer}.zip`), `ComfyUrl (${comfyUrl}) не на тег v${comfyVer}`)
 if (comfyZip) ok(bundleHas(comfyZip), `в бандле нет ${comfyZip}`)
 
+// (правка 1080) откатное поколение ядра: те же проверки, что и для основного
+const comfyRbVer = (inst.match(/\$ComfyRollbackVersion\s*=\s*'([\d.]+)'/) || [])[1]
+const comfyRbZip = (inst.match(/\$ComfyRollbackZipName\s*=\s*'([^']+)'/) || [])[1]
+const comfyRbUrl = (inst.match(/\$ComfyRollbackUrl\s*=\s*'([^']+)'/) || [])[1]
+ok(!!comfyRbVer && !!comfyRbZip && !!comfyRbUrl, 'install.ps1: не нашёл $ComfyRollbackVersion/$ComfyRollbackZipName/$ComfyRollbackUrl')
+if (comfyRbVer && comfyRbZip) ok(comfyRbZip === `ComfyUI-v${comfyRbVer}.zip`, `ComfyRollbackZipName=${comfyRbZip} не соответствует ComfyRollbackVersion=${comfyRbVer}`)
+if (comfyRbVer && comfyRbUrl) ok(comfyRbUrl.includes(`/v${comfyRbVer}.zip`), `ComfyRollbackUrl (${comfyRbUrl}) не на тег v${comfyRbVer}`)
+if (comfyRbZip) ok(bundleHas(comfyRbZip), `в бандле нет ${comfyRbZip} (откатное ядро)`)
+ok(/\[switch\]\$CoreRollback/.test(inst) && /\[switch\]\$CoreCurrent/.test(inst), 'install.ps1: есть ключи -CoreRollback / -CoreCurrent')
+ok(/\$ComfyVersion = \$ComfyRollbackVersion/.test(inst), 'install.ps1: -CoreRollback переключает версию ядра')
+// канал ядра переживает ремонты: читается и пишется config\comfy_core_channel.txt
+ok(/config\\comfy_core_channel\.txt/.test(inst), 'install.ps1: есть файл канала ядра config\\comfy_core_channel.txt')
+ok(/Get-Content -LiteralPath \$ChannelFile -Encoding UTF8/.test(inst), 'install.ps1: канал ядра читается с -Encoding UTF8')
+ok(/New-Item -ItemType Directory -Force -Path \(Split-Path \$ChannelFile -Parent\)/.test(inst), 'install.ps1: папка config\ создаётся перед записью канала')
+// пины нового поколения (comfy-aimdo/kitchen/frontend) ставятся после смены ядра,
+// иначе откат даст ядро 0.33 с aimdo 0.6.0 — связка, в которой веса читаются с диска
+ok(/function Install-ComfyCorePins/.test(inst), 'install.ps1: есть Install-ComfyCorePins')
+ok(/Install-ComfyCorePins \$comfyApp/.test(inst), 'install.ps1: пины ядра ставятся после его распаковки')
+ok(/-not \$_\.StartsWith\('#'\) -and \$_ -match '=='/.test(inst), 'Install-ComfyCorePins берёт из requirements.txt ядра только точные пины ==')
+// набор патчей выбирается по поколению ядра (0.33 <-> 0.44)
+ok(/function Get-CorePatchSetName/.test(inst) && /'comfy-patches-0\.33'/.test(inst),
+  'install.ps1: выбор набора патчей по поколению ядра (comfy-patches-0.33)')
+ok(/Get-CorePatchSetName \$ComfyVersion/.test(inst) && /Get-CorePatchSetName \$coreVer/.test(inst),
+  'install.ps1: набор патчей используется и при установке, и в -SelfCheck')
+ok(/function Get-InstalledAimdoVersion/.test(inst) && /comfy_aimdo-\(\[0-9\]/.test(inst),
+  'install.ps1: -SelfCheck проверяет версию comfy-aimdo в python_embeded')
+ok(existsSync(join(ROOT, 'install', 'comfy-patches-0.33')), 'нет папки install/comfy-patches-0.33')
+
 const pyVer = (inst.match(/python-(\d+\.\d+\.\d+)-embed-amd64\.zip/) || [])[1]
 ok(!!pyVer, 'install.ps1: не нашёл версию портативного Python')
 if (pyVer) ok(bundleHas(`python-${pyVer}-embed-amd64.zip`), `в бандле нет python-${pyVer}-embed-amd64.zip`)
@@ -199,8 +227,10 @@ ok(!(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('P
   'самодиагностика всё ещё проверяет удалённый режим «Изображение» (правка 951)')
 ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('import torch'),
   'самодиагностика не проверяет импорт torch')
-ok(inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0].includes('comfy-patches'),
+ok((inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('Get-CorePatchSetName'),
   'самодиагностика не сверяет патчи ядра с установщиком')
+ok((inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('Get-InstalledAimdoVersion'),
+  '(правка 1080) самодиагностика не проверяет соответствие comfy-aimdo поколению ядра')
 // (правка 943) путь к Electron в самодиагностике обязан совпадать с раскладкой
 // npm-пакета: node_modules\electron\dist\electron.exe (иначе ложная жалоба).
 ok((inst.match(/function Invoke-SelfCheck[\s\S]*?\n\}/)?.[0] ?? '').includes('electron\\dist\\electron.exe'),
@@ -383,10 +413,15 @@ ok(iBackupRecovery > 0 && iHasCore > 0 && iBackupRecovery < iHasCore, 'восс�
 ok(/ComfyUI\.keep\.old-/.test(inst), 'непринятые данные из ComfyUI.keep удаляются (нет переноса в сторону)')
 ok(/Restore-ComfyKeepData \$stage \$comfyApp \$keep/.test(inst), 'данные из ComfyUI.keep не возвращаются в ядро')
 ok(!/if \(Test-Path \$stage\) \{ Remove-Item \$stage -Recurse -Force \}/.test(inst), 'ComfyUI.keep удаляется без восстановления данных')
-const iCoreMove = inst.indexOf('Move-Item $inner.FullName $comfyApp')
-const iPostRestore = inst.indexOf('Restore-ComfyKeepData $stage $comfyApp $keep', iCoreMove + 1)
-const iBackupCleanup = inst.indexOf('if (Test-Path $backup) { Remove-Item $backup', iCoreMove + 1)
-ok(iCoreMove > 0 && iPostRestore > iCoreMove && (iBackupCleanup < 0 || iPostRestore < iBackupCleanup), 'после раскладки нового ядра данные не возвращаются из ComfyUI.keep')
+// (правка 1084) Замена ядра больше не уносит keep-папки в ComfyUI.keep:
+// models может держать открытый хэндл, и Move-Item падал «Отказано в доступе».
+// Ядро меняет Install-ComfyCoreTree из install/replace-comfy-core.ps1.
+const coreReplaceHelper = readFileSync(join(ROOT, 'install', 'replace-comfy-core.ps1'), 'utf8')
+ok(/\. \(Join-Path \$InstallDir 'replace-comfy-core\.ps1'\)/.test(inst), 'install.ps1 не подключает replace-comfy-core.ps1')
+ok(/Install-ComfyCoreTree -App \$comfyApp -NewCore \$inner\.FullName -Backup \$backup -Keep \$keep/.test(inst), 'замена ядра не вызывает Install-ComfyCoreTree')
+ok(!/Move-Item \$comfyApp \$backup/.test(inst), 'ядро по-прежнему целиком уносится в backup (models может быть занята)')
+ok(!/Move-Item \$src \(Join-Path \$stage \$k\)/.test(inst), 'keep-папки по-прежнему переносятся в ComfyUI.keep')
+ok(/function Install-ComfyCoreTree/.test(coreReplaceHelper) && /if \(\$Keep -contains \$item\.Name\) \{ continue \}/.test(coreReplaceHelper), 'хелпер замены ядра не сохраняет keep-папки')
 ok(!/Fail \(\$node\.name/.test(inst), 'недоступная нода по-прежнему Fail (exit 1, ComfyUI не запустится)')
 ok(/\$nodesFailed\+\+/.test(inst), 'нет счётчика неустановленных внешних нод')
 ok(/ни одна внешняя нода не установилась/.test(inst), 'нет подсказки «проверь сеть/прокси», если не встала ни одна нода')

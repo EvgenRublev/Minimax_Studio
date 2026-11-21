@@ -20,6 +20,8 @@ REM First matching line wins — immune to stray duplicate keys from old configs
 set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
 set "ASYNC_OFFLOAD="
+set "PINNED_MEMORY="
+set "NVML_PRESSURE="
 set "VRAM_HEADROOM="
 if exist config\config.ini (
     REM (правка 357) /b /c:"key" — матч только строк, НАЧИНАЮЩИХСЯ с ключа:
@@ -27,6 +29,12 @@ if exist config\config.ini (
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"reserve_gb" config\config.ini 2^>nul') do if not defined RESERVE_VRAM set "RESERVE_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"dynamic_vram" config\config.ini 2^>nul') do if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"async_offload" config\config.ini 2^>nul') do if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=%%a"
+    REM (правка 1073) pinned_memory=1|0 - host-кэш весов для DynamicVRAM.
+    REM 0 = аварийный выключатель, если с pinned включённым загрузка модели
+    REM падает ошибкой 1450/1453 - см. комментарий у EXTRA_FLAGS ниже.
+    for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"pinned_memory" config\config.ini 2^>nul') do if not defined PINNED_MEMORY set "PINNED_MEMORY=%%a"
+    REM (правка 1077) nvml_pressure=1|0 - учитывать ли aimdo чужие процессы за VRAM.
+    for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"nvml_pressure" config\config.ini 2^>nul') do if not defined NVML_PRESSURE set "NVML_PRESSURE=%%a"
     REM (правка 490) vram_headroom — доп. запас свободной VRAM для DynamicVRAM
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"vram_headroom" config\config.ini 2^>nul') do if not defined VRAM_HEADROOM set "VRAM_HEADROOM=%%a"
 )
@@ -41,9 +49,16 @@ REM Причина — async weight offloading (2 потока) + pinned memory.
 REM и модель грузится синхронно и стабильно. Включить обратно (быстрее
 REM загрузка, но на RTX 50xx может падать): async_offload=1 в config\config.ini.
 if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=0"
+REM (правка 1073) pinned_memory по умолчанию = 1: host-кэш весов нужен
+REM DynamicVRAM, иначе на картах меньше 15 ГБ H3 странизуется с диска.
+if not defined PINNED_MEMORY set "PINNED_MEMORY=1"
+REM (правка 1077) nvml_pressure по умолчанию = 1 (как в ядре).
+if not defined NVML_PRESSURE set "NVML_PRESSURE=1"
 set "RESERVE_VRAM=%RESERVE_VRAM:"=%"
 set "DYNAMIC_VRAM=%DYNAMIC_VRAM:"=%"
 set "ASYNC_OFFLOAD=%ASYNC_OFFLOAD:"=%"
+set "PINNED_MEMORY=%PINNED_MEMORY:"=%"
+set "NVML_PRESSURE=%NVML_PRESSURE:"=%"
 set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
 REM (правка 357) Валидация: значение из config.ini подставляется в команды
 REM запуска — мусор (пробелы, текст, единицы "GB") ломал бы всю строку.
@@ -51,9 +66,19 @@ REM Нечисловое значение → безопасный дефолт.
 echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
+echo %PINNED_MEMORY%| findstr /r "^[01]$" >nul || set "PINNED_MEMORY=1"
+echo %NVML_PRESSURE%| findstr /r "^[01]$" >nul || set "NVML_PRESSURE=1"
 echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
 set "EXTRA_FLAGS="
-if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
+REM (правка 1073) Флаги разделены. async_offload=0 снимает только async-конвейер
+REM ComfyUI - именно он вместе с pinned давал падения aimdo ошибкой 1450/1453
+REM на моделях ~20 ГБ. pinned-память теперь остаётся включённой: без неё
+REM pinned_hostbuf_size() возвращает 0, host-кэша весов нет, и H3 на 12-16 ГБ
+REM перечитывается с диска на каждом шаге.
+if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-async-offload"
+if "%PINNED_MEMORY%"=="0" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-pinned-memory"
+REM (правка 1077) nvml_pressure=0 - aimdo не учитывает чужие процессы за VRAM.
+if "%NVML_PRESSURE%"=="0" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-nvml-pressure"
 REM (правка 490) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит
 REM столько ГБ реально свободными (по NVML, включая чужие приложения) —
 REM защита от всплесков активаций, перепрыгивающих --reserve-vram.

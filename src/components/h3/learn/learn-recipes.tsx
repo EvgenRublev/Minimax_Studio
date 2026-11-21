@@ -14,6 +14,7 @@ import {
   CheckCircle2Icon,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 interface Recipe {
   icon: ReactNode
@@ -67,12 +68,12 @@ const RECIPES: Recipe[] = [
 ]
 
 export function LearnRecipes() {
+  const { t } = useTranslation() // (правка 955)
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Три проверенных способа работы со студией. Выберите под своё железо и задачу —
-        а можно и миксовать: любой ролик из «Галереи» в любой момент можно отправить
-        в Refine, Tile Upscale, FPS или Продление в любом порядке.
+        {t("Три проверенных способа работы со студией. Выберите под своё железо и задачу — а можно и миксовать: любой ролик из «Галереи» в любой момент можно отправить в Refine, Tile Upscale, FPS или Продление в любом порядке.")}
       </p>
 
       {RECIPES.map((r) => (
@@ -85,14 +86,14 @@ export function LearnRecipes() {
               {r.icon}
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground leading-snug">{r.title}</p>
-              <p className="text-xs text-cyan-300/90 leading-snug">{r.subtitle}</p>
+              <p className="text-sm font-semibold text-foreground leading-snug">{t(r.title)}</p>
+              <p className="text-xs text-cyan-300/90 leading-snug">{t(r.subtitle)}</p>
             </div>
           </div>
 
           <p className="text-xs text-muted-foreground leading-relaxed">
-            <span className="font-medium text-foreground/90">Когда использовать: </span>
-            {r.when}
+            <span className="font-medium text-foreground/90">{t("Когда использовать:")} </span>
+            {t(r.when)}
           </p>
 
           <ol className="space-y-1.5">
@@ -101,14 +102,14 @@ export function LearnRecipes() {
                 <span className="w-4.5 h-4.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold flex items-center justify-center shrink-0 mt-px">
                   {i + 1}
                 </span>
-                <span>{s}</span>
+                <span>{t(s)}</span>
               </li>
             ))}
           </ol>
 
           {r.note && (
             <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t border-border/50 pt-2.5">
-              {r.note}
+              {t(r.note)}
             </p>
           )}
         </div>
@@ -117,9 +118,8 @@ export function LearnRecipes() {
       <div className="flex gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
         <CheckCircle2Icon className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
         <p className="text-xs text-emerald-200/80 leading-relaxed">
-          <span className="font-medium text-emerald-300">Главное правило: </span>
-          ничего сломать нельзя. Каждый результат сохраняется в «Галерею», исходники
-          не затираются — экспериментируйте спокойно и комбинируйте шаги как удобно.
+          <span className="font-medium text-emerald-300">{t("Главное правило:")} </span>
+          {' '}{t("ничего сломать нельзя. Каждый результат сохраняется в «Галерею», исходники не затираются — экспериментируйте спокойно и комбинируйте шаги как удобно.")}
         </p>
       </div>
     </div>

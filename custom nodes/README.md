@@ -11,6 +11,7 @@ ComfyUI. Ничего дополнительно настраивать не н�
 | `minimax_studio_audio_trim` | `Audio Trim` / `Audio Gain` (Minimax Studio) | Обрезают и усиливают аудио-референс прямо в тензоре, не создавая копий файла в `input/`. `end_seconds = 0` — до конца файла. |
 | `minimax_studio_extend` | `Extend Keyframes` / `Extend Latent Lock` (MiniMax Studio) | Бесшовное продление: `ExtendKeyframes` кладёт хвост-латент предыдущего клипа в conditioning нативным keyframe-каналом H3 (видео — на кадр 0, аудио-контекст — на отрицательный кадр); `LatentLock` — модель-обёртка, жёстко фиксирующая предсказание в зоне перекрытия (замена video-SetLatentNoiseMask; аудио-маска остаётся). Чистый torch + comfy API, зависимостей нет. |
 | `MiniMaxSparseAttn` | `Model Sparse Attention (Sol-Attn)` | Sol-Attn (training-free разреженное внимание) для H3 на этой сборке ComfyUI: патчит модель через `optimized_attention_override`, короткие последовательности остаются dense, без ядра — автоматический откат в dense. |
+| `minimax_studio_bounded_attn` | `MiniMax Studio · Bounded Attention` | Режет QKV/attention/out_proj H3 по токенам без изменения математики: K/V живут в двух буферах, Q и `out_proj` считаются блоками. Убирает QKV-пик 3–6 ГБ на 1080p; включается студией на картах <12 ГБ в «Генерации» и Refine. Нужен Ampere+ (на Turing остаётся штатный attention). |
 
 Зависимости:
 
@@ -19,6 +20,8 @@ ComfyUI. Ничего дополнительно настраивать не н�
 - `minimax_studio_extend` — ничего, чистый torch + `comfy.nested_tensor`;
 - `MiniMaxSparseAttn` — `comfy_kitchen` с `sol_attn` (в этой сборке есть). На
   другом ComfyUI без него нода просто не патчит модель — генерация идёт dense.
+- `minimax_studio_bounded_attn` — `comfy_kitchen` (`rms_rope_split_half_`) и
+  `comfy.ldm.modules.attention.attention_pytorch`; других зависимостей нет.
 
 ## Оверрайд чужой ноды: `ComfyUI-Frame-Interpolation`
 

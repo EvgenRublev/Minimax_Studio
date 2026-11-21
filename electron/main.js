@@ -354,6 +354,13 @@ function killPortListeners(port) {
 }
 
 /* ── config.ini → флаги ComfyUI (порт правки 551 из start.bat) ── */
+// (правка 1080 → 1081) Таблица «флаг ↔ минимальная версия ядра» и сборка
+// аргументов живут в scripts/comfy-launch-args.js: их исполняет
+// scripts/check-comfy-sync.mjs, потому что inline-версия в этом файле уже
+// роняла приложение на старте («branch is not defined» после переименования
+// переменной), а `node --check` таких ошибок не видит.
+const { comfyCoreVersion, comfyFlags } = require('../scripts/comfy-launch-args')
+
 function parseIniVram() {
   // (правка 814) Заводские значения 1/1 — те же, что в app-config.ts и
   // config.ini. Здесь они используются только если файла конфига нет вовсе.
@@ -380,6 +387,16 @@ function parseIniVram() {
   v.reserveGb = num(grab('reserve_gb'), '1', /^[0-9][0-9.]*$/)
   v.dynamicVram = num(grab('dynamic_vram'), '1', /^[01]$/)
   v.asyncOffload = num(grab('async_offload'), '0', /^[01]$/)
+  // (правка 1073) pinned memory — отдельный ключ, больше не выключается вместе
+  // с async_offload. Без него DynamicVRAM (comfy-aimdo) лишается host-кэша
+  // весов: comfy/model_management.pinned_hostbuf_size() при
+  // --disable-pinned-memory даёт 0, и модель (w6a8 = 14,8 ГБ) при каждом шаге
+  // перечитывается с диска.
+  v.pinnedMemory = num(grab('pinned_memory'), '1', /^[01]$/)
+  // (правка 1077) nvml_pressure=1|0 — учитывать ли aimdo чужие процессы в VRAM
+  // (флаг ядра --disable-nvml-pressure). На 12 ГБ это второй по влиянию рычаг
+  // после pinned: с pressure aimdo отдаёт весам меньше половины карты.
+  v.nvmlPressure = num(grab('nvml_pressure'), '1', /^[01]$/)
   v.vramHeadroom = num(grab('vram_headroom'), '1', /^[0-9][0-9.]*$/)
   // (правка 1029) fast_disk=auto|1|0: ComfyUI по умолчанию сам считает
   // fast только NVMe; на SATA SSD auto даёт false. 1 = --fast-disk,
@@ -426,18 +443,17 @@ function startComfy() {
   } catch (err) {
     console.log(`[desktop] синхронизация патча VHS не удалась: ${err && err.message ? err.message : err}`)
   }
-  const args = [
-    '-I', path.join(resolveComfyCore(COMFY_ROOT), 'main.py'),
-    '--windows-standalone-build',
-    '--use-ck-attention',
-    '--disable-auto-launch',
-    '--reserve-vram', v.reserveGb,
-  ]
-  if (v.dynamicVram === '0') args.push('--disable-dynamic-vram')
-  if (v.asyncOffload !== '1') args.push('--disable-async-offload', '--disable-pinned-memory')
-  if (v.vramHeadroom !== '0') args.push('--vram-headroom', v.vramHeadroom)
-  if (v.fastDisk === '1') args.push('--fast-disk')
-  else if (v.fastDisk === '0') args.push('--disable-fast-disk')
+  // (правка 1080 → 1081) Флаги собирает scripts/comfy-launch-args.js (его
+  // исполняет check-comfy-sync): у откатного ядра 0.33 нет --disable-fast-disk,
+  // и argparse упал бы на нём с «unrecognized arguments» — ComfyUI не стартовал
+  // бы вовсе.
+  const coreDir = resolveComfyCore(COMFY_ROOT)
+  const coreVer = comfyCoreVersion(coreDir)
+  const { flags, skipped } = comfyFlags(v, coreVer)
+  const args = ['-I', path.join(coreDir, 'main.py'), ...flags]
+  for (const flag of skipped) {
+    appendConsole(`[desktop] ядро ComfyUI ${coreVer || '?'} не понимает флаг ${flag} — не передаём\n`)
+  }
   console.log(`[desktop] ComfyUI: ${args.join(' ')}`)
   const child = spawnChild(COMFY_PY, args)
   // (правка 950) держим ссылку для «Перезапустить ComfyUI» из «Консоли»
@@ -676,6 +692,113 @@ ipcMain.handle('h3:comfy-restart', async () => {
     return { ok: false, error: 'ComfyUI не поднялся за 180 с — подробности в «Консоли»' }
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) }
+  }
+})
+
+/* (правка 1080) Смена поколения ядра ComfyUI прямо из студии.
+ *
+ * Зачем: на картах 8-12 ГБ связка «ядро 0.44 + comfy-aimdo 0.6.0» не удерживает
+ * веса в host-памяти и перечитывает модель с диска на каждом шаге; откатное
+ * ядро 0.33.x с aimdo 0.4.13 такие разрешения и длины доводит до конца.
+ *
+ * Реализация — не свой «своп» папок, а существующий установщик: он уже умеет
+ * менять ядро на другую версию (данные уходят в ComfyUI.keep и возвращаются
+ * слиянием, при сбое — откат), проверяет контрольные суммы архива и ставит
+ * Python-пины нового поколения. Ключ -SkipApp нужен, чтобы ремонт не трогал
+ * node_modules/.next работающего приложения, -CoreRollback/-CoreCurrent —
+ * чтобы выбрать поколение. Перед запуском обязательно убивается дерево
+ * ComfyUI: python держит файлы ядра, и Move-Item не смог бы их перенести. */
+let coreSwitchBusy = false
+ipcMain.handle('h3:core-switch', async (_e, to) => {
+  if (quitting) return { ok: false, error: 'Приложение завершается' }
+  if (to !== 'rollback' && to !== 'current') return { ok: false, error: 'Неизвестное поколение ядра' }
+  const ps1 = path.join(APP_ROOT, 'install', 'install.ps1')
+  if (!existsSync(ps1)) {
+    return { ok: false, error: 'Не найден install\\install.ps1 — смена ядра недоступна, обновите студию' }
+  }
+  if (coreSwitchBusy) return { ok: false, error: 'Смена ядра уже идёт' }
+  const st = readSetupStatus()
+  if (statusIsLive(st)) {
+    return { ok: false, error: 'Установка или ремонт уже идут (шаг ' + (st.step || 0) + ') — дождитесь их окончания' }
+  }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const responds = async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${COMFY_PORT}/system_stats`, { signal: AbortSignal.timeout(3000) })
+      return res.ok
+    } catch { return false }
+  }
+  coreSwitchBusy = true
+  try {
+    // 1) остановить ComfyUI — иначе файлы ядра заняты и перенос не получится
+    const old = comfyChild
+    comfyChild = null
+    if (old && old.pid) {
+      appendConsole(`[desktop] смена ядра: останавливаю ComfyUI (PID ${old.pid})\n`)
+      killTree(old.pid)
+      const until = Date.now() + 20000
+      while (Date.now() < until && await responds()) await sleep(300)
+      if (await responds()) {
+        return { ok: false, error: 'ComfyUI не остановился за 20 с — закройте студию и запустите установщик вручную' }
+      }
+    }
+    // 2) канал ставим ДО запуска установщика: если ремонт оборвётся, следующая
+    //    попытка (обычный запуск студии) продолжит в выбранную сторону
+    try {
+      const cfgDir = path.join(APP_ROOT, 'config')
+      mkdirSync(cfgDir, { recursive: true })
+      writeFileSync(path.join(cfgDir, 'comfy_core_channel.txt'), to, 'utf8')
+    } catch (err) {
+      console.log(`[desktop] не удалось записать канал ядра: ${err && err.message ? err.message : err}`)
+    }
+    const switchFlag = to === 'rollback' ? '-CoreRollback' : '-CoreCurrent'
+    appendConsole(`[desktop] смена ядра ComfyUI: запускаю install\\install.ps1 ${switchFlag} -SkipApp\n`)
+    writeSetupStatus('running', 4, 9,
+      to === 'rollback' ? 'Откат ядра ComfyUI до 0.33…' : 'Возврат ядра ComfyUI 0.44…',
+      'Меняется только ядро: модели, custom_nodes, user, output и input остаются на месте. Окно можно свернуть, не закрывайте его.')
+    const inst = spawnChild(POWERSHELL, [
+      '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass',
+      '-File', ps1, '-Root', APP_ROOT, '-NoPause', '-SkipApp', switchFlag,
+    ])
+    const code = await new Promise((resolve) => inst.on('exit', (c) => resolve(c)))
+    const ok = code === 0
+    writeSetupStatus(ok ? 'done' : 'error', 4, 9,
+      ok
+        ? (to === 'rollback' ? 'Ядро ComfyUI откатилось на 0.33' : 'Ядро ComfyUI вернулось на 0.44')
+        : 'Смена ядра не завершилась',
+      ok
+        ? 'ComfyUI сейчас перезапустится сам; версия ядра видна в баннере сверху.'
+        : 'Подробности в install.log; можно запустить install.bat вручную или нажать кнопку ещё раз.')
+    appendConsole(`[desktop] смена ядра: установщик завершился с кодом ${code}\n`)
+    // 3) поднять ComfyUI заново (startComfy сам синхронизирует патчи того набора,
+    //    который соответствует новой версии ядра)
+    const child = startComfy()
+    let up = false
+    if (child) {
+      const deadline = Date.now() + 240_000
+      while (Date.now() < deadline) {
+        if (await responds()) {
+          up = true
+          break
+        }
+        if (!comfyChild) break
+        await sleep(1000)
+      }
+    }
+    const ver = comfyCoreVersion(resolveComfyCore(COMFY_ROOT))
+    if (!ok) {
+      return { ok: false, error: `Установщик завершился с кодом ${code} — подробности в «Консоли» и install.log`, version: ver }
+    }
+    // Раньше сюда возвращался ok даже когда ComfyUI не поднялся: UI писал
+    // «ядро обновлено, ComfyUI перезапущен», а бэкенд лежал. Честно сообщаем.
+    if (!up) {
+      return { ok: false, error: `Ядро ${ver || '?'} установлено, но ComfyUI не поднялся за 240 с — подробности в «Консоли»`, version: ver }
+    }
+    return { ok: true, version: ver }
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) }
+  } finally {
+    coreSwitchBusy = false
   }
 })
 

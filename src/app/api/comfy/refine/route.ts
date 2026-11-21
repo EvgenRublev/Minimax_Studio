@@ -14,6 +14,10 @@ import { readPromptChain, readPromptChainParts, readMetaImageRefs, readMetaLoop,
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
+// (правка 1058) Ручки тайлового режима Tessera: климпы/дефолты — и для
+// воркфлоу, и для сайдкара (по мете видно, с какими настройками считали).
+import { resolveTesseraTiles, type TesseraTileParams } from '@/lib/comfy/tessera-params'
+import { gpuVramTotalGb } from '@/lib/comfy/gpu-vram' // (правка 1076)
 import { st } from '@/lib/i18n/server'
 
 /**
@@ -117,6 +121,32 @@ function wholeModeMemoryError(
   )
 }
 
+/**
+ * (правка 1076 → 1078) Оценка «влезет ли» остаётся, но только как запись в лог.
+ *
+ * Правила продукта: жёстких ограничений на разрешение/длительность нет ни в
+ * каком виде — слабое железо должно ИМЕТЬ ВОЗМОЖНОСТЬ попробовать большой
+ * режим, пусть это и будет медленно. Поэтому про оценку нехватки VRAM сервер
+ * пишет в консоль (по ней видно, что именно упиралось в карту), но задачу не
+ * отклоняет.
+ *
+ * Ориентир для записи в лог — 0.11 Мп генерируемой площади на 1 ГБ VRAM
+ * (2112×1088 = 2.3 Мп работает на 24 ГБ).
+ */
+const REFINER_PIXELS_PER_VRAM_GB = 110_000
+
+function vramNote(dims: { genW: number; genH: number }, vramGb: number | null): void {
+  if (!vramGb || vramGb <= 0) return
+  const area = dims.genW * dims.genH
+  const budget = vramGb * REFINER_PIXELS_PER_VRAM_GB
+  if (area <= budget) return
+  console.warn(
+    `[refine] цель ${dims.genW}×${dims.genH} (${(area / 1e6).toFixed(2)} Мп) больше ориентира ` +
+    `${(budget / 1e6).toFixed(2)} Мп для ${vramGb.toFixed(1)} ГБ VRAM — прогон пойдёт медленно ` +
+    `и может упасть с нехваткой видеопамяти; отправляем всё равно (ограничений нет).`,
+  )
+}
+
 export async function POST(req: NextRequest) {
 
   // (правка 716) copiedPath вынесен из try — внешний catch должен иметь
@@ -151,6 +181,9 @@ export async function POST(req: NextRequest) {
       /** (правка 1057) «Частями по тайлам» (Tessera) — тайлы + чанки со
        *  стриминговым энкодом/декодом, тракт под слабые ГПУ (8 ГБ). */
       tessera?: boolean
+      /** (правка 1058) Ручки тайлового режима: шов/контекст/чанки/композит/
+       *  референсы/гайд (см. tessera-params.ts). */
+      tesseraParams?: Partial<TesseraTileParams>
       /** (правка 1057) 3D-апскейлер для пластинки в тайловом тракте. */
       latentUpscaler3D?: boolean
       /** (правка 265) Имя файла, уже лежащего в ComfyUI input/ (файл с диска,
@@ -203,6 +236,17 @@ export async function POST(req: NextRequest) {
     }
 
     const cfg = getAppConfig()
+
+    // (правка 1076) Объём VRAM нужен до сборки воркфлоу: (1) отказывать в цели,
+    // которая заведомо не влезет, и (2) удешевлять живую подсказку — крошечный
+    // VAE-декод превью на 12 ГБ не находится (в логе: «tiny VAE decode failed …
+    // Free (according to CUDA): 0 bytes»).
+    const vramGb = await gpuVramTotalGb()
+    const lowVram = vramGb !== null && vramGb < 16
+    // (правка 1088) Bounded attention для Refine без тайлов: на 8 ГБ «Целый»
+    // 1080p упирался в QKV-буфер pass 2, а тайлы Tessera оставляют швы.
+    const boundedAttention = vramGb !== null && vramGb > 0 && vramGb < 12
+      && body.vedaAttention !== true
 
     // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
     // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
@@ -278,6 +322,30 @@ export async function POST(req: NextRequest) {
     // (там это делает bodyToMetaParams). Здесь роут сам знает список.
     const loraMeta = customLoras
       ? { lora: customLoras.map((l) => l.name).join(', ') }
+      : {}
+    // (правка 1058) Тайловый режим: финальные значения ручек (те же климпы,
+    // что в шаблоне) — в воркфлоу и в сайдкар, чтобы по мете было видно,
+    // с каким швом/контекстом считали ролик.
+    const tesseraParams = body.tessera === true
+      ? resolveTesseraTiles(body.tesseraParams, Number(body.chunkSeconds) || 5)
+      : null
+    const tesseraRequest = tesseraParams ? { tesseraParams } : {}
+    const tesseraMeta = tesseraParams
+      ? {
+          tessera: true,
+          tessera_tile: tesseraParams.spatialTile === 'custom'
+            ? `${tesseraParams.tileWidth}x${tesseraParams.tileHeight}`
+            : tesseraParams.spatialTile,
+          tessera_seam: tesseraParams.seamOverlap,
+          tessera_context_border: tesseraParams.contextBorder,
+          tessera_temporal_window: tesseraParams.nodeTemporalTile === 'custom'
+            ? tesseraParams.nodeTemporalSize
+            : tesseraParams.nodeTemporalTile,
+          tessera_temporal_overlap: tesseraParams.temporalOverlap,
+          tessera_composite: tesseraParams.composite,
+          tessera_ref_crop: tesseraParams.videoRefCrop,
+          tessera_guide_release: tesseraParams.guideRelease,
+        }
       : {}
     // (правка 722) Общие поля сайдкара рефайна. Раньше в метаданных рефайна
     // НЕ БЫЛО пайплайна, шагов, сэмплера и настроек внимания — по сайдкару
@@ -359,6 +427,8 @@ export async function POST(req: NextRequest) {
       const dims = refineDimensions(probe.width, probe.height, target)
       const srcW = probe.width
       const srcH = probe.height
+      // (правка 1078) ориентир по VRAM идёт в лог сервера, задачу не отклоняем.
+      vramNote(dims, vramGb)
       // (правка 318) Best-effort: файл с диска может быть копией из галереи —
       // ищем сайдкар по его имени в корне output и наследуем image-референсы
       // в мету результата (якоря для повторного рефайна). В conditioning ветка
@@ -373,6 +443,8 @@ export async function POST(req: NextRequest) {
             buildChunkedRefineWorkflow({
               sourceVideo: inName,
               diffusionModel: cfg.diffusionModel || undefined,
+              lowVram, // (правка 1076)
+              boundedAttention, // (правка 1088)
               sourceWidth: srcW,
               sourceHeight: srcH,
               sourceFrames: probe.frames,
@@ -420,6 +492,7 @@ export async function POST(req: NextRequest) {
             input_source: true,
             minimax_h3_reference_detail: refImageSize, // (правка 317)
             ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
+            ...tesseraMeta, // (правка 1058) шов/контекст/чанки тайлового режима
             ...vedaMeta, // (правка 408)
             // (правка 318) референсы исходника — якоря повторного рефайна;
             // (правка 509) приоритет — референсы, поданные пользователем.
@@ -440,20 +513,22 @@ export async function POST(req: NextRequest) {
       }
 
       // Режим «Целый»
-      // (правка 871) Pre-flight по памяти: большой mp4 целиком в RAM не влезет.
-      const memErr = wholeModeMemoryError(probe, dims, {})
-      if (memErr) {
-        return NextResponse.json({ error: memErr }, { status: 400 })
-      }
+      // (правка 871) оценка памяти; (правка 1078) — только запись в лог: отказа
+      // нет, слабое железо должно иметь возможность попробовать большой режим.
+      const memNote = wholeModeMemoryError(probe, dims, {})
+      if (memNote) console.warn(`[refine] ${memNote}`)
       const run = await runGeneration(() =>
         submitRefine({
           sourceVideo: inName,
           diffusionModel: cfg.diffusionModel || undefined,
+          lowVram, // (правка 1076)
+          boundedAttention, // (правка 1088)
           windowed: body.windowed === true,
           // (правка 1056) «Частями»: длина части → геометрия окон H3
           chunkSeconds: Number(body.chunkSeconds) || 5,
           // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
           tessera: body.tessera === true,
+          ...tesseraRequest, // (правка 1058) ручки тайлового режима
           latentUpscaler3D: body.latentUpscaler3D !== false,
           sourceWidth: srcW,
           sourceHeight: srcH,
@@ -689,6 +764,10 @@ export async function POST(req: NextRequest) {
       : target
     const dims = refineDimensions(srcW, srcH, targetEff)
 
+    // (правка 1076) тот же отказ по VRAM для галерейного пути (оба режима:
+    // «Целый» и «Частями» — площадь кадра в них одинаковая).
+    vramNote(dims, vramGb)
+
     // ─── (правка 253) Режим «Частями»: ОДИН воркфлоу с цепочкой кусков
     // (latent masking) — план на сервере, клиент ждёт один джоб и
     // сшивает жёсткой конкатенацией. (правка 315) Картинки-рефы из меты
@@ -706,6 +785,8 @@ export async function POST(req: NextRequest) {
           buildChunkedRefineWorkflow({
             sourceVideo: destName,
             diffusionModel: cfg.diffusionModel || undefined,
+            lowVram, // (правка 1076)
+            boundedAttention, // (правка 1088)
             videoFormat: getVideoFormatSettings(), // (правка 386)
             // (правка 382) lossless-ветка «Частями»: окна режутся токенами
             // из сохранённого латента; размеры = канва латента
@@ -792,25 +873,24 @@ export async function POST(req: NextRequest) {
     // и падение ComfyUI («alloc_cpu ... not enough memory»). Lossless-ветка
     // (латент) и куски целиком mp4 не грузят — их не трогаем.
     if (!sourceLatent && !body.chunkJob) {
-      const memErr = wholeModeMemoryError(probe, dims, {
+      const memNote2 = wholeModeMemoryError(probe, dims, {
         skipFrames: body.skipFrames,
         frameCap: body.frameCap,
       })
-      if (memErr) {
-        // Свежая копия в input/ уже сделана — откатываем, как при ошибках запуска.
-        if (copiedPath) await fs.unlink(copiedPath).catch(() => {})
-        return NextResponse.json({ error: memErr }, { status: 400 })
-      }
+      if (memNote2) console.warn(`[refine] ${memNote2}`) // (правка 1078) оценки памяти — справочные, не отказ
     }
     const run = await runGeneration(() =>
       submitRefine({
         sourceVideo: destName,
         diffusionModel: cfg.diffusionModel || undefined,
+        lowVram, // (правка 1076)
+        boundedAttention, // (правка 1088)
         windowed: body.windowed === true,
         // (правка 1056) «Частями»: длина части → геометрия окон H3
         chunkSeconds: Number(body.chunkSeconds) || 5,
         // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
         tessera: body.tessera === true,
+        ...tesseraRequest, // (правка 1058) ручки тайлового режима
         latentUpscaler3D: body.latentUpscaler3D !== false,
         // (правка 376) lossless-ветка: первозданный латент генерации;
         // (правка 382) размеры = канва латента (геометрия всей ветки от неё)

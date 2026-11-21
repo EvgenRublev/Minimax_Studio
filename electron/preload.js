@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('h3desktop', {
   // { ok, error? } — рендерер показывает тост и ждёт готовности порта.
   comfy: {
     restart: () => ipcRenderer.invoke('h3:comfy-restart'),
+    // (правка 1080) смена поколения ядра ComfyUI: 'rollback' (0.33.x, для
+    // слабых карт) или 'current' (0.44+). Main-процесс сам останавливает
+    // ComfyUI, прогоняет install.ps1 и поднимает бэкенд заново.
+    switchCore: (to) => ipcRenderer.invoke('h3:core-switch', String(to || '')),
   },
   /** Подписка на смену фулскрина (внешний вход/выход); возвращает отписку. */
   onFullscreenChange: (cb) => {

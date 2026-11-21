@@ -184,6 +184,8 @@ function posterUrl(file: VideoGalleryFile): string {
 // сначала со спиннером, затем показывает кадр preview и исчезает, когда
 // готовый файл появляется в галерее.
 function LiveGenerationCard() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   // (правка 996) Берём активную задачу из ОБЩЕЙ очереди, а не из видео-стора:
   // Refine/Tile/FPS/Face/Upscale пишут прогресс в свои job-сторы, поэтому
   // карточка раньше появлялась только на «Генерации».
@@ -244,31 +246,31 @@ function LiveGenerationCard() {
           url={preview.url}
           videoIcon={false}
           className="absolute inset-0 block h-full w-full"
-          title="Открыть превью генерации в плеере"
+          title={tt("Открыть превью генерации в плеере")}
         >
           {isVideo ? (
             <video src={preview.url} autoPlay loop muted playsInline className="h-full w-full object-cover" />
           ) : (
-            <img src={preview.url} alt="Превью генерации" className="h-full w-full object-cover" draggable={false} />
+            <img src={preview.url} alt={tt("Превью генерации")} className="h-full w-full object-cover" draggable={false} />
           )}
         </RefPreviewThumb>
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--surface-2)]">
           <Loader2Icon className="h-7 w-7 animate-spin text-cyan-400" />
           <span className="text-[11px] text-muted-foreground">
-            {current.status === 'submitting' ? 'Отправка…' : current.status === 'queued' ? 'В очереди' : 'Генерация…'}
+            {current.status === 'submitting' ? tt("Отправка…") : current.status === 'queued' ? tt("В очереди") : tt("Генерация…")}
           </span>
         </div>
       )}
 
       <div className="pointer-events-none absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-md border border-cyan-400/40 bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 backdrop-blur-sm">
         <Loader2Icon className="h-2.5 w-2.5 animate-spin" />
-        Генерация
+        {' '}{tt("Генерация")}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 p-1.5">
         <span className="text-[10px] font-mono text-white/70">
-          {preview && preview.total > 0 ? `шаг ${preview.step}/${preview.total}` : '…'}
+          {preview && preview.total > 0 ? tt("шаг {{p1}}/{{p2}}", { p1: preview.step, p2: preview.total }) : '…'}
         </span>
         <span className="text-[10px] font-mono tabular-nums text-cyan-300/80">{pct}%</span>
       </div>

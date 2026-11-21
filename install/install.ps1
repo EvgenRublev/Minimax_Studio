@@ -52,7 +52,18 @@ param(
     [switch]$KeepCache,
     [switch]$NoPause,
     [switch]$SelfCheck,
-    [switch]$Deep
+    [switch]$Deep,
+    # (правка 1080) -CoreRollback ставит ОТКАТНОЕ ядро ComfyUI 0.33.x
+    # (comfy-aimdo 0.4.13), -CoreCurrent - актуальное (0.44+). Откат нужен для
+    # слабых карт: там DynamicVRAM из aimdo 0.5.5-0.6.0 на больших разрешениях
+    # уходит в страничевание весов с диска, а на связке 0.33 + aimdo 0.4.13
+    # генерация доходит до конца. Данные (models, custom_nodes, user, output,
+    # input, python_embeded) при смене поколения не трогаются: они уходят в
+    # ComfyUI.keep и возвращаются на место тем же механизмом, что и обычный
+    # ремонт. Выбор запоминается в config\comfy_core_channel.txt, чтобы
+    # последующие ремонты не «вернули» пользователя на 0.44 тайком.
+    [switch]$CoreRollback,
+    [switch]$CoreCurrent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +76,8 @@ $InstallDir = $PSScriptRoot
 $Cache = Join-Path $Root '.install-cache'
 $LogFile = Join-Path $Root 'install.log'
 $StatusFile = Join-Path $Cache 'setup_status.json'
+# (правка 1084) Замена ядра без переноса keep-папок (models и др.).
+. (Join-Path $InstallDir 'replace-comfy-core.ps1')
 
 $script:SelfCheckMode = [bool]($SelfCheck -or $Deep)
 $script:Failures = New-Object System.Collections.Generic.List[string]
@@ -1288,6 +1301,85 @@ function Install-RequirementsUv {
 }
 
 
+# (правка 1080) Пины Python из requirements.txt ЯДРА ComfyUI. Нужны, когда
+# поколение ядра меняется (0.44 <-> 0.33): у них разные comfy-aimdo (0.6.0 /
+# 0.4.13), comfy-kitchen, comfyui-frontend-package, workflow-templates и
+# embedded-docs, а requirements.lock.txt студии описывает только актуальное
+# ядро. Берём из requirements.txt строки с точным пином `==`: строки без версии
+# (torch, numpy, einops...) тянули бы свежие пакеты и ломали CUDA-сборку, а
+# диапазоны (av>=16) уже удовлетворены установленным.
+function Install-ComfyCorePins {
+    param([string]$App)
+    $req = Join-Path $App 'requirements.txt'
+    if (-not (Test-Path -LiteralPath $req)) {
+        Warn 'в ядре ComfyUI нет requirements.txt - пины ядра не проверялись'
+        return
+    }
+    $pins = @(Get-Content -LiteralPath $req -Encoding UTF8 |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and -not $_.StartsWith('#') -and $_ -match '==' })
+    if ($pins.Count -eq 0) {
+        Info 'в requirements.txt ядра нет точных пинов - ставить нечего'
+        return
+    }
+    Info ('пины ядра ComfyUI: ' + ($pins -join ', '))
+    $bf = Join-Path $Cache 'core-pins.txt'
+    [IO.File]::WriteAllLines($bf, $pins, (New-Object Text.ASCIIEncoding))
+    if ($script:UvExe -and (Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf))) {
+        Ok ('пины ядра установлены (uv): ' + $pins.Count + ' пакет(ов)')
+        return
+    }
+    & $script:Python -m pip install --quiet --no-deps --no-warn-script-location --disable-pip-version-check -r $bf
+    if ($LASTEXITCODE -ne 0) {
+        Warn ('не удалось поставить пины ядра (код ' + $LASTEXITCODE + ') - ComfyUI может запросить их сам при первом запуске')
+    } else {
+        Ok ('пины ядра установлены (pip): ' + $pins.Count + ' пакет(ов)')
+    }
+}
+
+# (правка 1080) Какой набор патчей ядра соответствует версии ComfyUI. Та же
+# логика, что в CORE_PATCH_SETS (scripts\sync_custom_nodes.js): 0.33.x - свой
+# набор, 0.44+ - основной; между ними патчей нет вовсе.
+function Get-CorePatchSetName {
+    param([string]$Version)
+    if ($Version -like '0.33.*') { return 'comfy-patches-0.33' }
+    return 'comfy-patches'
+}
+
+# Сравнение версий вида 0.4.13 / 0.6.0: истина, если $A >= $B.
+function Test-VersionAtLeast {
+    param([string]$A, [string]$B)
+    $pa = @(($A -replace '^v', '') -split '[.\-+]' | ForEach-Object { [int]($_ -replace '\D.*$') })
+    $pb = @(($B -replace '^v', '') -split '[.\-+]' | ForEach-Object { [int]($_ -replace '\D.*$') })
+    $n = [Math]::Max($pa.Count, $pb.Count)
+    for ($i = 0; $i -lt $n; $i++) {
+        $va = if ($i -lt $pa.Count) { $pa[$i] } else { 0 }
+        $vb = if ($i -lt $pb.Count) { $pb[$i] } else { 0 }
+        if ($va -ne $vb) { return $va -gt $vb }
+    }
+    return $true
+}
+
+# (правка 1080) Версия comfy-aimdo, установленная в переносном Python: ищем
+# dist-info в python_embeded рядом с ядром, корнем бэкенда и на уровень выше
+# (старая раскладка ComfyUI-Easy-Install). '' - не нашли.
+function Get-InstalledAimdoVersion {
+    param([string]$Root, [string]$Core)
+    foreach ($base in @($Core, $Root, (Split-Path -Parent $Root))) {
+        $sp = Join-Path $base 'python_embeded\Lib\site-packages'
+        if (-not (Test-Path -LiteralPath $sp)) { continue }
+        $dirs = @(Get-ChildItem -LiteralPath $sp -Directory -EA SilentlyContinue |
+            Where-Object { $_.Name -match '^comfy_aimdo-([0-9][0-9a-zA-Z.+-]*)\.(dist|egg)-info$' })
+        $best = ''
+        foreach ($d in $dirs) {
+            $v = $d.Name -replace '^comfy_aimdo-([0-9][0-9a-zA-Z.+-]*)\.(dist|egg)-info$', '$1'
+            if (-not $best -or (Test-VersionAtLeast $v $best)) { $best = $v }
+        }
+        if ($best) { return $best }
+    }
+    return ''
+}
+
 function Write-TextFileNoBom {
     param([string]$Path, [string]$Content)
     $dir = Split-Path -Parent $Path
@@ -1339,6 +1431,26 @@ function Get-SelfCheckComfyPaths {
         return [pscustomobject]@{ Root = $old; Core = $old }
     }
     return [pscustomobject]@{ Root = $new; Core = $new }
+}
+
+# Версия ядра: сначала comfyui_version.py (его пишет сборка ComfyUI), затем
+# pyproject.toml. Пустая строка - версию определить не удалось.
+# (правка 1080) объявлена ДО Invoke-SelfCheck: сама диагностика выходит из
+# скрипта раньше, чем выполнение доходит до шага 4, и функция должна существовать
+# к моменту вызова.
+function Get-ComfyCoreVersion {
+    param([string]$App)
+    $vf = Join-Path $App 'comfyui_version.py'
+    if (Test-Path $vf) {
+        $m = Select-String -Path $vf -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($m) { return $m.Matches[0].Groups[1].Value }
+    }
+    $pf = Join-Path $App 'pyproject.toml'
+    if (Test-Path $pf) {
+        $m = Select-String -Path $pf -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($m) { return $m.Matches[0].Groups[1].Value }
+    }
+    return ''
 }
 
 function Invoke-SelfCheck {
@@ -1475,15 +1587,34 @@ function Invoke-SelfCheck {
         else { Fail ('нет наших нод: ' + ($ours -join '; ') + '. Перезапусти студию - синк нод чинит это при старте (AGENTS.md, инвариант ComfyUI)') }
     }
 
-    # ---- патчи ядра: файлы из install\comfy-patches должны лежать в ядре ----
+    # ---- патчи ядра: файлы нужного набора должны лежать в ядре ----
+    # (правка 1080) набор зависит от поколения ядра: для 0.33.x свой
+    # (comfy/audio.py + shim pause_malloc_graph), для 0.44+ — основной.
     Write-Log ''
     Write-Log '  Патчи ядра:' 'step'
-    $patchSrc = Join-Path $InstallDir 'comfy-patches'
+    $coreVer = Get-ComfyCoreVersion $cp.Core
+    $patchSetName = Get-CorePatchSetName $coreVer
+    Ok ('ядро ' + $(if ($coreVer) { $coreVer } else { '?' }) + ' - набор патчей: install\' + $patchSetName)
+    # (правка 1080) comfy-aimdo должен соответствовать поколению: 0.4.13 для
+    # 0.33.x и 0.5+/0.6 для 0.44+. Расхождение = веса читаются с диска каждый
+    # шаг (12-ГБ карты встают на середине генерации).
+    $aimdo = Get-InstalledAimdoVersion $cp.Root $cp.Core
+    if ($aimdo) {
+        $aimOk = if ($coreVer -like '0.33.*') { $coreVer -and -not (Test-VersionAtLeast $aimdo '0.5.0') } else { Test-VersionAtLeast $aimdo '0.5.0' }
+        if ($aimOk) { Ok ('comfy-aimdo ' + $aimdo + ' соответствует ядру ' + $coreVer) }
+        else { Warn ('comfy-aimdo ' + $aimdo + ' не соответствует ядру ' + $coreVer +
+            ' - лечится install.bat с тем же ключом поколения (-CoreRollback / без него)') }
+    } else {
+        Warn 'comfy-aimdo в python_embeded не найден (не проверено соответствие ядру)'
+    }
+    $patchSrc = Join-Path $InstallDir $patchSetName
     if (-not (Test-Path -LiteralPath $patchSrc)) {
-        Warn 'нет install\comfy-patches - проверить патчи ядра нечем'
+        Warn ('нет install\' + $patchSetName + ' - проверить патчи ядра нечем')
     } else {
         $bad = @()
-        Get-ChildItem -LiteralPath $patchSrc -Recurse -File | Where-Object { $_.FullName -notmatch '__pycache__' } | ForEach-Object {
+        Get-ChildItem -LiteralPath $patchSrc -Recurse -File | Where-Object {
+            $_.FullName -notmatch '__pycache__' -and $_.Name -notmatch '(?i)^readme(\.\w+)?$'
+        } | ForEach-Object {
             $rel = $_.FullName.Substring($patchSrc.Length).TrimStart('\', '/')
             $dst = Join-Path $cp.Core ($rel -replace '/', '\')
             if (-not (Test-Path -LiteralPath $dst)) { $bad += ($rel + ' (файла нет в ядре)') }
@@ -2043,21 +2174,40 @@ $ComfyZipName = 'ComfyUI-v0.44.0.zip'
 $ComfyUrl = 'https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v0.44.0.zip'
 $ComfyCodeloadUrl = 'https://codeload.github.com/Comfy-Org/ComfyUI/zip/refs/tags/v0.44.0'
 
-# Версия ядра: сначала comfyui_version.py (его пишет сборка ComfyUI), затем
-# pyproject.toml. Пустая строка - версию определить не удалось.
-function Get-ComfyCoreVersion {
-    param([string]$App)
-    $vf = Join-Path $App 'comfyui_version.py'
-    if (Test-Path $vf) {
-        $m = Select-String -Path $vf -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
-        if ($m) { return $m.Matches[0].Groups[1].Value }
-    }
-    $pf = Join-Path $App 'pyproject.toml'
-    if (Test-Path $pf) {
-        $m = Select-String -Path $pf -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
-        if ($m) { return $m.Matches[0].Groups[1].Value }
-    }
-    return ''
+# (правка 1080) Откатное поколение ядра. comfy-aimdo 0.5.5-0.6.0 не удерживает
+# веса в host-памяти на картах 8-12 ГБ: на больших разрешениях модель
+# перечитывается с диска на каждом шаге (VRAM забита, утилизация 100% при
+# 40-60 Вт, генерация встаёт). В ядре 0.33.x — comfy-aimdo 0.4.13, на нём такие
+# разрешения и длины доезжают до конца. Версии 0.34-0.43 не поддерживаются:
+# под них нет набора патчей (см. CORE_PATCH_SETS в scripts\sync_custom_nodes.js).
+$ComfyRollbackVersion = '0.33.0'
+$ComfyRollbackZipName = 'ComfyUI-v0.33.0.zip'
+$ComfyRollbackUrl = 'https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v0.33.0.zip'
+$ComfyRollbackCodeloadUrl = 'https://codeload.github.com/Comfy-Org/ComfyUI/zip/refs/tags/v0.33.0'
+
+# Канал ядра (current | rollback) переживает ремонты: файл пишет и студия
+# (кнопка «Откатить ядро»), и установщик с -CoreRollback. Без него обычный
+# ремонт молча вернул бы пользователя на 0.44.
+$ChannelFile = Join-Path $Root 'config\comfy_core_channel.txt'
+if (-not $CoreRollback -and -not $CoreCurrent) {
+    try {
+        if (Test-Path -LiteralPath $ChannelFile) {
+            $chan = ((Get-Content -LiteralPath $ChannelFile -Encoding UTF8 -TotalCount 1) -as [string]).Trim()
+            if ($chan -eq 'rollback') {
+                $CoreRollback = $true
+                Info ('канал ядра rollback (config\comfy_core_channel.txt) - ставлю ' + $ComfyRollbackVersion)
+            }
+        }
+    } catch { }
+}
+if ($CoreRollback -and $CoreCurrent) {
+    Fail ('нельзя одновременно -CoreRollback и -CoreCurrent')
+}
+if ($CoreRollback) {
+    $ComfyVersion = $ComfyRollbackVersion
+    $ComfyZipName = $ComfyRollbackZipName
+    $ComfyUrl = $ComfyRollbackUrl
+    $ComfyCodeloadUrl = $ComfyRollbackCodeloadUrl
 }
 
 # (правка 945) Рекурсивно переносит $Src в $Dst, НЕ затирая то, что уже лежит
@@ -2193,64 +2343,86 @@ if (-not $SkipComfy) {
             New-Item -ItemType Directory -Force -Path $comfyParent | Out-Null
         }
 
-        $movedOld = $false
-        try {
-            # (правка 915) уводим в backup ЛЮБУЮ существующую папку ядра, даже без
-            # main.py: остаток прерванной попытки (например ComfyUI\ComfyUI-0.44.0)
-            # иначе не даёт положить новое ядро — Move-Item падает «файл уже существует».
-            if (Test-Path $comfyApp) {
-                if (Test-Path $stage) {
-                    # (правка 945) сюда мы приходим уже после восстановления, так что
-                    # непустая папка означает, что данные вернуть не удалось: молча
-                    # удалять их нельзя - это модели пользователя.
-                    if (@(Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue).Count -eq 0) {
-                        Remove-Item $stage -Recurse -Force
-                    } else {
-                        throw ('папка ComfyUI.keep не пуста (' + $stage + ') - перенеси её содержимое в ComfyUI вручную и запусти установку снова')
-                    }
-                }
-                New-Item -ItemType Directory -Force -Path $stage | Out-Null
-                foreach ($k in $keep) {
-                    $src = Join-Path $comfyApp $k
-                    if (-not (Test-Path $src)) { continue }
-                    Move-Item $src (Join-Path $stage $k)
-                }
-                if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
-                Move-Item $comfyApp $backup
-                $movedOld = $true
-            }
-            Move-Item $inner.FullName $comfyApp
-        } catch {
-            # Откат: вернуть старое ядро и данные, чтобы не оставить
-            # пользователя без ComfyUI.
-            if ($movedOld -and -not (Test-Path $comfyApp) -and (Test-Path $backup)) {
-                Move-Item $backup $comfyApp
-            }
-            # (правка 945) возвращаем слиянием: в новой папке ядра уже могут быть
-            # свои models/ и custom_nodes, и Remove-Item по ним убил бы данные.
-            if (Test-Path $stage) {
-                try { Restore-ComfyKeepData $stage $comfyApp $keep | Out-Null } catch { }
-            }
-            throw ('не удалось развернуть ядро ComfyUI: ' + $_.Exception.Message)
-        }
-
-        # (правка 945) данные возвращаем ВСЕГДА, когда они есть в stage, а не только
-        # после переноса старого ядра: stage мог остаться от прошлой оборванной
-        # попытки (тогда $movedOld = false), и раньше такой stage просто удалялся.
+        # (правка 1084) Keep-папки НЕ переносим: models может держать открытый
+        # хэндл (проводник/антивирус/индексатор), и Move-Item падал «Отказано
+        # в доступе по пути ...\ComfyUI\models». Install-ComfyCoreTree меняет
+        # только файлы самого ядра, данные пользователя остаются на месте.
         if (Test-Path $stage) {
-            try {
-                Restore-ComfyKeepData $stage $comfyApp $keep | Out-Null
-            } catch {
-                Warn ('не удалось вернуть данные из ComfyUI.keep: ' + $_.Exception.Message + ' - папка сохранена: ' + $stage)
-            }
+            # (правка 945) сюда мы приходим уже после восстановления, так что
+            # непустая папка означает, что данные вернуть не удалось: молча
+            # удалять их нельзя - это модели пользователя.
             if (@(Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue).Count -eq 0) {
-                Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item $stage -Recurse -Force
+            } else {
+                throw ('папка ComfyUI.keep не пуста (' + $stage + ') - перенеси её содержимое в ComfyUI вручную и запусти установку снова')
             }
+        }
+        try {
+            Install-ComfyCoreTree -App $comfyApp -NewCore $inner.FullName -Backup $backup -Keep $keep | Out-Null
+        } catch {
+            throw ('не удалось развернуть ядро ComfyUI: ' + $_.Exception.Message)
         }
         if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
         Remove-Item $tmp -Recurse -Force
         Ok ('ComfyUI ' + $ComfyVersion + ' распакован')
+        # (правка 1086) База 0.44 не читается ядром 0.33 (ревизия alembic 0009):
+        # уводим её в user\comfyui.db.0.44-* и возвращаем при переходе обратно.
+        $dbSwitch = Switch-ComfyUserDatabase -App $comfyApp -FromVersion $installedComfy -ToVersion $ComfyVersion
+        if ($dbSwitch.MovedDb) {
+            Warn ('база 0.44 несовместима с ядром 0.33 - сохранил как ' + $dbSwitch.MovedDb + ' (вернётся при переходе на 0.44)')
+        }
+        if ($dbSwitch.RestoredDb) {
+            Info ('вернул базу 0.44: ' + $dbSwitch.RestoredDb)
+        }
+        # (правка 1080) Смена поколения ядра меняет и его Python-пины:
+        # comfy-aimdo 0.4.13 у 0.33.x против 0.6.0 у 0.44.0, плюс comfy-kitchen,
+        # comfyui-frontend-package, workflow-templates и embedded-docs. Ставим их
+        # из requirements.txt нового ядра (только строки с точным пином `==`:
+        # голые имена вроде torch тянули бы свежий torch и ломали CUDA-сборку).
+        Install-ComfyCorePins $comfyApp
+        # Выбор канала помечаем, чтобы обычный ремонт позже молча не вернул
+        # прежнее поколение.
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path $ChannelFile -Parent) | Out-Null
+            [IO.File]::WriteAllText($ChannelFile, $(if ($CoreRollback) { 'rollback' } else { 'current' }), (New-Object Text.UTF8Encoding($false)))
+            Info ('канал ядра: ' + $(if ($CoreRollback) { 'rollback ' + $ComfyVersion } else { 'current ' + $ComfyVersion }))
+        } catch { }
     }
+
+    # (правка 1088) Пины и канал проверяем даже когда ядро уже стоит: оборванная
+    # смена (например, нет сети при скачивании пинов) оставляла 0.33 с aimdo 0.6,
+    # а повторный запуск видел совпадение версии ядра и пропускал установку пинов.
+    if ($hasCore) {
+        $aimdo = Get-InstalledAimdoVersion $Root $comfyApp
+        $aimdoOk = if ($CoreRollback) {
+            $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
+        } else {
+            $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
+        }
+        if (-not $aimdoOk) {
+            Warn ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не найден' }) + ' не соответствует ядру ' + $ComfyVersion + ' - ставлю пины ядра')
+            Install-ComfyCorePins $comfyApp
+            $aimdo = Get-InstalledAimdoVersion $Root $comfyApp
+            $aimdoOk = if ($CoreRollback) {
+                $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
+            } else {
+                $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
+            }
+        }
+        if (-not $aimdoOk) {
+            Fail ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не установлен' }) + ' несовместим с ядром ' + $ComfyVersion + ' - ComfyUI не запустится; проверьте сеть и повторите смену ядра')
+        } else {
+            Ok ('comfy-aimdo ' + $aimdo + ' соответствует ядру ' + $ComfyVersion)
+        }
+    }
+
+    # (правка 1088) Канал пишем всегда: повторный -CoreCurrent на уже стоящем
+    # 0.44 раньше не сбрасывал 'rollback', и следующий ремонт молча откатывал
+    # ядро назад.
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ChannelFile -Parent) | Out-Null
+        [IO.File]::WriteAllText($ChannelFile, $(if ($CoreRollback) { 'rollback' } else { 'current' }), (New-Object Text.UTF8Encoding($false)))
+    } catch { }
 
     # Патчи проекта поверх ядра ComfyUI. Применяются при каждом запуске установщика,
     # поэтому повторный запуск чинит и уже испорченную установку.
@@ -2261,10 +2433,15 @@ if (-not $SkipComfy) {
     #                                     (студия пишет их именно списками).
     # model.py и model_detection.py больше НЕ патчим: gate_compress и Veda-хуки
     # уже есть в ядре 0.44, а наши старые копии удаляли PDD/FLUX.3/Ming/ID-V2V.
-    $patchDir = Join-Path $InstallDir 'comfy-patches'
+    # (правка 1080) Под откатное ядро 0.33.x лежит свой набор
+    # install\comfy-patches-0.33 (comfy/audio.py + shim pause_malloc_graph):
+    # файлы 0.44 на 0.33 не импортируются, и наоборот. Тот же выбор и в
+    # scripts\sync_custom_nodes.js, который делает это при каждом запуске.
+    $patchSetName = Get-CorePatchSetName $ComfyVersion
+    $patchDir = Join-Path $InstallDir $patchSetName
     if (Test-Path $patchDir) {
         $patched = 0
-        Get-ChildItem $patchDir -Recurse -File | ForEach-Object {
+        Get-ChildItem $patchDir -Recurse -File | Where-Object { $_.Name -notmatch '(?i)^readme(\.\w+)?$' } | ForEach-Object {
             $rel = $_.FullName.Substring($patchDir.Length).TrimStart('\')
             $dest = Join-Path $comfyApp $rel
             $destDir = Split-Path $dest -Parent
@@ -2274,7 +2451,7 @@ if (-not $SkipComfy) {
         }
         Ok ('патчи проекта применены: ' + $patched + ' файл(а) ядра')
     } else {
-        Warn 'папка install\comfy-patches не найдена: ядро ComfyUI останется без патчей проекта, узлы H3/VSA могут не работать.'
+        Warn ('папка install\' + $patchSetName + ' не найдена: ядро ComfyUI останется без патчей проекта, узлы H3/VSA могут не работать.')
     }
 
     if ($Force -and (Test-Path $pythonDir)) {
@@ -2372,6 +2549,12 @@ if (-not $SkipComfy) {
             Warn 'kornia_rs не собрался (нужен Rust). Это не критично: kornia работает без него, только чуть медленнее.'
         }
     }
+
+    # (правка 1085) Общий requirements.lock.txt ставит пины ядра 0.44. На
+    # откатном 0.33 они перетирали пины из шага 4 (comfy-aimdo 0.4.13 и др.),
+    # и ComfyUI 0.33 не запускался с aimdo 0.6. Возвращаем пины выбранного
+    # ядра после общей установки — для 0.44 это те же версии, идемпотентно.
+    Install-ComfyCorePins $comfyApp
 
     # --- 6. кастомные ноды ---
     Step 6 9 'Кастомные ноды (22 из GitHub + 5 локальных)' '22 архива с GitHub: 2-10 минут. Если отдельная нода не импортируется - студия всё равно работает, список ошибок будет в конце'

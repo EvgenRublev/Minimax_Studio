@@ -160,13 +160,70 @@ function syncStudioNodes(appRoot, comfyRoot) {
   return synced
 }
 
-// (правка 904) Ядро ComfyUI перешло на 0.44.0. Наши патчи рассчитаны именно на
-// него: файл нод импортирует новые модули ComfyUI, а в 0.44 уже есть то, что мы
-// раньше патчили в model.py/model_detection.py (gate_compress, minimax_h3_layout,
-// block_index). Если ядро осталось 0.33 (пользователь обновился только внутри
-// приложения), патчи класть нельзя - иначе ComfyUI может не запуститься или
-// упасть на импорте. В этом случае честно предупреждаем: нужен установщик.
-const CORE_MIN_VERSION = '0.44.0'
+/** Собирает версии по схеме `<имя>-<версия>.(dist-)info` и возвращает высшую. */
+function readInstalledDistVersion(dirs, nameRe) {
+  for (const dir of dirs) {
+    let entries
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      continue
+    }
+    let best = null
+    for (const e of entries) {
+      const m = nameRe.exec(e)
+      if (!m) continue
+      if (!best || compareVersions(m[1], best.version) > 0) best = { version: m[1], file: path.join(dir, e) }
+    }
+    if (best) return best
+  }
+  return null
+}
+
+/**
+ * (правка 1080) Какая версия comfy-aimdo реально стоит в переносном Python.
+ * Ищет dist-info в python_embeded рядом с каталогом ядра, корнем бэкенда и
+ * на уровень выше (старые раскладки с python_embeded рядом с ComfyUI/).
+ */
+function readInstalledAimdoVersion(comfyCore, comfyRoot) {
+  const cand = []
+  for (const base of [comfyCore, comfyRoot, path.join(comfyRoot, '..')]) {
+    cand.push(path.join(base, 'python_embeded', 'Lib', 'site-packages'))
+  }
+  return readInstalledDistVersion(cand, /^comfy_aimdo-([0-9][0-9a-zA-Z.+-]*)\.(?:dist|egg)-info$/i)
+}
+
+// (правка 904 → 1080) Студия поддерживает ДВА поколения бэкенда, и у каждого
+// свой набор патчей ядра:
+//   • 0.44+              — install/comfy-patches (основной);
+//   • 0.33.x (откат)     — install/comfy-patches-0.33: ядро 0.33 с comfy-aimdo
+//                          0.4.13, куда добавлены comfy/audio.py и shim
+//                          pause_malloc_graph (без них наши патч-ноды на 0.33
+//                          не импортируются).
+// Чужой набор класть нельзя: файлы 0.44 импортируют модули, которых в 0.33 нет
+// (comfy.audio, malloc-graph), а файлы 0.33 не содержат того, что появилось в
+// 0.44. Поэтому набор выбирается по версии ядра, а не берётся «как есть».
+const CORE_PATCH_SETS = [
+  { dir: 'comfy-patches-0.33', min: '0.33.0', max: '0.34.0' },
+  { dir: 'comfy-patches', min: '0.44.0', max: '' },
+]
+// Границы поддерживаемых поколений (для баннера «ядро не поддерживается» они
+// продублированы в src/lib/comfy/core-version.ts — совпадение проверяет
+// scripts/check-comfy-sync.mjs).
+const CORE_ROLLBACK_MIN = CORE_PATCH_SETS[0].min
+const CORE_ROLLBACK_MAX = CORE_PATCH_SETS[0].max
+const CORE_CURRENT_MIN = CORE_PATCH_SETS[1].min
+// Нижняя граница поддерживаемого ядра (для баннера «ядро устарело»).
+const CORE_MIN_VERSION = CORE_ROLLBACK_MIN
+
+/** Набор патчей для версии ядра; '' (версия неизвестна) — основной набор. */
+function pickCorePatchSet(version) {
+  if (!version) return CORE_PATCH_SETS[CORE_PATCH_SETS.length - 1]
+  for (const s of CORE_PATCH_SETS) {
+    if (compareVersions(version, s.min) >= 0 && (!s.max || compareVersions(version, s.max) < 0)) return s
+  }
+  return null
+}
 
 /** Версия ядра ComfyUI: comfyui_version.py, иначе pyproject.toml. '' - не знаем.
  *  Принимает КАТАЛОГ ЯДРА (resolveComfyCore), а не корень бэкенда. */
@@ -206,18 +263,49 @@ function compareVersions(a, b) {
 // Re-sync the patch files before EVERY ComfyUI launch, same as custom nodes.
 function syncCorePatches(appRoot, comfyRoot) {
   const synced = []
-  const srcRoot = path.join(appRoot, 'install', 'comfy-patches')
   const dstRoot = resolveComfyCore(comfyRoot)
-  if (!existsSync(srcRoot) || !existsSync(dstRoot)) return synced
-  // (правка 904) Патчи предназначены для ядра 0.44+. На старом ядре они
-  // ломают импорт - лучше не трогать и сказать, что делать.
+  if (!existsSync(dstRoot)) return synced
+  // (правка 1080) набор выбирается по версии ядра: у 0.33 и 0.44 они разные
   const version = readComfyVersion(dstRoot)
-  if (version && compareVersions(version, CORE_MIN_VERSION) < 0) {
-    console.error(`[comfy-patches] ядро ComfyUI ${version} старее ${CORE_MIN_VERSION}: ` +
-      'патчи не применены. Запустите установщик студии, чтобы обновить ядро.')
+  const set = pickCorePatchSet(version)
+  if (!set) {
+    console.error(`[comfy-patches] ядро ComfyUI ${version || '?'} не поддерживается ` +
+      `(наборы патчей: ${CORE_PATCH_SETS.map((s) => s.min + (s.max ? '…' + s.max : '+')).join(', ')}). ` +
+      'Патчи не применены. Запустите установщик студии, чтобы поставить поддерживаемое ядро.')
     return synced
   }
+  const srcRoot = path.join(appRoot, 'install', set.dir)
+  if (!existsSync(srcRoot)) {
+    console.error(`[comfy-patches] нет набора ${set.dir} (ядро ${version || '?'}) — ` +
+      'файлы студии повреждены, запустите установщик.')
+    return synced
+  }
+  // (правка 1080) Для совместимости важно ПОКОЛЕНИЕ comfy-aimdo, а не только
+  // версия ядра: 0.5.5–0.6.0 не работают с ядром 0.33 (control.init() передаёт
+  // аргументы, которых там нет, а host-буферы DynamicVRAM обнуляются — веса
+  // читаются с диска каждый шаг), а ядро 0.44+ не работает с aimdo 0.4.x
+  // (comfy_aimdo.malloc_graph / storage.fast_disk отсутствуют). Установщик
+  // ставит aimdo по requirements.txt ядра, но если пользователь поменял ядро
+  // сам (или апдейт студии пришёл на старый python_embeded) — связка расходится.
+  // Смотрим фактическую версию пакета и честно пишем в лог запуска.
+  const aimdo = readInstalledAimdoVersion(dstRoot, resolveComfyRoot(path.resolve(appRoot)))
+  const aimdoVer = aimdo ? aimdo.version : null
+  if (aimdoVer) {
+    if (set.dir === 'comfy-patches-0.33' && compareVersions(aimdoVer, '0.5.0') >= 0) {
+      console.error(`[comfy-patches] ядро ${version} (откатное), но в python_embeded стоит ` +
+        `comfy-aimdo ${aimdoVer} (${path.relative(path.resolve(appRoot), aimdo.file) || aimdo.file}). ` +
+        'Откатное ядро требует comfy-aimdo 0.4.13 — иначе большие разрешения уходят в ' +
+        'страничевание весов. Запустите установщик/ремонт студии.')
+    }
+    if (set.dir === 'comfy-patches' && compareVersions(aimdoVer, '0.5.0') < 0) {
+      console.error(`[comfy-patches] ядро ${version}, но comfy-aimdo ${aimdoVer} старее: ` +
+        'нет comfy_aimdo.malloc_graph и storage.fast_disk, наши патч-ноды H3 не импортируются. ' +
+        'Запустите установщик/ремонт студии.')
+    }
+  }
   for (const rel of listFiles(srcRoot)) {
+    // README набора — документация для нас, в ядро её не кладём
+    if (/^readme(\.\w+)?$/i.test(path.basename(rel))) continue
     const sp = path.join(srcRoot, rel)
     const dp = path.join(dstRoot, rel)
     try {
@@ -295,7 +383,7 @@ function syncVhsPatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions }
+module.exports = { syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

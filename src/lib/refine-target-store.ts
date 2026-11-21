@@ -16,6 +16,9 @@
  */
 import { create } from 'zustand'
 import type { CropRect } from '@/lib/crop' // (правка 908)
+// (правка 1058) Ручки тайлового режима Tessera (только тип/дефолты —
+// модуль без импортов, в клиентский бандл не тянет шаблон воркфлоу).
+import { DEFAULT_TESSERA_TILES, type TesseraTileParams } from '@/lib/comfy/tessera-params'
 
 export interface RefineTarget {
   /** Имя файла в папке output ComfyUI. */
@@ -55,6 +58,10 @@ export interface RefineUiParams {
    *  со стриминговым энкодом/декодом. Только для режима «Частями»;
    *  режим для слабых ГПУ (8 ГБ). */
   tessera: boolean
+  /** (правка 1058) Ручки тайлового режима: шов, контекст, временные чанки,
+   *  композит, референсы и гайд (панель «Параметры тайлов»). Живут отдельным
+   *  объектом, чтобы «Сбросить» возвращало рецепт 1057. */
+  tesseraParams: TesseraTileParams
 }
 
 const DEFAULT_PARAMS: RefineUiParams = {
@@ -74,6 +81,9 @@ const DEFAULT_PARAMS: RefineUiParams = {
   refDetail: 'max', // (правка 1) дефолт Max — требование пользователя
   targetMp: 2.0, // (правка 494)
   tessera: false, // (правка 1057) по умолчанию — обычный оконный «Частями»
+  // (правка 1058) дефолты тайлового режима = рецепт 1057 (поведение то же,
+  // пока пользователь сам не подвинул ручки).
+  tesseraParams: DEFAULT_TESSERA_TILES,
 }
 
 interface RefineTargetState {
@@ -85,6 +95,10 @@ interface RefineTargetState {
   setSource: (s: RefineSource | null) => void
   params: RefineUiParams
   patchParams: (p: Partial<RefineUiParams>) => void
+  /** (правка 1058) Точечно обновить ручки тайлового режима. */
+  patchTesseraParams: (p: Partial<TesseraTileParams>) => void
+  /** (правка 1058) Вернуть ручки к рецепту 1057. */
+  resetTesseraParams: () => void
   // (правка 509) Промпт и референсы, вводимые вручную для источника с диска
   // (inputSource — у него нет .meta.json). В сторе, а не в useState вью:
   // вкладка размонтируется при переключении, локальный стейт терялся.
@@ -130,6 +144,13 @@ export const useRefineTarget = create<RefineTargetState>((set, get) => ({
   },
   params: DEFAULT_PARAMS,
   patchParams: (p) => set((s) => ({ params: { ...s.params, ...p } })),
+  // (правка 1058) Ручки тайлов — отдельным объектом; «Сбросить» — к рецепту.
+  patchTesseraParams: (p) => set((s) => ({
+    params: { ...s.params, tesseraParams: { ...s.params.tesseraParams, ...p } },
+  })),
+  resetTesseraParams: () => set((s) => ({
+    params: { ...s.params, tesseraParams: { ...DEFAULT_TESSERA_TILES } },
+  })),
   prompt: '',
   setPrompt: (prompt) => set({ prompt }),
   userRefs: [],

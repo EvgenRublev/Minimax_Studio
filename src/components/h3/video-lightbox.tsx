@@ -62,6 +62,11 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  /** (правка 1060) Открыто ли подтверждение удаления — читается таймером
+   *  авто-скрытия контролов (см. handleMouseMove). Ref, а не state: таймер
+   *  должен видеть актуальное значение без пересоздания. */
+  const confirmOpenRef = useRef(false)
+  confirmOpenRef.current = showDeleteConfirm
   /** Bumped by "Повторить" — remounts the <video> with a fresh request. */
   const [retryCount, setRetryCount] = useState(0)
   /** Set when the video element fails to load (broken cache entry etc.). */
@@ -127,6 +132,16 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
   // (правка 352) Таймер авто-скрытия контролов — гасим при unmount,
   // иначе колбэк стрелял по размонтированному компоненту.
   useEffect(() => () => clearTimeout(controlsTimer.current), [])
+
+  // (правка 1060) Подтверждение удаления держит контролы на экране: пока оно
+  // открыто, авто-скрытие выключено, а таймер сбрасывается при открытии.
+  // Раньше полоса гасла через 3 с после движения мыши, получала
+  // pointer-events:none — и клик по «Удалить» не срабатывал.
+  useEffect(() => {
+    if (!showDeleteConfirm) return
+    setShowControls(true)
+    clearTimeout(controlsTimer.current)
+  }, [showDeleteConfirm])
 
   // Страховка: если текущий файл исчез из списка (удалён извне), закрываем
   // модалку явно — рендер null оставил бы её «зависшей» без возможности Esc.
@@ -195,8 +210,18 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
     setShowControls(true)
     clearTimeout(controlsTimer.current)
     controlsTimer.current = setTimeout(() => {
-      if (isPlaying) setShowControls(false)
+      // (правка 1060) Пока открыто подтверждение удаления, контролы НЕ прячем:
+      // иначе полоса получает pointer-events:none, и кнопка «Удалить» видна,
+      // но клик по ней ничего не делает (жалоба: «жму — ничего не происходит»).
+      if (isPlaying && !confirmOpenRef.current) setShowControls(false)
     }, 3000)
+  }
+
+  /** (правка 1060) Не даём авто-скрытию «убить» подтверждение удаления. */
+  const openDeleteConfirm = () => {
+    setShowControls(true)
+    clearTimeout(controlsTimer.current)
+    setShowDeleteConfirm(true)
   }
 
   const formatTime = (s: number) => {
@@ -302,7 +327,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
             {/* Delete */}
             {onDelete && (
               showDeleteConfirm ? (
-                <div className="flex items-center gap-1 ml-1">
+                <div className="flex items-center gap-1 ml-1 pointer-events-auto">
                   <button
                     onClick={() => void handleDelete()}
                     className="px-3 py-1.5 rounded-lg bg-red-500/80 hover:bg-red-500 text-white text-xs font-medium transition-colors"
@@ -318,7 +343,7 @@ export function VideoLightbox({ files, initialIndex, onClose, onDelete }: VideoL
                 </div>
               ) : (
                 <button
-                  onClick={() => setShowDeleteConfirm(true)}
+                  onClick={openDeleteConfirm}
                   className="p-2 rounded-lg bg-white/10 hover:bg-red-500/40 text-white transition-colors"
                   title={t("Удалить")}
                 >

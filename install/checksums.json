@@ -3,6 +3,12 @@
   "generatedAt": "2026-11-12T09:00:24Z",
   "pinnedMeaning": "pinned=true — артефакт неизменяем (nodejs.org, python.org, релизный ассет GitHub), сумму сверяем и для скачанного из сети; pinned=false — архив тега GitHub, сумма проверяется только для бандла.",
   "files": {
+    "ComfyUI-v0.33.0.zip": {
+      "size": 12300308,
+      "sha256": "52b17625fc21506cf40f78d685fc77a30273b7afd3779f7fde1187565c509166",
+      "kind": "zip",
+      "pinned": false
+    },
     "ComfyUI-v0.44.0.zip": {
       "size": 13531801,
       "sha256": "fc596ab1307dc1057932cf21c2c88a32220a5c053334d17ef629f5781a740fcf",

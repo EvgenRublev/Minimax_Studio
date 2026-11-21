@@ -34,7 +34,8 @@ function expect(cond, label) {
 const sync = read('scripts/sync_custom_nodes.js')
 expect(/function\s+syncStudioNodes\s*\(/.test(sync), 'sync_custom_nodes.js: есть syncStudioNodes()')
 expect(/function\s+syncCorePatches\s*\(/.test(sync), 'sync_custom_nodes.js: есть syncCorePatches()')
-expect(/install['"],\s*['"]comfy-patches/.test(sync), 'sync_custom_nodes.js: патчи берутся из install/comfy-patches')
+expect(/join\(\s*appRoot,\s*'install',\s*set\.dir\s*\)/.test(sync) && /dir:\s*'comfy-patches'/.test(sync),
+  "sync_custom_nodes.js: патчи берутся из install/comfy-patches (через CORE_PATCH_SETS)")
 expect(/['"]custom nodes['"]/.test(sync), 'sync_custom_nodes.js: custom nodes берутся из папки «custom nodes»')
 expect(/module\.exports\s*=\s*\{[^}]*syncStudioNodes[^}]*syncCorePatches/.test(sync),
   'sync_custom_nodes.js: экспортирует обе функции')
@@ -132,8 +133,104 @@ for (const rel of legacyCore) {
 }
 expect(/function\s+readComfyVersion\s*\(/.test(sync),
   'sync_custom_nodes.js: читает версию ядра (readComfyVersion)')
-expect(/CORE_MIN_VERSION\s*=\s*['"]0\.44\.0['"]/.test(sync),
-  'sync_custom_nodes.js: патчи применяются только к ядру 0.44+')
+
+// (правка 1080) Студия поддерживает два поколения ядра, и у каждого свой набор
+// патчей. Класс ошибок 866/901: апдейтер ComfyUI не трогает, поэтому оба набора
+// обязаны лежать в поставке и выбираться по версии ядра.
+expect(/const CORE_PATCH_SETS = \[/.test(sync),
+  'sync_custom_nodes.js: есть таблица CORE_PATCH_SETS (наборы патчей по версиям)')
+expect(/function\s+pickCorePatchSet\s*\(/.test(sync),
+  'sync_custom_nodes.js: есть pickCorePatchSet()')
+{
+  const sets = [
+    ['install/comfy-patches', 'ядро 0.44+'],
+    ['install/comfy-patches-0.33', 'откатное ядро 0.33.x'],
+  ]
+  for (const [dir, label] of sets) {
+    const d = join(ROOT, ...dir.split('/'))
+    expect(existsSync(d), `${label}: набор ${dir} на месте`)
+  }
+  const rb = join(ROOT, 'install', 'comfy-patches-0.33')
+  if (existsSync(rb)) {
+    for (const rel of ['main.py', 'comfy/audio.py', 'comfy/model_prefetch.py',
+      'comfy_extras/nodes_minimax_h3.py', 'comfy_extras/nodes_context_windows.py']) {
+      expect(existsSync(join(rb, ...rel.split('/'))),
+        `набор comfy-patches-0.33: нет ${rel} (без него патч-ноды H3 на 0.33 не импортируются)`)
+    }
+    const mp = readFileSync(join(rb, 'comfy', 'model_prefetch.py'), 'utf-8')
+    expect(/def pause_malloc_graph/.test(mp),
+      'comfy-patches-0.33: model_prefetch.py содержит shim pause_malloc_graph')
+    const main033 = readFileSync(join(rb, 'main.py'), 'utf-8')
+    expect(/_keep_free_gb = _reserve_gb \+ _headroom_gb/.test(main033),
+      'comfy-patches-0.33: main.py несёт патч 967 (headroom применяется)',)
+  }
+}
+// версия из core-version.ts (баннер) обязана совпадать с таблицей наборов
+{
+  const mRollback = /CORE_ROLLBACK_MIN\s*=\s*['"]([^'"]+)['"]/.exec(read('src/lib/comfy/core-version.ts') || '')
+  const mCur = /CORE_CURRENT_MIN\s*=\s*['"]([^'"]+)['"]/.exec(read('src/lib/comfy/core-version.ts') || '')
+  expect(!!mRollback && !!mCur, 'core-version.ts: есть CORE_ROLLBACK_MIN и CORE_CURRENT_MIN')
+  const syncSrc = sync
+  const setRollback = /dir:\s*'comfy-patches-0\.33',\s*min:\s*'([\d.]+)'/.exec(syncSrc)
+  const setCur = /dir:\s*'comfy-patches',\s*min:\s*'([\d.]+)'/.exec(syncSrc)
+  if (mRollback && setRollback) {
+    expect(mRollback[1] === setRollback[1],
+      `CORE_ROLLBACK_MIN (${mRollback[1]}) != нижняя граница набора 0.33 (${setRollback[1]})`)
+  }
+  if (mCur && setCur) {
+    expect(mCur[1] === setCur[1],
+      `CORE_CURRENT_MIN (${mCur[1]}) != нижняя граница основного набора (${setCur[1]})`)
+  }
+}
+// electron и start.bat: у ядра 0.33 нет флага --disable-fast-disk, argparse
+// падает на неизвестном аргументе и ComfyUI не стартует
+expect(/require\(['"]\.\.\/scripts\/comfy-launch-args['"]\)/.test(main),
+  'electron/main.js: флаги собирает scripts/comfy-launch-args.js')
+expect(/--disable-fast-disk/.test(bat) && /compareVersions\(v,'0\.34\.0'\)/.test(bat),
+  'start.bat: --disable-fast-disk убирается для ядра 0.33')
+// (правка 1081) сборку аргументов именно ИСПОЛНЯЕМ: inline-реализация в
+// electron/main.js уже уронила приложение на старте («branch is not defined»),
+// а node --check такую опечатку не видит
+{
+  const { comfyFlags, comfyCoreVersion } = (await import('./comfy-launch-args.js')).default
+  const { readComfyVersion } = (await import('./sync_custom_nodes.js')).default
+  const v = {
+    reserveGb: '1', dynamicVram: '1', asyncOffload: '0', pinnedMemory: '1',
+    nvmlPressure: '1', vramHeadroom: '1', fastDisk: '0',
+  }
+  const f33 = comfyFlags(v, '0.33.0')
+  const f44 = comfyFlags(v, '0.44.0')
+  const has = (r, f) => r.flags.includes(f)
+  expect(!has(f33, '--disable-fast-disk') && f33.skipped.includes('--disable-fast-disk'),
+    'comfy-launch-args: ядро 0.33.0 не получает --disable-fast-disk (argparse упал бы на нём)')
+  expect(has(f44, '--disable-fast-disk') && !f44.skipped.length,
+    'comfy-launch-args: ядро 0.44.0 получает весь набор флагов')
+  for (const [ver, r] of [['0.33.0', f33], ['0.44.0', f44]]) {
+    for (const f of ['--windows-standalone-build', '--use-ck-attention', '--disable-auto-launch',
+      '--reserve-vram', '--disable-async-offload', '--vram-headroom']) {
+      expect(has(r, f), `comfy-launch-args: ядро ${ver} теряет нужный флаг ${f}`)
+    }
+  }
+  const fUnknown = comfyFlags(v, '')
+  expect(has(fUnknown, '--disable-fast-disk'),
+    'comfy-launch-args: неизвестная версия ядра ничего не обрезает (прежнее поведение)')
+  const off = comfyFlags({ ...v, vramHeadroom: '0', nvmlPressure: '0', pinnedMemory: '0', dynamicVram: '0', fastDisk: '1' }, '0.44.0')
+  expect(!has(off, '--vram-headroom') && has(off, '--disable-nvml-pressure') &&
+    has(off, '--disable-pinned-memory') && has(off, '--disable-dynamic-vram') && has(off, '--fast-disk'),
+    'comfy-launch-args: ключи config.ini переводятся во флаги правильно')
+  expect(comfyCoreVersion(join(ROOT, 'ComfyUI')) === readComfyVersion(join(ROOT, 'ComfyUI')),
+    'comfy-launch-args: версию ядра читает тот же модуль, что выбирает наборы патчей')
+}
+// (правка 1080) смена поколения ядра из интерфейса: renderer → preload → main,
+// а саму работу делает установщик (он умеет переносить данные и откатываться)
+expect(/ipcMain\.handle\('h3:core-switch'/.test(main), "electron/main.js: есть обработчик 'h3:core-switch'")
+expect(/-SkipApp/.test(main) && /'-CoreRollback'/.test(main) && /'-CoreCurrent'/.test(main),
+  'electron/main.js: смена ядра запускает install.ps1 с -SkipApp и ключом поколения')
+expect(/killTree\(old\.pid\)/.test(main), 'electron/main.js: перед сменой ядра останавливается ComfyUI')
+expect(/comfy_core_channel\.txt/.test(main), 'electron/main.js: канал ядра пишется до запуска установщика')
+const preload = read('electron/preload.js')
+expect(/switchCore: \(to\) => ipcRenderer\.invoke\('h3:core-switch'/.test(preload),
+  'electron/preload.js: мост h3desktop.comfy.switchCore')
 
 // (правка 1040) «Refine частями» использует встроенную ноду ядра
 // MiniMaxH3ContextWindows. Её нет в старых ядрах, поэтому релиз должен
@@ -236,18 +333,24 @@ expect(/"%COMFY_CORE%\\main\.py"/.test(startComfyBat),
 expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   '.env: COMFY_ROOT=./ComfyUI')
 
-// 9. (правка 911) Минимальная версия ядра — ОДНА на синхронизатор и на UI.
-//    Синхронизатор по ней решает, класть ли патчи, а баннер — предупреждать
-//    пользователя. Разъедутся — баннер будет молчать там, где патчи уже не
-//    кладутся (или наоборот). Ловим это на verify релиза.
+// 9. (правка 911 → 1080) Диапазоны поддерживаемых ядер — ОДНИ на синхронизатор
+//    и на UI. Синхронизатор по ним выбирает набор патчей, а баннер —
+//    предупреждает пользователя. Разъедутся — баннер будет молчать там, где
+//    патчи уже не кладутся (или наоборот). Ловим это на verify релиза.
 {
   const coreTs = read('src/lib/comfy/core-version.ts')
-  const mTs = /CORE_MIN_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(coreTs)
-  const mJs = /CORE_MIN_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(sync)
-  expect(!!mTs, 'core-version.ts: объявлен CORE_MIN_VERSION')
-  expect(!!mJs, 'sync_custom_nodes.js: объявлен CORE_MIN_VERSION')
-  expect(!!mTs && !!mJs && mTs[1] === mJs[1],
-    `CORE_MIN_VERSION совпадает в core-version.ts и sync_custom_nodes.js (${mTs?.[1] ?? '?'} / ${mJs?.[1] ?? '?'})`)
+  for (const name of ['CORE_MIN_VERSION', 'CORE_CURRENT_MIN', 'CORE_ROLLBACK_MIN', 'CORE_ROLLBACK_MAX']) {
+    expect(new RegExp(`export const ${name}\\b`).test(coreTs), `core-version.ts: объявлен ${name}`)
+    expect(new RegExp(`const ${name}\\b`).test(sync), `sync_custom_nodes.js: объявлен ${name}`)
+  }
+  expect(/const CORE_MIN_VERSION = CORE_ROLLBACK_MIN/.test(sync),
+    'sync_custom_nodes.js: CORE_MIN_VERSION привязан к CORE_ROLLBACK_MIN')
+  expect(/export const CORE_MIN_VERSION = CORE_ROLLBACK_MIN/.test(coreTs),
+    'core-version.ts: CORE_MIN_VERSION привязан к CORE_ROLLBACK_MIN')
+  const maxTs = /CORE_ROLLBACK_MAX\s*=\s*['"]([^'"]+)['"]/.exec(coreTs)?.[1]
+  const maxJs = /max:\s*'([\d.]+)'/.exec(sync)?.[1]
+  expect(!!maxTs && !!maxJs && maxTs === maxJs,
+    `верхняя граница откатного ядра совпадает (${maxTs ?? '?'} / ${maxJs ?? '?'})`)
 }
 
 // 10. (правка 917) Патч VideoHelperSuite: доезжает и через установщик, и через
@@ -339,6 +442,19 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     expect(/class_type: 'MiniMaxStudioVRAMReset'/.test(read(t)),
       `${t}: шаблон использует MiniMaxStudioVRAMReset`)
   }
+  // (правка 1061) Нода обязана воспроизводить finally-блок ядра: именно
+  // cleanup_prefetch_queues доказанно снимает пин VBAR-страниц (comfy-aimdo#117).
+  expect(/cleanup_prefetch_queues/.test(reset) && /reset_cast_buffers/.test(reset) &&
+    /vbars_reset_watermark_limits/.test(reset),
+    'minimax_studio_vram_reset: есть тройная очистка prefetch/cast-buffers/watermark')
+  // Refine обязан ставить сброс ПЕРЕД тяжёлым прогоном (иначе re-fault после
+  // генерации вешает прогон на 0% «Model Initializing»).
+  const refineTpl = read('src/lib/comfy/refine-template.ts')
+  expect(/'r_rst_pre':\s*\{/.test(refineTpl),
+    'refine-template: узел сброса r_rst_pre (перед сэмплером) на месте')
+  expect(refineTpl.includes("latent_image: ['r_rst_pre', 0]") &&
+    refineTpl.includes("latent: ['r_rst_pre', 0]"),
+    'refine-template: сэмплер и TesseraRefine запитаны от r_rst_pre')
 }
 
 // 13b. (правка 1057) Тайловый тракт Refine «Частями» (Tessera): пак забандлен

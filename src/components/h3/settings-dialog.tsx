@@ -8,7 +8,7 @@
  *   • Оптимизация  — VRAM-резерв, Dynamic VRAM
  *   • ComfyUI      — версия, Python, GPU, VRAM-разбивка
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -25,7 +25,6 @@ import {
   AlertCircleIcon,
   Loader2Icon,
   CpuIcon,
-  SunIcon,
   MoonIcon,
   SlidersHorizontalIcon,
   BotIcon,
@@ -40,9 +39,9 @@ import {
   MicIcon,
   PaletteIcon,
   SparklesIcon,
-  ZoomInIcon,
   FileVideoIcon,
   InfoIcon,
+  PackageIcon,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
@@ -53,6 +52,8 @@ import { DiffusionModelSelector } from './diffusion-model-selector'
 import { ModelMigrationPanel } from './model-migration-panel'
 import { LlmModelSelector } from './llm-model-selector'
 import { VoiceSettingsPanel } from './voice-settings-panel'
+// (правка 1080) карточка поколения ядра ComfyUI (откат 0.33 <-> актуальное 0.44)
+import { CoreChannelCard } from './core-channel-card'
 import { MODELS, MODEL_CATEGORIES, getManualRenameHint } from '@/lib/models-config'
 import { useGenStore, DEFAULT_VIDEO_STATE } from '@/lib/gen-store'
 import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
@@ -70,6 +71,16 @@ import { applyUiScale, UI_SCALE_KEY, UI_SCALE_DEFAULT } from '@/lib/ui-scale'
 import { SettingSlider } from './setting-slider'
 import { LanguageSwitcher } from './language-switcher' // (правка 955)
 import { UpdatePanel } from './update-panel' // (правка 790)
+// (правка 1067) Единый визуальный язык настроек: карточки групп, строки,
+// сегментированный выбор и общий тумблер — как в остальном приложении.
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsField,
+  SettingsChoice,
+  SettingsToggle,
+  SettingsNote,
+} from './settings-ui'
 
 /* (правка 791) Метка версии динамическая: берётся с сервера (package.json),
  * а не зашита в код — иначе после самообновления пользователь видел бы
@@ -89,28 +100,61 @@ function AboutVersion() {
     <div className="text-xs text-muted-foreground">{ver ? tt("Версия {{p1}}", { p1: ver }) : tt("Версия …")}</div>
   )
 }
-import { Label } from '@/components/ui/label'
 import { useTranslation } from 'react-i18next' // (правка 955)
-
 /* ─── Types ─── */
 
 type TabId = 'general' | 'appearance' | 'llm' | 'voice' | 'optimization' | 'video' | 'links' | 'about' | 'reset'
 
-const TABS: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
-  { id: 'general', label: 'Общие', icon: <BoxIcon className="w-4 h-4" /> },
-  // (правка 111) Внешний вид: тема оформления и звук — вынесено из «Общих»
-  { id: 'appearance', label: 'Внешний вид', icon: <PaletteIcon className="w-4 h-4" /> },
-  { id: 'llm', label: 'LLM', icon: <BotIcon className="w-4 h-4" /> },
-  // (правка 65) Голосовой ввод (whisper STT, CPU)
-  { id: 'voice', label: 'Голос', icon: <MicIcon className="w-4 h-4" /> },
-  { id: 'optimization', label: 'Оптимизация', icon: <SlidersHorizontalIcon className="w-4 h-4" /> },
-  // (правка 386) Формат сохранения видео: кодек + качество, на все режимы
-  { id: 'video', label: 'Формат', icon: <FileVideoIcon className="w-4 h-4" /> },
-  { id: 'links', label: 'Ссылки', icon: <LinkIcon className="w-4 h-4" /> },
-  // Информация о программе (текст предоставляет пользователь)
-  { id: 'about', label: 'О программе', icon: <InfoIcon className="w-4 h-4" /> },
-  { id: 'reset', label: 'Сброс', icon: <AlertTriangleIcon className="w-4 h-4" /> },
+/**
+ * (правка 1067) Навигация настроек: те же 9 пунктов, но сгруппированы и
+ * вынесены в левую колонку — как основной сайдбар приложения. Раньше это был
+ * ряд из девяти равноправных вкладок по 11 px: при сужении окна он уезжал в
+ * горизонтальную карусель, а «Сброс» выглядел так же, как «О программе».
+ */
+const NAV_GROUPS: Array<{
+  label: string
+  items: Array<{ id: TabId; label: string; icon: React.ReactNode; tone?: 'danger' }>
+}> = [
+  {
+    label: 'Программа',
+    items: [
+      { id: 'general', label: 'Общие', icon: <BoxIcon className="w-[18px] h-[18px]" /> },
+      // (правка 111) Внешний вид: тема оформления и звук — вынесено из «Общих»
+      { id: 'appearance', label: 'Внешний вид', icon: <PaletteIcon className="w-[18px] h-[18px]" /> },
+    ],
+  },
+  {
+    label: 'ИИ',
+    items: [
+      { id: 'llm', label: 'LLM', icon: <BotIcon className="w-[18px] h-[18px]" /> },
+      // (правка 65) Голосовой ввод (whisper STT, CPU)
+      { id: 'voice', label: 'Голос', icon: <MicIcon className="w-[18px] h-[18px]" /> },
+    ],
+  },
+  {
+    label: 'Система',
+    items: [
+      { id: 'optimization', label: 'Оптимизация', icon: <SlidersHorizontalIcon className="w-[18px] h-[18px]" /> },
+      // (правка 386) Формат сохранения видео: кодек + качество, на все режимы
+      { id: 'video', label: 'Формат', icon: <FileVideoIcon className="w-[18px] h-[18px]" /> },
+    ],
+  },
+  {
+    label: 'Дополнительно',
+    items: [
+      { id: 'links', label: 'Ссылки', icon: <LinkIcon className="w-[18px] h-[18px]" /> },
+      // Информация о программе (текст предоставляет пользователь)
+      { id: 'about', label: 'О программе', icon: <InfoIcon className="w-[18px] h-[18px]" /> },
+      // Опасная зона — отдельным пунктом внизу, с красным акцентом
+      { id: 'reset', label: 'Сброс', icon: <AlertTriangleIcon className="w-[18px] h-[18px]" />, tone: 'danger' },
+    ],
+  },
 ]
+
+/* (правка 1067) Поле ввода в стиле остальных панелей: h-8, surface-1,
+ * cyan-фокус. Вынесено отдельно, чтобы не размножать длинный className. */
+const SETTINGS_INPUT_CLASS =
+  'h-8 w-full rounded-md border border-border bg-[var(--surface-1)] px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-cyan-500/60 focus:outline-none focus:ring-1 focus:ring-cyan-500/40'
 
 /* Текст вкладки «О программе» (правка 484 — текст автора).
  * Многострочный: переносы строк в тексте сохраняются при показе. */
@@ -157,6 +201,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const { t: tt } = useTranslation() // (правка 955)
 
   const [tab, setTab] = useState<TabId>('general')
+  // (правка 1067) При смене раздела прокрутка возвращается наверх: раньше
+  // контейнер сохранял scrollTop, и «Оптимизация» могла открыться с середины.
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [connected, setConnected] = useState<boolean | null>(null)
   // (правка 803) Дефолты reserve/headroom снижены до 1/1 ГБ.
@@ -256,6 +303,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         })
     }
   }, [open, checkConnection])
+
+  // (правка 1067) Смена раздела — прокрутка наверх.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [tab])
 
   /** Save LLM settings (applied at next model load). */
   const saveLlm = useCallback(async () => {
@@ -591,403 +643,399 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* FIXED size (never resizes between tabs) + internal scroll area —
-          nothing sticks out past the side edges. */}
-      <DialogContent className="w-[950px] max-w-[96vw] sm:max-w-[950px] h-[920px] max-h-[96vh] flex flex-col overflow-hidden gap-0 p-0">
-        <DialogHeader className="px-6 pt-5 pb-2 shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <ServerIcon className="w-5 h-5" />
-            {' '}{tt("Настройки")}
+      {/* Окно фиксированного размера: слева — навигация (как сайдбар
+          приложения), справа — единственная прокручиваемая колонка карточек. */}
+      <DialogContent className="w-[1020px] max-w-[96vw] sm:max-w-[1020px] h-[880px] max-h-[94vh] flex flex-col overflow-hidden gap-0 p-0">
+        <DialogHeader className="shrink-0 gap-1 border-b border-border px-5 py-4">
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/25 bg-cyan-500/10">
+              <ServerIcon className="w-4 h-4 text-cyan-400" />
+            </span>
+            {tt("Настройки")}
           </DialogTitle>
-          <DialogDescription>
-            {tt("Подключение, модели, LLM, память GPU, ComfyUI и ссылки для ручной загрузки")}
+          <DialogDescription className="text-xs">
+            {tt("Модели, LLM, память GPU, внешний вид и сервис студии")}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Tab bar */}
-        <div className="px-6 shrink-0">
-          {/* (правка 566→571) Все девять вкладок — ОДНОЙ строкой, ЗАПОЛНЯЯ её
-              целиком: компактные паддинги/шрифт (суммарно ~790px минимальной
-              ширины < ~890px доступных) + flex-1 — кнопки делят строку поровну,
-              пустого хвоста после «Сброса» нет. Если контент перестанет
-              влезать (узкое окно/новая вкладка) — min-width:auto удержит
-              читаемость, сработает overflow-x-auto. */}
-          <div className="flex items-center gap-0.5 p-1 rounded-lg bg-[var(--surface-2)]/60 border border-border mb-2 overflow-x-auto">
-            {TABS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className={cn(
-                  // (правка 120) whitespace-nowrap: «Внешний вид» — двухсловное имя,
-                  // без запрета переноса лезло в две строки (у остальных слов переноса нет)
-                  'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap',
-                  tab === item.id
-                    ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                    : 'text-muted-foreground border border-transparent hover:text-foreground',
-                )}
-              >
-                <span className="shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5">{item.icon}</span>
-                {tt(item.label)}
-              </button>
-            ))}
-          </div>
-        </div>
+        <div className="flex min-h-0 flex-1">
+          {/* Навигация: тот же приём, что у основного сайдбара — surface-1,
+              активный пункт surface-3 с цветной полосой слева. */}
+          <aside className="flex w-[224px] shrink-0 flex-col border-r border-border bg-[var(--surface-1)]">
+            <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2 py-3">
+              {NAV_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                    {tt(group.label)}
+                  </p>
+                  <div className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const isActive = tab === item.id
+                      const isDanger = item.tone === 'danger'
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setTab(item.id)}
+                          className={cn(
+                            'relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors',
+                            isActive
+                              ? 'bg-[var(--surface-3)] text-foreground'
+                              : 'text-muted-foreground hover:bg-[var(--surface-2)] hover:text-foreground',
+                          )}
+                        >
+                          {isActive && (
+                            <span
+                              className={cn(
+                                'absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full',
+                                isDanger ? 'bg-red-400' : 'bg-cyan-400',
+                              )}
+                            />
+                          )}
+                          <span
+                            className={cn(
+                              'shrink-0',
+                              isActive && (isDanger ? 'text-red-400' : 'text-cyan-400'),
+                            )}
+                          >
+                            {item.icon}
+                          </span>
+                          <span className="truncate text-sm font-medium">{tt(item.label)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </nav>
+          </aside>
 
-        {/* Scrollable tab content — the ONLY scrolling region */}
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 pb-5">
+          {/* Содержимое: единственная прокручиваемая область */}
+          <div className="flex min-w-0 flex-1 flex-col bg-background">
+            <div ref={scrollRef} data-settings-scroll="" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+              <div className="px-5 py-4">
         {/* ─────────── General ─────────── */}
         {tab === 'general' && (
-          <div className="space-y-4 py-2">
-            {/* Connection status */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">ComfyUI:</span>
-              {loading ? (
-                <Badge variant="secondary" className="gap-1">
-                  <Loader2Icon className="w-3 h-3 animate-spin" />
-                  {' '}{tt("Проверка...")}
-                </Badge>
-              ) : connected ? (
-                <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1">
-                  <CheckCircleIcon className="w-3 h-3" />
-                  {' '}{tt("Подключено")}
-                </Badge>
-              ) : (
-                <Badge variant="destructive" className="gap-1">
-                  <AlertCircleIcon className="w-3 h-3" />
-                  {' '}{tt("Недоступно")}
-                </Badge>
-              )}
-            </div>
-            {!connected && (
-              <p className="text-xs text-muted-foreground">
-                {tt("Убедитесь, что ComfyUI запущен на порту 8188.")}
-              </p>
-            )}
-
-            {/* Model Migration (правка 47) — на самом верху */}
-            <ModelMigrationPanel />
-
-            {/* Models */}
-            <div className="space-y-2 pt-2 border-t border-border">
-              <ModelsPanel />
-            </div>
-
-            {/* (правка 257) Свои папки моделей — коллекции вне папки студии
-                (перенесено из удалённой вкладки «ComfyUI»);
-                (правка 321) key — перечитывание после сброса, как у селекторов
-                моделей (читает /api/config только при монтировании) */}
-            <ExtraModelPathsPanel key={`emp-${resetTick}`} />
-
-            {/* Diffusion Model (правка 45); key — перечитывание после сброса (правка 54) */}
-            <DiffusionModelSelector key={`dm-${resetTick}`} />
-
-            {/* Custom LoRAs (правка 44; правка 95 — турбо-лора в общем списке) */}
-            <LoraSettingsPanel />
-
-            {/* (правка 111) Тема и звук вынесены во вкладку «Внешний вид» */}
-
-            {/* (правка 116) Окно приветствия — вернуть, если галочка «Больше не показывать»
-             * случайно попала под палец: сбрасываем флаг в localStorage браузера
-             * (h3_welcome_seen_v1) и шлём событие h3:show-welcome — Home подхватывает
-             * и открывает WelcomeDialog. Настройки при этом закрываем, чтобы окно
-             * показывалось поверх приложения (у шаден-диалога outside-click закрыл бы
-             * его при клике по чужому оверлею). */}
-            <div className="space-y-2 pt-2 border-t border-border">
-              <div>
-                <span className="text-xs text-muted-foreground">{tt("Приветствие при запуске")}</span>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {tt("Всплывающее окно с краткой инструкцией. Если поставили галочку «Больше не показывать» — верните его этой кнопкой.")}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  try {
-                    localStorage.removeItem('h3_welcome_seen_v1')
-                    pushPrefs() // (правка 804) дублируем prefs на сервер
-                  } catch { /* ignore */ }
-                  window.dispatchEvent(new CustomEvent('h3:show-welcome'))
-                  onOpenChange(false)
-                }}
-              >
-                <SparklesIcon className="w-3.5 h-3.5" />
-                {' '}{tt("Показать окно приветствия")}
-              </Button>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={checkConnection}
-              disabled={loading}
-              className="w-full"
+          <div className="space-y-3">
+            {/* 1. Состояние бэкенда и служебные окна */}
+            <SettingsCard
+              icon={<ServerIcon className="w-4 h-4" />}
+              title={tt("Состояние")}
+              description={tt("Подключение к ComfyUI и служебные окна студии")}
             >
-              <RefreshCwIcon className={loading ? 'animate-spin' : ''} />
-              {' '}{tt("Перепроверить")}
-            </Button>
+              <SettingsRow
+                label="ComfyUI"
+                description={
+                  connected === false
+                    ? tt("Недоступен на порту 8188 — генерация не запустится, пока не поднимете бэкенд.")
+                    : tt("Порт 8188. Статус проверяется при открытии настроек.")
+                }
+                right={
+                  <>
+                    {loading ? (
+                      <Badge variant="secondary" className="gap-1 text-[10px]">
+                        <Loader2Icon className="w-3 h-3 animate-spin" />
+                        {' '}{tt("Проверка...")}
+                      </Badge>
+                    ) : connected ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px]">
+                        <CheckCircleIcon className="w-3 h-3" />
+                        {' '}{tt("Подключено")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="gap-1 text-[10px]">
+                        <AlertCircleIcon className="w-3 h-3" />
+                        {' '}{tt("Недоступно")}
+                      </Badge>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={checkConnection}
+                      disabled={loading}
+                      title={tt("Перепроверить подключение")}
+                    >
+                      <RefreshCwIcon className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                    </Button>
+                  </>
+                }
+              />
+              <SettingsRow
+                label={tt("Окно приветствия")}
+                description={tt("Краткая инструкция при запуске. Если поставили галочку «Больше не показывать» — верните его этой кнопкой.")}
+                right={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem('h3_welcome_seen_v1')
+                        pushPrefs() // (правка 804) дублируем prefs на сервер
+                      } catch { /* ignore */ }
+                      window.dispatchEvent(new CustomEvent('h3:show-welcome'))
+                      onOpenChange(false)
+                    }}
+                  >
+                    <SparklesIcon className="w-3.5 h-3.5" />
+                    {' '}{tt("Показать")}
+                  </Button>
+                }
+              />
+            </SettingsCard>
 
+            {/* 2. Модели — самый тяжёлый блок, поэтому отдельной карточкой */}
+            <SettingsCard
+              icon={<PackageIcon className="w-4 h-4" />}
+              title={tt("Модели")}
+              description={tt("Файлы генерации и ассистента: скачивание, проверка, удаление")}
+            >
+              <ModelsPanel />
+            </SettingsCard>
+
+            {/* 3. Базовая diffusion-модель (правка 45) */}
+            <SettingsCard
+              icon={<BoxIcon className="w-4 h-4" />}
+              title={tt("Базовая модель")}
+              description={tt("Какая diffusion-модель используется для генерации")}
+            >
+              <DiffusionModelSelector key={`dm-${resetTick}`} />
+            </SettingsCard>
+
+            {/* 4. Пользовательские LoRA (правка 44) */}
+            <SettingsCard
+              icon={<SparklesIcon className="w-4 h-4" />}
+              title="LoRA"
+              description={tt("Свои LoRA: включение, сила и триггерные слова")}
+            >
+              <LoraSettingsPanel />
+            </SettingsCard>
+
+            {/* 5. Свои папки моделей (правка 257; key — перечитывание после сброса) */}
+            <SettingsCard
+              icon={<FolderOpenIcon className="w-4 h-4" />}
+              title={tt("Свои папки моделей")}
+              description={tt("Коллекции вне папки студии — без копирования файлов")}
+            >
+              <ExtraModelPathsPanel key={`emp-${resetTick}`} />
+            </SettingsCard>
+
+            {/* 6. Перенос со старой версии (правка 47) */}
+            <SettingsCard
+              icon={<FolderOpenIcon className="w-4 h-4" />}
+              title={tt("Перенос со старой версии")}
+              description={tt("Модели, файлы, контент и данные предыдущей установки")}
+            >
+              <ModelMigrationPanel />
+            </SettingsCard>
 
           </div>
         )}
 
         {/* ─────────── Appearance (правка 111) ─────────── */}
         {tab === 'appearance' && (
-          <div className="space-y-4 py-2">
-            {/* (правка 111) Тема оформления — вынесено из «Общих» */}
-            <ThemeSwitcher first />
-
-            {/* (правка 445) Масштаб интерфейса (как zoom в браузере) */}
-            <UiScaleSwitcher />
-
-            {/* (правка 955) Язык интерфейса: Русский / English */}
-            <LanguageSwitcher />
-
-            {/* (правка 111) Звук при завершении — вынесено из «Общих» */}
-            <div className="flex items-center justify-between pt-2 border-t border-border">
-              <div>
-                <span className="text-xs text-muted-foreground">{tt("Звук при завершении")}</span>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {tt("Короткий сигнал при окончании генерации")}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={soundOn}
-                onClick={async () => {
-                  const newVal = !soundOn
-                  setSoundOn(newVal)
-                  try {
-                    await fetch('/api/config', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ sound_on: newVal }),
-                    })
-                  } catch { /* ignore */ }
-                }}
-                className={cn(
-                  'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
-                  soundOn ? 'bg-cyan-600' : 'bg-muted-foreground/30',
-                )}
+          <div className="space-y-3">
+            <SettingsCard
+              icon={<PaletteIcon className="w-4 h-4" />}
+              title={tt("Оформление")}
+              description={tt("Тема, масштаб интерфейса и язык")}
+            >
+              <SettingsField
+                label={tt("Тема оформления")}
+                description={tt("Все темы тёмные — как в основном интерфейсе студии")}
               >
-                <span
-                  className={cn(
-                    'pointer-events-none block h-4 w-4 rounded-full bg-white shadow-lg transition-transform',
-                  soundOn ? 'translate-x-4' : 'translate-x-0.5',
-                  )}
-                />
-              </button>
-            </div>
+                <ThemeSwitcher />
+              </SettingsField>
+              <SettingsField
+                label={tt("Масштаб интерфейса")}
+                description={tt("Масштабирует панели, кнопки, отступы и шрифт. Применяется сразу и запоминается.")}
+              >
+                <UiScaleSwitcher />
+              </SettingsField>
+              <SettingsRow
+                label={tt("Язык интерфейса")}
+                description={tt("Применяется сразу, без перезапуска. Переведены интерфейс, уведомления, сообщения сервера и раздел «Обучение»; ответы Ассистента остаются на русском.")}
+                right={<LanguageSwitcher />}
+              />
+            </SettingsCard>
 
-            {/* (правка 739) Выделение текста в интерфейсе (по умолчанию выкл.) */}
-            <SelectTextSwitcher />
+            <SettingsCard
+              icon={<SlidersHorizontalIcon className="w-4 h-4" />}
+              title={tt("Поведение")}
+              description={tt("Звук завершения и работа с текстом")}
+            >
+              <SettingsRow
+                label={tt("Звук при завершении")}
+                description={tt("Короткий сигнал при окончании генерации")}
+                right={
+                  <SettingsToggle
+                    checked={soundOn}
+                    label={tt("Звук при завершении")}
+                    onChange={(next) => {
+                      setSoundOn(next)
+                      void fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sound_on: next }),
+                      }).catch(() => { /* ignore */ })
+                    }}
+                  />
+                }
+              />
+              <SelectTextSwitcher />
+            </SettingsCard>
           </div>
         )}
 
         {/* ─────────── LLM ─────────── */}
         {tab === 'llm' && (
-          <div className="space-y-4 py-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <BotIcon className="w-4 h-4 text-cyan-400" />
-              {' '}{tt("LLM-ассистент")}
-            </div>
-            <p className="text-xs text-muted-foreground/70 -mt-2">
-              {tt("Устройство и параметры контекста модели чата (Gemma 4 12B / Qwen3.5 9B).")}
-            </p>
-
-            <div className="space-y-1.5 pt-2 border-t border-border">
-              <div className="flex items-center justify-between">
+          <div className="space-y-3">
+            <SettingsCard
+              icon={<CpuIcon className="w-4 h-4" />}
+              title={tt("Устройство и контекст")}
+              description={tt("Где и с каким контекстом считается модель чата")}
+            >
+              <SettingsField label={tt("Устройство")} description={tt("Где считается модель чата")}>
+                <SettingsChoice
+                  value={llmDevice}
+                  onChange={setLlmDevice}
+                  options={[
+                    { value: 'auto', label: tt("Авто"), title: tt("GPU при свободной VRAM, иначе CPU") },
+                    { value: 'gpu', label: 'GPU', title: tt("Быстро (~40+ ток/с), делит VRAM с генерацией") },
+                    { value: 'cpu', label: 'CPU', title: tt("Медленнее, но не трогает VRAM") },
+                  ]}
+                />
+              </SettingsField>
+              <SettingsField
+                label={tt("Контекст LLM")}
+                description={tt("Сколько токенов диалога модель держит в памяти")}
+                value={`${(llmCtxSize / 1024).toFixed(llmCtxSize % 1024 === 0 ? 0 : 1)}K`}
+              >
                 <div>
-                  <span className="text-xs text-muted-foreground">{tt("Устройство")}</span>
-                  <p className="text-[10px] text-muted-foreground/60">
-                    {tt("Где считается модель чата")}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--surface-2)]/60 border border-border">
-                {([
-                  ['auto', 'Авто', 'GPU при свободной VRAM, иначе CPU'],
-                  ['gpu', 'GPU', 'Быстро (~40+ ток/с), делит VRAM с генерацией'],
-                  ['cpu', 'CPU', 'Медленнее, но не трогает VRAM'],
-                ] as const).map(([id, label, title]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    title={tt(title)}
-                    onClick={() => setLlmDevice(id)}
-                    className={cn(
-                      'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
-                      llmDevice === id
-                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                        : 'text-muted-foreground border border-transparent hover:text-foreground',
-                    )}
-                  >
-                    {tt(label)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-2 border-t border-border">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{tt("Контекст LLM")}</span>
-                <span className="text-xs font-mono text-cyan-300">
-                  {(llmCtxSize / 1024).toFixed(llmCtxSize % 1024 === 0 ? 0 : 1)}{tt("K токенов")}
-                </span>
-              </div>
-              <input
-                type="range"
-                // (правка 827) min 8192→4096: сервер и чтение принимают от
-                // 4096 (правка 314) — UI не давал установить нижнюю половину диапазона.
-                min={4096}
-                max={102400}
-                step={1024}
-                value={llmCtxSize}
-                onChange={(e) => setLlmCtxSize(parseInt(e.target.value, 10))}
-                className="w-full h-2 cursor-pointer accent-cyan-400"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground/50">
-                <span>4K</span><span>100K</span>
-              </div>
-            </div>
-
-            {/* (правка 109) Квантизация KV-кэша: экономит VRAM/RAM, качество чуть ниже */}
-            <div className="space-y-1.5 pt-2 border-t border-border">
-              <span className="text-xs text-muted-foreground">{tt("Квантизация KV-кэша")}</span>
-              <p className="text-[10px] text-muted-foreground/60">
-                {tt("Сжимает кэш контекста модели чата (меньше памяти при том же контексте). По умолчанию q4_0 — максимум экономии (правка 119); q8_0 — почти без потери качества; off — без сжатия.")}
-              </p>
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--surface-2)]/60 border border-border">
-                {([
-                  ['off', 'Выкл (fp16)', 'Как раньше: полная точность, больше памяти'],
-                  ['q8_0', 'Q8', 'Рекомендуется: почти без потери качества'],
-                  ['q5_1', 'Q5', 'Умеренная экономия памяти'],
-                  ['q4_0', 'Q4', 'Максимальная экономия памяти'],
-                ] as const).map(([id, label, title]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    title={tt(title)}
-                    onClick={() => setLlmKvCache(id)}
-                    className={cn(
-                      'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
-                      llmKvCache === id
-                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                        : 'text-muted-foreground border border-transparent hover:text-foreground',
-                    )}
-                  >
-                    {tt(label)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* (правка 53) Видение видео ассистентом — по умолчанию ВКЛ */}
-            <div className="space-y-1.5 pt-2 border-t border-border">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <span className="text-xs text-muted-foreground">{tt("Видение видео ассистентом")}</span>
-                  <p className="text-[10px] text-muted-foreground/60">
-                    {tt("Вкл: ассистент получает сжатый digest видео-рефов (кэшируется по содержимому файла). Выкл: знает только о наличии видео и не выдумывает его содержимое.")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  title={llmVideoVision ? tt("Выключить видение видео") : tt("Включить видение видео")}
-                  onClick={() => setLlmVideoVision(!llmVideoVision)}
-                  className={cn(
-                    'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                    llmVideoVision ? 'bg-cyan-500/70' : 'bg-[var(--surface-4)]',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                      llmVideoVision && 'translate-x-[18px]',
-                    )}
+                  <input
+                    type="range"
+                    // (правка 827) min 8192→4096: сервер и чтение принимают от
+                    // 4096 (правка 314) — UI не давал установить нижнюю половину диапазона.
+                    min={4096}
+                    max={102400}
+                    step={1024}
+                    value={llmCtxSize}
+                    onChange={(e) => setLlmCtxSize(parseInt(e.target.value, 10))}
+                    className="h-1.5 w-full cursor-pointer accent-cyan-400"
                   />
-                </button>
-              </div>
-            </div>
+                  <div className="mt-1 flex justify-between text-[10px] text-muted-foreground/60">
+                    <span>4K</span><span>100K</span>
+                  </div>
+                </div>
+              </SettingsField>
+              {/* (правка 109) Квантизация KV-кэша: экономит VRAM/RAM, качество чуть ниже */}
+              <SettingsField
+                label={tt("Квантизация KV-кэша")}
+                description={tt("Сжимает кэш контекста модели чата (меньше памяти при том же контексте). Q8 — почти без потери качества, Q4 — максимум экономии.")}
+              >
+                <SettingsChoice
+                  value={llmKvCache}
+                  cols={4}
+                  onChange={setLlmKvCache}
+                  options={[
+                    { value: 'off', label: tt("Выкл"), title: tt("Как раньше: полная точность, больше памяти") },
+                    { value: 'q8_0', label: 'Q8', title: tt("Рекомендуется: почти без потери качества") },
+                    { value: 'q5_1', label: 'Q5', title: tt("Умеренная экономия памяти") },
+                    { value: 'q4_0', label: 'Q4', title: tt("Максимальная экономия памяти") },
+                  ]}
+                />
+              </SettingsField>
+            </SettingsCard>
 
-            {/* LLM Model Selector (правка 48); key — перечитывание после сброса
-                (правка 54) и после сохранения своей модели (правка 467) */}
-            <LlmModelSelector key={`llm-${resetTick}-${llmSelTick}`} />
+            <SettingsCard
+              icon={<SparklesIcon className="w-4 h-4" />}
+              title={tt("Возможности")}
+              description={tt("Что ассистент умеет видеть и учитывать")}
+            >
+              {/* (правка 53) Видение видео ассистентом — по умолчанию ВКЛ */}
+              <SettingsRow
+                label={tt("Видение видео ассистентом")}
+                description={tt("Вкл: ассистент получает сжатый digest видео-рефов (кэшируется по содержимому файла). Выкл: знает только о наличии видео и не выдумывает его содержимое.")}
+                right={
+                  <SettingsToggle
+                    checked={llmVideoVision}
+                    onChange={setLlmVideoVision}
+                    label={tt("Видение видео ассистентом")}
+                  />
+                }
+              />
+            </SettingsCard>
+
+            {/* (правка 48) Выбор встроенной модели; key — перечитывание после
+                сброса (правка 54) и после сохранения своей модели (правка 467) */}
+            <SettingsCard
+              icon={<BotIcon className="w-4 h-4" />}
+              title={tt("Модель ассистента")}
+              description={tt("Встроенные модели с разной квантизацией")}
+            >
+              <LlmModelSelector key={`llm-${resetTick}-${llmSelTick}`} />
+            </SettingsCard>
 
             {/* (правка 257) Своя модель ассистента: абсолютный путь к .gguf.
                 Непустой путь перекрывает выбор модели выше (баннер про
-                модели ассистента при этом гаснет). mmproj — опционально,
-                для зрения; без него ассистент работает только текстом. */}
-            <div className="space-y-1.5 pt-2 border-t border-border">
-              <span className="text-xs text-muted-foreground">{tt("Своя модель (GGUF)")}</span>
-              <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
+                модели ассистента при этом гаснет). mmproj — опционально. */}
+            <SettingsCard
+              icon={<FolderOpenIcon className="w-4 h-4" />}
+              title={tt("Своя модель (GGUF)")}
+              description={tt("Путь перекрывает выбор из списка выше. Пусто = встроенная модель")}
+            >
+              <div className="max-w-[520px] space-y-2 px-3.5 py-3">
                 {/* (правка 308) Сервер принимает и папку, и файл: папка
                     резолвится в первый .gguf внутри неё при сохранении. */}
-                {' '}{tt("Папка с .gguf-моделью или путь к самому файлу — ассистент запустится с ней (движок студии, без скачивания и копирования). Пусто = модель из списка выше. Пример:")}{' '} <span className="font-mono">D:\models</span>
-              </p>
-              {/* (правка 278) Кнопка «Выбрать папку» — нативный диалог
-                  (тот же, что у «Свои папки моделей»); ручной ввод остаётся
-                  как фолбэк. */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start font-normal"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/dialog/folder', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: tt("Выберите папку с моделью .gguf") }),
-                    })
-                    const data = await res.json()
-                    if (!res.ok) {
-                      toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
-                      return
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-full justify-start gap-1.5 text-xs font-normal"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/dialog/folder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: tt("Выберите папку с моделью .gguf") }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok) {
+                        toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
+                        return
+                      }
+                      if (data.path) setLlmCustomModel(data.path as string)
+                    } catch {
+                      toast.error(tt("Не удалось открыть диалог выбора папки."))
                     }
-                    if (data.path) setLlmCustomModel(data.path as string)
-                  } catch {
-                    toast.error(tt("Не удалось открыть диалог выбора папки."))
-                  }
-                }}
-              >
-                <FolderOpenIcon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-                {' '}{tt("Выбрать папку на диске…")}
-              </Button>
-              <input
-                type="text"
-                value={llmCustomModel}
-                onChange={(e) => setLlmCustomModel(e.target.value)}
-                placeholder={tt("…или введите путь вручную: D:\\models")}
-                className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-              <span className="text-xs text-muted-foreground block pt-1">{tt("mmproj (зрение, опционально)")}</span>
-              {/* (правка 308) Тоже файл или папка: из папки берётся первый
-                  файл с 'mmproj' в имени. */}
-              <input
-                type="text"
-                value={llmCustomMmproj}
-                onChange={(e) => setLlmCustomMmproj(e.target.value)}
-                placeholder="D:\models\my-model-mmproj-F16.gguf"
-                className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-            </div>
+                  }}
+                >
+                  <FolderOpenIcon className="w-3.5 h-3.5 shrink-0" />
+                  {' '}{tt("Выбрать папку на диске…")}
+                </Button>
+                <input
+                  type="text"
+                  value={llmCustomModel}
+                  onChange={(e) => setLlmCustomModel(e.target.value)}
+                  placeholder={tt("…или введите путь вручную: D:\\models")}
+                  className={SETTINGS_INPUT_CLASS}
+                />
+                <span className="block pt-1 text-[11px] text-muted-foreground">{tt("mmproj (зрение, опционально)")}</span>
+                {/* (правка 308) Тоже файл или папка: из папки берётся первый
+                    файл с 'mmproj' в имени. */}
+                <input
+                  type="text"
+                  value={llmCustomMmproj}
+                  onChange={(e) => setLlmCustomMmproj(e.target.value)}
+                  placeholder="D:\models\my-model-mmproj-F16.gguf"
+                  className={SETTINGS_INPUT_CLASS}
+                />
+              </div>
+            </SettingsCard>
 
-            <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-              {tt("Макс. длина ответа рассчитывается автоматически из контекста. Применяется при следующем запуске модели. При генерации видео GPU-режим автоматически уступает память.")}
-            </p>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void saveLlm()}
-              disabled={saving}
-              className="w-full"
-            >
-              {saving ? tt("Сохранение...") : tt("Сохранить")}
-            </Button>
+            <SettingsNote className="rounded-lg border border-border/60 bg-[var(--surface-1)] px-3.5 py-2.5">
+              {tt("Макс. длина ответа рассчитывается автоматически из контекста. Устройство, контекст и своя модель применяются при следующем запуске модели; остальное — сразу. При генерации видео GPU-режим автоматически уступает память.")}
+            </SettingsNote>
           </div>
         )}
 
@@ -996,182 +1044,124 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         {/* ─────────── Optimization ─────────── */}
         {tab === 'optimization' && (
-          <div className="space-y-5 py-2">
-            {/* ── ComfyUI GPU memory (config.ini, applied at restart) ── */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <CpuIcon className="w-4 h-4 text-amber-400" />
-                {' '}{tt("Память GPU (ComfyUI)")}
-              </div>
-              <p className="text-xs text-muted-foreground/70 -mt-1.5">
-                {tt("Резерв и динамическое управление VRAM ComfyUI. Применяется при перезапуске.")}
-              </p>
-
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">{tt("Резерв VRAM")}</span>
-                  <span className="text-xs font-mono">{reserveVram} GB</span>
-                </div>
-                <input
-                  type="range"
-                  /* (правка 315) Диапазон унифицирован с сервером: 1–16 ГБ */
-                  min={1}
-                  max={16}
-                  step={0.5}
-                  value={reserveVram}
-                  onChange={(e) => setReserveVram(parseFloat(e.target.value))}
-                  className="w-full h-2 cursor-pointer accent-amber-400"
-                />
-                {/* Позиции по реальной шкале 1–16: 8 GB стоит на ~47%, а не
-                    в центре (justify-between его прижимал к 50% и врал) */}
-                <div className="relative h-3 text-[10px] text-muted-foreground/50">
-                  <span className="absolute left-0">1 GB</span>
-                  <span className="absolute" style={{ left: '47%' }}>8 GB</span>
-                  <span className="absolute right-0">16 GB</span>
-                </div>
-              </div>
-
-              {/* (правка 490) Доп. запас свободной VRAM (--vram-headroom):
-                  его учитывает нативный слой DynamicVRAM (comfy-aimdo) —
-                  он следит за реально свободной VRAM по NVML, включая
-                  чужие приложения. Основной и гарантированный рычаг —
-                  «Резерв VRAM»: его менеджер моделей ComfyUI вычитает из
-                  доступной памяти при загрузке весов, поэтому модели
-                  выгружаются/офлоадятся раньше. */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">{tt("Запас свободной VRAM (headroom)")}</span>
-                  <span className="text-xs font-mono">{vramHeadroom > 0 ? `${vramHeadroom} GB` : tt("Выкл")}</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={8}
-                  step={0.5}
-                  value={vramHeadroom}
-                  onChange={(e) => setVramHeadroom(parseFloat(e.target.value))}
-                  className="w-full h-2 cursor-pointer accent-amber-400"
-                />
-                <div className="relative h-3 text-[10px] text-muted-foreground/50">
-                  <span className="absolute left-0">{tt("Выкл")}</span>
-                  <span className="absolute" style={{ left: '22%' }}>2 GB</span>
-                  <span className="absolute right-0">8 GB</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-                  {tt("Дополнительный запас, который учитывает нативный слой DynamicVRAM (comfy-aimdo) при распределении VRAM — с учётом и чужих приложений. Гарантированный рычаг — «Резерв VRAM»: его менеджер моделей ComfyUI вычитает при загрузке весов.")}
-                </p>
-              </div>
-
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <span className="text-xs text-muted-foreground">{tt("Принудительный fast-disk")}</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Дисковый режим ComfyUI для DynamicVRAM. По умолчанию выкл. Может помочь на быстром NVMe; на SATA SSD может быть медленнее.")}
-                    </p>
+          <div className="space-y-3">
+            {/* ── Память GPU: применяется при перезапуске ComfyUI ── */}
+            <SettingsCard
+              icon={<CpuIcon className="w-4 h-4" />}
+              title={tt("Память GPU (ComfyUI)")}
+              description={tt("Резерв и динамическое управление VRAM. Применяется при перезапуске ComfyUI.")}
+            >
+              <SettingsField
+                label={tt("Резерв VRAM")}
+                description={tt("Сколько памяти менеджер моделей вычитает из доступной — модели выгружаются раньше.")}
+                value={`${reserveVram} GB`}
+              >
+                <div>
+                  <input
+                    type="range"
+                    /* (правка 315) Диапазон унифицирован с сервером: 1–16 ГБ */
+                    min={1}
+                    max={16}
+                    step={0.5}
+                    value={reserveVram}
+                    onChange={(e) => setReserveVram(parseFloat(e.target.value))}
+                    className="h-1.5 w-full cursor-pointer accent-amber-400"
+                  />
+                  {/* Позиции по реальной шкале 1–16: 8 GB стоит на ~47%, а не
+                      в центре (justify-between его прижимал к 50% и врал) */}
+                  <div className="relative mt-1 h-3 text-[10px] text-muted-foreground/60">
+                    <span className="absolute left-0">1 GB</span>
+                    <span className="absolute" style={{ left: '47%' }}>8 GB</span>
+                    <span className="absolute right-0">16 GB</span>
                   </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={fastDisk}
-                    onClick={() => setFastDisk(!fastDisk)}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      fastDisk ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        fastDisk && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
                 </div>
-              </div>
+              </SettingsField>
 
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">Dynamic VRAM</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Динамическое управление VRAM ComfyUI")}
-                    </p>
+              {/* (правка 490) Доп. запас свободной VRAM (--vram-headroom) */}
+              <SettingsField
+                label={tt("Запас свободной VRAM (headroom)")}
+                description={tt("Дополнительный запас для нативного слоя DynamicVRAM (comfy-aimdo): учитывает и чужие приложения. Гарантированный рычаг — «Резерв VRAM».")}
+                value={vramHeadroom > 0 ? `${vramHeadroom} GB` : tt("Выкл")}
+              >
+                <div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={8}
+                    step={0.5}
+                    value={vramHeadroom}
+                    onChange={(e) => setVramHeadroom(parseFloat(e.target.value))}
+                    className="h-1.5 w-full cursor-pointer accent-amber-400"
+                  />
+                  <div className="relative mt-1 h-3 text-[10px] text-muted-foreground/60">
+                    <span className="absolute left-0">{tt("Выкл")}</span>
+                    <span className="absolute" style={{ left: '22%' }}>2 GB</span>
+                    <span className="absolute right-0">8 GB</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setDynamicVram(!dynamicVram)}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      dynamicVram ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        dynamicVram && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
                 </div>
-              </div>
+              </SettingsField>
 
-              <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
+              <SettingsRow
+                label={tt("Принудительный fast-disk")}
+                description={tt("Дисковый режим ComfyUI для DynamicVRAM. Может помочь на быстром NVMe; на SATA SSD может быть медленнее.")}
+                right={
+                  <SettingsToggle
+                    checked={fastDisk}
+                    onChange={setFastDisk}
+                    label={tt("Принудительный fast-disk")}
+                  />
+                }
+              />
+
+              <SettingsRow
+                label="Dynamic VRAM"
+                description={tt("Динамическое управление VRAM ComfyUI")}
+                right={
+                  <SettingsToggle checked={dynamicVram} onChange={setDynamicVram} label="Dynamic VRAM" />
+                }
+              />
+
+              <SettingsNote>
                 {tt("Применяется при перезапуске ComfyUI — после сохранения перезапустите студию (start.bat).")}
-              </p>
-            </div>
+              </SettingsNote>
+            </SettingsCard>
 
-            {/* ── Generation optimizations (per-generation workflow params, applied immediately) ── */}
-            <div className="space-y-3 pt-4 border-t border-border">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <SlidersHorizontalIcon className="w-4 h-4 text-emerald-400" />
-                {' '}{tt("Оптимизация генерации (VRAM)")}
-              </div>
-              <p className="text-xs text-muted-foreground/70 -mt-1.5">
-                {tt("Режимы экономии памяти для нод генерации. Применяются ко всем новым генерациям сразу — без перезапуска ComfyUI.")}
-              </p>
+            {/* (правка 1080) Поколение ядра ComfyUI: актуальное 0.44+ или
+                откатное 0.33.x (comfy-aimdo 0.4.13) для слабых карт. */}
+            <CoreChannelCard />
 
+            {/* ── Оптимизация генерации: применяется сразу ── */}
+            <SettingsCard
+              icon={<SlidersHorizontalIcon className="w-4 h-4" />}
+              title={tt("Экономия VRAM при генерации")}
+              description={tt("Применяется ко всем новым генерациям сразу — без перезапуска ComfyUI.")}
+            >
               {/* (правка 168) Sparse Attention (Sol-Attn) */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">{tt("Разреженное внимание (Sol-Attn)")}</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={video.sparseAttention}
+              <SettingsRow
+                label={tt("Разреженное внимание (Sol-Attn)")}
+                description={tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически")}
+                right={
+                  <SettingsToggle
+                    checked={video.sparseAttention}
+                    label={tt("Разреженное внимание (Sol-Attn)")}
                     // (правка 813) Sol-Attn сохраняем сразу: patchVideo пишет в
                     // localStorage и ставит зеркало в очередь на 800 мс. Если
                     // приложение закрыть/убить в этом окне, последнее значение
-                    // могло не дойти до data/settings. flushMirror отправляет
-                    // накопленное немедленно — тумблер фиксируется мгновенно.
-                    onClick={() => {
-                      patchVideo({ sparseAttention: !video.sparseAttention })
+                    // могло не дойти до data/settings — flushMirror отправляет
+                    // накопленное немедленно.
+                    onChange={(next) => {
+                      patchVideo({ sparseAttention: next })
                       flushMirror()
                     }}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      video.sparseAttention ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        video.sparseAttention && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
-                </div>
+                  />
+                }
+              />
 
-                {/* (правка 466) Настройки ноды Sol-Attn — видны при включённом
-                    тоггле (как блок Veda, правка 406). Раньше значения были
-                    зашиты в шаблон workflow (tau 1.3, 0.2–1.0, 12288, 256). */}
-                {video.sparseAttention && (
-                  <div className="space-y-3 pl-3 border-l border-border/60">
+              {/* (правка 466) Настройки ноды Sol-Attn — видны при включённом
+                  тоггле (как блок Veda, правка 406). */}
+              {video.sparseAttention && (
+                <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
                     <SettingSlider
                       label={tt("Порог разреженности (tau)")}
                       labelTitle="Насколько смело пропускать часть вычислений внимания. Больше — быстрее, но картинка может стать грубее. Стандартно 1.3."
@@ -1226,40 +1216,26 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       inputMax={8192}
                     />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* (правка 301) Veda Sparse Attention */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">Veda Sparse Attention</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={video.vedaAttention}
-                    onClick={() => patchVideo({ vedaAttention: !video.vedaAttention })}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      video.vedaAttention ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        video.vedaAttention && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
-                </div>
+              <SettingsRow
+                label="Veda Sparse Attention"
+                description={tt("Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn")}
+                right={
+                  <SettingsToggle
+                    checked={video.vedaAttention}
+                    onChange={(next) => patchVideo({ vedaAttention: next })}
+                    label="Veda Sparse Attention"
+                  />
+                }
+              />
 
-                {/* (правка 406) Расширенные настройки Veda — видны при включённом тоггле */}
-                {video.vedaAttention && (
-                  <div className="space-y-3 pl-3 border-l border-border/60">
+              {/* (правка 406) Расширенные настройки Veda — видны при включённом тоггле */}
+              {video.vedaAttention && (
+                <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
                     <SettingSlider
                       label={tt("Спарсити генерации, %")}
                       value={(() => { const n = Number.parseFloat(video.vedaGeneratedSparsity); return Number.isFinite(n) ? n : 90 })()}
@@ -1268,7 +1244,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       max={95}
                       step={5}
                     />
-                    <p className="text-[10px] text-muted-foreground/60 -mt-1.5 leading-snug">
+                    <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
                       {tt("Сколько key-тайлов пропускать в генерации. Выше % = быстрее, но грубее картинка.")}
                     </p>
                     <SettingSlider
@@ -1279,7 +1255,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       max={95}
                       step={5}
                     />
-                    <p className="text-[10px] text-muted-foreground/60 -mt-1.5 leading-snug">
+                    <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
                       {tt("То же для референсов. 0% = полное внимание к референсам — точнее лицо персонажа, но медленнее.")}
                     </p>
                     <div className="space-y-1">
@@ -1289,9 +1265,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         value={video.vedaFullAttentionLayers}
                         onChange={(e) => patchVideo({ vedaFullAttentionLayers: e.target.value })}
                         placeholder="0, 1, 47-49"
-                        className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        className={SETTINGS_INPUT_CLASS}
                       />
-                      <p className="text-[10px] text-muted-foreground/60 leading-snug">
+                      <p className="text-[11px] leading-snug text-muted-foreground">
                         {tt("0-based номера блоков DiT, которые всегда считаются плотно. Пусто = все слои sparse.")}
                       </p>
                     </div>
@@ -1302,84 +1278,53 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         value={video.vedaFullAttentionSteps}
                         onChange={(e) => patchVideo({ vedaFullAttentionSteps: e.target.value })}
                         placeholder="0, 1"
-                        className="w-full rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        className={SETTINGS_INPUT_CLASS}
                       />
-                      <p className="text-[10px] text-muted-foreground/60 leading-snug">
+                      <p className="text-[11px] leading-snug text-muted-foreground">
                         {tt("0-based номера шагов сэмплера с полным вниманием. Пусто = все шаги sparse.")}
                       </p>
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={video.vedaVerbose}
-                        onChange={(e) => patchVideo({ vedaVerbose: e.target.checked })}
-                        className="w-3.5 h-3.5 accent-emerald-500"
-                      />
+                    <label className="flex items-center justify-between gap-3">
                       <span className="text-xs text-muted-foreground">{tt("Подробный лог (verbose)")}</span>
+                      <SettingsToggle
+                        checked={video.vedaVerbose}
+                        onChange={(next) => patchVideo({ vedaVerbose: next })}
+                        label={tt("Подробный лог (verbose)")}
+                      />
                     </label>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Low VRAM Attention */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">Low VRAM Attention</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Attention чанками по 4 головы — экономит видеопамять")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={video.lowVramAttention}
-                    onClick={() => patchVideo({ lowVramAttention: !video.lowVramAttention })}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      video.lowVramAttention ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        video.lowVramAttention && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
-                </div>
-              </div>
+              <SettingsRow
+                label="Low VRAM Attention"
+                description={tt("Attention чанками по 4 головы — экономит видеопамять")}
+                right={
+                  <SettingsToggle
+                    checked={video.lowVramAttention}
+                    onChange={(next) => patchVideo({ lowVramAttention: next })}
+                    label="Low VRAM Attention"
+                  />
+                }
+              />
 
               {/* Chunk FeedForward + settings */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">Chunk FeedForward</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("FeedForward чанками на длинных последовательностях — экономит VRAM")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={video.chunkFeedForward}
-                    onClick={() => patchVideo({ chunkFeedForward: !video.chunkFeedForward })}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      video.chunkFeedForward ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        video.chunkFeedForward && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
-                </div>
+              <SettingsRow
+                label="Chunk FeedForward"
+                description={tt("FeedForward чанками на длинных последовательностях — экономит VRAM")}
+                right={
+                  <SettingsToggle
+                    checked={video.chunkFeedForward}
+                    onChange={(next) => patchVideo({ chunkFeedForward: next })}
+                    label="Chunk FeedForward"
+                  />
+                }
+              />
 
-                {video.chunkFeedForward && (
-                  <div className="space-y-3 pl-3 border-l border-border/60">
+              {video.chunkFeedForward && (
+                <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
                     <SettingSlider
                       label={tt("Chunk FF: число чанков")}
                       value={typeof video.chunkFFChunks === 'number' ? video.chunkFFChunks : 2}
@@ -1397,58 +1342,34 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       step={512}
                     />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* 3D-апскейлер латентов (правка 806) */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-muted-foreground">{tt("3D-апскейлер латентов")}</span>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {tt("Обученный 3D-апскейлер между проходами. Если выключить — латент просто растягивается: быстрее и экономит VRAM, но качество хуже")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={video.latentUpscaler3D}
-                    onClick={() => patchVideo({ latentUpscaler3D: !video.latentUpscaler3D })}
-                    className={cn(
-                      'relative w-10 h-5.5 rounded-full transition-colors shrink-0',
-                      video.latentUpscaler3D ? 'bg-emerald-500/70' : 'bg-[var(--surface-4)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform',
-                        video.latentUpscaler3D && 'translate-x-[18px]',
-                      )}
-                    />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void saveOptimization()}
-              disabled={saving}
-              className="w-full"
-            >
-              {saving ? tt("Сохранение...") : tt("Сохранить")}
-            </Button>
+              <SettingsRow
+                label={tt("3D-апскейлер латентов")}
+                description={tt("Обученный 3D-апскейлер между проходами. Если выключить — латент просто растягивается: быстрее и экономит VRAM, но качество хуже")}
+                right={
+                  <SettingsToggle
+                    checked={video.latentUpscaler3D}
+                    onChange={(next) => patchVideo({ latentUpscaler3D: next })}
+                    label={tt("3D-апскейлер латентов")}
+                  />
+                }
+              />
+            </SettingsCard>
           </div>
         )}
 
         {/* ─────────── Video output format (правка 386) ─────────── */}
         {tab === 'video' && (
-          <div className="space-y-6 py-2">
-            {/* Кодек */}
-            <div className="space-y-2">
-              <Label className="text-xs">{tt("Кодек видео")}</Label>
-              <div className="grid grid-cols-2 gap-1.5">
+          <div className="space-y-3">
+            <SettingsCard
+              icon={<FileVideoIcon className="w-4 h-4" />}
+              title={tt("Кодек видео")}
+              description={tt("Формат сохранения — для генерации, рефайна, продления и апскейлов")}
+            >
+              <div className="grid grid-cols-2 gap-2 px-3.5 py-3">
                 {([
                   ['h264', 'H.264 (x264)', 'Максимальная совместимость — играет везде'],
                   ['h265', 'H.265 (x265)', 'Файл на 30–50% меньше, кодирование медленнее'],
@@ -1463,70 +1384,71 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       'rounded-lg border p-2.5 text-left transition-colors',
                       videoCodec === id
                         ? 'border-cyan-500/50 bg-cyan-500/10'
-                        : 'border-border bg-[var(--surface-2)] hover:border-cyan-500/30',
+                        : 'border-border bg-[var(--surface-1)] hover:border-cyan-500/30',
                     )}
                   >
                     <p className={cn(
                       'text-xs font-medium',
                       videoCodec === id ? 'text-cyan-300' : 'text-foreground',
                     )}>{tt(label)}</p>
-                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{tt(hint)}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{tt(hint)}</p>
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-muted-foreground">
+              <SettingsNote>
                 {tt("NVENC использует отдельный блок видеокарты; если задачи начнут падать на сохранении — вернитесь на программный кодек.")}
-              </p>
-            </div>
+              </SettingsNote>
+            </SettingsCard>
 
-            {/* Качество */}
-            {videoCodec === 'h264' || videoCodec === 'h265' ? (
-              <div className="space-y-2">
-                <SettingSlider
-                  label={tt("Качество (CRF — меньше = лучше)")}
-                  value={videoCrf}
-                  min={0}
-                  max={30}
-                  step={1}
-                  onChange={(v) => setVideoCrf(Math.round(v))}
-                  formatValue={(v) =>
-                    v <= 14 ? tt("{{p1}} — максимум", { p1: v }) : v <= 19 ? tt("{{p1}} — высокое", { p1: v }) : v <= 25 ? tt("{{p1}} — стандарт", { p1: v }) : tt("{{p1}} — компакт", { p1: v })
-                  }
-                />
-                <p className="text-[10px] leading-snug text-muted-foreground">
-                  {tt("12 — прежний максимум студии (архивное качество). 17–19 — «высокое», глазом почти неотличимо. 23+ — компактные черновики. H.265 при том же CRF даёт заметно меньший файл, чем H.264.")}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <SettingSlider
-                  label={tt("Битрейт NVENC")}
-                  value={videoNvencBitrate}
-                  min={4}
-                  max={40}
-                  step={1}
-                  unit=" Мбит/с"
-                  onChange={(v) => setVideoNvencBitrate(Math.round(v))}
-                />
-                <p className="text-[10px] leading-snug text-muted-foreground">
-                  {tt("Аппаратные энкодеры управляются битрейтом, а не CRF. Для 1080p ориентир: 16 Мбит/с ≈ высокому качеству, 24+ — максимум, 8 — компактно.")}
-                </p>
-              </div>
-            )}
-
-            <p className="text-[10px] leading-snug text-muted-foreground/70">
-              {tt("Применяется ко всем НОВЫМ задачам: генерация (драфт/полное), рефайн «Целый» и «Частями», продление, Tile Upscale, FPS, обрезка и склейки. Уже созданные файлы не перекодируются. Настройка действует сразу — перезапуск не нужен.")}
-            </p>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void saveVideoFormat()}
-              disabled={saving}
-              className="w-full"
+            <SettingsCard
+              icon={<SlidersHorizontalIcon className="w-4 h-4" />}
+              title={videoCodec === 'h264' || videoCodec === 'h265' ? tt("Качество (CRF)") : tt("Качество (битрейт)")}
+              description={
+                videoCodec === 'h264' || videoCodec === 'h265'
+                  ? tt("Меньше CRF — выше качество и больше файл")
+                  : tt("Аппаратные энкодеры управляются битрейтом, а не CRF")
+              }
             >
-              {saving ? tt("Сохранение...") : tt("Сохранить")}
-            </Button>
+              <div className="px-3.5 py-3">
+                {videoCodec === 'h264' || videoCodec === 'h265' ? (
+                  <>
+                    <SettingSlider
+                      label={tt("CRF")}
+                      value={videoCrf}
+                      min={0}
+                      max={30}
+                      step={1}
+                      onChange={(v) => setVideoCrf(Math.round(v))}
+                      formatValue={(v) =>
+                        v <= 14 ? tt("{{p1}} — максимум", { p1: v }) : v <= 19 ? tt("{{p1}} — высокое", { p1: v }) : v <= 25 ? tt("{{p1}} — стандарт", { p1: v }) : tt("{{p1}} — компакт", { p1: v })
+                      }
+                    />
+                    <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                      {tt("12 — прежний максимум студии (архивное качество). 17–19 — «высокое», глазом почти неотличимо. 23+ — компактные черновики. H.265 при том же CRF даёт заметно меньший файл, чем H.264.")}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <SettingSlider
+                      label={tt("Битрейт NVENC")}
+                      value={videoNvencBitrate}
+                      min={4}
+                      max={40}
+                      step={1}
+                      unit=" Мбит/с"
+                      onChange={(v) => setVideoNvencBitrate(Math.round(v))}
+                    />
+                    <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                      {tt("Для 1080p ориентир: 16 Мбит/с ≈ высокому качеству, 24+ — максимум, 8 — компактно.")}
+                    </p>
+                  </>
+                )}
+              </div>
+            </SettingsCard>
+
+            <SettingsNote className="rounded-lg border border-border/60 bg-[var(--surface-1)] px-3.5 py-2.5">
+              {tt("Применяется ко всем НОВЫМ задачам: генерация (драфт/полное), рефайн «Целый» и «Частями», продление, Tile Upscale, FPS, обрезка и склейки. Уже созданные файлы не перекодируются. Настройка действует сразу — перезапуск не нужен.")}
+            </SettingsNote>
           </div>
         )}
 
@@ -1534,132 +1456,175 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         {tab === 'links' && <ManualDownloadPanel />}
 
         {/* ─────────── О программе ─────────── */}
+        {/* ─────────── О программе ─────────── */}
         {tab === 'about' && (
-          <div className="space-y-4 py-2">
-            {/* (правка 790) Автосредство обновления — выше остального, чтобы
-                про него не «забыли» прокруткой. */}
-            <UpdatePanel />
-            <div className="flex items-center gap-3">
-              <img src="/logo.svg" alt="" className="w-10 h-10" />
-              <div>
-                <div className="text-sm font-medium">Minimax H3 Studio</div>
-                <AboutVersion />{/* (правка 791) версия с сервера, не хардкод */}
+          <div className="space-y-3">
+            {/* (правка 790) Обновление — выше остального, чтобы про него не «забыли» */}
+            <SettingsCard
+              icon={<RefreshCwIcon className="w-4 h-4" />}
+              title={tt("Обновления")}
+              description={tt("Проверка и установка новой версии студии")}
+            >
+              <UpdatePanel />
+            </SettingsCard>
+
+            <SettingsCard icon={<InfoIcon className="w-4 h-4" />} title={tt("О программе")}>
+              <div className="flex items-center gap-3 px-3.5 py-3">
+                <img src="/logo.svg" alt="" className="h-10 w-10 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">Minimax H3 Studio</div>
+                  <AboutVersion />{/* (правка 791) версия с сервера, не хардкод */}
+                </div>
               </div>
-            </div>
-            {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}
-            <p className="text-xs text-muted-foreground whitespace-pre-line leading-relaxed">
-              {tt(ABOUT_TEXT)}
-            </p>
+              {/* (правка 484) Текст автора — константа ABOUT_TEXT выше. */}
+              <p className="whitespace-pre-line px-3.5 py-3 text-[11px] leading-relaxed text-muted-foreground">
+                {tt(ABOUT_TEXT)}
+              </p>
+            </SettingsCard>
 
             {/* (правка 484) Ссылки автора */}
-            <div className="space-y-1.5">
+            <SettingsCard
+              icon={<LinkIcon className="w-4 h-4" />}
+              title={tt("Ссылки автора")}
+              description={tt("Отзывы, обновления и поддержка проекта")}
+            >
               {ABOUT_LINKS.map((l) => (
-                <div key={l.url} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-muted-foreground shrink-0">{tt(l.label)}:</span>
+                <div key={l.url} className="flex items-baseline gap-2 px-3.5 py-2.5 text-xs">
+                  <span className="w-[92px] shrink-0 text-muted-foreground">{tt(l.label)}</span>
                   <a
                     href={l.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-blue-400 hover:text-blue-300 underline underline-offset-2 break-all"
+                    className="min-w-0 flex-1 truncate text-cyan-400 underline decoration-cyan-500/30 underline-offset-2 hover:text-cyan-300"
                   >
                     {l.url}
                   </a>
-                  {l.hint && <span className="text-muted-foreground/60">({tt(l.hint)})</span>}
+                  {l.hint && <span className="shrink-0 text-[10px] text-muted-foreground/70">({tt(l.hint)})</span>}
                 </div>
               ))}
-            </div>
+            </SettingsCard>
 
             {/* (правка 484) Техническая информация */}
-            <div className="border-t border-border/50 pt-3 space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground">{tt("Техническая информация")}</div>
+            <SettingsCard
+              icon={<BoxIcon className="w-4 h-4" />}
+              title={tt("Техническая информация")}
+              description={tt("Из чего собрана студия")}
+            >
               {ABOUT_TECH.map((t) => (
-                <div key={tt(t.label)} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-muted-foreground/70 shrink-0">{tt(t.label)}:</span>
-                  <span className="text-muted-foreground">{tt(t.value)}</span>
+                <div key={t.label} className="flex items-baseline gap-3 px-3.5 py-2 text-xs">
+                  <span className="w-[132px] shrink-0 text-muted-foreground">{tt(t.label)}</span>
+                  <span className="min-w-0 flex-1 text-foreground/80">{tt(t.value)}</span>
                 </div>
               ))}
-            </div>
+            </SettingsCard>
           </div>
         )}
 
         {/* ─────────── Reset (Опасная зона) ─────────── */}
         {tab === 'reset' && (
-          <div className="space-y-4 py-2">
-            <div className="flex items-center gap-2">
-              <AlertTriangleIcon className="w-4 h-4 text-red-400" />
-              <span className="text-sm font-medium text-red-400">{tt("Опасная зона")}</span>
-            </div>
-            <p className="text-xs text-muted-foreground/70 -mt-2">
-              {tt("Необратимые операции. Действуйте с осторожностью.")}
-            </p>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
+          <SettingsCard
+            tone="danger"
+            icon={<AlertTriangleIcon className="w-4 h-4" />}
+            title={tt("Опасная зона")}
+            description={tt("Необратимые операции. Действуйте с осторожностью.")}
+          >
+            <SettingsRow
+              label={tt("Сброс настроек")}
+              description={tt("Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию.")}
+              right={
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                  className="h-7 gap-1.5 border-amber-500/30 text-xs text-amber-400 hover:bg-amber-500/10"
                   onClick={() => setConfirmAction('reset')}
                 >
                   <RotateCcwIcon className="w-3.5 h-3.5" />
-                  {' '}{tt("Сброс настроек")}
+                  {' '}{tt("Сбросить")}
                 </Button>
-                <p className="text-xs text-muted-foreground/60 pl-1">
-                  {/* (правка 826) «формат сохранения» теперь тоже сбрасывается */}
-                  {' '}{tt("Все параметры (VRAM, LLM, выбор моделей, генерация, разрешение, шаги, формат сохранения, звук) вернутся к значениям по умолчанию.")}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
+              }
+            />
+            <SettingsRow
+              label={tt("Очистить кэш")}
+              description={tt("Удалит все файлы из папки input ComfyUI (референсы, кадры, временные загрузки).")}
+              right={
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                  className="h-7 gap-1.5 border-amber-500/30 text-xs text-amber-400 hover:bg-amber-500/10"
                   onClick={() => setConfirmAction('clean')}
                 >
                   <Trash2Icon className="w-3.5 h-3.5" />
-                  {' '}{tt("Очистить кэш")}
+                  {' '}{tt("Очистить")}
                 </Button>
-                <p className="text-xs text-muted-foreground/60 pl-1">
-                  {tt("Удалит все файлы из папки input ComfyUI (референсы, кадры, временные загрузки).")}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
+              }
+            />
+            <SettingsRow
+              label={tt("Удалить контент")}
+              description={tt("Удалит ВСЕ сгенерированные видео (папка output), историю чатов ассистента, историю промптов и ТЕКУЩИЙ промпт в поле генерации.")}
+              right={
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full text-red-400 border-red-500/30 hover:bg-red-500/10"
+                  className="h-7 gap-1.5 border-red-500/30 text-xs text-red-400 hover:bg-red-500/10"
                   onClick={() => setConfirmAction('delete')}
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
-                  {' '}{tt("Удалить контент")}
+                  {' '}{tt("Удалить")}
                 </Button>
-                <p className="text-xs text-muted-foreground/60 pl-1">
-                  {tt("Удалит ВСЕ сгенерированные видео (папка output), историю чатов ассистента, историю промптов и ТЕКУЩИЙ промпт в поле генерации.")}
-                </p>
-              </div>
-
-              {/* (правка 130 + полный сброс) Полный сброс «как с завода» */}
-              <div className="space-y-1.5 border-t border-border/40 pt-4">
+              }
+            />
+            {/* (правка 130 + полный сброс) Полный сброс «как с завода» — отдельной
+                строкой с красной подложкой, чтобы не нажать случайно. */}
+            <div className="bg-red-500/[0.04] px-3.5 py-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-red-300">{tt("Полный сброс (всё)")}</p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                    {tt("Удалит ВСЁ ваше: видео, кэш, файлы апскейла, вложения и историю чатов, промпты, журналы и локальные данные. Настройки, LoRA и config.ini вернутся к заводским. Для передачи программы другому человеку — после сброса не останется ничего вашего.")}
+                  </p>
+                </div>
                 <Button
-                  variant="outline"
                   size="sm"
-                  className="w-full text-red-500 border-red-500/50 bg-red-500/5 hover:bg-red-500/15 font-medium"
+                  className="h-7 shrink-0 gap-1.5 bg-red-600 text-xs text-white hover:bg-red-500"
                   onClick={() => setConfirmAction('factory')}
                 >
                   <SparklesIcon className="w-3.5 h-3.5" />
-                  {' '}{tt("Полный сброс (всё)")}
+                  {' '}{tt("Сбросить всё")}
                 </Button>
-                <p className="text-xs text-muted-foreground/60 pl-1">
-                  {tt("Удалит ВСЁ ваше: видео, кэш, файлы апскейла, вложения и историю чатов, промпты, журналы и локальные данные. Настройки, LoRA и config.ini вернутся к заводским. Для передачи программы другому человеку — после сброса не останется ничего вашего.")}
-                </p>
               </div>
             </div>
-          </div>
+            <SettingsNote>{tt("Каждое действие требует подтверждения и необратимо.")}</SettingsNote>
+          </SettingsCard>
         )}
+              </div>
+            </div>
+
+            {/* (правка 1067) Нижняя панель разделов, которые не сохраняются
+                автоматически: одна кнопка на всю вкладку вместо кнопки в конце
+                длинного скролла (она уезжала за край экрана). */}
+            {(tab === 'llm' || tab === 'optimization' || tab === 'video') && (
+              <div className="flex shrink-0 items-center gap-3 border-t border-border px-5 py-3">
+                <p className="flex-1 text-[11px] leading-snug text-muted-foreground">
+                  {tab === 'llm'
+                    ? tt("Устройство, контекст и своя модель применяются при следующем запуске модели.")
+                    : tab === 'optimization'
+                      ? tt("Память GPU применяется после перезапуска ComfyUI; экономия VRAM при генерации — сразу.")
+                      : tt("Применяется ко всем новым задачам, без перезапуска.")}
+                </p>
+                <Button
+                  size="sm"
+                  className="h-8 min-w-[120px]"
+                  disabled={saving}
+                  onClick={() => void (tab === 'llm' ? saveLlm() : tab === 'optimization' ? saveOptimization() : saveVideoFormat())}
+                >
+                  {saving ? tt("Сохранение...") : tt("Сохранить")}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </DialogContent>
+
     </Dialog>
 
     {/* Confirmation dialog */}
@@ -1804,24 +1769,16 @@ function ExtraModelPathsPanel() {
   }
 
   return (
-    <div className="space-y-2 pt-2 border-t border-border">
-      <div className="flex items-center gap-2 text-xs font-medium">
-        <FolderOpenIcon className="w-3.5 h-3.5 text-amber-400" />
-        {' '}{tt("Свои папки моделей")}
-      </div>
-      <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-        {tt("Папки с моделями ВНЕ папки студии (коллекции с других машин, общие хранилища) — без копирования. Папку со стандартной структурой (как")}{' '} <span className="font-mono">models</span> {' '}{tt("у ComfyUI) студия разложит по категориям сама. После изменения перезапустите start.bat.")}
-      </p>
-
+    <div className="divide-y divide-border/50">
       {entries.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 px-3.5 py-2.5">
           {entries.map((e, i) => (
             <div key={e.uid} className="flex items-center gap-1.5">
               {/* (правка 262) Индикатор: папка не существует на диске */}
               {e.exists === false && (
                 <span
                   title={tt("Папка не найдена на диске — удалите или исправьте путь")}
-                  className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/30"
+                  className="shrink-0 rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400"
                 >
                   {tt("нет")}
                 </span>
@@ -1834,11 +1791,12 @@ function ExtraModelPathsPanel() {
                   setEntries((prev) => prev.map((x, j) => (j === i ? { ...x, path: v, exists: undefined } : x)))
                   setDirty(true)
                 }}
-                className={`flex-1 min-w-0 rounded-md border bg-[var(--surface-2)] px-2 py-1 text-[10px] font-mono text-foreground focus:outline-none focus:ring-1 ${
+                className={cn(
+                  'h-7 min-w-0 flex-1 rounded-md border bg-[var(--surface-1)] px-2 font-mono text-[11px] text-foreground focus:outline-none focus:ring-1',
                   e.exists === false
                     ? 'border-red-500/40 focus:ring-red-500/50'
-                    : 'border-border focus:ring-cyan-500/50'
-                }`}
+                    : 'border-border focus:ring-cyan-500/50',
+                )}
               />
               <select
                 value={e.category}
@@ -1847,7 +1805,7 @@ function ExtraModelPathsPanel() {
                   setEntries((prev) => prev.map((x, j) => (j === i ? { ...x, category: v } : x)))
                   setDirty(true)
                 }}
-                className="rounded-md border border-border bg-[var(--surface-2)] px-1.5 py-1 text-[10px] text-foreground focus:outline-none"
+                className="h-7 shrink-0 rounded-md border border-border bg-[var(--surface-1)] px-1.5 text-[11px] text-foreground focus:outline-none"
                 title={tt("Категория (папка ComfyUI)")}
               >
                 {EXTRA_CATEGORY_OPTIONS.map(([k, label]) => (
@@ -1860,7 +1818,7 @@ function ExtraModelPathsPanel() {
                   setEntries((prev) => prev.filter((_, j) => j !== i))
                   setDirty(true)
                 }}
-                className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 shrink-0"
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-red-500/10 hover:text-red-400"
                 title={tt("Убрать папку")}
               >
                 <Trash2Icon className="w-3.5 h-3.5" />
@@ -1870,56 +1828,58 @@ function ExtraModelPathsPanel() {
         </div>
       )}
 
-      {/* Нативный выбор папки (тот же диалог, что у переноса моделей) */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full justify-start font-normal"
-        disabled={adding}
-        onClick={async () => {
-          try {
-            const res = await fetch('/api/dialog/folder', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ title: tt("Выберите папку с моделями") }),
-            })
-            const data = await res.json()
-            if (!res.ok) {
-              toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
-              return
-            }
-            if (data.path) void add(data.path as string)
-          } catch {
-            toast.error(tt("Не удалось открыть диалог выбора папки."))
-          }
-        }}
-      >
-        <FolderOpenIcon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-        {adding ? tt("Добавление…") : tt("Выбрать папку на диске…")}
-      </Button>
-
-      <div className="flex gap-1.5">
-        <input
-          type="text"
-          value={newPath}
-          onChange={(e) => setNewPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              void add()
+      <div className="space-y-2 px-3.5 py-3">
+        {/* Нативный выбор папки (тот же диалог, что у переноса моделей) */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 w-full max-w-[480px] justify-start gap-1.5 text-xs font-normal"
+          disabled={adding}
+          onClick={async () => {
+            try {
+              const res = await fetch('/api/dialog/folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: tt("Выберите папку с моделями") }),
+              })
+              const data = await res.json()
+              if (!res.ok) {
+                toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
+                return
+              }
+              if (data.path) void add(data.path as string)
+            } catch {
+              toast.error(tt("Не удалось открыть диалог выбора папки."))
             }
           }}
-          placeholder={tt("…или введите путь вручную: D:\\AI\\models")}
-          className="flex-1 rounded-md border border-border bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-        />
-        <Button variant="outline" size="sm" onClick={() => void add()} disabled={adding || !newPath.trim()} className="h-8 px-3">
-          {adding ? '…' : tt("Добавить")}
+        >
+          <FolderOpenIcon className="w-3.5 h-3.5 shrink-0" />
+          {adding ? tt("Добавление…") : tt("Выбрать папку на диске…")}
+        </Button>
+
+        <div className="flex max-w-[520px] gap-1.5">
+          <input
+            type="text"
+            value={newPath}
+            onChange={(e) => setNewPath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void add()
+              }
+            }}
+            placeholder={tt("…или введите путь вручную: D:\\AI\\models")}
+            className={cn(SETTINGS_INPUT_CLASS, 'flex-1')}
+          />
+          <Button variant="outline" size="sm" onClick={() => void add()} disabled={adding || !newPath.trim()} className="h-8 shrink-0 px-3 text-xs">
+            {adding ? '…' : tt("Добавить")}
+          </Button>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="h-8 w-fit text-xs">
+          {saving ? tt("Сохранение…") : tt("Сохранить папки")}
         </Button>
       </div>
-
-      <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="w-full">
-        {saving ? tt("Сохранение…") : tt("Сохранить папки")}
-      </Button>
     </div>
   )
 }
@@ -1971,139 +1931,144 @@ function ManualDownloadPanel() {
   }
 
   return (
-    <div className="space-y-3 py-2">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <LinkIcon className="w-4 h-4 text-cyan-400" />
-        {' '}{tt("Ручная загрузка моделей")}
-      </div>
-      <p className="text-xs text-muted-foreground/70 -mt-1 leading-relaxed">
-        {tt("Если скачивание из приложения не работает (например, huggingface.co недоступен) — скачайте файлы вручную по прямым ссылкам и положите по указанным путям. Приложение подхватит их автоматически.")}
-      </p>
-
-      {/* Models root paths */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 p-2 rounded-md bg-[var(--surface-2)] border border-border">
-          <FolderOpenIcon className="w-4 h-4 text-amber-400 shrink-0" />
-          <code className="flex-1 min-w-0 text-[10px] font-mono text-foreground/80 break-all">
-            ComfyUI: {comfyModelsRoot}
-          </code>
-          <button
-            type="button"
-            onClick={() => void copy(comfyModelsRoot, 'Путь')}
-            className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-            title={tt("Скопировать путь")}
-          >
-            <CopyIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        <div className="flex items-center gap-2 p-2 rounded-md bg-[var(--surface-2)] border border-border">
-          <FolderOpenIcon className="w-4 h-4 text-violet-400 shrink-0" />
-          <code className="flex-1 min-w-0 text-[10px] font-mono text-foreground/80 break-all">
-            Bonsai: {bonsaiModelsRoot}
-          </code>
-          <button
-            type="button"
-            onClick={() => void copy(bonsaiModelsRoot, 'Путь')}
-            className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-            title={tt("Скопировать путь")}
-          >
-            <CopyIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {MODEL_CATEGORIES.map(({ key, label }) => {
-        const models = MODELS.filter((m) => m.category === key)
-        if (!models.length) return null
-        return (
-          <div key={key} className="space-y-1.5 pt-2 border-t border-border">
-            <div className="text-xs font-medium text-foreground/80">{tt(label)}</div>
-            {models.map((m) => {
-              const isBonsai = m.target === 'bonsai'
-              // (правка 905) модели кастомных нод (VFI, controlnet_aux) лежат
-              // в своей папке baseDir внутри ядра ComfyUI, а не в models/.
-              const customRoot = m.target === 'custom' && m.baseDir && comfyCore
-                ? `${comfyCore}\\${m.baseDir.replace(/\//g, '\\')}\\`
-                : ''
-              const fullRoot = isBonsai ? bonsaiModelsRoot : (customRoot || comfyModelsRoot)
-              const fullPath = fullRoot + m.relPath
-              // (правка 769) если по ссылке скачается файл с ДРУГИМ именем, чем
-              // ждёт приложение — подсказать юзеру переименовать (автозагрузка
-              // переименовывает сама, ручной способ — нет).
-              const renameHint = getManualRenameHint(m)
-              return (
-              <div
-                key={m.id}
-                className="p-2 rounded-md bg-[var(--surface-2)]/60 border border-border space-y-1"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-foreground/90 truncate" title={tt(m.label)}>
-                    {tt(m.label)}
-                  </span>
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{tt(m.sizeLabel)}</Badge>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <code className="flex-1 min-w-0 text-[10px] font-mono text-cyan-300/80 truncate" title={fullPath}>
-                    {fullPath}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => void copy(fullPath, 'Путь')}
-                    className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                    title={tt("Скопировать полный путь")}
-                  >
-                    <CopyIcon className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <a
-                    href={m.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 min-w-0 text-[10px] text-muted-foreground hover:text-cyan-300 truncate underline decoration-dotted underline-offset-2"
-                    title={m.url}
-                  >
-                    {m.url.replace('?download=true', '')}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => void copy(m.url, 'URL')}
-                    className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                    title={tt("Скопировать ссылку")}
-                  >
-                    <CopyIcon className="w-3 h-3" />
-                  </button>
-                </div>
-                {/* (правка 769) имена в URL и в пути различаются — подсказка */}
-                {renameHint && (
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="flex-1 min-w-0 text-[10px] text-amber-300/90"
-                      title={tt("Скачанный по ссылке файл нужно переименовать, иначе приложение его не увидит")}
-                    >
-                      {tt("⚠ по ссылке скачается «")}{renameHint.downloaded}{tt("» — переименуйте файл в «")}{renameHint.expected}»
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void copy(renameHint.expected, 'Имя файла')}
-                      className="p-0.5 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground shrink-0"
-                      title={tt("Скопировать нужное имя файла")}
-                    >
-                      <CopyIcon className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-              )
-            })}
+    <div className="space-y-3">
+      <SettingsCard
+        icon={<FolderOpenIcon className="w-4 h-4" />}
+        title={tt("Папки моделей")}
+        description={tt("Куда класть файлы, скачанные вручную")}
+      >
+        <div className="space-y-2 px-3.5 py-3">
+          <div className="flex items-center gap-2 rounded-md border border-border bg-[var(--surface-1)] px-2.5 py-2">
+            <FolderOpenIcon className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+            <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">
+              ComfyUI: {comfyModelsRoot}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy(comfyModelsRoot, 'Путь')}
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+              title={tt("Скопировать путь")}
+            >
+              <CopyIcon className="w-3.5 h-3.5" />
+            </button>
           </div>
-        )
-      })}
+          <div className="flex items-center gap-2 rounded-md border border-border bg-[var(--surface-1)] px-2.5 py-2">
+            <FolderOpenIcon className="w-3.5 h-3.5 shrink-0 text-violet-400" />
+            <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">
+              Bonsai: {bonsaiModelsRoot}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy(bonsaiModelsRoot, 'Путь')}
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+              title={tt("Скопировать путь")}
+            >
+              <CopyIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </SettingsCard>
 
-      <p className="text-[10px] text-muted-foreground/60 leading-relaxed pt-1">
-        {tt("Имя файла должно совпасть точно (браузер иногда дописывает «(1)» — переименуйте). Если huggingface.co не открывается — замените в ссылке домен на")}{' '}
-        <code className="text-cyan-300/80">hf-mirror.com</code>{tt(". После скачивания проверьте размер файла (см. бейдж) — меньший размер означает обрыв загрузки.")}
-      </p>
+      <SettingsCard
+        icon={<LinkIcon className="w-4 h-4" />}
+        title={tt("Ссылки на модели")}
+        description={tt("Скачайте файл по ссылке и положите по указанному пути — приложение подхватит его автоматически")}
+      >
+        {MODEL_CATEGORIES.map(({ key, label }) => {
+          const models = MODELS.filter((m) => m.category === key)
+          if (!models.length) return null
+          return (
+            <div key={key}>
+              <div className="px-3.5 pb-1 pt-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                {tt(label)}
+              </div>
+              <div className="divide-y divide-border/40">
+                {models.map((m) => {
+                  const isBonsai = m.target === 'bonsai'
+                  // (правка 905) модели кастомных нод (VFI, controlnet_aux) лежат
+                  // в своей папке baseDir внутри ядра ComfyUI, а не в models/.
+                  const customRoot = m.target === 'custom' && m.baseDir && comfyCore
+                    ? `${comfyCore}\\${m.baseDir.replace(/\//g, '\\')}\\`
+                    : ''
+                  const fullRoot = isBonsai ? bonsaiModelsRoot : (customRoot || comfyModelsRoot)
+                  const fullPath = fullRoot + m.relPath
+                  // (правка 769) если по ссылке скачается файл с ДРУГИМ именем, чем
+                  // ждёт приложение — подсказать юзеру переименовать (автозагрузка
+                  // переименовывает сама, ручной способ — нет).
+                  const renameHint = getManualRenameHint(m)
+                  return (
+                    <div key={m.id} className="space-y-1 px-3.5 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xs text-foreground/90" title={tt(m.label)}>
+                          {tt(m.label)}
+                        </span>
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">{tt(m.sizeLabel)}</Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-cyan-300/80" title={fullPath}>
+                          {fullPath}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => void copy(fullPath, 'Путь')}
+                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+                          title={tt("Скопировать полный путь")}
+                        >
+                          <CopyIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={m.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-cyan-300"
+                          title={m.url}
+                        >
+                          {m.url.replace('?download=true', '')}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void copy(m.url, 'URL')}
+                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+                          title={tt("Скопировать ссылку")}
+                        >
+                          <CopyIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {/* (правка 769) имена в URL и в пути различаются — подсказка */}
+                      {renameHint && (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="min-w-0 flex-1 text-[10px] leading-snug text-amber-300/90"
+                            title={tt("Скачанный по ссылке файл нужно переименовать, иначе приложение его не увидит")}
+                          >
+                            {tt("⚠ по ссылке скачается «")}{renameHint.downloaded}{tt("» — переименуйте файл в «")}{renameHint.expected}»
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void copy(renameHint.expected, 'Имя файла')}
+                            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-[var(--surface-3)] hover:text-foreground"
+                            title={tt("Скопировать нужное имя файла")}
+                          >
+                            <CopyIcon className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </SettingsCard>
+
+      <SettingsNote className="rounded-lg border border-border/60 bg-[var(--surface-1)] px-3.5 py-2.5">
+        {tt("Если скачивание из приложения не работает (например, huggingface.co недоступен) — скачайте файлы вручную по этим ссылкам. Имя файла должно совпасть точно (браузер иногда дописывает «(1)» — переименуйте). Если huggingface.co не открывается — замените в ссылке домен на")}{' '}
+        <code className="text-cyan-300/80">hf-mirror.com</code>
+        {tt(". После скачивания проверьте размер файла (см. бейдж) — меньший размер означает обрыв загрузки.")}
+      </SettingsNote>
     </div>
   )
 }
@@ -2111,7 +2076,7 @@ function ManualDownloadPanel() {
 /* ─── Theme Switcher ─── */
 
 /** (правка 111) `first` — первый блок вкладки «Внешний вид»: без верхней границы. */
-function ThemeSwitcher({ first = false }: { first?: boolean }) {
+function ThemeSwitcher() {
   const { t: tt } = useTranslation() // (правка 955)
 
   const { theme, setTheme } = useTheme()
@@ -2119,47 +2084,32 @@ function ThemeSwitcher({ first = false }: { first?: boolean }) {
 
   useEffect(() => setMounted(true), [])
 
-  if (!mounted) return <div className="h-10" />
-
-  const btnBase = 'flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-all'
-  const btnActive = 'border-cyan-500/50 bg-cyan-500/10 text-foreground'
-  const btnIdle = 'border-border text-muted-foreground hover:border-border/80'
+  if (!mounted) return <div className="h-8" />
 
   return (
-    <div className={cn('space-y-2', !first && 'pt-2 border-t border-border')}>
-      <div className="flex items-center gap-2">
-        <SunIcon className="w-4 h-4 text-amber-400" />
-        <span className="text-sm font-medium">{tt("Тема оформления")}</span>
-      </div>
-      {/* (правка 98) Светлая тема удалена — только тёмные.
-          (правка 441) + тема «Студия» (dark-calm, Calm Studio). */}
-      <div className="grid grid-cols-3 gap-2">
-        <button
-          type="button"
-          onClick={() => { setTheme('dark-gray'); pushPrefs() /* (правка 804) */ }}
-          className={cn(btnBase, theme === 'dark-gray' ? btnActive : btnIdle)}
-        >
-          <MoonIcon className="w-4 h-4" />
-          {' '}{tt("Серая")}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setTheme('dark'); pushPrefs() /* (правка 804) */ }}
-          className={cn(btnBase, theme === 'dark' ? btnActive : btnIdle)}
-        >
-          <MoonIcon className="w-4 h-4" />
-          {' '}{tt("Чёрная")}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setTheme('dark-calm'); pushPrefs() /* (правка 804) */ }}
-          className={cn(btnBase, theme === 'dark-calm' ? btnActive : btnIdle)}
-        >
-          <SparklesIcon className="w-4 h-4" />
-          {' '}{tt("Студия")}
-        </button>
-      </div>
-    </div>
+    /* (правка 98) Светлая тема удалена — только тёмные.
+       (правка 441) + тема «Студия» (dark-calm, Calm Studio). */
+    <SettingsChoice<'dark-gray' | 'dark' | 'dark-calm'>
+      value={theme === 'dark' || theme === 'dark-calm' ? theme : 'dark-gray'}
+      onChange={(v) => {
+        setTheme(v)
+        pushPrefs() // (правка 804)
+      }}
+      options={[
+        {
+          value: 'dark-gray',
+          label: <span className="inline-flex items-center gap-1.5"><MoonIcon className="w-3.5 h-3.5" />{tt("Серая")}</span>,
+        },
+        {
+          value: 'dark',
+          label: <span className="inline-flex items-center gap-1.5"><MoonIcon className="w-3.5 h-3.5" />{tt("Чёрная")}</span>,
+        },
+        {
+          value: 'dark-calm',
+          label: <span className="inline-flex items-center gap-1.5"><SparklesIcon className="w-3.5 h-3.5" />{tt("Студия")}</span>,
+        },
+      ]}
+    />
   )
 }
 
@@ -2179,8 +2129,6 @@ const UI_SCALE_PRESETS = [80, 90, 100, 110, 125] as const
  */
 
 function UiScaleSwitcher() {
-  const { t: tt } = useTranslation() // (правка 955)
-
   // (правка 579) дефолт масштаба UI — 80%
   const [scale, setScale] = useState(UI_SCALE_DEFAULT)
   const [mounted, setMounted] = useState(false)
@@ -2202,34 +2150,25 @@ function UiScaleSwitcher() {
     } catch { /* ignore */ }
   }
 
-  if (!mounted) return <div className="h-10" />
+  if (!mounted) return <div className="h-8" />
 
   return (
-    <div className="space-y-2 pt-2 border-t border-border">
-      <div className="flex items-center gap-2">
-        <ZoomInIcon className="w-4 h-4 text-cyan-400" />
-        <span className="text-sm font-medium">{tt("Масштаб интерфейса")}</span>
-      </div>
-      <div className="grid grid-cols-5 gap-2">
-        {UI_SCALE_PRESETS.map((pct) => (
-          <button
-            key={pct}
-            type="button"
-            onClick={() => apply(pct)}
-            className={cn(
-              'flex items-center justify-center px-2 py-2.5 rounded-lg border text-sm transition-all tabular-nums',
-              scale === pct
-                ? 'border-cyan-500/50 bg-cyan-500/10 text-foreground'
-                : 'border-border text-muted-foreground hover:border-border/80',
-            )}
-          >
-            {pct}%
-          </button>
-        ))}
-      </div>
-      <p className="text-[10px] text-muted-foreground/60">
-        {tt("Масштабирует весь интерфейс: панели, кнопки, отступы и шрифт. Применяется сразу и запоминается.")}
-      </p>
+    <div className="grid grid-cols-5 gap-1.5">
+      {UI_SCALE_PRESETS.map((pct) => (
+        <button
+          key={pct}
+          type="button"
+          onClick={() => apply(pct)}
+          className={cn(
+            'h-8 rounded-md border text-xs font-medium tabular-nums transition-colors',
+            scale === pct
+              ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
+              : 'border-border bg-[var(--surface-1)] text-muted-foreground hover:border-cyan-500/30 hover:text-foreground',
+          )}
+        >
+          {pct}%
+        </button>
+      ))}
     </div>
   )
 }
@@ -2273,33 +2212,19 @@ function SelectTextSwitcher() {
     applySelectText(next)
   }
 
-  if (!mounted) return <div className="h-10" />
+  if (!mounted) return <div className="h-8" />
 
   return (
-    <div className="flex items-center justify-between pt-2 border-t border-border">
-      <div>
-        <span className="text-xs text-muted-foreground">{tt("Выделение текста в интерфейсе")}</span>
-        <p className="text-[10px] text-muted-foreground/60">
-          {tt("Разрешить выделять и копировать текст в UI (по умолчанию заблокировано)")}
-        </p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        onClick={toggle}
-        className={cn(
-          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
-          on ? 'bg-cyan-600' : 'bg-muted-foreground/30',
-        )}
-      >
-        <span
-          className={cn(
-            'pointer-events-none block h-4 w-4 rounded-full bg-white shadow-lg transition-transform',
-            on ? 'translate-x-4' : 'translate-x-0.5',
-          )}
+    <SettingsRow
+      label={tt("Выделение текста в интерфейсе")}
+      description={tt("Разрешить выделять и копировать текст в UI (по умолчанию заблокировано)")}
+      right={
+        <SettingsToggle
+          checked={on}
+          onChange={toggle}
+          label={tt("Выделение текста в интерфейсе")}
         />
-      </button>
-    </div>
+      }
+    />
   )
 }

@@ -66,6 +66,10 @@ function bundleSpec() {
   const inst = readFileSync(join(ROOT, 'install', 'install.ps1'), 'utf8')
   const nodeVer = (inst.match(/\$nodeVersion\s*=\s*'([\d.]+)'/) || [])[1] || null
   const comfyVer = (inst.match(/\$ComfyVersion\s*=\s*'([\d.]+)'/) || [])[1] || null
+  // (правка 1080) откатное ядро тоже бандла: кнопка «Откатить ядро» и ремонт
+  // с -CoreRollback должны ставить его без качания архива с GitHub (codeload
+  // там самое капризное). comfy-aimdo 0.4.13 при этом ставится из PyPI.
+  const comfyRollbackVer = (inst.match(/\$ComfyRollbackVersion\s*=\s*'([\d.]+)'/) || [])[1] || null
   const pyMatch = inst.match(/python-(\d+\.\d+\.\d+)-embed-amd64\.zip/)
   const pyVer = pyMatch ? pyMatch[1] : null
   const uvVer = (inst.match(/uv\/releases\/download\/([\d.]+)\//) || [])[1] || null
@@ -76,6 +80,7 @@ function bundleSpec() {
   if (elVer) jobs.push({ rel: `electron-v${elVer}-win32-x64.zip`, url: `https://github.com/electron/electron/releases/download/v${elVer}/electron-v${elVer}-win32-x64.zip` })
   if (uvVer) jobs.push({ rel: `uv-x86_64-pc-windows-msvc.zip`, url: `https://github.com/astral-sh/uv/releases/download/${uvVer}/uv-x86_64-pc-windows-msvc.zip` })
   if (comfyVer) jobs.push({ rel: `ComfyUI-v${comfyVer}.zip`, url: `https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v${comfyVer}.zip` })
+  if (comfyRollbackVer) jobs.push({ rel: `ComfyUI-v${comfyRollbackVer}.zip`, url: `https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/v${comfyRollbackVer}.zip` })
   jobs.push({ rel: 'get-pip.py', url: 'https://bootstrap.pypa.io/get-pip.py' })
   for (const n of JSON.parse(readFileSync(join(ROOT, 'install', 'nodes.json'), 'utf8'))) {
     jobs.push({ rel: `nodes/${n.name}.zip`, url: `https://codeload.github.com/${n.repo}/zip/${n.sha}` })

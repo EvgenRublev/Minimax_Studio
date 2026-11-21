@@ -15,6 +15,8 @@
  * исполнения ComfyUI обеспечивает `comfy-turn.ts`.
  */
 import { useGenQueue, type QueueItem } from './gen-queue-store'
+// (правка 1058) Тип ручек тайлового режима — модуль без импортов.
+import type { TesseraTileParams } from './comfy/tessera-params'
 import { acquireComfyTurn, isComfyTurnActive, stallLabel } from './comfy-turn'
 import { useGalleryRefresh } from './gallery-refresh-store'
 import { useMontageReturn } from './montage-return-store' // (правка 857)
@@ -43,6 +45,9 @@ export interface RefineTask {
   chunkSeconds: number
   /** (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ. */
   tessera?: boolean
+  /** (правка 1058) Ручки тайлового режима (шов/контекст/чанки/композит/
+   *  референсы/гайд) — из панели «Параметры тайлов». */
+  tesseraParams?: TesseraTileParams
   /** (правка 1057) 3D-апскейлер для пластинки в тайловом тракте. */
   latentUpscaler3D?: boolean
   /** (правка 315) Режим размера референсов ('match' | 'max', дефолт 'max'
@@ -260,6 +265,10 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
       ...(task.windowed === true && { windowed: true }),
       // (правка 1057) «по тайлам» — только вместе с «Частями» (windowed)
       ...(task.windowed === true && task.tessera === true && { tessera: true }),
+      // (правка 1058) ручки тайлового режима — только вместе с тайлами
+      ...(task.windowed === true && task.tessera === true && task.tesseraParams
+        ? { tesseraParams: task.tesseraParams }
+        : {}),
       ...(task.latentUpscaler3D !== undefined && { latentUpscaler3D: task.latentUpscaler3D }),
       // (правка 968) тогглы оптимизаций из настроек — иначе Refine всегда
       // включал LowVRAM/Chunk FF, даже если пользователь их выключил.

@@ -7,6 +7,11 @@
  * становится уникальным (timestamp+random, как stageFile). Ответ:
  * { file, name, duration, url } — длительность считает ffprobe на сервере.
  *
+ * (правка 1064) POST с JSON { fromVideo: { name, subfolder } } — отделение
+ * звука от видео монтажки, как «Detach Audio» в DaVinci Resolve: ffmpeg
+ * вынимает дорожку из файла output ComfyUI в .montage-audio (m4a/AAC) и
+ * возвращает тот же ответ, что импорт файла.
+ *
  * GET ?f=<имя>: отдаёт файл потоком с поддержкой Range — это обязательно,
  * иначе <audio> не сможет делать seek по звуковой дорожке превью.
  */
@@ -20,7 +25,10 @@ import {
   MultipartParseError,
   type MultipartFilePart,
 } from '@/lib/multipart-stream'
-import { resolveFfprobe } from '@/lib/video-probe'
+import { resolveFfprobe, probeHasAudio } from '@/lib/video-probe'
+import { getAppConfig } from '@/lib/app-config'
+import { sanitizeFolderPath } from '@/lib/gallery-folders'
+import { resolveFfmpeg } from '@/lib/thumb'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { st as stT } from '@/lib/i18n/server'
@@ -67,9 +75,82 @@ async function probeAudioDuration(file: string): Promise<number> {
   }
 }
 
+/**
+ * (правка 1064) «Отделить аудио»: вынимаем звук из видеофайла output ComfyUI в
+ * .montage-audio (m4a/AAC 192k). Перекодирование, а не copy: контейнер m4a
+ * принимает только AAC/ALAC, а на входе бывает mp3/opus/ac3. Звук короткий по
+ * сравнению с видео, так что это дёшево даже на слабых машинах.
+ */
+async function extractAudioFromVideo(req: NextRequest): Promise<NextResponse> {
+  let destPath: string | null = null
+  try {
+    const body = await req.json().catch(() => null)
+    const rawName = String(body?.fromVideo?.name || '')
+    if (!rawName || rawName.includes('..') || /[\\/:]/.test(rawName)) {
+      return NextResponse.json({ error: stT("Некорректное имя файла") }, { status: 400 })
+    }
+    const sub = sanitizeFolderPath(body?.fromVideo?.subfolder || '')
+    const outputDir = getAppConfig().outputDir
+    const outputRoot = path.resolve(outputDir)
+    if (!outputDir || !existsSync(outputDir)) {
+      return NextResponse.json({ error: stT("Не найдена папка output ComfyUI. Запустите ComfyUI.") }, { status: 500 })
+    }
+    const src = path.resolve(outputRoot, ...(sub ? sub.split('/') : []), rawName)
+    if (!src.startsWith(outputRoot + path.sep) || !existsSync(src)) {
+      return NextResponse.json({ error: stT("Файл не найден: {{p1}}", { p1: rawName }) }, { status: 404 })
+    }
+    const hasAudio = await probeHasAudio(src)
+    if (hasAudio === false) {
+      // noAudio — маркер для клиента: это не ошибка импорта, а штатное «звука нет»
+      return NextResponse.json({ error: stT("В этом видео нет звуковой дорожки"), noAudio: true }, { status: 400 })
+    }
+    const ffmpeg = await resolveFfmpeg()
+    if (!ffmpeg) {
+      return NextResponse.json({ error: stT("FFmpeg не найден (runtime/ffmpeg).") }, { status: 500 })
+    }
+
+    await fs.mkdir(AUDIO_DIR, { recursive: true })
+    const base = (path.basename(rawName, path.extname(rawName)).replace(UNSAFE_CHARS, '_') || 'audio').slice(0, 120)
+    const unique = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${base}.m4a`
+    destPath = path.join(AUDIO_DIR, unique)
+
+    await execFileAsync(
+      ffmpeg,
+      [
+        '-y', '-v', 'error',
+        '-i', src,
+        '-vn', '-sn', '-dn',
+        '-ac', '2', '-ar', '48000',
+        '-c:a', 'aac', '-b:a', '192k',
+        destPath,
+      ],
+      { timeout: 10 * 60_000, maxBuffer: 8 * 1024 * 1024 },
+    )
+    if (!existsSync(destPath)) {
+      return NextResponse.json({ error: stT("Не удалось отделить звук от видео") }, { status: 500 })
+    }
+    const duration = await probeAudioDuration(destPath)
+    return NextResponse.json({
+      file: unique,
+      name: base,
+      duration,
+      url: `/api/montage/audio?f=${encodeURIComponent(unique)}`,
+    })
+  } catch (err) {
+    if (destPath) await fs.unlink(destPath).catch(() => {})
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: stT("Не удалось отделить звук: {{p1}}", { p1: msg }) }, { status: 500 })
+  }
+}
+
 export async function POST(req: NextRequest) {
   const blocked = localRequestGuard(req)
   if (blocked) return blocked
+
+  // (правка 1064) отделение аудио от клипа видео («Отделить аудио»)
+  if ((req.headers.get('content-type') || '').includes('application/json')) {
+    return extractAudioFromVideo(req)
+  }
 
   let part: MultipartFilePart | null = null
   let destPath: string | null = null

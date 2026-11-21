@@ -19,6 +19,7 @@ import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { framesForDuration } from '@/lib/comfy/minimax-h3-template' // (правка 1047)
+import { gpuVramTotalGb } from '@/lib/comfy/gpu-vram' // (правка 1088)
 import { st } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
@@ -480,6 +481,21 @@ export async function POST(req: NextRequest) {
       if (fs.existsSync(modelPath)) {
         body.diffusionModel = cfg.diffusionModel
       }
+    }
+
+    // (правка 1088) Bounded attention для карт <12 ГБ: QKV-буфер pass 2 на
+    // 1080p (3–6 ГБ) не оставляет места под остальные активации. Узел режет
+    // Q/K/V и out_proj по токенам, математика не меняется. Порог — по
+    // фактической VRAM; MINIMAX_BOUNDED_ATTN=1/0 — ручное включение для замеров.
+    const boundedOverride = process.env.MINIMAX_BOUNDED_ATTN
+    if (boundedOverride === '1' || boundedOverride === '0') {
+      body.boundedAttention = boundedOverride === '1'
+    } else {
+      const vramGb = await gpuVramTotalGb()
+      // Veda патчит attention своим override'ом и с поблочным Q не проверялась —
+      // оставляем ей штатный путь.
+      body.boundedAttention = vramGb !== null && vramGb > 0 && vramGb < 12
+        && body.vedaAttention !== true
     }
 
     // VRAM arbitration: LLM должен ПОЛНОСТЬЮ покинуть VRAM до загрузки MiniMax.

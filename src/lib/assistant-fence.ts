@@ -200,6 +200,29 @@ export function hasDanglingPictureTags(prompt: string, refCount: number): boolea
 }
 
 /**
+ * (правка 1062) Все «висячие» метки промпта сразу по трём видам референсов:
+ * номер больше числа прикреплённых активов этого вида. Возвращает сами теги
+ * (`<Picture 2>`, …) в порядке появления — для предупреждения при вставке
+ * ответа ассистента в форму (генерация такие теги всё равно отклонит).
+ */
+export function danglingRefTags(
+  prompt: string,
+  counts: { Picture: number; Video: number; Audio: number },
+): string[] {
+  if (!prompt) return []
+  const out: string[] = []
+  const re = /<(Picture|Video|Audio)\s+(\d+)\s*>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(prompt)) !== null) {
+    const kind = m[1] as keyof typeof counts
+    const n = parseInt(m[2], 10)
+    const have = counts[kind] ?? 0
+    if (n >= 1 && n > have && !out.includes(m[0])) out.push(m[0])
+  }
+  return out
+}
+
+/**
  * Извлечь вставляемый H3-промпт из ответа ассистента (правка 34):
  * 1) содержимое fence-блока — ровно между ```text и ```, т.е. обрезка
  *    ПО ЗАКРЫВАЮЩЕМУ FENCE, а не до конца строки; (правка 823) только если

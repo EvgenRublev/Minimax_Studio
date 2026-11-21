@@ -4,11 +4,11 @@
  * на рантайме это один словарь пространства имён `translation`.
  *
  * Чего здесь НЕТ:
- *   • текста вклада «Обучение» и prompt-guide (большой контент, переводится
- *     отдельной задачей);
  *   • промптов и ответов Ассистента (язык ответа задаётся системным промптом);
  *   • названий узлов ComfyUI в воркфлоу-шаблонах (это данные воркфлоу).
  * Такие строки остаются русскими и в английском интерфейсе.
+ * (правка 1066) контент вкладки «Обучение» — больше не исключение: он лежит в
+ * learn.json (те же русские литералы, что стоят в модульных таблицах learn/*).
  */
 import common from './common.json'
 import settings from './settings.json'
@@ -16,6 +16,7 @@ import views from './views.json'
 import api from './api.json'
 import ui from './ui.json' // (правка 955) строки из компонентов (tt-обёртки), собранная партия
 import extra from './extra.json' // (правка 955) добрано по DOM-пробегке: незавернутые литералы + лейблы моделей
+import learn from './learn.json' // (правка 1066) контент вкладки «Обучение»
 
 export const enMessages: Record<string, string> = {
   ...common,
@@ -24,4 +25,5 @@ export const enMessages: Record<string, string> = {
   ...api,
   ...ui,
   ...extra,
+  ...learn,
 }

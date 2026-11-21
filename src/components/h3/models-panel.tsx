@@ -14,7 +14,6 @@ import {
   DownloadIcon,
   Loader2Icon,
   AlertCircleIcon,
-  PackageIcon,
   RefreshCwIcon,
   CpuIcon,
   BotIcon,
@@ -259,37 +258,36 @@ export function ModelsPanel() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <PackageIcon className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-medium">{t("Модели")}</span>
-          <span className={cn(
-            'text-xs px-1.5 py-0.5 rounded',
-            allReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400',
-          )}>
-            {readyCount}/{totalCount}
-          </span>
-        </div>
-        <div className="flex gap-1.5">
+    <div className="divide-y divide-border/50">
+      {/* Сводка: сколько готово + действия. Своей шапки у панели больше нет —
+          заголовок даёт карточка настроек, здесь только статус и кнопки. */}
+      <div className="flex items-center gap-2 px-3.5 py-2.5">
+        <span className="text-xs text-muted-foreground">{t("Готово")}</span>
+        <span className={cn(
+          'rounded px-1.5 py-0.5 text-[11px] tabular-nums',
+          allReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400',
+        )}>
+          {readyCount}/{totalCount}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 text-xs"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => void fetchStatus()}
+            title={t("Обновить статус")}
           >
-            <RefreshCwIcon className="w-3 h-3" />
+            <RefreshCwIcon className="w-3.5 h-3.5" />
           </Button>
           {!allReady && (
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-7 gap-1.5 text-xs"
               onClick={() => void downloadAll()}
               disabled={!!starting}
             >
-              <DownloadIcon className="w-3 h-3" />
+              <DownloadIcon className="w-3.5 h-3.5" />
               {' '}{t("Скачать все")}
             </Button>
           )}
@@ -297,36 +295,15 @@ export function ModelsPanel() {
       </div>
 
       {/* ─── Section 1: Minimax H3 ─── */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 px-1 pt-1">
-          <CpuIcon className="w-3.5 h-3.5 text-cyan-500/70" />
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <div>
+        <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-2.5">
+          <CpuIcon className="w-3 h-3 text-cyan-500/70" />
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
             {t("Minimax H3 (генерация)")}
           </span>
         </div>
-        {h3Models.map(model => (
-          <ModelRow
-            key={model.id}
-            model={model}
-            onDownload={() => void download(model.id)}
-            onCancel={() => void cancel(model.id)}
-            onDelete={() => void remove(model)}
-            deleting={deletingId === model.id}
-            starting={starting === model.id}
-          />
-        ))}
-      </div>
-
-      {/* ─── (правка 269) Section: FPS (VFI) ─── */}
-      {fpsModels.length > 0 && (
-        <div className="space-y-1.5 pt-2 border-t border-border">
-          <div className="flex items-center gap-2 px-1 pt-1">
-            <GaugeIcon className="w-3.5 h-3.5 text-cyan-500/70" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              {t("FPS (вставка кадров)")}
-            </span>
-          </div>
-          {fpsModels.map(model => (
+        <div className="divide-y divide-border/40">
+          {h3Models.map(model => (
             <ModelRow
               key={model.id}
               model={model}
@@ -337,29 +314,56 @@ export function ModelsPanel() {
               starting={starting === model.id}
             />
           ))}
+        </div>
+      </div>
+
+      {/* ─── (правка 269) Section: FPS (VFI) ─── */}
+      {fpsModels.length > 0 && (
+        <div>
+          <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-2.5">
+            <GaugeIcon className="w-3 h-3 text-cyan-500/70" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {t("FPS (вставка кадров)")}
+            </span>
+          </div>
+          <div className="divide-y divide-border/40">
+            {fpsModels.map(model => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                onDownload={() => void download(model.id)}
+                onCancel={() => void cancel(model.id)}
+                onDelete={() => void remove(model)}
+                deleting={deletingId === model.id}
+                starting={starting === model.id}
+              />
+            ))}
+          </div>
         </div>
       )}
 
       {/* ─── Section 2: LLM ─── */}
       {llmModels.length > 0 && (
-        <div className="space-y-1.5 pt-2 border-t border-border">
-          <div className="flex items-center gap-2 px-1 pt-1">
-            <BotIcon className="w-3.5 h-3.5 text-violet-500/70" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <div>
+          <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-2.5">
+            <BotIcon className="w-3 h-3 text-violet-500/70" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
               {t("LLM ассистент")}
             </span>
           </div>
-          {llmModels.map(model => (
-            <ModelRow
-              key={model.id}
-              model={model}
-              onDownload={() => void download(model.id)}
-              onCancel={() => void cancel(model.id)}
-              onDelete={() => void remove(model)}
-              deleting={deletingId === model.id}
-              starting={starting === model.id}
-            />
-          ))}
+          <div className="divide-y divide-border/40">
+            {llmModels.map(model => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                onDownload={() => void download(model.id)}
+                onCancel={() => void cancel(model.id)}
+                onDelete={() => void remove(model)}
+                deleting={deletingId === model.id}
+                starting={starting === model.id}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -390,30 +394,24 @@ function ModelRow({
     : null
 
   return (
-    <div className={cn(
-      'flex items-center gap-3 px-3 py-2 rounded-lg border',
-      model.status === 'ready' && 'border-emerald-500/20 bg-emerald-500/5',
-      model.status === 'downloading' && 'border-cyan-500/30 bg-cyan-500/5',
-      model.status === 'missing' && 'border-border',
-      model.status === 'error' && 'border-red-500/30 bg-red-500/5',
-    )}>
+    <div className="group flex items-center gap-2.5 px-3.5 py-2">
       {/* Status icon */}
       <div className="shrink-0">
-        {model.status === 'ready' && <CheckCircleIcon className="w-4 h-4 text-emerald-400" />}
-        {model.status === 'downloading' && <Loader2Icon className="w-4 h-4 animate-spin text-cyan-400" />}
-        {model.status === 'missing' && <DownloadIcon className="w-4 h-4 text-muted-foreground" />}
-        {model.status === 'error' && <AlertCircleIcon className="w-4 h-4 text-red-400" />}
+        {model.status === 'ready' && <CheckCircleIcon className="w-3.5 h-3.5 text-emerald-400" />}
+        {model.status === 'downloading' && <Loader2Icon className="w-3.5 h-3.5 animate-spin text-cyan-400" />}
+        {model.status === 'missing' && <DownloadIcon className="w-3.5 h-3.5 text-muted-foreground/60" />}
+        {model.status === 'error' && <AlertCircleIcon className="w-3.5 h-3.5 text-red-400" />}
       </div>
 
       {/* Label + size */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs truncate">{t(model.label)}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">{model.sizeLabel}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="truncate text-xs text-foreground/90">{t(model.label)}</span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{model.sizeLabel}</span>
           {/* (правка 720) Пометка «опционально» — чтобы было видно, почему
               эта модель не входит в счётчик и «Скачать все» её не качает. */}
           {model.optional && (
-            <span className="shrink-0 px-1 py-px rounded text-[9px] border border-border/60 text-muted-foreground/80">
+            <span className="shrink-0 rounded border border-border/60 px-1 py-px text-[9px] text-muted-foreground/80">
               {t("опционально")}
             </span>
           )}
@@ -422,9 +420,9 @@ function ModelRow({
         {/* Progress bar (when downloading) */}
         {model.status === 'downloading' && (
           <div className="mt-1.5 space-y-0.5">
-            <div className="h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
+            <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-1)]">
               <div
-                className="h-full bg-cyan-400 rounded-full transition-all duration-500"
+                className="h-full rounded-full bg-cyan-400 transition-all duration-500"
                 style={{ width: `${progress ?? 0}%` }}
               />
             </div>
@@ -443,46 +441,49 @@ function ModelRow({
 
         {/* Error */}
         {model.status === 'error' && model.error && (
-          <p className="text-[10px] text-red-400 mt-0.5 truncate">{t(model.error)}</p>
+          <p className="mt-0.5 truncate text-[10px] text-red-400">{t(model.error)}</p>
         )}
       </div>
 
       {/* Action buttons */}
-      {(model.status === 'missing' || model.status === 'error') && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs shrink-0"
-          onClick={onDownload}
-          disabled={starting}
-        >
-          {starting ? <Loader2Icon className="w-3 h-3 animate-spin" /> : t("Скачать")}
-        </Button>
-      )}
-      {model.status === 'downloading' && onCancel && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs shrink-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-          onClick={onCancel}
-        >
-          <XIcon className="w-3.5 h-3.5" />
-        </Button>
-      )}
-      {/* (правка 139) Удаление скачанного/сломанного — освобождение места.
-          Активная модель ассистента блокируется на сервере (409 + тост). */}
-      {(model.status === 'ready' || model.status === 'error') && onDelete && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs shrink-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-          onClick={onDelete}
-          disabled={deleting}
-          title={t("Удалить файлы модели с диска")}
-        >
-          {deleting ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <Trash2Icon className="w-3.5 h-3.5" />}
-        </Button>
-      )}
+      <div className="flex shrink-0 items-center gap-1">
+        {(model.status === 'missing' || model.status === 'error') && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 gap-1 px-2 text-[11px]"
+            onClick={onDownload}
+            disabled={starting}
+          >
+            {starting ? <Loader2Icon className="w-3 h-3 animate-spin" /> : t("Скачать")}
+          </Button>
+        )}
+        {model.status === 'downloading' && onCancel && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            onClick={onCancel}
+            title={t("Отменить скачивание")}
+          >
+            <XIcon className="w-3.5 h-3.5" />
+          </Button>
+        )}
+        {/* (правка 139) Удаление скачанного/сломанного — освобождение места.
+            Активная модель ассистента блокируется на сервере (409 + тост). */}
+        {(model.status === 'ready' || model.status === 'error') && onDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100"
+            onClick={onDelete}
+            disabled={deleting}
+            title={t("Удалить файлы модели с диска")}
+          >
+            {deleting ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <Trash2Icon className="w-3.5 h-3.5" />}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

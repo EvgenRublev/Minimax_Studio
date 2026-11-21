@@ -81,6 +81,11 @@ import { useOutputFolderStore } from '@/lib/output-folder-store' // (правк�
 
 type Phase = 'idle' | 'submitting' | 'queued' | 'running' | 'done' | 'error'
 
+/** (правка 1058) Размеры тайлов Tessera — кратно 64 px: на полуразмерном
+ *  референсе это ровно один DiT-патч, поэтому кропы референсов режутся
+ *  точно (без latent-интерполяции и предупреждения «RESAMPLED»). */
+const TILE_SIZES = [512, 576, 640, 704, 768, 832, 896, 960, 1024] as const
+
 export function RefineView() {
   const { t } = useTranslation() // (правка 955)
   const outputFolder = useOutputFolderStore((s) => s.folders.refine )
@@ -117,7 +122,12 @@ export function RefineView() {
 
   const params = useRefineTarget((s) => s.params)
   const patchParams = useRefineTarget((s) => s.patchParams)
-  const { target, steps, strength, mode, chunkSec, tessera, refDetail, targetMp } = params
+  // (правка 1058) Ручки тайлового режима — отдельный объект в сторе.
+  const patchTesseraParams = useRefineTarget((s) => s.patchTesseraParams)
+  const resetTesseraParams = useRefineTarget((s) => s.resetTesseraParams)
+  const { target, steps, strength, mode, chunkSec, tessera, tesseraParams, refDetail, targetMp } = params
+  // (правка 1058) «Параметры тайлов» свёрнуты: дефолты = рецепт 1057.
+  const [showTesseraAdvanced, setShowTesseraAdvanced] = useState(false)
 
   // (правка 509) Промпт — в сторе (переживает переключение вкладок);
   // вводится вручную для источников с диска (у них нет .meta.json).
@@ -386,7 +396,7 @@ export function RefineView() {
       mode: 'whole' as const,
       windowed: mode === 'chunks',
       // (правка 1057) «по тайлам» — только поверх «Частями»
-      ...(mode === 'chunks' && tessera ? { tessera: true } : {}),
+      ...(mode === 'chunks' && tessera ? { tessera: true, tesseraParams } : {}),
       outputSubfolder: outputFolder,
       source: { filename: src.filename, subfolder: src.subfolder ?? '' },
       ...(src.inputSource ? { inputSource: src.inputSource } : {}),
@@ -429,7 +439,7 @@ export function RefineView() {
     }
     enqueueRefine(task)
     toast.info(t("Refine поставлен в очередь: {{p1}}", { p1: src.filename }))
-  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, tessera, uploadingSrc, refDetail, userRefs])
+  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, tessera, tesseraParams, uploadingSrc, refDetail, userRefs])
 
   const cancel = useCallback(async () => {
     await cancelActiveRefines()
@@ -972,6 +982,291 @@ export function RefineView() {
                     </span>
                   </span>
                 </label>
+                {/* (правка 1058) Параметры тайлового режима (Tessera). Свёрнуты:
+                    дефолты = рецепт 1057, ручки — для подбора стыков вручную.
+                    Подписи-тултипы объясняют, что на что влияет. */}
+                {tessera && (
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowTesseraAdvanced((v) => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-cyan-500/40 transition-all text-left"
+                    >
+                      <span className="text-xs font-medium text-muted-foreground">{t("Параметры тайлов")}</span>
+                      <span className={cn('text-[10px] text-muted-foreground transition-transform', showTesseraAdvanced && 'rotate-180')}>▼</span>
+                    </button>
+
+                    {showTesseraAdvanced && (
+                      <div className="space-y-3 pl-1">
+                        {/* Сетка: авто-кап или свой размер */}
+                        <div className="space-y-1">
+                          <Label
+                            className="text-xs text-muted-foreground"
+                            title={t("Размер окна тайла. Авто: кап 768 px — экономнее по VRAM, 1024 px — качественнее и крупнее тайлы (меньше стыков). Свой размер — кратно 64 px, чтобы кропы референсов резались точно (иначе в консоли «RESAMPLED»).")}
+                          >
+                            {t("Сетка тайлов")}
+                          </Label>
+                          <Select
+                            value={tesseraParams.spatialTile}
+                            onValueChange={(v) => patchTesseraParams({ spatialTile: v as 'low_vram' | 'high_vram' | 'custom' })}
+                            disabled={busy}
+                          >
+                            <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[var(--surface-3)] border-border">
+                              <SelectItem value="low_vram">{t("Авто · до 768 px (экономно)")}</SelectItem>
+                              <SelectItem value="high_vram">{t("Авто · до 1024 px")}</SelectItem>
+                              <SelectItem value="custom">{t("Свой размер")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {tesseraParams.spatialTile === 'custom' && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">{t("Ширина тайла")}</Label>
+                              <Select
+                                value={String(tesseraParams.tileWidth)}
+                                onValueChange={(v) => patchTesseraParams({ tileWidth: parseInt(v, 10) })}
+                                disabled={busy}
+                              >
+                                <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-[var(--surface-3)] border-border">
+                                  {TILE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{`${n} px`}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">{t("Высота тайла")}</Label>
+                              <Select
+                                value={String(tesseraParams.tileHeight)}
+                                onValueChange={(v) => patchTesseraParams({ tileHeight: parseInt(v, 10) })}
+                                disabled={busy}
+                              >
+                                <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-[var(--surface-3)] border-border">
+                                  {TILE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{`${n} px`}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Контекст + шов: главная пара ручек стыка */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label
+                              className="text-xs text-muted-foreground"
+                              title={t("Сколько соседней картинки тайл видит за границей своей зоны (контекст для модели, в кадр он не идёт). Больше — согласованнее края на стыке; цена — только размер окна.")}
+                            >
+                              {t("Контекст (px)")}
+                            </Label>
+                            <Select
+                              value={String(tesseraParams.contextBorder)}
+                              onValueChange={(v) => patchTesseraParams({ contextBorder: parseInt(v, 10) })}
+                              disabled={busy}
+                            >
+                              <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[var(--surface-3)] border-border">
+                                {[32, 64, 96, 128, 160, 192, 256].map((n) => (
+                                  <SelectItem key={n} value={String(n)}>{`${n} px`}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label
+                              className="text-xs text-muted-foreground"
+                              title={t("Ширина полосы шва: её генерируют ОБА соседних тайла и смешивают. Главная ручка видимости стыка: 32 px — тонкая полоса (последний шаг веса 1/3 — читается линией), 96 px — плавно. Требует «контекста» минимум на 32 px больше шва.")}
+                            >
+                              {t("Шов (px)")}
+                            </Label>
+                            <Select
+                              value={String(tesseraParams.seamOverlap)}
+                              onValueChange={(v) => patchTesseraParams({ seamOverlap: parseInt(v, 10) })}
+                              disabled={busy}
+                            >
+                              <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[var(--surface-3)] border-border">
+                                {/* только помещающиеся варианты (шов ≤ контекст − 32);
+                                    текущее значение показываем всегда */}
+                                {Array.from(new Set([
+                                  0,
+                                  ...[32, 64, 96, 128].filter((n) => n <= Math.max(0, tesseraParams.contextBorder - 32)),
+                                  tesseraParams.seamOverlap,
+                                ].filter((n, i, a) => a.indexOf(n) === i))).sort((a, b) => a - b).map((n) => (
+                                  <SelectItem key={n} value={String(n)}>{n === 0 ? t("нет (жёсткий стык)") : `${n} px`}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          {t("Шов не может быть шире контекста минус 32 px — иначе нода не вырастит полосу шва (в консоли «raise context_border»). Проверенная пара: контекст 128 + шов 96 при том же числе тайлов.")}
+                        </p>
+
+                        {/* Композит */}
+                        <div className="space-y-1">
+                          <Label
+                            className="text-xs text-muted-foreground"
+                            title={t("Как склеиваются тайлы. «В латенте» — один декод готового канваса (быстрее, меньше VRAM); «в пикселях» — каждый тайл декодируется отдельно и смешивается попиксельно (медленнее).")}
+                          >
+                            {t("Склейка тайлов")}
+                          </Label>
+                          <Select
+                            value={tesseraParams.composite}
+                            onValueChange={(v) => patchTesseraParams({ composite: v as 'latent' | 'pixel' })}
+                            disabled={busy}
+                          >
+                            <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[var(--surface-3)] border-border">
+                              <SelectItem value="latent">{t("В латенте — один декод (быстрее)")}</SelectItem>
+                              <SelectItem value="pixel">{t("В пикселях — попиксельный кроссфейд")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Временные чанки */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label
+                              className="text-xs text-muted-foreground"
+                              title={t("Длина временного окна. «Авто» берёт значение из «длины части» (2–3 с → 73 кадра, 5–8 с → 124). «Весь клип» — без чанков (максимум VRAM, стыков по времени нет).")}
+                            >
+                              {t("Окно по времени")}
+                            </Label>
+                            <Select
+                              value={tesseraParams.temporalTile}
+                              onValueChange={(v) => patchTesseraParams({ temporalTile: v as 'auto' | '73' | '124' | '192' | 'off' })}
+                              disabled={busy}
+                            >
+                              <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[var(--surface-3)] border-border">
+                                <SelectItem value="auto">{t("Авто (по длине части)")}</SelectItem>
+                                <SelectItem value="73">{t("~3 с (73 кадра)")}</SelectItem>
+                                <SelectItem value="124">{t("~5 с (124 кадра)")}</SelectItem>
+                                <SelectItem value="192">{t("~8 с (192 кадра)")}</SelectItem>
+                                <SelectItem value="off">{t("Весь клип одним окном")}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label
+                              className="text-xs text-muted-foreground"
+                              title={t("Сколько кадров новый чанк наследует из уже готового результата. Больше — мягче переход между чанками, но чанков становится больше.")}
+                            >
+                              {t("Нахлёст чанков")}
+                            </Label>
+                            <Select
+                              value={String(tesseraParams.temporalOverlap)}
+                              onValueChange={(v) => patchTesseraParams({ temporalOverlap: parseInt(v, 10) })}
+                              disabled={busy}
+                            >
+                              <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[var(--surface-3)] border-border">
+                                {[0, 2, 4, 6, 8, 12, 16].map((n) => (
+                                  <SelectItem key={n} value={String(n)}>{t("{{p1}} лат. кадров", { p1: n })}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* Референсы */}
+                        <div className="space-y-1">
+                          <Label
+                            className="text-xs text-muted-foreground"
+                            title={t("per_tile: каждый тайл получает свой кроп референса и свой Qwen-эмбеддинг (точнее по месту, но соседи сильнее расходятся на стыке). global: все тайлы видят кадр целиком — консистентнее по стыкам.")}
+                          >
+                            {t("Референсы в тайлах")}
+                          </Label>
+                          <Select
+                            value={tesseraParams.videoRefCrop}
+                            onValueChange={(v) => patchTesseraParams({ videoRefCrop: v as 'per_tile' | 'global' })}
+                            disabled={busy}
+                          >
+                            <SelectTrigger className="w-full h-9 bg-[var(--surface-2)] border-border text-sm rounded-md">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[var(--surface-3)] border-border">
+                              <SelectItem value="per_tile">{t("Свой кроп на каждый тайл")}</SelectItem>
+                              <SelectItem value="global">{t("Кадр целиком на все тайлы")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Гайд */}
+                        <SettingSlider
+                          label={t("Отпускание гайда")}
+                          labelTitle={t("Насколько модель отпускает гайд (пластинку) в тонкой фазе: выше — свободнее текстура и резче, ниже — ближе к исходнику и стабильнее на стыках.")}
+                          value={tesseraParams.guideRelease}
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          onChange={(v) => patchTesseraParams({ guideRelease: v })}
+                          formatValue={(v) => v.toFixed(2)}
+                          disabled={busy}
+                        />
+
+                        <label className="flex items-start gap-2 rounded-lg border border-border bg-[var(--surface-2)] p-2 cursor-pointer hover:border-cyan-500/40">
+                          <input
+                            type="checkbox"
+                            checked={tesseraParams.motionAdapt}
+                            onChange={(e) => patchTesseraParams({ motionAdapt: e.target.checked })}
+                            className="mt-0.5 accent-cyan-400"
+                          />
+                          <span className="space-y-0.5">
+                            <span className="block text-xs font-medium text-foreground">{t("Гасить отпускание на движении")}</span>
+                            <span className="block text-[10px] text-muted-foreground leading-relaxed">
+                              {t("На быстром движении текстура «кипит» — отпускание гайда уменьшается автоматически. Спокойные планы не трогает.")}
+                            </span>
+                          </span>
+                        </label>
+
+                        <SettingSlider
+                          label={t("Пропуск плоских тайлов")}
+                          labelTitle={t("Плоские окна (небо, дым, стена) не сэмплировать — они остаются с пластинки. 0 = выкл; рецепт Tessera — 4.0. Сейчас по умолчанию выкл: мягкая пластинка иначе оставалась бы мылом.")}
+                          value={tesseraParams.flatSkip}
+                          min={0}
+                          max={8}
+                          step={0.5}
+                          onChange={(v) => patchTesseraParams({ flatSkip: v })}
+                          formatValue={(v) => (v === 0 ? t("выкл") : v.toFixed(1))}
+                          disabled={busy}
+                        />
+
+                        <div className="flex items-center justify-between pt-1">
+                          <button
+                            type="button"
+                            onClick={() => resetTesseraParams()}
+                            disabled={busy}
+                            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                          >
+                            {t("Сбросить к дефолтам")}
+                          </button>
+                          <span className="text-[10px] text-muted-foreground">
+                            {t("Влияние Refine — главный рычаг: ниже 0.7 тайлы меньше расходятся")}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

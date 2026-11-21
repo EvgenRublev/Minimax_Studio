@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags } from '@/lib/assistant-fence'
+import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags, danglingRefTags } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -173,6 +173,10 @@ export function AssistantView({
   const stickToBottomRef = useRef(true)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null)
+  // (правка 1068) Копирование ответа ассистента целиком. Раньше копировать
+  // можно было только промпт из ```text-fence; в чатах, где модель ответила
+  // без fence (частый случай в ControlNet), кнопки копирования не было вовсе.
+  const [copiedMessage, setCopiedMessage] = useState<string | null>(null)
 
   /* ── (правка 86) Вложение к сообщению чата (изображение / видео) ── */
   const attachment = useAssistantDraft((s) => s.attachment)
@@ -274,6 +278,32 @@ export function AssistantView({
         setCopiedPrompt(id)
         toast.success(tt("Промпт скопирован"))
         setTimeout(() => setCopiedPrompt(null), 2000)
+      } catch {
+        toast.error(tt("Не удалось скопировать"))
+      }
+    },
+    [],
+  )
+
+  /**
+   * (правка 1068) Копирование сообщения ассистента целиком — во всех режимах
+   * чата. Убираем только строки-ограждения ```text/```, сам текст (пояснение +
+   * промпт + заметки) остаётся как есть. Кнопка живёт в нижней строке пузыря,
+   * поэтому есть и там, где fence-карточки нет.
+   */
+  const copyMessage = useCallback(
+    async (raw: string, key: string) => {
+      try {
+        // Убираем строки-ограждения ```text/``` и слипшиеся пустые строки —
+        // в буфер попадает читаемый текст: пояснение + промпт + заметки.
+        const text = raw
+          .replace(/^```[a-zA-Z]*[ \t]*$/gm, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+        await navigator.clipboard.writeText(text)
+        setCopiedMessage(key)
+        toast.success(tt("Сообщение скопировано"))
+        setTimeout(() => setCopiedMessage(null), 2000)
       } catch {
         toast.error(tt("Не удалось скопировать"))
       }
@@ -809,6 +839,23 @@ export function AssistantView({
     if (hasRefTags(clean) && st.video.mode !== 'ref') {
       toast.warning(tt("В промпте метки референсов (<Picture N>…), а форма в режиме «Текст»/«Кадры» — при генерации они будут удалены. Переключите режим на «Референсы» или уберите метки."))
     }
+    // (правка 1062) Метка на несуществующий референс — вторая половина той же
+    // проблемы (ассистент иногда «дописывает» позицию, которой в форме нет).
+    // Генерация такие теги отклоняет (тост «Промпт ссылается на
+    // несуществующие референсы»), поэтому предупреждаем сразу при вставке и
+    // говорим, чего не хватает. Вставку не блокируем: реф можно добавить.
+    if (st.video.mode === 'ref') {
+      const counts = { Picture: 0, Video: 0, Audio: 0 }
+      for (const r of st.video.refs) {
+        if (r.kind === 'image') counts.Picture++
+        else if (r.kind === 'video') counts.Video++
+        else if (r.kind === 'audio') counts.Audio++
+      }
+      const dangling = danglingRefTags(clean, counts)
+      if (dangling.length) {
+        toast.warning(tt("Промпт ссылается на референсы, которых нет: {{p1}}. Добавьте их в форму или уберите метки — иначе генерация не запустится.", { p1: dangling.join(', ') }))
+      }
+    }
     // (правка 161) Кнопка видна только когда !streaming — стрим завершён.
     // Но серверный assistantBusy может ещё быть true (drain-насос не
     // завершился). GenerateView при монтировании poll'ит /api/llm/status
@@ -1124,7 +1171,13 @@ export function AssistantView({
               </div>
             )}
             <div className="space-y-3 max-w-3xl mx-auto">
-              {messages.map((m, i) => (
+              {messages.map((m, i) => {
+                // (правка 1083) Один маленький значок копирования в углу пузыря.
+                // У ответа с fence-промптом иконка уже есть в углу карточки
+                // промпта — второй не ставим. Текстовые «Скопировать» убраны.
+                const showCornerCopy = !streaming
+                  && (m.role === 'user' || (m.role === 'assistant' && parseAllFences(m.content).length === 0))
+                return (
                 <motion.div
                   key={messageKeys[i]}
                   initial={{ opacity: 0, y: 6 }}
@@ -1135,7 +1188,7 @@ export function AssistantView({
                     className={cn(
                       // (правка 564) select-text: текст сообщений чата выделяется
                       // (копирование ответов), кнопки внутри исключены в CSS.
-                      'select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words',
+                      'select-text relative max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words',
                       // (правка 88) у ассистента текст рендерится маркдауном —
                       // pre-wrap там не нужен (двойные переносы), у юзера остаётся.
                       m.role === 'user' && 'whitespace-pre-wrap',
@@ -1144,6 +1197,28 @@ export function AssistantView({
                         : 'bg-[var(--surface-2)]/60 border border-border/60 text-foreground/95 rounded-bl-sm',
                     )}
                   >
+                    {/* (правка 1083) Один маленький значок копирования в углу
+                        пузыря — как иконка на карточке промпта. У сообщений
+                        ассистента с fence-промптом она уже есть в углу карточки,
+                        поэтому здесь значок только для своих сообщений и для
+                        ответов без fence. Текстовые «Скопировать» убраны. */}
+                    {showCornerCopy && (
+                      <button
+                        type="button"
+                        onClick={() => void copyMessage(m.content, messageKeys[i])}
+                        className={cn(
+                          'absolute right-1 top-1 rounded-md p-1 transition-colors',
+                          m.role === 'user'
+                            ? 'text-white/60 hover:bg-white/20 hover:text-white'
+                            : 'text-muted-foreground/50 hover:bg-[var(--surface-2)] hover:text-foreground',
+                        )}
+                        title={m.role === 'user' ? tt("Скопировать сообщение") : tt("Скопировать сообщение ассистента")}
+                      >
+                        {copiedMessage === messageKeys[i]
+                          ? <CheckIcon className={cn('w-3 h-3', m.role === 'user' ? 'text-emerald-300' : 'text-emerald-400')} />
+                          : <CopyIcon className="w-3 h-3" />}
+                      </button>
+                    )}
                     {/* (правка 87) Вложение: изображение или видео в пузыре.
                         (правка 108) src='chat' → изолированное хранилище чата
                         (data/chat-attachments/); legacy (без src) → /api/comfy/file. */}
@@ -1191,8 +1266,8 @@ export function AssistantView({
                         «генерируется…» к сообщению юзера. Fence-карточки нужны
                         только в ответах ассистента. */}
                     {m.role === 'user'
-                      ? (<div className="leading-relaxed break-words"><MarkdownText text={displayUserText(m.content)} previewFor={previewFor} onRefClick={openRefByTag} /></div>)
-                      : (renderChatContent(m.content) || '')}
+                      ? (<div className={cn('leading-relaxed break-words', showCornerCopy && 'pr-6')}><MarkdownText text={displayUserText(m.content)} previewFor={previewFor} onRefClick={openRefByTag} /></div>)
+                      : (<div className={cn(showCornerCopy && 'pr-6')}>{renderChatContent(m.content) || ''}</div>)}
                     {/* (правка 427) Вставка — по режиму чата: «В промпт»
                         только в чатах «Генерация»; в чатах «Продление» —
                         per-fence «В клип N» (по маркеру `clip: N`, а без
@@ -1333,7 +1408,8 @@ export function AssistantView({
                     })()}
                   </div>
                 </motion.div>
-              ))}
+                )
+              })}
                   { streamingHere && (
                 <div className="flex justify-start">
                   <div className="select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words bg-[var(--surface-2)]/60 border border-border/60 text-foreground/95 rounded-bl-sm">

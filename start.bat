@@ -385,12 +385,20 @@ REM (правка 803) Дефолты снижены: reserve 3→1, headroom 2�
 set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
 set "ASYNC_OFFLOAD="
+set "PINNED_MEMORY="
+set "NVML_PRESSURE="
 set "VRAM_HEADROOM="
 set "FAST_DISK="
 if exist config\config.ini (
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"reserve_gb" config\config.ini 2^>nul') do if not defined RESERVE_VRAM set "RESERVE_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"dynamic_vram" config\config.ini 2^>nul') do if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=%%a"
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"async_offload" config\config.ini 2^>nul') do if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=%%a"
+    REM (правка 1073) pinned_memory=1|0 - host-кэш весов для DynamicVRAM.
+    REM 0 = аварийный выключатель на случай, если загрузка модели падает
+    REM ошибкой 1450/1453 - см. комментарий у EXTRA_FLAGS ниже.
+    for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"pinned_memory" config\config.ini 2^>nul') do if not defined PINNED_MEMORY set "PINNED_MEMORY=%%a"
+    REM (правка 1077) nvml_pressure=1|0 - учитывать ли aimdo чужие процессы за VRAM.
+    for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"nvml_pressure" config\config.ini 2^>nul') do if not defined NVML_PRESSURE set "NVML_PRESSURE=%%a"
     REM (правка 521) vram_headroom — доп. запас свободной VRAM для DynamicVRAM
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"vram_headroom" config\config.ini 2^>nul') do if not defined VRAM_HEADROOM set "VRAM_HEADROOM=%%a"
     REM (правка 1029) fast_disk=auto|1|0 — авто/принудительно вкл/выкл
@@ -399,16 +407,22 @@ if exist config\config.ini (
 if not defined RESERVE_VRAM set "RESERVE_VRAM=1"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
 if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=0"
+if not defined PINNED_MEMORY set "PINNED_MEMORY=1"
+if not defined NVML_PRESSURE set "NVML_PRESSURE=1"
 if not defined VRAM_HEADROOM set "VRAM_HEADROOM=1"
 if not defined FAST_DISK set "FAST_DISK=auto"
 set "RESERVE_VRAM=%RESERVE_VRAM:"=%"
 set "DYNAMIC_VRAM=%DYNAMIC_VRAM:"=%"
 set "ASYNC_OFFLOAD=%ASYNC_OFFLOAD:"=%"
+set "PINNED_MEMORY=%PINNED_MEMORY:"=%"
+set "NVML_PRESSURE=%NVML_PRESSURE:"=%"
 set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
 set "FAST_DISK=%FAST_DISK:"=%"
 echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
+echo %PINNED_MEMORY%| findstr /r "^[01]$" >nul || set "PINNED_MEMORY=1"
+echo %NVML_PRESSURE%| findstr /r "^[01]$" >nul || set "NVML_PRESSURE=1"
 echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
 set "FAST_DISK_VALID="
 if /i "%FAST_DISK%"=="auto" set "FAST_DISK_VALID=1"
@@ -416,7 +430,18 @@ if "%FAST_DISK%"=="1" set "FAST_DISK_VALID=1"
 if "%FAST_DISK%"=="0" set "FAST_DISK_VALID=1"
 if not defined FAST_DISK_VALID set "FAST_DISK=auto"
 set "EXTRA_FLAGS="
-if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=--disable-async-offload --disable-pinned-memory"
+REM (правка 1073) Флаги разделены. async_offload=0 убирает только async-конвейер
+REM ComfyUI - он и вызывал падения aimdo ошибкой 1450/1453 на ~20 ГБ моделях.
+REM pinned-память больше не отключается вместе с ним: без неё
+REM pinned_hostbuf_size() в comfy/model_management.py возвращает 0, host-кэша
+REM весов нет, и на картах 12-16 ГБ H3 перечитывается с диска на каждом шаге
+REM (VRAM забит, утилизация 100% при 40-60 Вт, генерация встаёт). Выключить:
+REM pinned_memory=0 в config\config.ini.
+if not "%ASYNC_OFFLOAD%"=="1" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-async-offload"
+if "%PINNED_MEMORY%"=="0" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-pinned-memory"
+REM (правка 1077) nvml_pressure=0 - aimdo перестаёт учитывать чужие процессы за
+REM VRAM и отдаёт весам больше карты. На 12 ГБ с H3 это стоит проверять первым.
+if "%NVML_PRESSURE%"=="0" set "EXTRA_FLAGS=%EXTRA_FLAGS% --disable-nvml-pressure"
 REM (правка 521) --vram-headroom: DynamicVRAM (aimdo) непрерывно держит
 REM столько ГБ реально свободными (по NVML, включая чужие приложения).
 REM 0 = флаг не передаём (поведение как раньше).
@@ -429,6 +454,18 @@ if "%DYNAMIC_VRAM%"=="0" set "DYN_FLAG=--disable-dynamic-vram"
 set "FASTDISK_FLAG="
 if "%FAST_DISK%"=="1" set "FASTDISK_FLAG=--fast-disk"
 if "%FAST_DISK%"=="0" set "FASTDISK_FLAG=--disable-fast-disk"
+REM (правка 1080) Откатное ядро 0.33.x не знает --disable-fast-disk (он появился
+REM в 0.34): argparse ComfyUI падает на неизвестном аргументе, и бэкенд вообще не
+REM стартует. Версию ядра читает тот же модуль, что решает, какой набор патчей
+REM класть, поэтому версии и наборы не разъедутся.
+set "OLD_FASTDISK=%FASTDISK_FLAG%"
+set "CORE_NEW=1"
+if defined NODE_CMD "%NODE_CMD%" -e "const m=require(process.argv[1]);const v=m.readComfyVersion(process.argv[2]);process.exit(v&&m.compareVersions(v,'0.34.0')<0?1:0)" "%~dp0scripts\sync_custom_nodes.js" "%COMFY_CORE%" >nul 2>&1
+if errorlevel 1 set "CORE_NEW="
+if not defined CORE_NEW if "%OLD_FASTDISK%"=="--disable-fast-disk" (
+    set "FASTDISK_FLAG="
+    echo  [INFO] ComfyUI 0.33.x: флаг --disable-fast-disk не поддерживается, пропущен
+)
 
 REM Запускаем ComfyUI напрямую
 start /b "" "%COMFY_ROOT%\python_embeded\python.exe" -I "%COMFY_CORE%\main.py" --windows-standalone-build --use-ck-attention --disable-auto-launch --reserve-vram %RESERVE_VRAM% %DYN_FLAG% %EXTRA_FLAGS% %HEADROOM_FLAG% %FASTDISK_FLAG%

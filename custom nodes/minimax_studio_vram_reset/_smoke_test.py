@@ -24,13 +24,21 @@ _orig_unload, _orig_soft = mm.unload_all_models, mm.soft_empty_cache
 mm.unload_all_models = lambda: calls.__setitem__("unload", calls["unload"] + 1)
 mm.soft_empty_cache = lambda *a, **k: calls.__setitem__("soft", calls["soft"] + 1)
 
+# (правка 1061) тройная очистка из finally ядра обязана вызываться до unload
+import comfy.model_prefetch as mp
+calls["prefetch"] = 0
+_orig_pq = mp.cleanup_prefetch_queues
+mp.cleanup_prefetch_queues = lambda *a, **k: calls.__setitem__("prefetch", calls["prefetch"] + 1)
+
 lat = {"samples": torch.zeros(1, 2, 7, 4, 4)}
 out = cls().reset(lat, label="smoke")
 mm.unload_all_models, mm.soft_empty_cache = _orig_unload, _orig_soft
+mp.cleanup_prefetch_queues = _orig_pq
 assert isinstance(out, tuple) and len(out) == 1
 assert out[0] is lat, "лата должен прокидываться тем же объектом"
-assert calls == {"unload": 1, "soft": 1}, calls
-print("reset OK: латент прокинут, unload_all_models=%d soft_empty_cache=%d" % (calls["unload"], calls["soft"]))
+assert calls["unload"] == 1 and calls["soft"] >= 1 and calls["prefetch"] == 1, calls
+print("reset OK: латент прокинут, unload=%d soft=%d prefetch=%d"
+      % (calls["unload"], calls["soft"], calls["prefetch"]))
 
 # aimdo_usage не должен падать, когда DynamicVRAM не инициализирован
 dev = mm.get_torch_device()

@@ -28,6 +28,11 @@ nul
 start_error.log
 /.backup-before-fixes/
 
+# (правка 1080) выбранное поколение ядра ComfyUI (rollback/current) — состояние
+# пользователя, которое пишут установщик и Electron. В репозитории ему не место:
+# чужой выбор поколения в поставке укатил бы нового юзера на старый бэкенд.
+/config/comfy_core_channel.txt
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

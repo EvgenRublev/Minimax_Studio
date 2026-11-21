@@ -46,6 +46,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 /* ──────────────────── copy helper ──────────────────── */
 
@@ -65,6 +66,7 @@ async function copyText(text: string, okMsg: string) {
 }
 
 function CopyButton({ text, label = 'Скопировать' }: { text: string; label?: string }) {
+  const { t: tt } = useTranslation() // (правка 1066) подпись кнопки приходит из пропсов или дефолта
   const [done, setDone] = useState(false)
   return (
     <Button
@@ -72,13 +74,13 @@ function CopyButton({ text, label = 'Скопировать' }: { text: string; 
       size="sm"
       className="h-7 gap-1.5 text-xs"
       onClick={async () => {
-        await copyText(text, 'Скопировано в буфер обмена')
+        await copyText(text, tt('Скопировано в буфер обмена'))
         setDone(true)
         setTimeout(() => setDone(false), 2000)
       }}
     >
       {done ? <CheckIcon className="w-3.5 h-3.5 text-emerald-400" /> : <CopyIcon className="w-3.5 h-3.5" />}
-      {label}
+      {tt(label)}
     </Button>
   )
 }
@@ -96,6 +98,7 @@ function Section({
   subtitle?: string
   children: React.ReactNode
 }) {
+  const { t: tt } = useTranslation() // (правка 1066) подписи разделов приходят из модульных таблиц
   return (
     <section className="space-y-3">
       <div className="flex items-start gap-3">
@@ -103,8 +106,8 @@ function Section({
           {icon}
         </span>
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-foreground">{tt(title)}</h3>
+          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{tt(subtitle)}</p>}
         </div>
       </div>
       {children}
@@ -118,6 +121,7 @@ function Section({
  *    <Subject N> rose · <Scene N>/<Location N> sky · <d>…</d> amber.
  */
 function PromptSample({ text, note }: { text: string; note?: string }) {
+  const { t: tt } = useTranslation() // (правка 1066) подсказка под образцом приходит пропом
   const parts = text.split(/(<(?:Picture|Video|Audio|Subject) \d+>|<Scene \d+>|<Location \d+>|<d>[\s\S]*?<\/d>)/g)
   return (
     <div className="rounded-xl border border-border bg-[var(--surface-0)]/70 overflow-hidden">
@@ -158,7 +162,7 @@ function PromptSample({ text, note }: { text: string; note?: string }) {
         })}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border bg-[var(--surface-2)]/40 px-3.5 py-2">
-        <p className="text-xs text-muted-foreground min-w-0">{note}</p>
+        <p className="text-xs text-muted-foreground min-w-0">{tt(note ?? '')}</p>
         <CopyButton text={text} label="" />
       </div>
     </div>
@@ -227,6 +231,8 @@ export const CAMERA_WORDS = [
 /* ──────────────────── component ──────────────────── */
 
 export function PromptGuide() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -237,32 +243,32 @@ export function PromptGuide() {
       {/* ── 1. Technical specs ── */}
       <Section
         icon={<MonitorPlayIcon className="w-4 h-4" />}
-        title="Технические характеристики"
+        title={tt("Технические характеристики")}
         subtitle="Лимиты и требования MiniMax H3"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
-              <p className="text-xs font-semibold text-foreground mb-2">Выход</p>
+              <p className="text-xs font-semibold text-foreground mb-2">{tt("Выход")}</p>
               <ul className="space-y-1 text-xs text-muted-foreground">
-                <li>• Разрешение: <span className="text-foreground/80 font-mono">480p / 720p / 1080p</span></li>
-                <li>• Длительность: <span className="text-foreground/80 font-mono">~1–30 сек</span> (выравнивание 17n+5 кадров)</li>
-                <li>• Соотношение сторон: 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 + свободное разрешение</li>
+                <li>{tt("• Разрешение:")}{' '} <span className="text-foreground/80 font-mono">480p / 720p / 1080p</span></li>
+                <li>{tt("• Длительность:")}{' '} <span className="text-foreground/80 font-mono">{tt("~1–30 сек")}</span> {' '}{tt("(выравнивание 17n+5 кадров)")}</li>
+                <li>{tt("• Соотношение сторон: 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 + свободное разрешение")}</li>
               </ul>
             </div>
             <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
-              <p className="text-xs font-semibold text-foreground mb-2">Вход (референсы)</p>
+              <p className="text-xs font-semibold text-foreground mb-2">{tt("Вход (референсы)")}</p>
               <ul className="space-y-1 text-xs text-muted-foreground">
-                <li>• Изображения: до <span className="text-foreground/80 font-mono">9</span></li>
-                <li>• Видео: до <span className="text-foreground/80 font-mono">3</span></li>
-                <li>• Аудио: до <span className="text-foreground/80 font-mono">3</span></li>
-                <li>• Смешанный ввод: максимум <span className="text-foreground/80 font-mono">15 файлов</span> суммарно</li>
-                <li>• Сумма длительности видео+аудио: ≤ <span className="text-foreground/80 font-mono">15 сек</span></li>
+                <li>{tt("• Изображения: до")}{' '} <span className="text-foreground/80 font-mono">9</span></li>
+                <li>{tt("• Видео: до")}{' '} <span className="text-foreground/80 font-mono">3</span></li>
+                <li>{tt("• Аудио: до")}{' '} <span className="text-foreground/80 font-mono">3</span></li>
+                <li>{tt("• Смешанный ввод: максимум")}{' '} <span className="text-foreground/80 font-mono">{tt("15 файлов")}</span> {' '}{tt("суммарно")}</li>
+                <li>{tt("• Сумма длительности видео+аудио: ≤")}{' '} <span className="text-foreground/80 font-mono">{tt("15 сек")}</span></li>
               </ul>
             </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            💡 Все генерации выполняются <span className="text-foreground/80">локально на вашем компьютере</span> через ComfyUI — интернет не нужен.
+            {tt("💡 Все генерации выполняются")}{' '} <span className="text-foreground/80">{tt("локально на вашем компьютере")}</span> {' '}{tt("через ComfyUI — интернет не нужен.")}
           </p>
         </div>
       </Section>
@@ -270,17 +276,17 @@ export function PromptGuide() {
       {/* ── 2. Mode selection ── */}
       <Section
         icon={<MonitorPlayIcon className="w-4 h-4" />}
-        title="Выбор режима генерации"
+        title={tt("Выбор режима генерации")}
         subtitle="Определите, какие входные данные у вас есть — не выбирайте режим «на звук»"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 overflow-hidden">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-[var(--surface-1)]/60">
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Режим</th>
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Вход</th>
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Задача промпта</th>
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Подходит для</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Режим")}</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Вход")}</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Задача промпта")}</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Подходит для")}</th>
               </tr>
             </thead>
             <tbody>
@@ -293,9 +299,9 @@ export function PromptGuide() {
               ].map(([mode, input, task, use]) => (
                 <tr key={mode} className="border-b border-border/50 last:border-0">
                   <td className="px-3 py-2 font-mono text-foreground">{mode}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{input}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{task}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{use}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tt(input)}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tt(task)}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tt(use)}</td>
                 </tr>
               ))}
             </tbody>
@@ -306,7 +312,7 @@ export function PromptGuide() {
       {/* ── 2b. Студия: какой формат пишет ассистент ── */}
       <Section
         icon={<ListOrderedIcon className="w-4 h-4" />}
-        title="Что именно пишет ассистент в студии"
+        title={tt("Что именно пишет ассистент в студии")}
         subtitle="Формат выбирается автоматически по текущему режиму вкладки"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
@@ -314,9 +320,9 @@ export function PromptGuide() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-[var(--surface-2)]/60">
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Вкладка студии</th>
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Режим H3</th>
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Формат промпта</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Вкладка студии")}</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Режим H3")}</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Формат промпта")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -328,19 +334,19 @@ export function PromptGuide() {
                   ['«ControlNet»', 'Ref2VA', '6 полей + отдельные правила для контрольного видео'],
                 ].map(([tab, mode, fmt]) => (
                   <tr key={tab} className="border-b border-border/50 last:border-0">
-                    <td className="px-3 py-2 font-medium text-foreground">{tab}</td>
+                    <td className="px-3 py-2 font-medium text-foreground">{tt(tab)}</td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{mode}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{fmt}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{tt(fmt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-            <li>• Вручную ничего выбирать не надо: ассистент смотрит на режим вкладки и сам берёт нужную структуру.</li>
-            <li>• Метки <span className="font-mono text-[10px]">&lt;Picture N&gt;</span> / <span className="font-mono text-[10px]">&lt;Video N&gt;</span> / <span className="font-mono text-[10px]">&lt;Subject N&gt;</span> в «Тексте» и «Кадрах» <span className="text-foreground/80">запрещены</span> — в «Тексте» допустима только <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>, и то если аудио-реф реально приложен.</li>
-            <li>• Режима «только последний кадр» (L2VA) в студии нет — доступны «Текст», «Кадры» и «Референсы», плюс отдельные вкладки «Продление» и «ControlNet».</li>
-            <li>• Готовый промпт приходит в markdown-блоке кода — так его можно сразу скопировать в поле.</li>
+            <li>{tt("• Вручную ничего выбирать не надо: ассистент смотрит на режим вкладки и сам берёт нужную структуру.")}</li>
+            <li>{tt("• Метки")}{' '} <span className="font-mono text-[10px]">&lt;Picture N&gt;</span> / <span className="font-mono text-[10px]">&lt;Video N&gt;</span> / <span className="font-mono text-[10px]">&lt;Subject N&gt;</span> {' '}{tt("в «Тексте» и «Кадрах»")}{' '} <span className="text-foreground/80">{tt("запрещены")}</span> {' '}{tt("— в «Тексте» допустима только")}{' '} <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>{tt(", и то если аудио-реф реально приложен.")}</li>
+            <li>{tt("• Режима «только последний кадр» (L2VA) в студии нет — доступны «Текст», «Кадры» и «Референсы», плюс отдельные вкладки «Продление» и «ControlNet».")}</li>
+            <li>{tt("• Готовый промпт приходит в markdown-блоке кода — так его можно сразу скопировать в поле.")}</li>
           </ul>
         </div>
       </Section>
@@ -348,7 +354,7 @@ export function PromptGuide() {
       {/* ── 3. Formula ── */}
       <Section
         icon={<SparklesIcon className="w-4 h-4" />}
-        title="Формула промпта"
+        title={tt("Формула промпта")}
         subtitle="Три блока в строгом порядке (официальный мануал MiniMax)"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4">
@@ -360,15 +366,15 @@ export function PromptGuide() {
             ].map(([k, v], i) => (
               <div key={k} className="flex items-center gap-2">
                 <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-1.5">
-                  <p className="text-xs font-semibold text-cyan-300">{k}</p>
-                  <p className="text-[10px] text-muted-foreground">{v}</p>
+                  <p className="text-xs font-semibold text-cyan-300">{tt(k)}</p>
+                  <p className="text-[10px] text-muted-foreground">{tt(v)}</p>
                 </div>
                 {i < 2 && <span className="text-muted-foreground/50 text-xs">→</span>}
               </div>
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-            Первый блок пропускается, если файлов не загружено (T2VA).
+            {tt("Первый блок пропускается, если файлов не загружено (T2VA).")}
           </p>
         </div>
       </Section>
@@ -376,27 +382,24 @@ export function PromptGuide() {
       {/* ── 4. Final structure ── */}
       <Section
         icon={<ListOrderedIcon className="w-4 h-4" />}
-        title="Структура финального промпта"
+        title={tt("Структура финального промпта")}
         subtitle="Две части: инструкция выравнивания + три основных поля"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Часть 1 — Инструкция (первая строка)</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Часть 1 — Инструкция (первая строка)")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• <span className="text-foreground/80 font-mono">T2VA</span>: нет инструкции, начинается сразу с трёх полей.</li>
+              <li>• <span className="text-foreground/80 font-mono">T2VA</span>{tt(": нет инструкции, начинается сразу с трёх полей.")}</li>
               <li>• <span className="text-foreground/80 font-mono">I2VA</span>: <span className="font-mono text-[10px]">For the target video, at 0.00 seconds into the target video, &lt;Picture 1&gt; (from [Shot 1]) is fully referenced.</span></li>
               <li>• <span className="text-foreground/80 font-mono">FL2VA</span>: <span className="font-mono text-[10px]">How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark...</span></li>
             </ul>
             <p className="text-[11px] text-muted-foreground/80 leading-relaxed mt-2 border-l-2 border-cyan-500/40 pl-2">
-              В студии эту строку писать <span className="text-foreground/80">не нужно</span>: кадры и их привязка ко времени
-              подставляются самой программой, а ассистент всегда начинает промпт с первого поля
-              (<span className="font-mono text-[10px]">integrated_multimodal_description</span> или
-              <span className="font-mono text-[10px]">subject_definitions</span>). Строка выше — справка по
-              официальному API MiniMax, если вы пишете промпт для другой обвязки.
+              {tt("В студии эту строку писать")}{' '} <span className="text-foreground/80">{tt("не нужно")}</span>{tt(": кадры и их привязка ко времени подставляются самой программой, а ассистент всегда начинает промпт с первого поля (")}<span className="font-mono text-[10px]">integrated_multimodal_description</span> {' '}{tt("или")}{' '}
+              <span className="font-mono text-[10px]">subject_definitions</span>{tt("). Строка выше — справка по официальному API MiniMax, если вы пишете промпт для другой обвязки.")}
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Часть 2 — Три основных поля</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Часть 2 — Три основных поля")}</p>
             <div className="space-y-1.5">
               {[
                 ['integrated_multimodal_description', 'Основное тело промпта: визуал, действия, кадры, говорящие, диалоги, пение, синхронизированный звук вдоль таймлайна.'],
@@ -405,7 +408,7 @@ export function PromptGuide() {
               ].map(([field, desc]) => (
                 <div key={field} className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-2.5">
                   <p className="font-mono text-xs text-foreground/90">{field}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{desc}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{tt(desc)}</p>
                 </div>
               ))}
             </div>
@@ -416,35 +419,35 @@ export function PromptGuide() {
       {/* ── 5. Writing the 3 fields ── */}
       <Section
         icon={<BookOpenIcon className="w-4 h-4" />}
-        title="Как писать три основных поля"
+        title={tt("Как писать три основных поля")}
         subtitle="Детали по каждому полю"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <div>
             <p className="text-xs font-semibold text-foreground mb-2">5.1 integrated_multimodal_description</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Развивайте описание вдоль таймлайна. Каждый элемент должен соответствовать чему-то видимому или слышимому: стиль, начальная композиция, облик и положение субъекта, сцена и ключевые реквизиты, действия и реакции, смена кадров, язык речи, синхронизированный звуковой эффект.
+              {tt("Развивайте описание вдоль таймлайна. Каждый элемент должен соответствовать чему-то видимому или слышимому: стиль, начальная композиция, облик и положение субъекта, сцена и ключевые реквизиты, действия и реакции, смена кадров, язык речи, синхронизированный звуковой эффект.")}
             </p>
             <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              В начале <span className="font-mono text-[10px]">[Shot 1]</span> укажите общий стиль и начальную композицию. Распространённые стили: <span className="text-foreground/80">Cinematic, live-action, 2D-animated, 3D CG, claymation, watercolor, vintage film</span>.
+              {tt("В начале")}{' '} <span className="font-mono text-[10px]">[Shot 1]</span> {' '}{tt("укажите общий стиль и начальную композицию. Распространённые стили:")}{' '} <span className="text-foreground/80">Cinematic, live-action, 2D-animated, 3D CG, claymation, watercolor, vintage film</span>.
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">5.2 Кадровая структура и срезы</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("5.2 Кадровая структура и срезы")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• <span className="text-foreground/80">Первому кадру не ставьте таймкод.</span></li>
-              <li>• Для последующих кадров используйте нумерацию <span className="font-mono text-[10px]">[Shot 2]</span>, <span className="font-mono text-[10px]">[Shot 3]</span> и т. д., начиная каждый с <span className="text-foreground/80">строго возрастающего</span> времени среза в пределах длительности видео.</li>
-              <li>• Для обычных срезов используйте: <span className="font-mono text-[10px]">the camera cuts to</span>, <span className="font-mono text-[10px]">the shot cuts to</span>, <span className="font-mono text-[10px]">the shot transitions to</span>, <span className="font-mono text-[10px]">the shot changes to</span>, <span className="font-mono text-[10px]">the shot switches to</span>.</li>
-              <li>• Перекрёстное растворение (cross-dissolve), fade и wipe допускаются только при явном запросе пользователя.</li>
-              <li>• Срез должен вносить новую информацию о субъекте, пространстве, состоянии, точке зрения или времени.</li>
+              <li>• <span className="text-foreground/80">{tt("Первому кадру не ставьте таймкод.")}</span></li>
+              <li>{tt("• Для последующих кадров используйте нумерацию")}{' '} <span className="font-mono text-[10px]">[Shot 2]</span>, <span className="font-mono text-[10px]">[Shot 3]</span> {' '}{tt("и т. д., начиная каждый с")}{' '} <span className="text-foreground/80">{tt("строго возрастающего")}</span> {' '}{tt("времени среза в пределах длительности видео.")}</li>
+              <li>{tt("• Для обычных срезов используйте:")}{' '} <span className="font-mono text-[10px]">the camera cuts to</span>, <span className="font-mono text-[10px]">the shot cuts to</span>, <span className="font-mono text-[10px]">the shot transitions to</span>, <span className="font-mono text-[10px]">the shot changes to</span>, <span className="font-mono text-[10px]">the shot switches to</span>.</li>
+              <li>{tt("• Перекрёстное растворение (cross-dissolve), fade и wipe допускаются только при явном запросе пользователя.")}</li>
+              <li>{tt("• Срез должен вносить новую информацию о субъекте, пространстве, состоянии, точке зрения или времени.")}</li>
             </ul>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">5.3 Ключевые кадры (I2VA / FL2VA / L2VA)</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("5.3 Ключевые кадры (I2VA / FL2VA / L2VA)")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• <span className="text-foreground/80 font-mono">I2VA</span>: опишите первое изображение как отправную точку <span className="font-mono text-[10px]">[Shot 1]</span>, затем расскажите, как сцена развивается вперёд. Паттерн: <em>открывающееся изображение → первое движение → продолжение действия → финальная реакция</em>.</li>
-              <li>• <span className="text-foreground/80 font-mono">FL2VA</span>: не описывайте оба статичных изображения дважды — опишите <span className="text-foreground/80">движение</span>, которое их связывает. Паттерн: <em>начальное состояние → промежуточные физические изменения → приближение к конечной композиции → конечное состояние</em>.</li>
-              <li>• <span className="text-foreground/80 font-mono">L2VA</span>: стройте правдоподобную предыдущую последовательность, сходящуюся к заданному конечному кадру. <span className="text-foreground/80">В студии такого режима нет</span> — последний кадр задаётся только вместе с первым («Кадры»).</li>
+              <li>• <span className="text-foreground/80 font-mono">I2VA</span>{tt(": опишите первое изображение как отправную точку")}{' '} <span className="font-mono text-[10px]">[Shot 1]</span>{tt(", затем расскажите, как сцена развивается вперёд. Паттерн:")}{' '} <em>{tt("открывающееся изображение → первое движение → продолжение действия → финальная реакция")}</em>.</li>
+              <li>• <span className="text-foreground/80 font-mono">FL2VA</span>{tt(": не описывайте оба статичных изображения дважды — опишите")}{' '} <span className="text-foreground/80">{tt("движение")}</span>{tt(", которое их связывает. Паттерн:")}{' '} <em>{tt("начальное состояние → промежуточные физические изменения → приближение к конечной композиции → конечное состояние")}</em>.</li>
+              <li>• <span className="text-foreground/80 font-mono">L2VA</span>{tt(": стройте правдоподобную предыдущую последовательность, сходящуюся к заданному конечному кадру.")}{' '} <span className="text-foreground/80">{tt("В студии такого режима нет")}</span> {' '}{tt("— последний кадр задаётся только вместе с первым («Кадры»).")}</li>
             </ul>
           </div>
         </div>
@@ -453,7 +456,7 @@ export function PromptGuide() {
       {/* ── 6. Camera movement ── */}
       <Section
         icon={<CameraIcon className="w-4 h-4" />}
-        title="Движение камеры"
+        title={tt("Движение камеры")}
         subtitle="Три измерения: тип, амплитуда, скорость"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
@@ -464,8 +467,8 @@ export function PromptGuide() {
               ['Скорость', 'slow / moderate / fast speed'],
             ].map(([k, v]) => (
               <div key={k} className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-2.5">
-                <p className="text-xs font-semibold text-foreground">{k}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">{v}</p>
+                <p className="text-xs font-semibold text-foreground">{tt(k)}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">{tt(v)}</p>
               </div>
             ))}
           </div>
@@ -473,9 +476,9 @@ export function PromptGuide() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-[var(--surface-1)]/60">
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Тип</th>
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Выражение</th>
-                  <th className="text-left px-3 py-2 font-semibold text-foreground">Описание</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Тип")}</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Выражение")}</th>
+                  <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Описание")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -495,14 +498,14 @@ export function PromptGuide() {
                   <tr key={type} className="border-b border-border/50 last:border-0">
                     <td className="px-3 py-2 font-medium text-foreground">{type}</td>
                     <td className="px-3 py-2 font-mono text-[10px] text-foreground/80">{expr}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{desc}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{tt(desc)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            💡 Движение камеры описывается как естественное английское действие внутри кадра:
+            {tt("💡 Движение камеры описывается как естественное английское действие внутри кадра:")}
           </p>
           <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
             <p className="text-xs font-mono text-foreground/90 leading-relaxed">
@@ -517,19 +520,19 @@ export function PromptGuide() {
       {/* ── 7. Speaking characters ── */}
       <Section
         icon={<MessageSquareQuoteIcon className="w-4 h-4" />}
-        title="Говорящие персонажи, диалоги и пение"
+        title={tt("Говорящие персонажи, диалоги и пение")}
         subtitle="ID, voiceover, разрыв диалога"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <ul className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
-            <li>• Говорящие, поющие или издающие голос субъекты получают стабильные идентификаторы <span className="font-mono text-[10px]">(S1)</span>, <span className="font-mono text-[10px]">(S2)</span> и т. д. Когда несколько уже нумерованных говорящих говорят/поют вместе — используйте составной ID <span className="font-mono text-[10px]">(S1,S2)</span>.</li>
-            <li>• Идентификатор сохраняется на протяжении кадров; персонажи, которые никогда не произносят слов, получают <span className="text-foreground/80">никакой</span> ID.</li>
-            <li>• При первом появлении говорящего укажите достаточно информации для стабильной идентичности: тип персонажа, возраст, пол, находится ли он в кадре, высота тона, тембр, скорость речи или акцент.</li>
+            <li>{tt("• Говорящие, поющие или издающие голос субъекты получают стабильные идентификаторы")}{' '} <span className="font-mono text-[10px]">(S1)</span>, <span className="font-mono text-[10px]">(S2)</span> {' '}{tt("и т. д. Когда несколько уже нумерованных говорящих говорят/поют вместе — используйте составной ID")}{' '} <span className="font-mono text-[10px]">(S1,S2)</span>.</li>
+            <li>{tt("• Идентификатор сохраняется на протяжении кадров; персонажи, которые никогда не произносят слов, получают")}{' '} <span className="text-foreground/80">{tt("никакой")}</span> ID.</li>
+            <li>{tt("• При первом появлении говорящего укажите достаточно информации для стабильной идентичности: тип персонажа, возраст, пол, находится ли он в кадре, высота тона, тембр, скорость речи или акцент.")}</li>
           </ul>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Формат строки диалога</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Формат строки диалога")}</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Идентифицирующая фраза, ID, действие и подача ставятся <span className="text-foreground/80">вне</span> <span className="font-mono text-[10px]">&lt;d&gt;</span>. Внутри <span className="font-mono text-[10px]">&lt;d&gt;</span> — только тег языка и фактический произносимый контент. Сохраняйте каждое слово и знак препинания дословно; не переводите и не переписывайте их.
+              {tt("Идентифицирующая фраза, ID, действие и подача ставятся")}{' '} <span className="text-foreground/80">{tt("вне")}</span> <span className="font-mono text-[10px]">&lt;d&gt;</span>{tt(". Внутри")}{' '} <span className="font-mono text-[10px]">&lt;d&gt;</span> {' '}{tt("— только тег языка и фактический произносимый контент. Сохраняйте каждое слово и знак препинания дословно; не переводите и не переписывайте их.")}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
@@ -539,9 +542,9 @@ export function PromptGuide() {
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Оффаscreen-озвучка (voiceover)</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Оффаscreen-озвучка (voiceover)")}</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Используйте точную фразу <span className="font-mono text-[10px]">says in an off-screen voiceover</span>. Сразу после каждого блока <span className="font-mono text-[10px]">&lt;d&gt;</span> укажите, что губы соответствующего персонажа на экране остаются закрытыми:
+              {tt("Используйте точную фразу")}{' '} <span className="font-mono text-[10px]">says in an off-screen voiceover</span>{tt(". Сразу после каждого блока")}{' '} <span className="font-mono text-[10px]">&lt;d&gt;</span> {' '}{tt("укажите, что губы соответствующего персонажа на экране остаются закрытыми:")}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
@@ -550,9 +553,9 @@ export function PromptGuide() {
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Разрыв диалога по кадру</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Разрыв диалога по кадру")}</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Если одна реплика или куплет пересекает срез, используйте <span className="font-mono text-[10px]">&lt;scenetrans&gt;</span> в соединяющих точках обеих частей и явно укажите, что звук продолжается через срез. Для обрыва речи к концу видео используйте <span className="font-mono text-[10px]">&lt;cutoff&gt;</span>.
+              {tt("Если одна реплика или куплет пересекает срез, используйте")}{' '} <span className="font-mono text-[10px]">&lt;scenetrans&gt;</span> {' '}{tt("в соединяющих точках обеих частей и явно укажите, что звук продолжается через срез. Для обрыва речи к концу видео используйте")}{' '} <span className="font-mono text-[10px]">&lt;cutoff&gt;</span>.
             </p>
           </div>
         </div>
@@ -561,12 +564,12 @@ export function PromptGuide() {
       {/* ── 8. On-screen text ── */}
       <Section
         icon={<TypeIcon className="w-4 h-4" />}
-        title="Текст на экране"
+        title={tt("Текст на экране")}
         subtitle="Баннеры, вывески, подписи, субтитры"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4">
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Любой баннер, вывеска, подпись, субтитр или неоновый текст, реально видимый на экране, пишите в <span className="text-foreground/80">английских двойных кавычках</span>, сохраняя оригинальный текст и знаки препинания дословно, без перевода:
+            {tt("Любой баннер, вывеска, подпись, субтитр или неоновый текст, реально видимый на экране, пишите в")}{' '} <span className="text-foreground/80">{tt("английских двойных кавычках")}</span>{tt(", сохраняя оригинальный текст и знаки препинания дословно, без перевода:")}
           </p>
           <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3 mt-2">
             <p className="text-xs font-mono text-foreground/90 leading-relaxed">
@@ -579,26 +582,26 @@ export function PromptGuide() {
       {/* ── 9. Soundscape & music ── */}
       <Section
         icon={<MusicIcon className="w-4 h-4" />}
-        title="Звуковой ландшафт и музыка"
+        title={tt("Звуковой ландшафт и музыка")}
         subtitle="overall_soundscape и non_diegetic_music"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <div>
             <p className="text-xs font-semibold text-foreground mb-2">overall_soundscape</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Используйте <span className="text-foreground/80">1–4 предложения</span> в одном непрерывном абзаце для сводки атмосферного звука, физических звуков действий и невербальных человеческих звуков за всё видео (ветер, дождь, транспорт, шаги, движение ткани, удары, дыхание, смех, хрипота).
+              {tt("Используйте")}{' '} <span className="text-foreground/80">{tt("1–4 предложения")}</span> {' '}{tt("в одном непрерывном абзаце для сводки атмосферного звука, физических звуков действий и невербальных человеческих звуков за всё видео (ветер, дождь, транспорт, шаги, движение ткани, удары, дыхание, смех, хрипота).")}
             </p>
             <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              ⚠️ Диалоги, пение и диетическая музыка уже относятся к <span className="font-mono text-[10px]">integrated_multimodal_description</span> и <span className="text-foreground/80">не должны повторяться</span> здесь.
+              {tt("⚠️ Диалоги, пение и диетическая музыка уже относятся к")}{' '} <span className="font-mono text-[10px]">integrated_multimodal_description</span> {' '}{tt("и")}{' '} <span className="text-foreground/80">{tt("не должны повторяться")}</span> {' '}{tt("здесь.")}
             </p>
           </div>
           <div>
             <p className="text-xs font-semibold text-foreground mb-2">non_diegetic_music</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Используйте <span className="text-foreground/80">1–3 предложения</span> для описания фоновой музыки, которую персонажи не слышат, а только зритель. Акцентируйте инструментовку, темп, ритм и изменения динамики; <span className="text-foreground/80">не используйте абстрактные слова настроения</span> и не объясняйте эмоциональную функцию саундтрека.
+              {tt("Используйте")}{' '} <span className="text-foreground/80">{tt("1–3 предложения")}</span> {' '}{tt("для описания фоновой музыки, которую персонажи не слышат, а только зритель. Акцентируйте инструментовку, темп, ритм и изменения динамики;")}{' '} <span className="text-foreground/80">{tt("не используйте абстрактные слова настроения")}</span> {' '}{tt("и не объясняйте эмоциональную функцию саундтрека.")}
             </p>
             <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              ⚠️ Пение, инструменты, радио, телевизор или музыка с телефона, слышимые персонажами — это диетические события и должны находиться в <span className="font-mono text-[10px]">integrated_multimodal_description</span>.
+              {tt("⚠️ Пение, инструменты, радио, телевизор или музыка с телефона, слышимые персонажами — это диетические события и должны находиться в")}{' '} <span className="font-mono text-[10px]">integrated_multimodal_description</span>.
             </p>
           </div>
           <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-3">
@@ -613,17 +616,17 @@ export function PromptGuide() {
       {/* ── 10. Examples ── */}
       <Section
         icon={<BookOpenIcon className="w-4 h-4" />}
-        title="Полные примеры промптов"
+        title={tt("Полные примеры промптов")}
         subtitle="Четыре режима — можно копировать и адаптировать"
       >
         <div className="space-y-3">
           {EXAMPLES.map((ex) => (
             <div key={ex.title} className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-foreground">{ex.title}</span>
-                <span className="text-[10px] text-muted-foreground">— {ex.note}</span>
+                <span className="text-xs font-medium text-foreground">{tt(ex.title)}</span>
+                <span className="text-[10px] text-muted-foreground">— {tt(ex.note)}</span>
               </div>
-              <PromptSample text={ex.text} note="Нажмите на иконку справа, чтобы скопировать" />
+              <PromptSample text={ex.text} note={tt("Нажмите на иконку справа, чтобы скопировать")} />
             </div>
           ))}
         </div>
@@ -632,16 +635,16 @@ export function PromptGuide() {
       {/* ── 11. Common mistakes ── */}
       <Section
         icon={<AlertTriangleIcon className="w-4 h-4" />}
-        title="Частые ошибки"
+        title={tt("Частые ошибки")}
         subtitle="Что снижает качество генерации и как исправить"
       >
         <div className="rounded-xl border border-border overflow-hidden">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-[var(--surface-1)]/60">
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Проблема</th>
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Причина</th>
-                <th className="text-left px-3 py-2 font-semibold text-foreground">Исправление</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Проблема")}</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Причина")}</th>
+                <th className="text-left px-3 py-2 font-semibold text-foreground">{tt("Исправление")}</th>
               </tr>
             </thead>
             <tbody>
@@ -654,9 +657,9 @@ export function PromptGuide() {
                 ['Два источника конфликтуют за один атрибут', 'Не выбран контрольный актив', 'Выберите актив, управляющий атрибутом, исключите версию другого'],
               ].map(([problem, cause, fix]) => (
                 <tr key={problem} className="border-b border-border/50 last:border-0">
-                  <td className="px-3 py-2 text-foreground">{problem}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{cause}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{fix}</td>
+                  <td className="px-3 py-2 text-foreground">{tt(problem)}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tt(cause)}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tt(fix)}</td>
                 </tr>
               ))}
             </tbody>
@@ -667,12 +670,12 @@ export function PromptGuide() {
       {/* ── 12. Ref2VA deep dive ── */}
       <Section
         icon={<TagIcon className="w-4 h-4" />}
-        title="Режим референсов (Ref2VA)"
+        title={tt("Режим референсов (Ref2VA)")}
         subtitle="Шестисекционная структура, метки, правила"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 space-y-3">
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Шестисекционная структура</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Шестисекционная структура")}</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {[
                 ['subject_definitions', 'Кто/что есть: <Subject N>, привязка к <Picture N>, <Video N>, <Audio N>'],
@@ -687,13 +690,13 @@ export function PromptGuide() {
                     <span className="w-4 h-4 rounded-full bg-cyan-500/15 text-cyan-300 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
                     <span className="font-mono text-[10px] text-foreground/90">{k}</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{v}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{tt(v)}</p>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Метки референсов</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Метки референсов")}</p>
             <div className="grid sm:grid-cols-2 gap-2">
               {[
                 ['<Subject N>', 'Видимое содержимое, абстрагированное из референсных активов; можно переиспользовать или изменить в целевом видео'],
@@ -703,54 +706,54 @@ export function PromptGuide() {
               ].map(([tag, desc]) => (
                 <div key={tag} className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-2.5">
                   <p className="font-mono text-xs text-foreground/90">{tag}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{desc}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{tt(desc)}</p>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Правила нумерации и независимые треки</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Правила нумерации и независимые треки")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• <span className="font-mono text-[10px]">&lt;Video N&gt;</span> и <span className="font-mono text-[10px]">&lt;Audio N&gt;</span> нумеруются <span className="text-foreground/80">независимо</span> — индексы не кодируют пару между ними.</li>
-              <li>• Если изображение используется только для определения персонажа/стиля, не создавайте отдельную строку <span className="font-mono text-[10px]">&lt;Picture N&gt;</span> — укажите источник внутри соответствующего <span className="font-mono text-[10px]">&lt;Subject N&gt;</span>.</li>
-              <li>• Если актив <span className="font-mono text-[10px]">&lt;Picture N&gt;</span>/<span className="font-mono text-[10px]">&lt;Video N&gt;</span> лишь идентифицирует другой референс и не анализируется отдельно, сослайтесь на него внутри определения этого актива.</li>
+              <li>• <span className="font-mono text-[10px]">&lt;Video N&gt;</span> {' '}{tt("и")}{' '} <span className="font-mono text-[10px]">&lt;Audio N&gt;</span> {' '}{tt("нумеруются")}{' '} <span className="text-foreground/80">{tt("независимо")}</span> {' '}{tt("— индексы не кодируют пару между ними.")}</li>
+              <li>{tt("• Если изображение используется только для определения персонажа/стиля, не создавайте отдельную строку")}{' '} <span className="font-mono text-[10px]">&lt;Picture N&gt;</span> {' '}{tt("— укажите источник внутри соответствующего")}{' '} <span className="font-mono text-[10px]">&lt;Subject N&gt;</span>.</li>
+              <li>{tt("• Если актив")}{' '} <span className="font-mono text-[10px]">&lt;Picture N&gt;</span>/<span className="font-mono text-[10px]">&lt;Video N&gt;</span> {' '}{tt("лишь идентифицирует другой референс и не анализируется отдельно, сослайтесь на него внутри определения этого актива.")}</li>
             </ul>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Отношения сохранения (relationship markers)</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Отношения сохранения (relationship markers)")}</p>
             <div className="grid sm:grid-cols-2 gap-2">
               <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-2.5">
-                <p className="text-[10px] font-semibold text-foreground mb-1">Для видимого содержимого</p>
+                <p className="text-[10px] font-semibold text-foreground mb-1">{tt("Для видимого содержимого")}</p>
                 <ul className="space-y-0.5 text-[10px] text-muted-foreground">
-                  <li>• <span className="font-mono text-[10px]">fully_preserved</span> — геометрия, цвета, детали полностью сохранены</li>
-                  <li>• <span className="font-mono text-[10px]">weak_reference</span> — сохраняется лишь общее сходство по категории/атмосфере</li>
+                  <li>• <span className="font-mono text-[10px]">fully_preserved</span> {' '}{tt("— геометрия, цвета, детали полностью сохранены")}</li>
+                  <li>• <span className="font-mono text-[10px]">weak_reference</span> {' '}{tt("— сохраняется лишь общее сходство по категории/атмосфере")}</li>
                 </ul>
               </div>
               <div className="rounded-lg border border-border bg-[var(--surface-1)]/60 p-2.5">
-                <p className="text-[10px] font-semibold text-foreground mb-1">Для аудио</p>
+                <p className="text-[10px] font-semibold text-foreground mb-1">{tt("Для аудио")}</p>
                 <ul className="space-y-0.5 text-[10px] text-muted-foreground">
-                  <li>• <span className="font-mono text-[10px]">fully_copy</span> — исходный звук переиспользуется 1:1 как финальный трек</li>
-                  <li>• <span className="font-mono text-[10px]">reference</span> — не копируется дословно; передаётся тембр, ритм, стиль музыки, содержание диалога</li>
-                  <li>• <span className="font-mono text-[10px]">weak_reference</span> — сохраняется лишь широкое сходство по категории/атмосфере</li>
+                  <li>• <span className="font-mono text-[10px]">fully_copy</span> {' '}{tt("— исходный звук переиспользуется 1:1 как финальный трек")}</li>
+                  <li>• <span className="font-mono text-[10px]">reference</span> {' '}{tt("— не копируется дословно; передаётся тембр, ритм, стиль музыки, содержание диалога")}</li>
+                  <li>• <span className="font-mono text-[10px]">weak_reference</span> {' '}{tt("— сохраняется лишь широкое сходство по категории/атмосфере")}</li>
                 </ul>
               </div>
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Говорящие персонажи и ID</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Говорящие персонажи и ID")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• Переиспользуйте глобальный ID говорящего <span className="font-mono text-[10px]">(Sx)</span> на каждом реальном вокальном событии.</li>
-              <li>• <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>, привязанный к целевому говорящему, тоже переиспользует тот же <span className="font-mono text-[10px]">(Sx)</span>, но <span className="text-foreground/80">никогда</span> не присваивает новый ID самостоятельно.</li>
-              <li>• Не пишите <span className="font-mono text-[10px]">(Sx)</span> в <span className="font-mono text-[10px]">retention_analysis</span>.</li>
-              <li>• Голоса, физически произведённые конкретным человеком/персонажем — используют <span className="font-mono text-[10px]">(Sx)</span>. Музыка или диалог из прямого переиспользования саундтрека — ссылаются на <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>.</li>
+              <li>{tt("• Переиспользуйте глобальный ID говорящего")}{' '} <span className="font-mono text-[10px]">(Sx)</span> {' '}{tt("на каждом реальном вокальном событии.")}</li>
+              <li>• <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>{tt(", привязанный к целевому говорящему, тоже переиспользует тот же")}{' '} <span className="font-mono text-[10px]">(Sx)</span>{tt(", но")}{' '} <span className="text-foreground/80">{tt("никогда")}</span> {' '}{tt("не присваивает новый ID самостоятельно.")}</li>
+              <li>{tt("• Не пишите")}{' '} <span className="font-mono text-[10px]">(Sx)</span> {' '}{tt("в")}{' '} <span className="font-mono text-[10px]">retention_analysis</span>.</li>
+              <li>{tt("• Голоса, физически произведённые конкретным человеком/персонажем — используют")}{' '} <span className="font-mono text-[10px]">(Sx)</span>{tt(". Музыка или диалог из прямого переиспользования саундтрека — ссылаются на")}{' '} <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>.</li>
             </ul>
           </div>
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Важные предупреждения</p>
+            <p className="text-xs font-semibold text-foreground mb-2">{tt("Важные предупреждения")}</p>
             <ul className="space-y-1 text-xs text-muted-foreground leading-relaxed">
-              <li>• <span className="text-foreground/80">Не смешивайте</span> роли first/last-frame с ролями референсных медиа. API требует, чтобы семейства ролей не пересеклись в одном запросе.</li>
-              <li>• Референсное аудио <span className="text-foreground/80">не может быть единственным</span> медиа-референсом для H3-Base-Ref2VA — обязательно приложите изображение или видео.</li>
-              <li>• Если только тембр передаётся — не копируйте исходный диалог дословно в цельное видео.</li>
+              <li>• <span className="text-foreground/80">{tt("Не смешивайте")}</span> {' '}{tt("роли first/last-frame с ролями референсных медиа. API требует, чтобы семейства ролей не пересеклись в одном запросе.")}</li>
+              <li>{tt("• Референсное аудио")}{' '} <span className="text-foreground/80">{tt("не может быть единственным")}</span> {' '}{tt("медиа-референсом для H3-Base-Ref2VA — обязательно приложите изображение или видео.")}</li>
+              <li>{tt("• Если только тембр передаётся — не копируйте исходный диалог дословно в цельное видео.")}</li>
             </ul>
           </div>
         </div>
@@ -759,7 +762,7 @@ export function PromptGuide() {
       {/* ── 13. Checklist ── */}
       <Section
         icon={<ClipboardCheckIcon className="w-4 h-4" />}
-        title="Чеклист перед генерацией"
+        title={tt("Чеклист перед генерацией")}
         subtitle="Проверьте все пункты перед отправкой"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4">
@@ -780,7 +783,7 @@ export function PromptGuide() {
             ].map((item, i) => (
               <li key={i} className="flex gap-2 text-xs text-muted-foreground leading-relaxed">
                 <span className="text-cyan-400 shrink-0 mt-0.5">☐</span>
-                {item}
+                {tt(item)}
               </li>
             ))}
           </ul>
@@ -790,7 +793,7 @@ export function PromptGuide() {
       {/* ── 14. LLM assistant ── */}
       <Section
         icon={<BotIcon className="w-4 h-4" />}
-        title="LLM-ассистент в студии"
+        title={tt("LLM-ассистент в студии")}
         subtitle="Встроенный локальный помощник (Bonsai 2 27B по умолчанию / Gemma 4 12B / Qwen3.5 9B) — видит референсы, а видео-кадры — по флажку в Настройки → LLM"
       >
         <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-4 space-y-3">
@@ -800,10 +803,10 @@ export function PromptGuide() {
             </span>
             <div className="space-y-1">
               <p className="text-xs text-foreground leading-relaxed">
-                <span className="text-violet-300 font-medium">«Ассистент»</span> — правая панель на вкладках «Генерация» и «Продление» (ширину можно тянуть за край, кнопка в шапке сворачивает в узкий рейл). Это локальная LLM (по умолчанию Bonsai 2 27B, тернарная, vision; альтернативы: Gemma 4 12B, Qwen3.5 9B), которая работает прямо на вашей видеокарте. Она уже знает полный гайд по MiniMax H3, <span className="text-violet-300 font-medium">видит прикреплённые картинки И видео-кадры</span>, поэтому может описать, что на них, и зафиксировать персонажей в промпте. Ассистент знает выбранный режим генерации и не добавит теги, которые не поддерживаются (правка 150).
+                <span className="text-violet-300 font-medium">{tt("«Ассистент»")}</span> {' '}{tt("— правая панель на вкладках «Генерация» и «Продление» (ширину можно тянуть за край, кнопка в шапке сворачивает в узкий рейл). Это локальная LLM (по умолчанию Bonsai 2 27B, тернарная, vision; альтернативы: Gemma 4 12B, Qwen3.5 9B), которая работает прямо на вашей видеокарте. Она уже знает полный гайд по MiniMax H3,")}{' '} <span className="text-violet-300 font-medium">{tt("видит прикреплённые картинки И видео-кадры")}</span>{tt(", поэтому может описать, что на них, и зафиксировать персонажей в промпте. Ассистент знает выбранный режим генерации и не добавит теги, которые не поддерживаются (правка 150).")}
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Отвечает по-русски, готовый промпт выдаёт на английском. Если референсов нет — не использует теги; если есть — привязывает только существующие <span className="font-mono text-[10px]">&lt;Picture N&gt;</span>, <span className="font-mono text-[10px]">&lt;Video N&gt;</span>, <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>.
+                {tt("Отвечает по-русски, готовый промпт выдаёт на английском. Если референсов нет — не использует теги; если есть — привязывает только существующие")}{' '} <span className="font-mono text-[10px]">&lt;Picture N&gt;</span>, <span className="font-mono text-[10px]">&lt;Video N&gt;</span>, <span className="font-mono text-[10px]">&lt;Audio N&gt;</span>.
               </p>
             </div>
           </div>
@@ -814,8 +817,8 @@ export function PromptGuide() {
               ['Вставь готовый промпт', 'Ответ ассистента копируешь в поле генерации — теги и персонажи уже привязаны к твоим рефам.'],
             ].map(([t, d]) => (
               <div key={t} className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-3">
-                <p className="text-xs font-semibold text-violet-400">{t}</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{d}</p>
+                <p className="text-xs font-semibold text-violet-400">{tt(t)}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{tt(d)}</p>
               </div>
             ))}
           </div>
@@ -825,7 +828,7 @@ export function PromptGuide() {
       {/* ── 15. History / favorites / examples ── */}
       <Section
         icon={<HistoryIcon className="w-4 h-4" />}
-        title="История, избранное и примеры"
+        title={tt("История, избранное и примеры")}
         subtitle="Ваши промпты не теряются — они сохраняются и доступны в один клик"
       >
         <div className="grid sm:grid-cols-3 gap-2.5">
@@ -835,8 +838,8 @@ export function PromptGuide() {
             ['📚 Примеры', 'Готовые английские промпты для разных сценариев (T2VA, I2VA, FL2VA, Ref2VA). Доступны в редакторе и в меню «Примеры».'],
           ].map(([t, d]) => (
             <div key={t} className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-3">
-              <p className="text-xs font-semibold text-foreground">{t}</p>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{d}</p>
+              <p className="text-xs font-semibold text-foreground">{tt(t)}</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{tt(d)}</p>
             </div>
           ))}
         </div>
@@ -845,7 +848,7 @@ export function PromptGuide() {
       {/* ── 16. Hover previews ── */}
       <Section
         icon={<MousePointerClickIcon className="w-4 h-4" />}
-        title="Превью референсов при наведении"
+        title={tt("Превью референсов при наведении")}
         subtitle="Наведите курсор на тег — увидите, какой файл за ним стоит"
       >
         <div className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4 flex items-start gap-3">
@@ -854,13 +857,13 @@ export function PromptGuide() {
           </span>
           <div className="space-y-1">
             <p className="text-xs text-foreground leading-relaxed">
-              В поле промпта, редакторе и чате с LLM наведение курсора на тег <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300">&lt;Picture N&gt;</span> или <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300">&lt;Video N&gt;</span> показывает плавающее превью: картинку или постер видео. Это помогает не путать номера референсов в длинных промптах.
+              {tt("В поле промпта, редакторе и чате с LLM наведение курсора на тег")}{' '} <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300">&lt;Picture N&gt;</span> {' '}{tt("или")}{' '} <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300">&lt;Video N&gt;</span> {' '}{tt("показывает плавающее превью: картинку или постер видео. Это помогает не путать номера референсов в длинных промптах.")}
             </p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Аудио-референсы (<span className="font-mono text-[10px]">&lt;Audio N&gt;</span>) превью не показывают — для звука нет визуального представления.
+              {tt("Аудио-референсы (")}<span className="font-mono text-[10px]">&lt;Audio N&gt;</span>{tt(") превью не показывают — для звука нет визуального представления.")}
             </p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Клик по самому превью референса открывает файл на весь экран — так видно детали, которых не разглядеть в маленьком квадрате (работает одинаково во всех вкладках студии).
+              {tt("Клик по самому превью референса открывает файл на весь экран — так видно детали, которых не разглядеть в маленьком квадрате (работает одинаково во всех вкладках студии).")}
             </p>
           </div>
         </div>
@@ -869,7 +872,7 @@ export function PromptGuide() {
       {/* ── 17. Camera vocabulary (quick insert) ── */}
       <Section
         icon={<CameraIcon className="w-4 h-4" />}
-        title="Кинематографический словарик (быстрая вставка)"
+        title={tt("Кинематографический словарик (быстрая вставка)")}
         subtitle="Фразы, которые модель понимает и любит — вставляйте в промпт"
       >
         <div className="flex flex-wrap gap-2">
@@ -884,14 +887,14 @@ export function PromptGuide() {
       {/* ── 18. Don'ts (summary) ── */}
       <Section
         icon={<AlertTriangleIcon className="w-4 h-4" />}
-        title="Чего НЕ делать (кратко)"
+        title={tt("Чего НЕ делать (кратко)")}
         subtitle="Быстрый список запрещённых действий"
       >
         <ul className="space-y-1.5">
           {DONT_LIST.map((t, i) => (
             <li key={i} className="flex gap-2.5 rounded-lg border border-border bg-[var(--surface-2)]/40 px-3 py-2">
               <span className="text-red-400 text-xs shrink-0 mt-0.5">✕</span>
-              <p className="text-xs text-muted-foreground leading-relaxed">{t}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{tt(t)}</p>
             </li>
           ))}
         </ul>

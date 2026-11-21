@@ -23,6 +23,7 @@ import {
   DownloadIcon,
   XIcon,
   MicIcon,
+  SlidersHorizontalIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -36,6 +37,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { VoiceInputButton } from './voice-input-button'
+import { SettingsCard, SettingsRow, SettingsField, SettingsToggle, SettingsNote } from './settings-ui'
 import { setSttMicDevice, getSttMicDevice } from '@/lib/use-voice-dictation'
 import { useTranslation } from 'react-i18next' // (правка 955)
 
@@ -336,287 +338,293 @@ export function VoiceSettingsPanel() {
   const anyModel = (st?.models.length ?? 0) > 0
 
   return (
-    <div className="space-y-4 py-2">
-      {/* Вкл/выкл */}
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-sm font-medium text-foreground">{tt("Голосовой ввод")}</span>
-          <p className="text-[10px] text-muted-foreground/60">
-            {tt("Кнопка диктата у поля промпта, в редакторе промпта и в чате ассистента. Работает на CPU (whisper / transcribe.cpp).")}
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          onClick={() => setEnabled((v) => !v)}
-          className={cn(
-            'relative w-9 h-5 rounded-full transition-colors border',
-            enabled ? 'bg-cyan-500/40 border-cyan-500/50' : 'bg-[var(--surface-3)] border-border',
-          )}
-        >
-          <span
-            className={cn(
-              'absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all',
-              enabled ? 'left-[18px]' : 'left-0.5',
-            )}
-          />
-        </button>
-      </div>
+    <div className="space-y-3">
+﻿      {/* Вкл/выкл */}
+      <SettingsCard
+        icon={<MicIcon className="w-4 h-4" />}
+        title={tt("Голосовой ввод")}
+        description={tt("Кнопка диктовки у поля промпта, в редакторе и в чате ассистента. Работает на CPU (whisper / transcribe.cpp).")}
+      >
+        <SettingsRow
+          label={tt("Включить диктовку")}
+          description={tt("Кнопка микрофона появится в полях ввода по всему интерфейсу")}
+          right={
+            <SettingsToggle
+              checked={enabled}
+              onChange={setEnabled}
+              label={tt("Голосовой ввод")}
+            />
+          }
+        />
+      </SettingsCard>
 
       {/* Скачивание моделей */}
-      <div className="pt-3 border-t border-border space-y-2">
-        <div>
-          <span className="text-xs text-muted-foreground">{tt("Модели распознавания")}</span>
-          <p className="text-[10px] text-muted-foreground/60">
-            {tt("Скачайте модель нужного качества. Для русского языка рекомендуется")}{' '} <span className="font-mono">small</span> {' '}{tt("или")}{' '} <span className="font-mono">medium</span>.
-          </p>
-        </div>
-        <div className="space-y-1.5">
-          {MODEL_CATALOG.map((m) => {
-            const downloaded = isModelDownloaded(m.name)
-            const prog = downloading[m.name]
-            const isActive = prog && !prog.done && !prog.cancelled
-            const pct = prog && prog.total > 0 ? Math.round((prog.downloaded / prog.total) * 100) : 0
+      <SettingsCard
+        icon={<DownloadIcon className="w-4 h-4" />}
+        title={tt("Модели распознавания")}
+        description={tt("Скачайте модель нужного качества. Для русского языка рекомендуется small или medium.")}
+      >
+        {MODEL_CATALOG.map((m) => {
+          const downloaded = isModelDownloaded(m.name)
+          const prog = downloading[m.name]
+          const isActive = prog && !prog.done && !prog.cancelled
+          const pct = prog && prog.total > 0 ? Math.round((prog.downloaded / prog.total) * 100) : 0
 
-            return (
-              <div key={m.name} className="flex items-center gap-2 rounded-md border border-border bg-[var(--surface-2)] px-3 py-2">
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs font-medium text-foreground">{m.name}</span>
-                  <span className="text-[10px] text-muted-foreground ml-2">{tt(m.sizeLabel)} · {tt(m.quality)}</span>
+          return (
+            <div key={m.name} className="flex items-center gap-2.5 px-3.5 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xs font-medium text-foreground/90">{m.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{tt(m.sizeLabel)}</span>
                 </div>
-                {downloaded ? (
-                  <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px] shrink-0">
-                    <CheckCircleIcon className="w-3 h-3" />
-                    {' '}{tt("Скачана")}
-                  </Badge>
-                ) : isActive ? (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="w-20 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-cyan-500 transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-muted-foreground w-8 text-right">{pct}%</span>
-                    <button
-                      type="button"
-                      onClick={() => cancelDownload(m.name)}
-                      className="p-1 rounded hover:bg-red-500/20 text-red-400"
-                      title={tt("Отменить скачивание")}
-                    >
-                      <XIcon className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5 text-xs shrink-0"
-                    onClick={() => { void startDownload(m.name) }}
-                  >
-                    <DownloadIcon className="w-3.5 h-3.5" />
-                    {' '}{tt("Скачать")}
-                  </Button>
-                )}
+                <p className="text-[11px] text-muted-foreground">{tt(m.quality)}</p>
               </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Модель (выбор из скачанных) */}
-      <div className="pt-3 border-t border-border space-y-2">
-        <div>
-          <span className="text-xs text-muted-foreground">{tt("Активная модель")}</span>
-          <p className="text-[10px] text-muted-foreground/60">
-            {tt("Какая модель будет использоваться для распознавания. Пусто = автоматически (первая найденная).")}
-          </p>
-        </div>
-        <Select value={model || '__auto__'} onValueChange={(v) => setModel(v === '__auto__' ? '' : v)}>
-          <SelectTrigger className="h-8 w-full text-xs">
-            <SelectValue placeholder={tt("Выберите модель")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__auto__">{tt("Автоматически (первая доступная)")}</SelectItem>
-            {st?.models.map((m) => (
-              <SelectItem key={m} value={m}>{m}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              {downloaded ? (
+                <Badge className="shrink-0 gap-1 border-emerald-500/30 bg-emerald-500/15 text-[10px] text-emerald-400">
+                  <CheckCircleIcon className="w-3 h-3" />
+                  {' '}{tt("Скачана")}
+                </Badge>
+              ) : isActive ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <div className="h-1 w-20 overflow-hidden rounded-full bg-[var(--surface-1)]">
+                    <div
+                      className="h-full rounded-full bg-cyan-400 transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-8 text-right text-[10px] text-muted-foreground">{pct}%</span>
+                  <button
+                    type="button"
+                    onClick={() => cancelDownload(m.name)}
+                    className="rounded p-1 text-red-400 hover:bg-red-500/20"
+                    title={tt("Отменить скачивание")}
+                  >
+                    <XIcon className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 gap-1.5 text-xs"
+                  onClick={() => { void startDownload(m.name) }}
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  {' '}{tt("Скачать")}
+                </Button>
+              )}
+            </div>
+          )
+        })}
         {!anyModel && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-            <AlertCircleIcon className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-xs text-amber-200/90 leading-snug">
-              {tt("Модели пока нет. Скачайте модель выше (рекомендуется")}{' '} <span className="font-mono">small</span> {' '}{tt("для русского языка) — и она появится в списке.")}
-            </p>
-          </div>
+          <SettingsNote className="border-t border-amber-500/20 bg-amber-500/[0.06] text-amber-200/90">
+            {tt("Модели пока нет. Скачайте модель выше (рекомендуется small для русского языка) — и она появится в списке.")}
+          </SettingsNote>
         )}
-      </div>
+      </SettingsCard>
 
-      {/* (правка 85) Микрофон */}
-      <div className="pt-3 border-t border-border space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-xs text-muted-foreground">{tt("Микрофон")}</span>
-            <p className="text-[10px] text-muted-foreground/60">
-              {tt("Если на компьютере несколько устройств ввода — выберите нужный здесь.")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => { void refreshMics() }}
-            disabled={micLoading}
-            className="p-1 rounded hover:bg-[var(--surface-3)] text-muted-foreground hover:text-foreground transition-colors"
-            title={tt("Обновить список микрофонов")}
-          >
-            <RefreshCwIcon className={cn('w-3.5 h-3.5', micLoading && 'animate-spin')} />
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <MicIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <Select value={selectedMic || '__default__'} onValueChange={handleMicChange} disabled={micLoading || micDevices.length === 0}>
-            <SelectTrigger className="h-8 flex-1 text-xs">
-              <SelectValue placeholder={micLoading ? tt("Загрузка…") : tt("Системный (по умолчанию)")} />
+      {/* Параметры распознавания */}
+      <SettingsCard
+        icon={<SlidersHorizontalIcon className="w-4 h-4" />}
+        title={tt("Параметры распознавания")}
+        description={tt("Модель, микрофон, язык речи и потоки CPU")}
+      >
+        <SettingsField
+          label={tt("Активная модель")}
+          description={tt("Какая модель будет использоваться. Пусто = автоматически (первая найденная).")}
+        >
+          <Select value={model || '__auto__'} onValueChange={(v) => setModel(v === '__auto__' ? '' : v)}>
+            <SelectTrigger className="h-8 w-full text-xs">
+              <SelectValue placeholder={tt("Выберите модель")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">{tt("Системный (по умолчанию)")}</SelectItem>
-              {micDevices.map((d) => (
-                <SelectItem key={d.deviceId} value={d.deviceId}>
-                  {d.label || `Микрофон ${micDevices.indexOf(d) + 1}`}
-                </SelectItem>
+              <SelectItem value="__auto__">{tt("Автоматически (первая доступная)")}</SelectItem>
+              {st?.models.map((m) => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-      </div>
+        </SettingsField>
 
-      {/* Язык + потоки */}
-      <div className="pt-3 border-t border-border grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">{tt("Язык речи")}</span>
-          <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ru">{tt("Русский")}</SelectItem>
-              <SelectItem value="en">{tt("Английский")}</SelectItem>
-              <SelectItem value="auto">{tt("Автоопределение")}</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* (правка 85) Микрофон */}
+        <SettingsRow
+          label={tt("Микрофон")}
+          description={tt("Если на компьютере несколько устройств ввода — выберите нужный здесь.")}
+          right={
+            <>
+              <button
+                type="button"
+                onClick={() => { void refreshMics() }}
+                disabled={micLoading}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-[var(--surface-3)] hover:text-foreground"
+                title={tt("Обновить список микрофонов")}
+              >
+                <RefreshCwIcon className={cn('w-3.5 h-3.5', micLoading && 'animate-spin')} />
+              </button>
+              <Select value={selectedMic || '__default__'} onValueChange={handleMicChange} disabled={micLoading || micDevices.length === 0}>
+                <SelectTrigger className="h-8 w-[240px] text-xs">
+                  <SelectValue placeholder={micLoading ? tt("Загрузка…") : tt("Системный (по умолчанию)")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">{tt("Системный (по умолчанию)")}</SelectItem>
+                  {micDevices.map((d) => (
+                    <SelectItem key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Микрофон ${micDevices.indexOf(d) + 1}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          }
+        />
+
+        {/* Язык + потоки */}
+        <div className="grid grid-cols-2 gap-3 px-3.5 py-3">
+          <div className="space-y-1.5">
+            <span className="text-xs text-muted-foreground">{tt("Язык речи")}</span>
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ru">{tt("Русский")}</SelectItem>
+                <SelectItem value="en">{tt("Английский")}</SelectItem>
+                <SelectItem value="auto">{tt("Автоопределение")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <span className="text-xs text-muted-foreground">{tt("Потоки CPU")}</span>
+            <Select value={String(threads)} onValueChange={(v) => setThreads(parseInt(v, 10))}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">{tt("Авто (по ядрам)")}</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="4">4</SelectItem>
+                <SelectItem value="6">6</SelectItem>
+                <SelectItem value="8">8</SelectItem>
+                <SelectItem value="12">12</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <span className="text-xs text-muted-foreground">{tt("Потоки CPU")}</span>
-          <Select value={String(threads)} onValueChange={(v) => setThreads(parseInt(v, 10))}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">{tt("Авто (по ядрам)")}</SelectItem>
-              <SelectItem value="2">2</SelectItem>
-              <SelectItem value="4">4</SelectItem>
-              <SelectItem value="6">6</SelectItem>
-              <SelectItem value="8">8</SelectItem>
-              <SelectItem value="12">12</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      </SettingsCard>
 
       {/* Статус сервиса */}
-      <div className="pt-3 border-t border-border space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{tt("STT-сервис:")}</span>
-            {service?.starting ? (
-              <Badge variant="secondary" className="gap-1 text-[10px]">
-                <Loader2Icon className="w-3 h-3 animate-spin" />
-                {' '}{tt("Загрузка…")}
-              </Badge>
-            ) : service?.running ? (
-              <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1 text-[10px]">
-                <CheckCircleIcon className="w-3 h-3" />
-                {' '}{tt("Работает")}
-              </Badge>
-            ) : st?.runtimeFound === false ? (
-              /* (правка 743) Рантайма нет — «запустится при первом диктанте»
-                 было неправдой: сервер не сможет стартовать вообще. */
-              <Badge className="bg-red-500/15 text-red-300 border-red-500/30 text-[10px]">
-                {tt("Недоступен: нет transcribe.dll")}
-              </Badge>
-            ) : (st?.models?.length ?? 0) === 0 ? (
-              <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
-                {tt("Недоступен: нет модели распознавания")}
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="text-[10px]">
-                {tt("Остановлен (запустится при первом диктанте)")}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {service?.running && (
-              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={stopService}>
-                <PowerIcon className="w-3 h-3" />
-                {' '}{tt("Остановить")}
-              </Button>
-            )}
-          </div>
-        </div>
-        {st?.health && (
-          <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
-            {String(st.health.model ?? '')} {' '}{tt("· язык:")}{' '} {String(st.health.language ?? '')} {' '}{tt("· потоки:")}{' '} {String(st.health.threads ?? '')}
-            {st.health.version ? ` · ${String(st.health.version)}` : ''}
-          </p>
-        )}
+      <SettingsCard
+        icon={<PowerIcon className="w-4 h-4" />}
+        title={tt("Сервис распознавания")}
+        description={tt("Запускается по требованию и освобождает память, когда не нужен")}
+      >
+        <SettingsRow
+          label={tt("Состояние")}
+          description={
+            st?.health
+              ? `${String(st.health.model ?? '')} · ${tt("язык:")} ${String(st.health.language ?? '')} · ${tt("потоки:")} ${String(st.health.threads ?? '')}${st.health.version ? ` · ${String(st.health.version)}` : ''}`
+              : tt("Сервис поднимается при первом диктанте")
+          }
+          right={
+            <>
+              {service?.starting ? (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <Loader2Icon className="w-3 h-3 animate-spin" />
+                  {' '}{tt("Загрузка…")}
+                </Badge>
+              ) : service?.running ? (
+                <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/15 text-[10px] text-emerald-400">
+                  <CheckCircleIcon className="w-3 h-3" />
+                  {' '}{tt("Работает")}
+                </Badge>
+              ) : st?.runtimeFound === false ? (
+                /* (правка 743) Рантайма нет — «запустится при первом диктанте»
+                   было неправдой: сервер не сможет стартовать вообще. */
+                <Badge className="border-red-500/30 bg-red-500/15 text-[10px] text-red-300">
+                  {tt("Нет transcribe.dll")}
+                </Badge>
+              ) : (st?.models?.length ?? 0) === 0 ? (
+                <Badge className="border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-300">
+                  {tt("Нет модели")}
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="text-[10px]">
+                  {tt("Остановлен")}
+                </Badge>
+              )}
+              {service?.running && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={stopService}
+                >
+                  <PowerIcon className="w-3 h-3" />
+                  {' '}{tt("Остановить")}
+                </Button>
+              )}
+            </>
+          }
+        />
         {/* (правка 743) Нет рантайма — объясняем, что делать. Общую ошибку
             запуска в этом случае не дублируем: причина уже названа. */}
         {st?.runtimeFound === false && (
-          <p className="text-xs text-amber-300/90 flex items-start gap-1.5">
-            <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <p className="mx-3.5 mb-2.5 flex items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-snug text-amber-200/90">
+            <AlertCircleIcon className="mt-0.5 w-3.5 h-3.5 shrink-0" />
             <span>
               {tt("Папка")}{' '} <code className="font-mono">stt/</code> {' '}{tt("с рантаймом (transcribe.dll и соседние DLL) не входит в поставку — скопируйте её целиком с рабочей машины рядом с")}{' '} <code className="font-mono">start.bat</code>.
             </span>
           </p>
         )}
         {service?.error && st?.runtimeFound !== false && (
-          <p className="text-xs text-red-300/90 flex items-start gap-1.5">
-            <AlertCircleIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <p className="mx-3.5 mb-2.5 flex items-start gap-1.5 text-[11px] leading-snug text-red-300/90">
+            <AlertCircleIcon className="mt-0.5 w-3.5 h-3.5 shrink-0" />
             {tt(service.error)}
           </p>
         )}
-      </div>
+      </SettingsCard>
 
       {/* Тест */}
-      <div className="pt-3 border-t border-border space-y-2">
-        <span className="text-xs text-muted-foreground">
-          {tt("Тест: нажмите кнопку, скажите фразу и нажмите её снова — текст появится ниже")}
-        </span>
-        <div className="flex items-center gap-2">
+      <SettingsCard
+        icon={<PlayIcon className="w-4 h-4" />}
+        title={tt("Проверка")}
+        description={tt("Нажмите кнопку, скажите фразу и нажмите её снова — текст появится ниже")}
+      >
+        <div className="flex items-center gap-3 px-3.5 py-2.5">
           <VoiceInputButton
             variant="inline"
-            onText={(t) => setTestText(t)}
+            onText={(text) => setTestText(text)}
             disabled={!enabled}
           />
-          <span className="text-[10px] text-muted-foreground/60">
+          <span className="text-[11px] text-muted-foreground">
             {enabled ? tt("Голосовой ввод включён") : tt("Голосовой ввод выключен — включите его выше")}
           </span>
         </div>
         {testText && (
-          <div className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-2">
-            <p className="text-xs text-cyan-100/90 leading-snug">{testText}</p>
+          <div className="mx-3.5 mb-2.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-2">
+            <p className="text-xs leading-snug text-cyan-100/90">{testText}</p>
           </div>
         )}
-      </div>
+      </SettingsCard>
 
       {/* Сохранить */}
-      <div className="pt-3 border-t border-border flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => { void refresh() }} disabled={saving}>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs"
+          onClick={() => { void refresh() }}
+          disabled={saving}
+        >
           <RefreshCwIcon className="w-3.5 h-3.5" />
           {' '}{tt("Обновить")}
         </Button>
-        <Button size="sm" className="gap-1.5 text-xs bg-cyan-600 hover:bg-cyan-500" onClick={() => { void save() }} disabled={saving}>
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 bg-cyan-600 text-xs hover:bg-cyan-500"
+          onClick={() => { void save() }}
+          disabled={saving}
+        >
           {saving ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlayIcon className="w-3.5 h-3.5" />}
           {' '}{tt("Сохранить и применить")}
         </Button>
@@ -624,3 +632,4 @@ export function VoiceSettingsPanel() {
     </div>
   )
 }
+

@@ -125,29 +125,29 @@ export function DiffusionModelSelector() {
   const displayName = selected || defaultModel || '—'
 
   return (
-    <div className="pt-2 border-t border-border">
-      {/* Header row + «Добавить» (правка 90) */}
-      <div className="flex items-center gap-1">
+    <div className="divide-y divide-border/50">
+      {/* Текущая модель: шапку группы даёт карточка настроек */}
+      <div className="flex items-center gap-2 px-3.5 py-2.5">
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--surface-2)]/50 transition-colors text-left min-w-0"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           <PackageIcon className={cn('w-4 h-4 shrink-0', isDefault ? 'text-muted-foreground' : 'text-cyan-400')} />
-          <div className="flex-1 min-w-0">
-            <span className="text-xs font-medium block truncate">{displayName}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-medium text-foreground">{displayName}</span>
             <span className="text-[10px] text-muted-foreground">
               {isDefault ? t("Базовая модель") : t("Альтернативная модель")}
             </span>
-          </div>
-          <ChevronDownIcon className={cn('w-4 h-4 text-muted-foreground transition-transform shrink-0', expanded && 'rotate-180')} />
+          </span>
+          <ChevronDownIcon className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
         </button>
         <Button
           variant="outline"
           size="sm"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="h-7 gap-1.5 text-xs shrink-0"
+          className="h-7 shrink-0 gap-1.5 text-xs"
         >
           {uploading ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
           {' '}{t("Добавить")}
@@ -163,20 +163,20 @@ export function DiffusionModelSelector() {
 
       {/* Upload progress (правка 90; правка 104 — состояние из общего store) */}
       {uploading && (
-        <div className="space-y-1 px-1">
-          <div className="h-1.5 bg-[var(--surface-2)] rounded-full overflow-hidden">
+        <div className="space-y-1 px-3.5 py-2.5">
+          <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-1)]">
             <div
-              className="h-full bg-cyan-500 rounded-full transition-all duration-200"
+              className="h-full rounded-full bg-cyan-400 transition-all duration-200"
               style={{ width: `${uploadProgress}%` }}
             />
           </div>
-          <p className="text-[10px] text-muted-foreground text-right">{uploadProgress}%</p>
+          <p className="text-right text-[10px] text-muted-foreground">{uploadProgress}%</p>
         </div>
       )}
 
       {/* Expanded list */}
       {expanded && (
-        <div className="mt-1.5 space-y-0.5 px-1 pb-1 max-h-48 overflow-y-auto">
+        <div className="max-h-56 overflow-y-auto py-1">
           {models.map((m) => (
             <button
               key={m}
@@ -184,16 +184,16 @@ export function DiffusionModelSelector() {
               onClick={() => handleSelect(m)}
               disabled={saving}
               className={cn(
-                'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors',
+                'flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-xs transition-colors',
                 selected === m
                   ? 'bg-cyan-500/10 text-cyan-300'
-                  : 'hover:bg-[var(--surface-2)]/60 text-foreground/80',
+                  : 'text-foreground/80 hover:bg-[var(--surface-1)]',
               )}
             >
               {selected === m && <CheckIcon className="w-3 h-3 shrink-0" />}
               <span className="flex-1 truncate">{m}</span>
               {m === defaultModel && (
-                <span className="text-[10px] px-1 py-0.5 rounded bg-muted-foreground/20 text-muted-foreground shrink-0">
+                <span className="shrink-0 rounded bg-[var(--surface-3)] px-1 py-0.5 text-[9px] text-muted-foreground">
                   {t("базовая")}
                 </span>
               )}
@@ -206,7 +206,7 @@ export function DiffusionModelSelector() {
               type="button"
               onClick={() => handleSelect('')}
               disabled={saving}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-amber-400/80 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+              className="flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-xs text-amber-400/80 transition-colors hover:bg-amber-500/10 hover:text-amber-300"
             >
               <RotateCcwIcon className="w-3 h-3 shrink-0" />
               {' '}{t("Вернуть базовую модель")}

@@ -217,23 +217,22 @@ export function LoraSettingsPanel() {
   }
 
   return (
-    <div className="space-y-3 pt-3 border-t border-border">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">LoRAs</span>
-        <div className="flex items-center gap-2">
-          {/* (правка 133) Кнопка «Сбросить патчи» убрана — сброс теперь
-           * автоматический при включении/выключении LoRA (в API PUT). */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleAdd}
-            disabled={uploading}
-            className="h-7 gap-1.5 text-xs"
-          >
-            {uploading ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
-            {' '}{t("Добавить")}
-          </Button>
-        </div>
+    <div className="divide-y divide-border/50">
+      {/* Пояснение + «Добавить»: шапку рисует карточка настроек */}
+      <div className="flex items-center gap-3 px-3.5 py-2.5">
+        <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
+          {t("Встроенная турбо-лора включена по умолчанию. В режиме «Кадры» с добавленным аудио она пропускается автоматически; обычные LoRA работают всегда.")}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleAdd}
+          disabled={uploading}
+          className="h-7 shrink-0 gap-1.5 text-xs"
+        >
+          {uploading ? <Loader2Icon className="w-3.5 h-3.5 animate-spin" /> : <PlusIcon className="w-3.5 h-3.5" />}
+          {' '}{t("Добавить")}
+        </Button>
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -244,20 +243,16 @@ export function LoraSettingsPanel() {
         />
       </div>
 
-      <p className="text-[10px] text-muted-foreground leading-snug">
-        {t("Встроенная турбо-лора включена по умолчанию. В режиме «Кадры» с добавленным аудио она пропускается автоматически; обычные LoRA работают всегда.")}
-      </p>
-
       {/* Upload progress (правка 104 — состояние из общего store) */}
       {uploading && (
-        <div className="space-y-1">
-          <div className="h-1.5 bg-[var(--surface-2)] rounded-full overflow-hidden">
+        <div className="space-y-1 px-3.5 py-2.5">
+          <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-1)]">
             <div
-              className="h-full bg-cyan-500 rounded-full transition-all duration-200"
+              className="h-full rounded-full bg-cyan-400 transition-all duration-200"
               style={{ width: `${uploadProgress}%` }}
             />
           </div>
-          <p className="text-[10px] text-muted-foreground text-right">{uploadProgress}%</p>
+          <p className="text-right text-[10px] text-muted-foreground">{uploadProgress}%</p>
         </div>
       )}
 
@@ -267,81 +262,74 @@ export function LoraSettingsPanel() {
           <Loader2Icon className="w-4 h-4 animate-spin text-muted-foreground" />
         </div>
       ) : loras.length === 0 ? (
-        <p className="text-xs text-muted-foreground/60 py-1">
+        <p className="px-3.5 py-3 text-[11px] text-muted-foreground">
           {t("Нет кастомных LoRAs. Добавьте файл .safetensors.")}
         </p>
       ) : (
-        <div className="space-y-2">
-          {loras.map((lora) => (
-            <div
-              key={lora.name}
-              className="rounded-lg border border-border bg-[var(--surface-2)] px-3 py-2 space-y-1.5"
-            >
-              {/* Header: name + actions */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-foreground truncate flex items-center gap-1.5" title={lora.name}>
-                    <span className="truncate">{shortName(lora.name)}</span>
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {formatSize(lora.size)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => toggleEnabled(lora.name, !lora.enabled)}
-                    className={`p-1.5 rounded-md transition-colors ${
-                      lora.enabled
-                        ? 'text-emerald-400 hover:bg-emerald-500/10'
-                        : 'text-muted-foreground/40 hover:bg-muted'
-                    }`}
-                    title={lora.enabled ? t("Отключить") : t("Включить")}
-                  >
-                    {lora.enabled ? <PowerIcon className="w-3.5 h-3.5" /> : <PowerOffIcon className="w-3.5 h-3.5" />}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(lora.name)}
-                    className="p-1.5 rounded-md text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title={t("Удалить")}
-                  >
-                    <Trash2Icon className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+        loras.map((lora) => (
+          <div key={lora.name} className="px-3.5 py-2.5">
+            {/* Header: name + actions */}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-foreground" title={lora.name}>
+                  {shortName(lora.name)}
+                </p>
+                <p className="text-[10px] text-muted-foreground">{formatSize(lora.size)}</p>
               </div>
-
-              {/* Strength slider (only when enabled) */}
-              {lora.enabled && (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      /* (правка 256) Диапазон −10…+10: на civitai есть лоры,
-                         обученные с отрицательной силой (инверсия), а старые
-                         границы 0.1…2.0 не давали их использовать. */
-                      min="-10"
-                      max="10"
-                      step="0.05"
-                      value={lora.strength}
-                      onChange={(e) => updateStrength(lora.name, parseFloat(e.target.value))}
-                      className="flex-1 h-1 accent-cyan-500 cursor-pointer"
-                    />
-                    <span className="text-[10px] font-mono text-muted-foreground w-12 text-right">
-                      {lora.strength.toFixed(2)}
-                    </span>
-                  </div>
-                  {/* Trigger words (правка 46) */}
-                  <input
-                    type="text"
-                    placeholder={t("Триггерные слова (добавляются к промпту)")}
-                    value={lora.trigger || ''}
-                    onChange={(e) => updateTrigger(lora.name, e.target.value)}
-                    className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
-                  />
-                </div>
-              )}
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={() => toggleEnabled(lora.name, !lora.enabled)}
+                  className={`rounded-md p-1.5 transition-colors ${
+                    lora.enabled
+                      ? 'text-emerald-400 hover:bg-emerald-500/10'
+                      : 'text-muted-foreground/40 hover:bg-[var(--surface-3)]'
+                  }`}
+                  title={lora.enabled ? t("Отключить") : t("Включить")}
+                >
+                  {lora.enabled ? <PowerIcon className="w-3.5 h-3.5" /> : <PowerOffIcon className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  onClick={() => handleDelete(lora.name)}
+                  className="rounded-md p-1.5 text-muted-foreground/40 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                  title={t("Удалить")}
+                >
+                  <Trash2Icon className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-          ))}
-        </div>
+
+            {/* Strength slider (only when enabled) */}
+            {lora.enabled && (
+              <div className="mt-2 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    /* (правка 256) Диапазон −10…+10: на civitai есть лоры,
+                       обученные с отрицательной силой (инверсия), а старые
+                       границы 0.1…2.0 не давали их использовать. */
+                    min="-10"
+                    max="10"
+                    step="0.05"
+                    value={lora.strength}
+                    onChange={(e) => updateStrength(lora.name, parseFloat(e.target.value))}
+                    className="h-1 flex-1 cursor-pointer accent-cyan-500"
+                  />
+                  <span className="w-10 shrink-0 text-right text-[10px] font-mono text-muted-foreground">
+                    {lora.strength.toFixed(2)}
+                  </span>
+                </div>
+                {/* Trigger words (правка 46) */}
+                <input
+                  type="text"
+                  placeholder={t("Триггерные слова (добавляются к промпту)")}
+                  value={lora.trigger || ''}
+                  onChange={(e) => updateTrigger(lora.name, e.target.value)}
+                  className="h-7 w-full max-w-[420px] rounded-md border border-border bg-[var(--surface-1)] px-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-cyan-500/60 focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
+                />
+              </div>
+            )}
+          </div>
+        ))
       )}
     </div>
   )

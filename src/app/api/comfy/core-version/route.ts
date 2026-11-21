@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getAppConfig } from '@/lib/app-config'
-import { CORE_MIN_VERSION, isCoreOutdated, parseComfyVersion } from '@/lib/comfy/core-version'
+import { CORE_CURRENT_MIN, CORE_MIN_VERSION, CORE_ROLLBACK_MAX, CORE_ROLLBACK_MIN, coreSupport, isCoreOutdated, parseComfyVersion, readCoreChannel } from '@/lib/comfy/core-version'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,11 +31,17 @@ export async function GET() {
       coreExists,
       version,
       minVersion: CORE_MIN_VERSION,
+      // (правка 1080) какое поколение ядра сейчас и какие диапазоны поддержаны
+      support: coreSupport(version),
+      currentMin: CORE_CURRENT_MIN,
+      rollbackMin: CORE_ROLLBACK_MIN,
+      rollbackMax: CORE_ROLLBACK_MAX,
+      channel: readCoreChannel(),
       outdated: isCoreOutdated(version),
       unknown: coreExists && !version,
     })
   } catch {
     // Не смогли прочитать конфиг/диск — молчим, баннер не показываем.
-    return NextResponse.json({ ok: false, coreExists: false, version: null, minVersion: CORE_MIN_VERSION, outdated: false, unknown: false })
+    return NextResponse.json({ ok: false, coreExists: false, version: null, minVersion: CORE_MIN_VERSION, support: 'current', currentMin: CORE_CURRENT_MIN, rollbackMin: CORE_ROLLBACK_MIN, rollbackMax: CORE_ROLLBACK_MAX, channel: '', outdated: false, unknown: false })
   }
 }

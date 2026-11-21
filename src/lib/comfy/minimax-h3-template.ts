@@ -249,6 +249,10 @@ export interface MiniMaxH3Params {
   sparseExtraTokens?: number
   /** Enable MiniMaxLowVRAMAttention (head-chunked attention, saves VRAM). Default true. */
   lowVramAttention?: boolean
+  /** (правка 1088) Bounded attention: QKV/attention/out_proj блоками по токенам.
+   *  Включается роутом на картах <12 ГБ; на 8 ГБ это единственный способ
+   *  провести pass 2 в 1080p без тайлов. */
+  boundedAttention?: boolean
   /** Enable MiniMaxChunkFeedForward (chunked FFN, saves VRAM on long sequences). Default true. */
   chunkFeedForward?: boolean
   /** ChunkFF: number of feed-forward chunks (default 2). */
@@ -1157,7 +1161,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // the chain as nodes get enabled, so the LoRA always receives the
   // last patch in the chain (or the raw UNET when both are off).
   const lowVram = p.lowVramAttention !== false
-  const chunkFF = p.chunkFeedForward !== false
+  // (правка 1088) Bounded attention — обёртка над уже пропатченным forward:
+  // на длинной последовательности режет QKV/attention/out_proj по токенам,
+  // на короткой отдаёт управление LowVRAM. В этом режиме FFN обязан быть
+  // порезан, иначе его пик (4,3 ГБ на 1080p) съедает выигрыш.
+  const boundedAttn = p.boundedAttention === true
+  const chunkFF = p.chunkFeedForward !== false || boundedAttn
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
@@ -1168,15 +1177,25 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     }
     modelSrc = ['46:43', 0]
   }
+  if (boundedAttn) {
+    modelNodes['46:45'] = {
+      inputs: { token_chunk: 4096, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['46:45', 0]
+  }
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-        chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+        chunks: boundedAttn
+          ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
+          : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
         seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
         model: modelSrc,
       },
       class_type: 'MiniMaxChunkFeedForward',
-      _meta: { title: 'Chunk FeedForward' },
+      _meta: { title: boundedAttn ? 'Chunk FeedForward (bounded)' : 'Chunk FeedForward' },
     }
     modelSrc = ['46:40', 0]
   }
@@ -1222,13 +1241,16 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     },
     // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
     // Превью не должно валить длинную генерацию; сама генерация не ограничена.
+    // (правка 1088) В bounded-режиме tiny-VAE декодирует КАЖДЫЙ кадр в полном
+    // разрешении и складывает их в один GPU-тензор: 124 кадра 1080p — это 3,1 ГБ
+    // на каждом шаге. Восьми кадров хватает для анимации и они не съедают бюджет.
     '46:19c': {
       inputs: {
-        expression: `min(a, ${PREVIEW_MAX_FRAMES})`,
+        expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`,
         'values.a': ['46:19', 1],
       },
       class_type: 'ComfyMathExpression',
-      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
     },
 
     // Low-res resolution is computed server-side (selectResolution) and fed
@@ -1480,14 +1502,37 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       // после этого не держится. Пиксельный путь его вообще не касается:
       // Pass 2 получает обычный VAE-энкод кадров.
       ...(loopOn ? {
+        // (правка 1082) Pass 1 в цикле декодируем ТЕМ ЖЕ LoopDecode, что и финал.
+        // Обычный VAEDecode начинает и заканчивает декодер внутри цикла и кладёт
+        // битый шов в первые/последние кадры — Pass 2 получал его обратно через
+        // VAEEncode, и высокий sigma превращал шов в разрыв/артефакты. LoopDecode
+        // декодирует цикл с обёрнутым контекстом с двух сторон и отдаёт ровно 17k.
         '46:26:dec': {
-          inputs: { samples: ['46:35', 0], vae: ['46:3', 0] },
-          class_type: 'VAEDecode',
-          _meta: { title: 'Decode Pass 1 (для пиксельного апскейла)' },
+          inputs: {
+            samples: ['h3_rst_mid', 0],
+            vae: ['46:3', 0],
+            audio_vae: ['46:4', 0],
+            pad_clips: loopPadClips,
+          },
+          class_type: 'MiniMaxStudioLoopDecode',
+          _meta: { title: 'Loop Decode Pass 1 (цикл без шва)' },
+        },
+        // (правка 1082) Хвост 17k+5: первые 5 кадров цикла дописываем как
+        // продолжение (как 'r_pad' в Refine). Иначе VAEEncode получает 17k кадров
+        // и сетка латента съезжает (5k-3 вместо 5k+2).
+        '46:26:head': {
+          inputs: { image: ['46:26:dec', 0], batch_index: 0, length: 5 },
+          class_type: 'ImageFromBatch',
+          _meta: { title: 'Первые 5 кадров (хвост цикла)' },
+        },
+        '46:26:pad': {
+          inputs: { image1: ['46:26:dec', 0], image2: ['46:26:head', 0] },
+          class_type: 'ImageBatch',
+          _meta: { title: 'Цикл + хвост 5 кадров (17k+5)' },
         },
         '46:26:res': {
           inputs: {
-            image: ['46:26:dec', 0],
+            image: ['46:26:pad', 0],
             width: final.genW,
             height: final.genH,
             upscale_method: 'lanczos',

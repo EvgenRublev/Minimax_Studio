@@ -1,19 +1,21 @@
 'use client'
 
 /**
- * (правка 911) Баннер «ядро ComfyUI устарело».
+ * (правка 911 → 1080) Баннер про поколение ядра ComfyUI.
  *
  * Внутрипрограммное обновление меняет только файлы студии и никогда не трогает
  * папку ComfyUI (install/apply_update.ps1). Поэтому обновившийся пользователь
- * может остаться на ядре 0.33, под которое наши патчи и ноды уже не
- * рассчитаны, — и до этой правки узнавал об этом только из консоли.
+ * может остаться на ядре, под которое нет набора патчей, — и до правки 911 он
+ * узнавал об этом только из консоли.
  *
- * Компонент спрашивает /api/comfy/core-version и, если ядро старее
- * CORE_MIN_VERSION, показывает баннер с кнопкой «Как обновить» (диалог с
- * пошаговой инструкцией) и крестиком «скрыть до перезагрузки».
+ * Компонент спрашивает /api/comfy/core-version и показывает:
+ *   • красную полосу — если ядро не поддерживается ни одним набором патчей
+ *     (0.34–0.43, либо старее 0.33), с кнопкой «Как обновить»;
+ *   • жёлтую полосу — если работает откатное ядро 0.33.x (правка 1080, режим
+ *     для слабых карт), с кнопкой «Вернуть ядро 0.44…».
  *
  * Важно: это ПРЕДУПРЕЖДЕНИЕ, а не блокировка. Пока шаблоны воркфлоу не
- * требуют нод 0.44, генерация на старом ядре продолжает работать — пугать
+ * требуют нод конкретного поколения, генерация продолжается — пугать
  * пользователя запретом генерации нельзя.
  */
 import { useEffect, useState } from 'react'
@@ -34,6 +36,12 @@ interface CoreVersionResp {
   coreExists?: boolean
   version: string | null
   minVersion: string
+  /** (правка 1080) 'current' | 'rollback' | 'unsupported' */
+  support?: 'current' | 'rollback' | 'unsupported'
+  currentMin?: string
+  rollbackMin?: string
+  rollbackMax?: string
+  channel?: string
   outdated: boolean
   unknown?: boolean
 }
@@ -44,6 +52,9 @@ export function CoreWarningBanner() {
   const [info, setInfo] = useState<CoreVersionResp | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  // (правка 1080) ход «обратно на актуальное ядро» из откатного
+  const [switching, setSwitching] = useState(false)
+  const [switchMsg, setSwitchMsg] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -61,12 +72,59 @@ export function CoreWarningBanner() {
     return () => { alive = false; clearInterval(t) }
   }, [])
 
-  if (dismissed || !info?.outdated || !info.version) return null
+  const backToCurrent = async () => {
+    const bridge = typeof window !== 'undefined' ? window.h3desktop?.comfy?.switchCore : undefined
+    if (!bridge || switching) return
+    setSwitching(true)
+    setSwitchMsg('')
+    const res = await bridge('current').catch((e: unknown) => ({ ok: false, error: String((e as Error)?.message || e) }))
+    setSwitching(false)
+    if (!res?.ok) setSwitchMsg(res?.error || tt('Не удалось вернуть актуальное ядро'))
+  }
 
-  const title = `Ядро ComfyUI устарело: ${info.version} (нужно ${info.minVersion})`
+  if (dismissed || !info?.version) return null
+
+  // (правка 1080) Откатное ядро — не ошибка, а выбранный режим: показываем
+  // спокойную полосу и кнопку возврата, чтобы пользователь не забыл, на чём он.
+  if (info.support === 'rollback') {
+    const title = tt('Работает откатное ядро ComfyUI') + `: ${info.version}`
+    const detail = tt('Оно медленнее, но держит большие разрешения на картах 8-12 ГБ. Вернуться можно в любой момент — модели и ноды не трогаются.')
+    return (
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 shrink-0">
+        <AlertTriangleIcon className="w-4 h-4 text-amber-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-amber-300 font-medium truncate" title={title}>{title}</p>
+          <p className="text-[11px] text-amber-300/70 truncate" title={detail}>{switchMsg || detail}</p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs text-amber-300 border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-200 shrink-0"
+          disabled={switching || !window.h3desktop?.comfy?.switchCore}
+          onClick={() => void backToCurrent()}
+        >
+          <ArrowUpCircleIcon className="w-3 h-3" />
+          {' '}{switching ? tt('Возврат ядра…') : `${tt('Вернуть ядро')} ${info.currentMin || ''}`}
+        </Button>
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="p-1 rounded hover:bg-amber-500/20 text-amber-400/70 hover:text-amber-300 shrink-0"
+          title={tt('Скрыть до перезапуска')}
+        >
+          <XIcon className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )
+  }
+
+  if (!info.outdated) return null
+
+  const ranges = `${info.rollbackMin}–${(info.rollbackMax || '').replace(/\.0$/, '')}.x, ${info.currentMin}+`
+  const title = `Ядро ComfyUI не поддерживается: ${info.version} (нужно ${ranges})`
   const detail =
     'Обновление студии не трогает ComfyUI, поэтому ядро осталось прежним. ' +
-    'Патчи и ноды проекта рассчитаны на ' + info.minVersion + '. Запустите install.bat один раз — ' +
+    'Наши патчи и ноды есть только для ядер ' + ranges + '. Запустите install.bat один раз — ' +
     'модели, ноды и настройки сохранятся.'
 
   return (

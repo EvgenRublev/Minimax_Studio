@@ -9,40 +9,20 @@
  * вставляются текстовыми узлами, так что HTML из релиза не может ни чего-то
  * отрендерить, ни выполнить скрипт.
  *
- * Два экспорта:
- *   • <ReleaseNotes/> — блок для панели «О программе» (со скроллом);
- *   • notesSummary()  — 1–2 строки для стартового тоста.
+ * Два места показа:
+ *   • <ReleaseNotes/> — полный список изменений в панели «О программе»;
+ *   • стартовый тост об обновлении (правка 1072) показывает только версию:
+ *     своих строк из чейнджлога в уведомлении больше нет.
  */
 import type { ReactNode } from 'react'
 
-/** Убираем markdown-разметку, оставляя текст (для тоста). */
+/** Убираем markdown-разметку, оставляя текст. */
 function stripInline(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/`(.+?)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .trim()
-}
-
-/**
- * Краткая сводка релиза для тоста: первые содержательные строки (заголовки
- * версий пропускаем — версия уже есть в тексте тоста), склеенные через « · ».
- */
-export function notesSummary(notes: string, maxLines = 2, maxChars = 220): string {
-  if (!notes) return ''
-  const lines: string[] = []
-  for (const raw of notes.split(/\r?\n/)) {
-    const line = raw.trim()
-    if (!line) continue
-    if (line.startsWith('<!--')) continue
-    if (/^#+\s/.test(line)) continue // заголовок секции — дублирует версию
-    const text = stripInline(line.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, ''))
-    if (!text) continue
-    lines.push(text)
-    if (lines.length >= maxLines) break
-  }
-  const out = lines.join(' · ')
-  return out.length > maxChars ? `${out.slice(0, maxChars - 1)}…` : out
 }
 
 /** Инлайн-фрагменты: **жирный**, `код`, [текст](ссылка) → текст. */

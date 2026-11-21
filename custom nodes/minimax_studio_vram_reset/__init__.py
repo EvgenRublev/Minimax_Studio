@@ -1,4 +1,4 @@
-"""MiniMax Studio (правка 1055): нода-сброс VRAM между стадиями H3.
+"""MiniMax Studio (правки 1055, 1061): нода-сброс VRAM между стадиями H3.
 
 Зачем: DynamicVRAM (comfy-aimdo) оставляет веса моделей резидентными между
 стадиями/сегментами одного прогона. В длинных многоклиповых задачах (продление,
@@ -9,11 +9,28 @@
 каждым новым прогоном модели; авторы #118 убрали висельники именно
 unload_all_models + empty_cache между сегментами.
 
+Правка 1061. Апстрим-разбор comfy-aimdo#117 дочитал механизм до конца:
+vbar_fault() проверяет watermark ДО проверки резидентности, а watermark
+восстанавливает только vbar_prioritize() - который ядро вызывает при ЗАГРУЗКЕ
+модели. То есть модель, пережившая предыдущий сэмпл, остаётся с дренажнутым
+watermark, и первый же re-fault (Refine после генерации!) возвращает OOM и
+дедлокается в hostbuf_file_reader_read (старт висит на 0/.. «Model
+Initializing»). Ядро чинит это блоком finally в execution.py
+(cleanup_prefetch_queues + reset_cast_buffers + vbars_reset_watermark_limits),
+но он выполняется ПОСЛЕ ноды, а не перед первым fault'ом следующей. Ноды,
+которые держат несколько сегментов внутри одного execute (Loop, Tessera,
+продление) вообще получают его один раз на весь прогон. Поэтому сброс делает
+всё четыре действия ПЕРЕД тяжёлой стадией: полный unload (при следующей
+загрузке prioritize поднимет watermark), очистка очередей пре-фетча (именно
+они пинят страницы - доказанный фикс #117), сброс cast-буферов и лимитов
+watermark. Все вызовы с guard'ами - на старых core/aimdo просто пропускаются.
+
 MiniMaxStudioVRAMReset стоит разрывом на линии латента (вход = выход, тот же
 объект) и при исполнении выгружает все модели и чистит кеш аллокатора.
-Ставится в шаблоне: после сэмплера перед separate/decode (освободить DiT под
-всплеск VAE-декода и NVENC) и между клипами продления (сбросить резидентность
-перед следующим сегментом).
+Ставится в шаблоне: перед Refine-сэмплером (1061 - рефайн обычно идёт сразу
+за генерацией и ловит re-fault на дренажнутом watermark), после сэмплера
+перед separate/decode (освободить DiT под всплеск VAE-декода и NVENC) и между
+клипами продления (сбросить резидентность перед следующим сегментом).
 """
 
 import logging
@@ -46,6 +63,48 @@ def aimdo_usage(device):
 def _gb(x):
     # Лог ComfyUI на Windows открыт в cp1251: только кириллица/ASCII, без стрелок.
     return "%.2f GB" % (x / 1024 ** 3)
+
+
+def core_cleanups():
+    """(правка 1061) Тот же блок, что делает finally ядра в execution.py
+    после КАЖДОЙ ноды: cleanup_prefetch_queues -> reset_cast_buffers ->
+    vbars_reset_watermark_limits. Очереди пре-фетча держат ссылки на блоки
+    весов и пинят VBAR-страницы (pin_count), из-за чего free_memory дренирует
+    watermark в ноль, а vbar_fault после этого возвращает OOM, не глядя на
+    резидентность (comfy-aimdo#117). Внутри многосегментных нод этот блок не
+    выполняется между сегментами вовсе - делаем его сами. Возвращает список
+    имён выполненных действий для лога. На старых core/aimdo отсутствующие
+    функции молча пропускаются."""
+    done = []
+    try:
+        import comfy.model_prefetch as mp
+        fn = getattr(mp, "cleanup_prefetch_queues", None)
+        if fn is not None:
+            fn()
+            done.append("prefetch_queues")
+    except Exception:
+        pass
+    try:
+        fn = getattr(mm, "reset_cast_buffers", None)
+        if fn is not None:
+            fn()
+            done.append("cast_buffers")
+    except Exception:
+        pass
+    try:
+        # Нативные vbar-вызовы опасны без инициализированного DynamicVRAM
+        # (могут грохнуть процесс, try/except тут не спасает) - повторяем
+        # гейт ядра: только когда aimdo реально активен.
+        import comfy.memory_management as mem
+        if getattr(mem, "aimdo_enabled", False):
+            import comfy_aimdo.model_vbar as vbar
+            fn = getattr(vbar, "vbars_reset_watermark_limits", None)
+            if fn is not None:
+                fn()
+                done.append("watermark_limits")
+    except Exception:
+        pass
+    return done
 
 
 class MiniMaxStudioVRAMReset:
@@ -83,6 +142,10 @@ class MiniMaxStudioVRAMReset:
             loaded = -1
         tag = (" [%s]" % label) if label else ""
 
+        # Очереди пре-фетча пинят VBAR-страницы, поэтому их чистим ДО unload:
+        # иначе unload дренирует watermark, а fault'ы следующего прогона
+        # вернут OOM (comfy-aimdo#117).
+        cleaned = core_cleanups()
         mm.unload_all_models()
         mm.soft_empty_cache()
         try:
@@ -100,11 +163,12 @@ class MiniMaxStudioVRAMReset:
         # память удерживают НЕ модели (чужие процессы/утечка в ядре).
         LOG.info(
             "MiniMax Studio VRAM Reset%s: моделей до сброса %d, свободно %s, aimdo держит %s; "
-            "после: свободно %s (+%s)",
+            "после: свободно %s (+%s); очистки: %s",
             tag, loaded, _gb(max(0, free_before)),
             "нет данных" if used is None else _gb(used),
             _gb(max(0, free_after)),
-            _gb(max(0, free_after - free_before)))
+            _gb(max(0, free_after - free_before)),
+            ", ".join(cleaned) if cleaned else "нет (старый core/aimdo)")
         return (flow,)
 
 

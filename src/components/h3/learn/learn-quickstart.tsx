@@ -28,6 +28,7 @@ import {
   ZapIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next' // (правка 955)
 
 const TABS = [
   {
@@ -210,56 +211,57 @@ function SectionTitle({ icon: Icon, title, sub }: { icon: typeof SparklesIcon; t
 }
 
 export function LearnQuickStart() {
+  const { t: tt } = useTranslation() // (правка 955)
+
   return (
     <div className="select-text mx-auto w-full max-w-5xl space-y-7 pb-8 pt-1">
       {/* Приветствие */}
       <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-cyan-500/5 to-transparent p-5">
         <div className="flex items-center gap-2 text-xs font-medium text-emerald-300">
           <RocketIcon className="h-3.5 w-3.5" />
-          Быстрый старт
+          {' '}{tt("Быстрый старт")}
         </div>
         <h1 className="mt-2 text-xl font-semibold text-foreground">
-          Сделайте первое видео, даже если никогда не работали с нейросетями
+          {tt("Сделайте первое видео, даже если никогда не работали с нейросетями")}
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Здесь всё по шагам и простыми словами: куда нажать, что написать и где забрать результат.
-          Технические подробности знать не нужно — программа сделает всё сама.
+          {tt("Здесь всё по шагам и простыми словами: куда нажать, что написать и где забрать результат. Технические подробности знать не нужно — программа сделает всё сама.")}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-[var(--surface-2)]/60 px-2.5 py-1 text-[11px] text-foreground/80">
-            <CheckIcon className="h-3 w-3 text-emerald-400" /> Первое видео — 5–10 минут
+            <CheckIcon className="h-3 w-3 text-emerald-400" /> {' '}{tt("Первое видео — 5–10 минут")}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-[var(--surface-2)]/60 px-2.5 py-1 text-[11px] text-foreground/80">
-            <CheckIcon className="h-3 w-3 text-emerald-400" /> Всё на русском
+            <CheckIcon className="h-3 w-3 text-emerald-400" /> {' '}{tt("Всё на русском")}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-[var(--surface-2)]/60 px-2.5 py-1 text-[11px] text-foreground/80">
-            <CheckIcon className="h-3 w-3 text-emerald-400" /> Настройки можно менять без страха
+            <CheckIcon className="h-3 w-3 text-emerald-400" /> {' '}{tt("Настройки можно менять без страха")}
           </span>
         </div>
       </div>
 
       {/* Три первых шага */}
       <section className="space-y-3">
-        <SectionTitle icon={PlayIcon} title="С чего начать" sub="Три вещи, которые нужны один раз." />
+        <SectionTitle icon={PlayIcon} title={tt("С чего начать")} sub="Три вещи, которые нужны один раз." />
         <div className="grid gap-3 md:grid-cols-3">
           {[
             {
               n: 1,
               icon: DownloadIcon,
-              title: 'Скачайте модели',
-              text: '«Настройки» внизу слева → «Общие» → «Скачать все». Это файлы, которые создают видео. Качать один раз, потом интернет не нужен.',
+              title: tt("Скачайте модели"),
+              text: tt("«Настройки» внизу слева → «Общие» → «Скачать все». Это файлы, которые создают видео. Качать один раз, потом интернет не нужен."),
             },
             {
               n: 2,
               icon: SparklesIcon,
-              title: 'Придумайте сцену',
-              text: 'Кто в кадре, что происходит, где это, какое настроение. Не нужно знать специальных слов — опишите как другу.',
+              title: tt("Придумайте сцену"),
+              text: tt("Кто в кадре, что происходит, где это, какое настроение. Не нужно знать специальных слов — опишите как другу."),
             },
             {
               n: 3,
               icon: ClapperboardIcon,
-              title: 'Нажмите «Сгенерировать»',
-              text: 'Программа сделает видео и положит его в «Галерею». Первый раз может быть дольше обычного.',
+              title: tt("Нажмите «Сгенерировать»"),
+              text: tt("Программа сделает видео и положит его в «Галерею». Первый раз может быть дольше обычного."),
             },
           ].map((s) => (
             <div key={s.n} className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4">
@@ -280,7 +282,7 @@ export function LearnQuickStart() {
       <section className="space-y-3">
         <SectionTitle
           icon={ClapperboardIcon}
-          title="Что находится слева"
+          title={tt("Что находится слева")}
           sub="Одиннадцать вкладок. Начинающим нужны первые три, остальные — когда захочется большего."
         />
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -290,8 +292,8 @@ export function LearnQuickStart() {
                 <t.icon className="h-4 w-4" />
               </span>
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-foreground">{t.title}</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t.text}</p>
+                <p className="text-xs font-semibold text-foreground">{tt(t.title)}</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{tt(t.text)}</p>
               </div>
             </div>
           ))}
@@ -300,7 +302,7 @@ export function LearnQuickStart() {
 
       {/* Первое видео */}
       <section className="space-y-3">
-        <SectionTitle icon={PlayIcon} title="Первое видео: шесть шагов" sub="Держите этот список перед глазами — больше ничего не нужно." />
+        <SectionTitle icon={PlayIcon} title={tt("Первое видео: шесть шагов")} sub="Держите этот список перед глазами — больше ничего не нужно." />
         <div className="space-y-2">
           {FIRST_VIDEO.map((s) => (
             <div key={s.n} className="flex gap-3 rounded-xl border border-border bg-[var(--surface-2)]/30 p-3.5">
@@ -308,8 +310,8 @@ export function LearnQuickStart() {
                 {s.n}
               </span>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">{s.title}</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{s.text}</p>
+                <p className="text-sm font-medium text-foreground">{tt(s.title)}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{tt(s.text)}</p>
               </div>
             </div>
           ))}
@@ -317,10 +319,9 @@ export function LearnQuickStart() {
         <div className="flex gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3.5">
           <LightbulbIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <div className="text-xs leading-relaxed text-amber-100/80">
-            <p className="font-medium text-amber-300">Не знаете, что написать?</p>
+            <p className="font-medium text-amber-300">{tt("Не знаете, что написать?")}</p>
             <p className="mt-1">
-              Откройте ассистента справа и нажмите «Предложить идеи» или «Исправить мой промпт».
-              Он задаст пару вопросов и сам соберёт описание. Готовый текст можно сразу отправить в генерацию.
+              {tt("Откройте ассистента справа и нажмите «Предложить идеи» или «Исправить мой промпт». Он задаст пару вопросов и сам соберёт описание. Готовый текст можно сразу отправить в генерацию.")}
             </p>
           </div>
         </div>
@@ -328,15 +329,15 @@ export function LearnQuickStart() {
 
       {/* Что дальше */}
       <section className="space-y-3">
-        <SectionTitle icon={WandSparklesIcon} title="Что делать с результатом" sub="Простые пути, если хочется лучше." />
+        <SectionTitle icon={WandSparklesIcon} title={tt("Что делать с результатом")} sub="Простые пути, если хочется лучше." />
         <div className="grid gap-3 sm:grid-cols-2">
           {IMPROVE.map((c) => (
             <div key={c.title} className="rounded-xl border border-border bg-[var(--surface-2)]/40 p-4">
               <div className="flex items-center gap-2">
                 <c.icon className="h-4 w-4 text-cyan-400" />
-                <p className="text-sm font-semibold text-foreground">{c.title}</p>
+                <p className="text-sm font-semibold text-foreground">{tt(c.title)}</p>
               </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{c.text}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{tt(c.text)}</p>
             </div>
           ))}
         </div>
@@ -344,15 +345,15 @@ export function LearnQuickStart() {
 
       {/* Частые вопросы */}
       <section className="space-y-3">
-        <SectionTitle icon={CircleHelpIcon} title="Если что-то пошло не так" sub="Самые частые ситуации у новичков." />
+        <SectionTitle icon={CircleHelpIcon} title={tt("Если что-то пошло не так")} sub="Самые частые ситуации у новичков." />
         <div className="grid gap-3 md:grid-cols-2">
           {FAQ.map((q) => (
             <div key={q.title} className="rounded-xl border border-border bg-[var(--surface-1)] p-4">
               <div className="flex items-center gap-2">
                 <q.icon className="h-4 w-4 text-violet-400" />
-                <p className="text-xs font-semibold text-foreground">{q.title}</p>
+                <p className="text-xs font-semibold text-foreground">{tt(q.title)}</p>
               </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{q.text}</p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{tt(q.text)}</p>
             </div>
           ))}
         </div>
@@ -360,14 +361,14 @@ export function LearnQuickStart() {
 
       {/* Клавиши */}
       <section className="space-y-3">
-        <SectionTitle icon={KeyboardIcon} title="Полезные клавиши" sub="Необязательно, но ускоряет работу." />
+        <SectionTitle icon={KeyboardIcon} title={tt("Полезные клавиши")} sub="Необязательно, но ускоряет работу." />
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {HOTKEYS.map((h) => (
             <div key={h.keys} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-[var(--surface-2)]/40 px-3 py-2">
               <kbd className="rounded border border-border bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-foreground/90">
                 {h.keys}
               </kbd>
-              <span className="text-[11px] text-muted-foreground">{h.text}</span>
+              <span className="text-[11px] text-muted-foreground">{tt(h.text)}</span>
             </div>
           ))}
         </div>
@@ -375,12 +376,12 @@ export function LearnQuickStart() {
 
       {/* Словарик */}
       <section className="space-y-3">
-        <SectionTitle icon={CircleHelpIcon} title="Словарик" sub="Шесть слов, которые встретятся в интерфейсе." />
+        <SectionTitle icon={CircleHelpIcon} title={tt("Словарик")} sub="Шесть слов, которые встретятся в интерфейсе." />
         <div className="grid gap-2 sm:grid-cols-2">
           {TERMS.map((t) => (
             <div key={t.word} className="rounded-lg border border-border bg-[var(--surface-1)] px-3 py-2.5">
-              <span className="text-xs font-semibold text-foreground">{t.word}</span>
-              <span className="ml-1.5 text-[11px] text-muted-foreground">— {t.text}</span>
+              <span className="text-xs font-semibold text-foreground">{tt(t.word)}</span>
+              <span className="ml-1.5 text-[11px] text-muted-foreground">— {tt(t.text)}</span>
             </div>
           ))}
         </div>
@@ -389,14 +390,13 @@ export function LearnQuickStart() {
       {/* Финал */}
       <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-cyan-500/25 bg-cyan-500/5 p-5 sm:flex-row sm:items-center">
         <div>
-          <p className="text-sm font-semibold text-foreground">Готово — можно пробовать</p>
+          <p className="text-sm font-semibold text-foreground">{tt("Готово — можно пробовать")}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Откройте «Генерацию», опишите сцену и нажмите большую кнопку. Если что-то непонятно — вернитесь сюда
-            или загляните в «Подробный тур».
+            {tt("Откройте «Генерацию», опишите сцену и нажмите большую кнопку. Если что-то непонятно — вернитесь сюда или загляните в «Подробный тур».")}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300">
-          Первый шаг — «Генерация» <ArrowRightIcon className="h-3.5 w-3.5" />
+          {tt("Первый шаг — «Генерация»")}{' '} <ArrowRightIcon className="h-3.5 w-3.5" />
         </span>
       </div>
     </div>

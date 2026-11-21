@@ -21,6 +21,8 @@ export interface H3DesktopBridge {
   /** (правка 950) «Перезапустить ComfyUI» из «Консоли» (только Electron). */
   comfy?: {
     restart: () => Promise<{ ok: boolean; error?: string }>
+    /** (правка 1080) смена поколения ядра: 'rollback' (0.33.x) | 'current' (0.44+). */
+    switchCore?: (to: 'rollback' | 'current') => Promise<{ ok: boolean; error?: string; version?: string }>
   }
   console: {
     /** Полный накопленный лог (кольцевой буфер ~2 МБ). */

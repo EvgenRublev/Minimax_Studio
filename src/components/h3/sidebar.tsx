@@ -20,6 +20,7 @@ import {
   WaypointsIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MODE_COLOR } from '@/lib/mode-colors'
 import { useTranslation } from 'react-i18next' // (правка 955) перевод интерфейса
 import { SystemStatsBar } from '@/components/h3/system-stats-bar'
 import { ConsoleDialog } from '@/components/h3/console-dialog' // (правка 567)
@@ -44,17 +45,17 @@ interface SidebarProps {
 // (правка 955) Подписи вкладов строятся при рендере: модульный const зафиксировал бы
 // язык на моменте импорта, и переключение языка в настройках не подействовало бы.
 const navItems = (t: (key: string) => string) => [
-  { id: 'generate' as TabType, label: t('Генерация'), icon: ClapperboardIcon, color: '#06B6D4' },
-  { id: 'extend' as TabType, label: t('Продление'), icon: FilmIcon, color: '#06B6D4' },
-  { id: 'refine' as TabType, label: 'Refine', icon: Wand2Icon, color: '#10B981' },
-  { id: 'controlnet' as TabType, label: 'ControlNet', icon: WaypointsIcon, color: '#FB923C' },
-  { id: 'tile-upscale' as TabType, label: 'Tile Upscale', icon: Grid3x3Icon, color: '#EC4899' },
-  { id: 'fps' as TabType, label: 'FPS', icon: GaugeIcon, color: '#22D3EE' },
-  { id: 'face-refine' as TabType, label: 'Face Refine', icon: ScanFaceIcon, color: '#FACC15' },
-  { id: 'upscale' as TabType, label: 'DLSS', icon: SparklesIcon, color: '#F472B6' },
-  { id: 'gallery' as TabType, label: t('Галерея'), icon: FolderOpenIcon, color: '#8B5CF6' },
-  { id: 'montage' as TabType, label: t('Монтаж'), icon: ScissorsIcon, color: '#A78BFA' }, // (правка 720)
-  { id: 'learn' as TabType, label: t('Обучение'), icon: GraduationCapIcon, color: '#10B981' },
+  { id: 'generate' as TabType, label: t('Генерация'), icon: ClapperboardIcon, color: MODE_COLOR.generate },
+  { id: 'extend' as TabType, label: t('Продление'), icon: FilmIcon, color: MODE_COLOR.extend },
+  { id: 'refine' as TabType, label: 'Refine', icon: Wand2Icon, color: MODE_COLOR.refine },
+  { id: 'controlnet' as TabType, label: 'ControlNet', icon: WaypointsIcon, color: MODE_COLOR.controlnet },
+  { id: 'tile-upscale' as TabType, label: 'Tile Upscale', icon: Grid3x3Icon, color: MODE_COLOR['tile-upscale'] },
+  { id: 'fps' as TabType, label: 'FPS', icon: GaugeIcon, color: MODE_COLOR.fps },
+  { id: 'face-refine' as TabType, label: 'Face Refine', icon: ScanFaceIcon, color: MODE_COLOR['face-refine'] },
+  { id: 'upscale' as TabType, label: 'DLSS', icon: SparklesIcon, color: MODE_COLOR.upscale },
+  { id: 'gallery' as TabType, label: t('Галерея'), icon: FolderOpenIcon, color: MODE_COLOR.gallery },
+  { id: 'montage' as TabType, label: t('Монтаж'), icon: ScissorsIcon, color: MODE_COLOR.montage }, // (правка 720)
+  { id: 'learn' as TabType, label: t('Обучение'), icon: GraduationCapIcon, color: MODE_COLOR.learn },
 ]
 
 /* ────────────────────────────────────────────────────────────────
