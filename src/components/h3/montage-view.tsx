@@ -980,8 +980,8 @@ export function MontageView() {
   const layersRef = useRef<LayerClip[]>([])
   /** (правка 874) нижняя граница числа рядов слоёв в UI («+ слой» добавляет ряд) */
   /** (правка 1063) сразу два видеоряда (V1 + V2) и один аудиоряд (A1), все пустые */
-  const [layerTracks, setLayerTracks] = useState(1)
-  const layerTracksRef = useRef(1)
+  const [layerTracks, setLayerTracks] = useState(0)
+  const layerTracksRef = useRef(0)
   const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null)
   /** (правка 874) аудиоклипы звуковых дорожек (A1+) */
   const [audios, setAudios] = useState<AudioClip[]>([])
@@ -1423,11 +1423,19 @@ export function MontageView() {
         }))
       setLayers(ls)
       const savedLT = Number.isFinite(s.layerTracks as number) ? Math.max(0, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number))) : 0
-      // (правка 1063) базовая раскладка — минимум V2: пустой проект открывается
-      // с двумя видеодорожками, даже если в старом сохранении было 0
-      setLayerTracks(Math.max(1, savedLT, ls.reduce((m, l) => Math.max(m, l.track), 0)))
+      // (правка 1098) Без «минимума V2»: по умолчанию в монтажке ОДНА
+      // видеодорожка (база V1), пустой ряд V2 больше не рисуется.
+      // Сохранённые проекты: клипы слоёв восстанавливают свои ряды; ровно
+      // одна «лишняя» дорожка БЕЗ клипов — это старый дефолт (=1), его
+      // выбрасываем; две и больше — пользователь создавал сам, оставляем.
+      const layerMaxT = ls.reduce((m, l) => Math.max(m, l.track), 0)
+      const restoredLT = layerMaxT > 0
+        ? Math.max(layerMaxT, savedLT)
+        : (savedLT > 1 ? savedLT : 0)
+      setLayerTracks(Math.min(MAX_TRACKS, Math.max(0, restoredLT)))
     } else if (Number.isFinite(s.layerTracks as number)) {
-      setLayerTracks(Math.max(1, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number))))
+      const lt = Math.max(0, Math.min(MAX_TRACKS, Math.round(s.layerTracks as number)))
+      setLayerTracks(lt > 1 ? lt : 0)
     }
     if (Array.isArray(s.audios)) {
       const as = s.audios

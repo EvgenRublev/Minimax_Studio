@@ -35,7 +35,7 @@ import { st } from '@/lib/i18n/server'
  *   prompt?         — caption
  *   seed?           — (-1/undefined = random)
  *   duration?       — секунды (default 5; клампится к длине исходника)
- *   targetShortSide?— короткая сторона генерации, px (default 720)
+ *   targetShortSide?— короткая сторона генерации, px (default 480)
  *   controlType?    — 'depth' (default) | 'canny'
  *   refImages?      — картинки-референсы (имена файлов в input/, до 9)
  *   refImageSize?   — 'match' | 'max' (default 'max', правка 511)
@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
       const frames = preprocessOnly
         ? Math.max(1, Math.min(Math.round((body.duration ?? 5) * 24), probe.frames))
         : controlNetFrames(body.duration ?? 5, probe.frames)
-      const size = controlNetSize(probe.width, probe.height, body.targetShortSide ?? 720)
+      const size = controlNetSize(probe.width, probe.height, body.targetShortSide ?? 480)
 
       // Промпт: пользовательский > цепочка из меты исходника (галерея)
       const draftPrompt = !userPrompt && opts.galleryName
@@ -416,7 +416,7 @@ export async function POST(req: NextRequest) {
           duration_seconds: frames / 24,
           fps: 24,
           control_type: controlType,
-          target_short_side: body.targetShortSide ?? 720,
+          target_short_side: body.targetShortSide ?? 480,
           minimax_h3_reference_detail: body.refImageSize ?? 'match',
           ...cnCommonMeta, // (правка 722) параметры пайплайна
           ...(body.compress === true && { compress_source: true }),

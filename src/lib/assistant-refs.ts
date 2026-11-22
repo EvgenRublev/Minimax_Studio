@@ -49,6 +49,12 @@ export interface AssistantRefInput {
   endFrame?: { path: string; name: string } | null
   /** Картинки вкладки «Продление». */
   extendImageRefs: AssistantRefSource[]
+  /**
+   * (правка 1100) Исходное видео вкладки «Продление» — то, которое продлеваем.
+   * Ассистент должен его ВИДЕТЬ (описание/кадры), иначе промпты клипов пишутся
+   * вслепую: он знал только имя файла и промпт из сайдкара.
+   */
+  extendSource?: { path: string; name: string; subfolder?: string | null } | null
   controlnet: {
     controlType: string
     source: AssistantControlNetSource | null
@@ -117,16 +123,35 @@ export function buildReferenceSet(
   }
 
   if (chatMode === 'extend') {
+    // (правка 1100) Исходное видео — ПЕРВЫМ, как <Video 1>: в графе продления
+    // оно и так подаётся референсом-клипом, значит ассистент обязан понимать,
+    // что в нём происходит. Путь: галерейный файл (output) → subfolder/name;
+    // файл с диска (staged в ComfyUI input) → путь как есть.
+    const out: AssistantRefEntry[] = []
+    if (input.extendSource) {
+      const src = input.extendSource
+      out.push({
+        path: src.subfolder ? `${src.subfolder}/${src.name}` : src.path,
+        name: src.name,
+        trigger: 'Video 1',
+        intent: src.subfolder ? 'extend_source' : 'extend_source_input',
+        kind: 'video',
+        includeAudio: false,
+      })
+    }
     // Референсы вкладки «Продление» (extendImageRefs), а НЕ refs «Генерации».
     // (правка 823) Потолок картинок применяется ЗДЕСЬ — раньше система
     // перечисляла все, а сервер молча резал до 9.
-    return input.extendImageRefs.slice(0, REF_LIMITS.image).map((r, i) => ({
-      path: r.path,
-      name: r.name,
-      trigger: `Picture ${i + 1}`,
-      intent: r.imageIntent || 'identity',
-      kind: 'image' as const,
-    }))
+    for (const r of input.extendImageRefs.slice(0, REF_LIMITS.image)) {
+      out.push({
+        path: r.path,
+        name: r.name,
+        trigger: `Picture ${countKind(out, 'image') + 1}`,
+        intent: r.imageIntent || 'identity',
+        kind: 'image',
+      })
+    }
+    return out
   }
 
   // ── generate: ref / t2v / flf ──

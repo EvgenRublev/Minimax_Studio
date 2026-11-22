@@ -245,7 +245,7 @@ export async function POST(req: NextRequest) {
             const kind = ref.kind ?? 'image'
             if (kind === 'audio') continue
             if (kind === 'video' && !cfg.llmVideoVision) continue
-            const resolved = await resolveRefPath(ref.path, ref.intent === 'control_source')
+            const resolved = await resolveRefPath(ref.path, ref.intent === 'control_source' || ref.intent === 'extend_source')
             if (!resolved) {
               // (правка 771) файл исчез с диска («чистка input», перезапись) —
               // берём последнее созданное описание этого имени. Здесь сверять
@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
           // path traversal (../../ или абсолютный путь) давал чтение
           // произвольных файлов. resolveRefPath держит путь внутри input/output
           // (подход safeAttachPath) и делает fallback на staging.
-          const resolvedPath = await resolveRefPath(ref.path, ref.intent === 'control_source')
+          const resolvedPath = await resolveRefPath(ref.path, ref.intent === 'control_source' || ref.intent === 'extend_source')
           if (!resolvedPath) {
             // (правка 771) файла нет, но описание уже создавалось — тег
             // остаётся с описанием, модель НЕ получает пустую ссылку

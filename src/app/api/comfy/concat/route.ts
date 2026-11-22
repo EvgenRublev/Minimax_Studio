@@ -280,7 +280,11 @@ export async function POST(req: NextRequest) {
           resolvedPaths[i - 1],
           prevAt,
           resolvedPaths[i],
-          headTrims[i] || 0,
+          // (правка 1097) Сравниваем с ПЕРВЫМ НОВЫМ кадром клипа: при
+          // дублированном хвосте (12 кадров) + подрезке головы смещение =
+          // trim + fade, иначе gain подбирался по кадру-дублю (gain ≈ 1) и
+          // перепад яркости после стыка оставался.
+          (headTrims[i] || 0) + (i === 1 ? seamFadeSec : fadeSec),
         )
       }
     }
@@ -503,8 +507,12 @@ export async function POST(req: NextRequest) {
       for (let i = 1; i < infos.length; i++) {
         seamFrames.push(acc)
         const clipFrames = frameCounts[i] || Math.round(infos[i].duration * targetFps)
-        const trimFrames = i === 1 ? Math.round((headTrims[1] || 0) * targetFps) : 0
-        const fadeFrames = i === 1 && seamFadeSec > 0.001 ? Math.round(seamFadeSec * targetFps) : 0
+        // (правка 1097) Подрезка головы и фейд — на ЛЮБОМ стыке, а не только
+        // на первом: клипы i>0 приходят с 8 кадрами дублированного хвоста, и
+        // подрезка у них нулевая, фейд — тот же fadeSec. Иначе номер стыка
+        // для seam-polish уезжал на каждом клипе (радиус/тон-фейд били мимо).
+        const trimFrames = Math.round((headTrims[i] || 0) * targetFps)
+        const fadeFrames = Math.round((i === 1 ? seamFadeSec : fadeSec) * targetFps)
         acc += Math.max(1, clipFrames - trimFrames) - fadeFrames
       }
     }

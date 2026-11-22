@@ -394,6 +394,19 @@ export function resolveSourceLatent(
     log(`канва латента ${width}×${height} не кратна 32 — lossless отклонён`)
     return null
   }
+  // (правка 1101) Латент обязан быть на сетке 17k+5 И покрывать РОВНО столько
+  // кадров, сколько в mp4. Раньше длина латента не сверялась: combined-латент
+  // продления на 196 кадров при mp4 194 проходил проверку по мете, Refine вёл
+  // таймлайн по латенту — и картинка со стыка и до конца уезжала (артефакты).
+  if (tokens < 2 || (tokens - 2) % 5 !== 0) {
+    log(`латент не на сетке 17k+5 (tokens=${tokens}) — lossless отклонён`)
+    return null
+  }
+  const latentFrames = 5 + 17 * ((tokens - 2) / 5)
+  if (latentFrames !== probe.frames) {
+    log(`латент покрывает ${latentFrames} кадров, mp4 — ${probe.frames}: lossless отклонён`)
+    return null
+  }
   return { file: ls.latentFile, width, height, tokens, audioSteps }
 }
 

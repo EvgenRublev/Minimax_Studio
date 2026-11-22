@@ -329,7 +329,16 @@ export function ExtendView() {
       if (!data.name) throw new Error('Upload: no name in response')
       const duration = typeof data.durationSec === 'number' && data.durationSec > 0 ? data.durationSec : 0
       // (правка 363) Файл с диска — не из галереи: папка результата = outputFolder
-      patchVideo({ extendSourceVideoPath: data.name, extendSourceDuration: duration, extendSourceSubfolder: null, extendSourceName: null })
+      // (правка 1102) Смена исходника снимает рефы, унаследованные от прошлого.
+      const prevRefs = useGenStore.getState().video.extendImageRefs
+      const keptRefs = prevRefs.filter((r) => !r.fromMeta)
+      patchVideo({
+        extendSourceVideoPath: data.name,
+        extendSourceDuration: duration,
+        extendSourceSubfolder: null,
+        extendSourceName: null,
+        ...(keptRefs.length !== prevRefs.length ? { extendImageRefs: keptRefs } : {}),
+      })
       if (duration > 0) {
         toast.success(t("Исходник: {{p1}} ({{p2}} с)", { p1: file.name, p2: duration.toFixed(1) }))
       } else {
@@ -419,7 +428,12 @@ export function ExtendView() {
             imgRefs.unshift({ type: 'image', path: firstFrame, role: 'первый кадр оригинала' })
           }
           if (imgRefs.length > 0) {
-            const prev = useGenStore.getState().video.extendImageRefs
+            // (правка 1102) Рефы, унаследованные от ПРЕДЫДУЩЕГО исходника,
+            // убираем: при смене видео оставались якоря старой сцены, и новое
+            // продление шло со старыми картинками. Пользовательские рефы
+            // (без fromMeta) не трогаем.
+            const prevAll = useGenStore.getState().video.extendImageRefs
+            const prev = prevAll.filter((r) => !r.fromMeta)
             const known = new Set(prev.map((r) => r.path))
             const inherited: VideoRefItem[] = []
             for (const r of imgRefs) {
@@ -436,12 +450,22 @@ export function ExtendView() {
                 role: typeof r.role === 'string' ? r.role : '',
                 imageIntent: 'identity',
                 includeAudio: false,
+                fromMeta: filename,
               })
             }
             if (inherited.length > 0) {
               patchVideo({ extendImageRefs: [...prev, ...inherited] })
               toast.success(t("Референсы оригинала: +{{p1}} из метаданных", { p1: inherited.length }))
+            } else if (prev.length !== prevAll.length) {
+              // Новых наследовать нечего, но старые унаследованные уже убрали.
+              patchVideo({ extendImageRefs: prev })
             }
+          } else {
+            // (правка 1102) У нового исходника нет картинок в мете — снимаем
+            // унаследованные от прошлого, чтобы не тянуть чужую сцену.
+            const prevAll = useGenStore.getState().video.extendImageRefs
+            const prev = prevAll.filter((r) => !r.fromMeta)
+            if (prev.length !== prevAll.length) patchVideo({ extendImageRefs: prev })
           }
         }
       } catch { /* нет сайдкара/сеть — продление просто без наследованных рефов */ }
@@ -451,6 +475,10 @@ export function ExtendView() {
       // чтобы карточка не выглядела «выбранной» при отсутствующем файле.
       setSourceVideo(null)
       patchVideo({ extendSourceVideoPath: '', extendSourceDuration: 0, extendSourceSubfolder: null, extendSourceName: null })
+      // (правка 1102) Исходника нет — унаследованные от него рефы тоже снимаем.
+      const refsNow = useGenStore.getState().video.extendImageRefs
+      const refsKept = refsNow.filter((r) => !r.fromMeta)
+      if (refsKept.length !== refsNow.length) patchVideo({ extendImageRefs: refsKept })
       toast.error(e instanceof Error ? e.message : t("Ошибка импорта видео из галереи"))
     } finally {
       setUploadingVideo(false)
@@ -780,6 +808,11 @@ export function ExtendView() {
                         return null
                       })
                       patchVideo({ extendSourceVideoPath: '', extendSourceSubfolder: null }) // (правка 363)
+                      // (правка 1102) Исходник убран — его унаследованные рефы
+                      // тоже больше не нужны.
+                      const refsNow = useGenStore.getState().video.extendImageRefs
+                      const refsKept = refsNow.filter((r) => !r.fromMeta)
+                      if (refsKept.length !== refsNow.length) patchVideo({ extendImageRefs: refsKept })
                     }}
                     className="text-[10px] text-muted-foreground hover:text-red-400 shrink-0"
                   >
@@ -1310,19 +1343,9 @@ export function ExtendView() {
             </div>
             </div>
 
-            {/* Badges */}
+            {/* Badges. (правка 1097) Текстовая плашка про диапазон длительности
+                убрана: превышение видно по красному бейджу и по тосту при запуске. */}
             <div className="flex flex-wrap items-center gap-1.5">{badges}</div>
-            {/* (правка 1096) Ограничение — на ОДИН клип: если какая-то карточка
-                вне EXTEND_CLIP_MIN_SECONDS…EXTEND_CLIP_MAX_SECONDS, говорим об
-                этом прямо. Суммы клипов не ограничены. */}
-            {overCap && (
-              <p className="text-[11px] leading-snug text-red-400">
-                {t(
-                  "Длительность клипа вне диапазона {{p1}}–{{p2}} с: больше {{p2}} с не принимает нода (потолок — 3600 кадров), а короче {{p1}} с портится шов с исходником. Общее число клипов не ограничено.",
-                  { p1: EXTEND_CLIP_MIN_SECONDS, p2: EXTEND_CLIP_MAX_SECONDS },
-                )}
-              </p>
-            )}
           </div>
 
         </div>

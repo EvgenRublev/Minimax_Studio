@@ -98,7 +98,7 @@ async function buildSystemMessage(
   refs: AssistantRefEntry[] = [],
 ): Promise<string> {
   // (правка 427) extend-чат — свой контекст (клипы, extend-рефы, мета исходника).
-  if (chatMode === 'extend') return buildExtendSystemMessage(signal, refs)
+  if (chatMode === 'extend') return buildExtendSystemMessage(videoVisionOn, signal, refs)
   // (правка 502) controlnet-чат — свой контекст (контрольное видео,
   // refImages вкладки «ControlNet», параметры контроля).
   if (chatMode === 'controlnet') return buildControlNetSystemMessage(videoVisionOn, refs)
@@ -376,6 +376,7 @@ ${guide3dBlock}
  * правки 165/197), дублирование портит conditioning.
  */
 async function buildExtendSystemMessage(
+  videoVisionOn: boolean,
   signal?: AbortSignal,
   refs: AssistantRefEntry[] = [],
 ): Promise<string> {
@@ -404,6 +405,14 @@ async function buildExtendSystemMessage(
   // ── Исходное видео ──
   if (v.extendSourceVideoPath) {
     lines.push(`Исходное видео: ${v.extendSourceName ?? v.extendSourceVideoPath}${v.extendSourceDuration > 0 ? ` (~${v.extendSourceDuration.toFixed(1)} с)` : ''}.`)
+    // (правка 1100) Ассистент получает исходник как ВИДЕО-референс (<Video 1>):
+    // сервер строит по нему описание (video-vision) или прикрепляет кадры.
+    // Без этого промпты клипов писались вслепую — модель знала только имя файла.
+    lines.push(
+      videoVisionOn
+        ? 'Ты ВИДИШЬ это исходное видео: оно приложено первым референсом (<Video 1>) — описание содержимого и/или кадры. Опирайся на то, что в нём реально происходит (персонажи, локация, движение камеры, свет, звук), а не только на его промпт из метаданных. Метку <Video 1> в промпт клипа всё равно НЕ пиши — она подставляется автоматически.'
+        : 'ВНИМАНИЕ: видение видео у ассистента выключено — содержимое исходного ролика ты НЕ видишь. Не описывай кадры и движение как увиденное; опирайся только на метаданные ниже и явно говори, если для промпта не хватает знания картинки.',
+    )
   } else {
     lines.push('Исходное видео пока НЕ выбрано — без него продление не запустится; при необходимости подскажи пользователю выбрать его на вкладке «Продление».')
   }
@@ -413,12 +422,25 @@ async function buildExtendSystemMessage(
   // уйдёт на провод (раньше система перечисляла все, сервер молча резал).
   // (правка 906) — переданный снимок, тот же, что в payload.
   const refEntries = refs
+  // (правка 1100) Исходное видео приходит тем же списком (kind='video') —
+  // перечисляем его отдельно, картинки нумеруем ТОЛЬКО по картинкам, иначе
+  // <Picture 1> указывал бы на видео и модель путала метки.
+  const videoEntries = refEntries.filter((r) => r.kind === 'video')
+  const imageEntries = refEntries.filter((r) => r.kind === 'image')
   lines.push('')
-  if (refEntries.length) {
-    lines.push('РЕФЕРЕНСЫ ПРОДЛЕНИЯ (картинки; ты получаешь их визуальное описание/видишь приложенный файл):')
-    refEntries.forEach((r, i) => {
-      lines.push(`  <Picture ${i + 1}> = ${r.name}${r.intent ? ` (используется как: ${r.intent})` : ''}`)
-    })
+  if (imageEntries.length || videoEntries.length) {
+    if (videoEntries.length) {
+      lines.push('ИСХОДНОЕ ВИДЕО (видео-референс продления):')
+      videoEntries.forEach((r) => {
+        lines.push(`  <Video 1> = ${r.name} — тот ролик, который продолжаем. Метку <Video 1> в промпт НЕ пиши (подставляется автоматически), но его содержимое учитывай.`)
+      })
+    }
+    if (imageEntries.length) {
+      lines.push('РЕФЕРЕНСЫ ПРОДЛЕНИЯ (картинки; ты получаешь их визуальное описание/видишь приложенный файл):')
+      imageEntries.forEach((r, i) => {
+        lines.push(`  <Picture ${i + 1}> = ${r.name}${r.intent ? ` (используется как: ${r.intent})` : ''}`)
+      })
+    }
   } else {
     // (правка 1062) Помимо картинок в продлении нет ни subject'ов, ни аудио-рефов
     // (звук клипа пишется заново по тексту) — запрещаем все три вида.
@@ -720,6 +742,15 @@ function collectRefInput(): AssistantRefInput {
       kind: 'image' as const,
       imageIntent: r.imageIntent,
     })),
+    // (правка 1100) Исходное видео продления — в референсы ассистента, чтобы
+    // он его ВИДЕЛ (описание/кадры), а не только имя.
+    extendSource: v.extendSourceVideoPath
+      ? {
+          path: v.extendSourceVideoPath,
+          name: v.extendSourceName || v.extendSourceVideoPath,
+          subfolder: v.extendSourceSubfolder,
+        }
+      : null,
     controlnet: {
       controlType: cn.params.controlType,
       source: cn.source

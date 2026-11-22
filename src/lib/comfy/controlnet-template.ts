@@ -196,7 +196,7 @@ export function buildControlNetPreprocessWorkflow(p: {
 }): Record<string, unknown> {
   const vhsEnc = vhsEncodeInputs(p.videoFormat)
   const frames = Math.max(1, Math.min(Math.round((p.duration ?? 5) * 24), p.sourceFrames))
-  const { width, height } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 720)
+  const { width, height } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 480)
   const controlType = p.controlType === 'canny' ? 'canny' : (p.controlType === 'pose' ? 'pose' : 'depth') // (правка 512)
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
 
@@ -295,7 +295,7 @@ export function buildControlNetPreprocessWorkflow(p: {
  * значит препроцессинг выполняется ПЕРЕД генерацией.
  */
 export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, unknown> {
-  const { width, height, genW, genH } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 720)
+  const { width, height, genW, genH } = controlNetSize(p.sourceWidth, p.sourceHeight, p.targetShortSide ?? 480)
   const frames = controlNetFrames(p.duration ?? 5, p.sourceFrames)
   const controlType: ControlNetType = p.controlType === 'canny' ? 'canny' : (p.controlType === 'direct' ? 'direct' : (p.controlType === 'pose' ? 'pose' : 'depth')) // (правка 512)
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''

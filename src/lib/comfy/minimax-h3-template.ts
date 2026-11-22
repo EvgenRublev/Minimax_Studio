@@ -2125,13 +2125,37 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // (правка 419) Эталон «V2V Extend Any Video»: перекрытие сегмент-к-сегменту
   // = тому же 2-секундному окну контекста (56 кадров), что и стык с исходником.
   const CHAIN_OVERLAP_FRAMES = 56
+  // (правка 1097) БЕСШОВНЫЙ СТЫК КЛИПОВ: голова клипа i>0 — это ровно хвост
+  // клипа i−1 (латент залочен MiniMaxStudioLatentLock, т.е. пиксели совпадают
+  // с точностью до контекста VAE-декода). Раньше вся голова срезалась в
+  // воркфлоу, и клиент склеивал клипы ЖЁСТКИМ cut'ом — на границе двух
+  // независимых декодов виден скачок (микроконтраст/цвет и «прыжок» первого
+  // нового кадра). Теперь в файле клипа остаётся SEAM_BLEND_FRAMES кадров
+  // дублированного хвоста, а /api/comfy/concat перекрывает стык xfade'ом
+  // ровно по этим кадрам: смешиваются ПОПАРНО СОВПАДАЮЩИЕ изображения (как на
+  // стыке «исходник → клип 0», правка 251), поэтому фейд невидим и не двоит.
+  // Схема масштабируется: клипы по-прежнему декодируются по одному и не
+  // упираются в VRAM длинного единого декода.
+  const SEAM_BLEND_FRAMES = 12
   // Фраза непрерывности для клипов i>0: последний кадр
   // предыдущего клипа приходит <Picture N>-референсом (нода ext_lf_i ниже) —
   // якорь внешнего вида для ВСЕГО нового содержимого клипа, а не только шва.
+  // (правка 1099) Фраза непрерывности: к «продолжай с последнего кадра» добавлен
+  // ЖЁСТКИЙ якорь окружения и цвета. Наблюдение по реальному прогону: стык по
+  // яркости/цвету выровнен (color_match в seam-polish), а сцена уезжает потому,
+  // что модель вместе с новым действием перерисовывает фон. Официальные правила
+  // H3 Extender требуют ровно этого: в КАЖДОМ клипе заново объявлять активные
+  // референсы и держать стабильные якоря окружения, а цвет привязывать к
+  // картинке-референсу, а не к «своему» видению сцены.
   const continuityPhrase = (pic: number) =>
-    `Continuity: <Picture ${pic}> is the last frame of the previous shot of this video; ` +
-    `continue seamlessly from it and keep characters, faces, clothing, lighting and ` +
-    `details consistent with <Picture ${pic}>.`
+    `Continuity: <Picture ${pic}> is the last frame of the previous shot of this video. ` +
+    `Continue seamlessly from it and keep characters, faces, clothing, lighting and ` +
+    `details consistent with <Picture ${pic}>. ` +
+    `The location stays the same: same background, same set dressing, same props, same ` +
+    `architecture and the same light sources as in <Picture ${pic}>. Do not redesign, ` +
+    `replace or re-light the environment; only the action moves forward. ` +
+    `Colour grading, saturation, contrast, exposure and white balance stay exactly as in ` +
+    `<Picture ${pic}>.`
   // Промпт клипа: клип 0 — с преамбулой продолжения (правка 207); клипы i>0 —
   // с фразой непрерывности про последний кадр предыдущего (слот picSlot).
   const clipPrompt = (idx: number, picSlot: number) => {
@@ -2656,6 +2680,9 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         // (правка 1096) Длины через clipOverlapFrames/clipTotalFrames: новое
         // содержимое клампится потолком ноды (3600 кадров), сетка 17k+5 не ломается.
         const overlapFrames = clipOverlapFrames(i)
+        // (правка 1097) Сколько кадров дублированного хвоста остаётся в файле
+        // клипа под xfade на стыке (0 у клипа 0 — у него своя схема шва).
+        const seamKeep = i > 0 ? Math.min(overlapFrames, SEAM_BLEND_FRAMES) : 0
         const totalFrames = clipTotalFrames(i)
         const oTok = tok(overlapFrames)
         const tTok = tok(totalFrames)
@@ -2693,7 +2720,12 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             width: passW,
             height: passH,
             length: totalFrames,
-            ref_image_size: p.refImageSize || 'match',
+            // (правка 1099) В продлении референсы — не «стилистическая
+            // подсказка», а якорь сцены: держим их в максимальном разрешении
+            // (match даунскейлит картинку и модель теряет мелкие детали фона —
+            // ровно то, что перерисовывается на стыке). Канва продления и так
+            // не больше исходника, поэтому по VRAM это почти бесплатно.
+            ref_image_size: 'max',
             clip: ['46:15', 0],
             vae: ['46:3', 0],
             audio_vae: ['46:4', 0],
@@ -3161,10 +3193,13 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
               _meta: { title: `Срез окна: от ${sliceStart} (шов 17 кадров)` },
             }
           } else if (i > 0) {
+            // (правка 1097) Срез головы — до начала перекрытия БЕЗ последних
+            // SEAM_BLEND_FRAMES кадров: они остаются в файле и служат
+            // перекрытием для xfade на стыке (см. SEAM_BLEND_FRAMES выше).
             nodes[`ext_sl_${i}`] = {
-              inputs: { images: [`ext_decv_${i}`, 0], start_index: overlapFrames, num_frames: 4096 },
+              inputs: { images: [`ext_decv_${i}`, 0], start_index: overlapFrames - seamKeep, num_frames: 4096 },
               class_type: 'GetImageRangeFromBatch',
-              _meta: { title: `Срез preserved-головы (${overlapFrames} кадров)` },
+              _meta: { title: `Срез preserved-головы (${overlapFrames} кадров, стык ${seamKeep})` },
             }
           }
           let clipFramesSrc = i === 0 && hasSeed ? 'ext_sl_0' : i > 0 ? `ext_sl_${i}` : `ext_decv_${i}`
@@ -3200,10 +3235,14 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             }
             clipAudioSrc = 'ext_asl_0'
           } else if (i > 0) {
+            // (правка 1097) Аудио срезается тем же моментом, что и видео:
+            // в файле остаются seamKeep кадров дублированного хвоста под
+            // acrossfade на стыке.
+            const aStart = (overlapFrames - seamKeep) / 24
             nodes[`ext_asl_${i}`] = {
-              inputs: { audio: [`ext_deca_${i}`, 0], start_seconds: Number((overlapFrames / 24).toFixed(4)) },
+              inputs: { audio: [`ext_deca_${i}`, 0], start_seconds: Number(aStart.toFixed(4)) },
               class_type: 'MiniMaxH3AudioSliceFrom',
-              _meta: { title: `Аудио клипа: от ${(overlapFrames / 24).toFixed(2)} с` },
+              _meta: { title: `Аудио клипа: от ${aStart.toFixed(2)} с (стык ${seamKeep})` },
             }
             clipAudioSrc = `ext_asl_${i}`
           }
@@ -3254,35 +3293,50 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     // Отличие от откаченного комбайна 383–416: латент НЕ подаётся в
     // сэмплер — он собирается ПОСЛЕ генерации чистыми срезами/конкатами и
     // пишется файлом для lossless-рефайна/тайлового апскейла итога.
-    // Таймлайн = ровно таймлайн ffmpeg-склейки (перекрытие шва 17 кадров
-    // съедается Trim 9 + xfade 8; клипы i>0 — срез головы 56):
-    //   src[:F−17] ⊕ клип0[от tailFrames−17] ⊕ клипы i>0[от 56 кадра]
-    // Проверка на реальном прогоне: mp4 260 кадров = 107+153 ✓.
+    // Таймлайн ровно как у ffmpeg-склейки (правка 1101):
+    //   src[:F] ⊕ клип0[от tailFrames] ⊕ клипы i>0[от 56 кадра]
+    // Источник в склейке НЕ подрезается (sourceTrimSeconds = 0), а перекрытие
+    // шва (5 подрезки головы + 12 xfade = 17 кадров) съедает дублирующаяся
+    // голова клипа 0 — значит в латенте исходник идёт ЦЕЛИКОМ, а клип 0
+    // начинается с tailFrames (раньше здесь резали по F−17 / tailFrames−17 —
+    // латент уезжал относительно mp4 на 17 кадров, и Refine по нему давал
+    // артефакты со стыка и до конца).
+    // Дополнительно: H3-латент существует только на сетке 17k+5. Если длина
+    // исходника на сетку не ложится (обычный mp4 — 194 кадра и т.п.), ТОЧНОГО
+    // латента таймлайна не существует: сборка пропускается, Refine честно
+    // кодирует mp4 заново вместо того, чтобы работать по сдвинутому латенту.
     ...((hasSeed && clips.length >= 1) ? (() => {
       const nodes: Record<string, unknown> = {}
       const srcF = Math.max(5, p.extendSourceFrames ?? tailFrames)
-      const srcCutTok = tok(Math.max(5, srcF - 17))
-      const srcCutA = Math.round((Math.max(5, srcF - 17) * 5) / 3)
+      const snapDownGrid = (n: number) => 5 + 17 * Math.floor((Math.max(5, n) - 5) / 17)
+      const srcGrid = snapDownGrid(srcF)
+      const srcAligned = srcGrid === srcF && srcF >= 22 && tailFrames >= 39
+      // Не на сетке 17k+5 — точного латента этого таймлайна не существует.
+      // Пустой блок = в графе нет ext_lsave, клиент не приложит latent_source,
+      // Refine/VaeEncode пойдёт от mp4 (без сдвига и артефактов).
+      if (!srcAligned) return {}
+      const srcCutTok = tok(srcGrid)
+      const srcCutA = Math.round((srcGrid * 5) / 3)
       const srcV: [string, number] = p.extendSourceLatentFile
         ? (sourceLatentCrop?.needed ? ['ext_srcfit', 0] : ['ext_srclsep', 0])
         : ['extv_fenc', 0]
       const srcA: [string, number] = p.extendSourceLatentFile ? ['ext_srclsep', 1] : ['extv_aful', 0]
 
-      // Куски клипов: клип 0 — от среза шва (sliceStart), i>0 — от головы 56
-      const clipCut = (i: number) =>
-        i === 0 ? Math.max(0, tailFrames - 17) : CHAIN_OVERLAP_FRAMES
+      // Куски клипов: клип 0 — с начала его НОВОГО содержимого (tailFrames),
+      // i>0 — с CHAIN_OVERLAP_FRAMES: ровно там, где заканчивается xfade.
+      const clipCut = (i: number) => (i === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES)
       const clipCutTok = (i: number) => tok(clipCut(i))
       const clipCutA = (i: number) => Math.round((clipCut(i) * 5) / 3)
 
       nodes['ext_ljsrc_v'] = {
         inputs: { samples: srcV, dim: 't', index: 0, amount: srcCutTok },
         class_type: 'LatentCut',
-        _meta: { title: `Итог: исходник[:${srcF - 17}] (видео)` },
+        _meta: { title: `Итог: исходник[:${srcGrid}] (видео)` },
       }
       nodes['ext_ljsrc_a'] = {
         inputs: { samples: srcA, dim: 'x', index: 0, amount: srcCutA },
         class_type: 'LatentCut',
-        _meta: { title: `Итог: исходник[:${srcF - 17}] (аудио)` },
+        _meta: { title: `Итог: исходник[:${srcGrid}] (аудио)` },
       }
       let vCur = 'ext_ljsrc_v'
       let aCur = 'ext_ljsrc_a'

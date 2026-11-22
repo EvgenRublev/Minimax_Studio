@@ -36,7 +36,7 @@ export interface ControlNetUiParams {
   controlType: ControlNetType
   /** Длительность генерации, секунды (клампится к длине исходника). */
   duration: number
-  /** Короткая сторона генерации, px. Default 720. */
+  /** Короткая сторона генерации, px. Default 480 (правка 1098). */
   targetShortSide: number
   /** «Только карта»: сохранить depth/canny-видео без генерации Minimax.
    *  В режиме direct недоступно (карта не строится). */
@@ -70,7 +70,7 @@ export interface ControlNetUiParams {
 const DEFAULT_PARAMS: ControlNetUiParams = {
   controlType: 'depth',
   duration: 5,
-  targetShortSide: 720,
+  targetShortSide: 480,
   preprocessOnly: false,
   refImageSize: 'max', // (правка 511) было 'match'
   pipeline: 'draft',

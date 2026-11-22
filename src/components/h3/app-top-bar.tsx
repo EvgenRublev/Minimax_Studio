@@ -33,6 +33,61 @@ function GenerationInfo() {
   const v = useGenProgress((s) => s.video)
   const [, tick] = useState(0)
 
+  // (правка 1103) Текущий узел ComfyUI, номер шага и этап — для ЛЮБОЙ задачи,
+  // а не только для «Генерации». Раньше детали брались из useGenProgress
+  // (туда пишет лишь видео-поток), поэтому в Refine/Tile/ControlNet/Face/FPS
+  // панель показывала одну строку статуса без стадии и без ноды.
+  const promptId = current?.promptId ?? null
+  const running = current?.status === 'running'
+  const [live, setLive] = useState<{
+    percent: number | null
+    title: string | null
+    step: number | null
+    total: number | null
+    stage: number | null
+    totalStages: number | null
+    nodeMs: number | null
+  } | null>(null)
+
+  useEffect(() => {
+    if (!running || !promptId) {
+      setLive(null)
+      return
+    }
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/comfy/progress?prompt_id=${encodeURIComponent(promptId)}`, { cache: 'no-store' })
+        if (!res.ok) return
+        const d = (await res.json()) as {
+          progress?: { percent?: number } | null
+          title?: string | null
+          step?: number | null
+          total?: number | null
+          stage?: number | null
+          totalStages?: number | null
+          nodeMs?: number | null
+        }
+        if (cancelled) return
+        setLive({
+          percent: typeof d.progress?.percent === 'number' ? d.progress.percent : null,
+          title: typeof d.title === 'string' && d.title ? d.title : null,
+          step: typeof d.step === 'number' ? d.step : null,
+          total: typeof d.total === 'number' ? d.total : null,
+          stage: typeof d.stage === 'number' ? d.stage : null,
+          totalStages: typeof d.totalStages === 'number' ? d.totalStages : null,
+          nodeMs: typeof d.nodeMs === 'number' ? d.nodeMs : null,
+        })
+      } catch { /* сеть/таймаут — панель просто без деталей */ }
+    }
+    void poll()
+    const timer = setInterval(poll, 1500)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [running, promptId])
+
   useEffect(() => {
     const started = current?.startedAt ?? current?.createdAt
     if (!started || !current) return
@@ -41,14 +96,25 @@ function GenerationInfo() {
   }, [current?.startedAt, current?.createdAt, current])
 
   if (!current) return null
-  const pct = current.progressMax > 0 ? Math.min(100, Math.round((current.progressValue / current.progressMax) * 100)) : 0
+  const pct = current.progressMax > 0
+    ? Math.min(100, Math.round((current.progressValue / current.progressMax) * 100))
+    : (live?.percent ?? 0)
+  const hasPct = current.progressMax > 0 || live?.percent != null
   const statusLabel =
     current.status === 'submitting' ? t('Отправка…')
       : current.status === 'queued' ? t('В очереди')
         : t('Генерация…')
   const startedAt = current.startedAt ?? current.createdAt
   const videoDetail = current.type === 'video' && v.promptId === current.promptId
-  const detail = v && videoDetail ? (v.executingTitle || v.statusMessage) : current.message
+  // Нода/стадия: для видео — из его стора (обновляется видео-потоком),
+  // для остальных вкладок — из опроса /api/comfy/progress выше.
+  const nodeTitle = live?.title ?? (videoDetail ? v.executingTitle : null)
+  const detail = nodeTitle || (videoDetail ? v.statusMessage : current.message)
+  const step = live?.step ?? (videoDetail ? v.nodeStep : null)
+  const total = live?.total ?? (videoDetail ? v.nodeTotal : null)
+  const stage = live?.stage ?? null
+  const totalStages = live?.totalStages ?? null
+  const nodeMs = live?.nodeMs ?? (videoDetail ? v.nodeElapsedMs : null)
 
   return (
     <div className="min-w-0 flex-1">
@@ -56,7 +122,7 @@ function GenerationInfo() {
         <span className="shrink-0 text-xs font-medium text-cyan-300">
           {t(TYPE_LABEL[current.type])} · {statusLabel}
         </span>
-        {current.progressMax > 0 && (
+        {hasPct && (
           <span className="shrink-0 text-[11px] font-mono tabular-nums text-cyan-300">{pct}%</span>
         )}
         {startedAt > 0 && (
@@ -69,9 +135,19 @@ function GenerationInfo() {
             {t(detail)}
           </span>
         )}
-        {videoDetail && v.nodeStep != null && v.nodeTotal != null && v.nodeTotal > 0 && (
+        {step != null && total != null && total > 0 && (
           <span className="shrink-0 text-[10px] font-mono tabular-nums text-muted-foreground/70">
-            {t('шаг')} {v.nodeStep}/{v.nodeTotal}
+            {t('шаг')} {step}/{total}
+          </span>
+        )}
+        {step == null && stage != null && totalStages != null && totalStages > 0 && (
+          <span className="shrink-0 text-[10px] font-mono tabular-nums text-muted-foreground/70">
+            {t('этап')} {stage}/{totalStages}
+          </span>
+        )}
+        {nodeMs != null && nodeMs > 2000 && (
+          <span className="shrink-0 text-[10px] font-mono tabular-nums text-muted-foreground/50">
+            {Math.round(nodeMs / 1000)}{t('с')}
           </span>
         )}
       </div>
