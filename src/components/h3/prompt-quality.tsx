@@ -45,6 +45,11 @@ function analyze(prompt: string, refsCount: number): Item[] {
         kind: 'ok',
         text: tt("Референсы: {{p1}} тег(ов){{p2}}", { p1: unique.size, p2: repeated > 0 ? ` · повторов: ${repeated}` : '' }),
       })
+      // (правка 1106) Привязаны не все: ассистент (и сам пользователь) иногда
+      // оставляет загруженный референс без метки, и он ни к чему не привязан.
+      if (unique.size < refsCount) {
+        items.push({ kind: 'warn', text: tt("Привязано {{p1}} реф. из {{p2}} — остальные не участвуют в генерации", { p1: unique.size, p2: refsCount }) })
+      }
     }
   }
 

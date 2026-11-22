@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags, danglingRefTags } from '@/lib/assistant-fence'
+import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags, danglingRefTags, unusedRefTags } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -844,6 +844,9 @@ export function AssistantView({
     // Генерация такие теги отклоняет (тост «Промпт ссылается на
     // несуществующие референсы»), поэтому предупреждаем сразу при вставке и
     // говорим, чего не хватает. Вставку не блокируем: реф можно добавить.
+    // (правка 1106) Третья половина — обратная: референс в форме ЕСТЬ, а метки
+    // к нему в промпте нет, и он ни к чему не привязан. Тоже только
+    // предупреждение: реф может быть добавлен сознательно «на потом».
     if (st.video.mode === 'ref') {
       const counts = { Picture: 0, Video: 0, Audio: 0 }
       for (const r of st.video.refs) {
@@ -854,6 +857,10 @@ export function AssistantView({
       const dangling = danglingRefTags(clean, counts)
       if (dangling.length) {
         toast.warning(tt("Промпт ссылается на референсы, которых нет: {{p1}}. Добавьте их в форму или уберите метки — иначе генерация не запустится.", { p1: dangling.join(', ') }))
+      }
+      const unused = unusedRefTags(clean, counts)
+      if (unused.length) {
+        toast.warning(tt("Эти референсы не упомянуты в промпте ни одной меткой: {{p1}}. Без метки они не привязаны к кадру — добавьте <Picture N>/<Video N>/<Audio N> или уберите лишние референсы.", { p1: unused.join(', ') }))
       }
     }
     // (правка 161) Кнопка видна только когда !streaming — стрим завершён.

@@ -214,10 +214,40 @@ export function danglingRefTags(
   const re = /<(Picture|Video|Audio)\s+(\d+)\s*>/gi
   let m: RegExpExecArray | null
   while ((m = re.exec(prompt)) !== null) {
-    const kind = m[1] as keyof typeof counts
+    // (правка 1106) Ключ счётов всегда с большой буквы, а тег в промпте модель
+    // может написать и <picture 1> (регистр в регулярке не проверялся) —
+    // раньше такие метки считались «несуществующими» и ловили ложный тост.
+    const kind = (m[1][0].toUpperCase() + m[1].slice(1).toLowerCase()) as keyof typeof counts
     const n = parseInt(m[2], 10)
     const have = counts[kind] ?? 0
     if (n >= 1 && n > have && !out.includes(m[0])) out.push(m[0])
+  }
+  return out
+}
+
+/**
+ * (правка 1106) Обратная сторона danglingRefTags: референсы, которые
+ * ПРИКРЕПЛЕНЫ, но в промпте не упомянуты ни одной меткой. Жалоба зеркальная
+ * («иногда наоборот ничего не указывает»): реф в форме есть, а привязки к нему
+ * в промпте нет, и в кадре он не работает. Возвращает ожидаемые теги в порядке
+ * нумерации (`<Picture 2>`, …).
+ */
+export function unusedRefTags(
+  prompt: string,
+  counts: { Picture: number; Video: number; Audio: number },
+): string[] {
+  if (!prompt) return []
+  const used = new Set<string>()
+  const re = /<\/?(Picture|Video|Audio)\s+(\d+)\s*>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(prompt)) !== null) {
+    used.add(`${m[1].toLowerCase()} ${parseInt(m[2], 10)}`)
+  }
+  const out: string[] = []
+  for (const kind of ['Picture', 'Video', 'Audio'] as const) {
+    for (let n = 1; n <= (counts[kind] ?? 0); n++) {
+      if (!used.has(`${kind.toLowerCase()} ${n}`)) out.push(`<${kind} ${n}>`)
+    }
   }
   return out
 }
