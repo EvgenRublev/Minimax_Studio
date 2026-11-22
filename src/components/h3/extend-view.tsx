@@ -37,6 +37,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useGenStore, type VideoRefItem } from '@/lib/gen-store'
+import { EXTEND_CLIP_MAX_SECONDS, EXTEND_CLIP_MIN_SECONDS } from '@/lib/comfy/minimax-h3-template' // (правка 1096)
 import { useVideoGen } from '@/hooks/use-video-gen'
 import { useGenProgress } from '@/lib/gen-progress-store'
 import { uploadInputFile } from '@/lib/upload'
@@ -498,6 +499,21 @@ export function ExtendView() {
       toast.error(t("Заполните промпт хотя бы одного клипа"))
       return
     }
+    // (правка 1096) Ограничение — только на ОДИН клип продления:
+    // EXTEND_CLIP_MAX_SECONDS. Суммарной границы «на все клипы» нет (решение
+    // пользователя): длинное видео собирается числом карточек. Верхнюю границу
+    // карточки держит и сервер (framesForDuration ≤ MAX_GEN_FRAMES), поэтому
+    // сюда добавлен кламп: набор, который сервер отверг бы, доезжает до него
+    // уже валидным, а не с тостом в 400.
+    for (const c of v.extendClips) {
+      if (!(c.duration >= EXTEND_CLIP_MIN_SECONDS && c.duration <= EXTEND_CLIP_MAX_SECONDS)) {
+        toast.error(t(
+          "Клип продления: длительность {{p1}} с — вне диапазона {{p2}}–{{p3}} с на один клип. Ограничение только на клип: общее видео собирается числом клипов.",
+          { p1: String(c.duration), p2: String(EXTEND_CLIP_MIN_SECONDS), p3: String(EXTEND_CLIP_MAX_SECONDS) },
+        ))
+        return
+      }
+    }
     if (uploadingVideo) {
       toast.error(t("Видео ещё загружается — дождитесь завершения"))
       return
@@ -534,8 +550,14 @@ export function ExtendView() {
       // минимум 3 с (было 5: при коротких клипах первый кадр клипа 0
       // «отъезжал» от хвоста исходника; на 3 с риск ниже, а гибкость нужна).
       // Кламп здесь, чтобы не пробились значения из сохранённых настроек/
-      // очереди мимо UI.
-      return { prompt, duration: Math.max(3, c.duration), seed: c.seed }
+      // очереди мимо UI. (правка 1096) Верхняя граница — EXTEND_CLIP_MAX_SECONDS:
+      // больше одного прохода модели не бывает, а ниже EXTEND_CLIP_MIN_SECONDS
+      // шов «исходник → клип» начинает «отъезжать» (правка 434).
+      return {
+        prompt,
+        duration: Math.min(EXTEND_CLIP_MAX_SECONDS, Math.max(EXTEND_CLIP_MIN_SECONDS, c.duration)),
+        seed: c.seed,
+      }
     })
 
     // Общий промпт удалён из UI: conditioning строят только промпты клипов.
@@ -617,12 +639,17 @@ export function ExtendView() {
     ? video.extendSourceDuration
     : 0
   const totalDuration = sourceDur + clipsSum
+  // (правка 1096) Общий потолок «на все клипы» не вводим: лимит действует на
+  // один клип (EXTEND_CLIP_MIN_SECONDS…EXTEND_CLIP_MAX_SECONDS). Бейдж поэтому
+  // показывает и самое длинное из клипов — по нему видно, не пробита ли граница.
+  const maxClip = video.extendClips.reduce((m, c) => Math.max(m, c.duration), 0)
+  const overCap = maxClip > EXTEND_CLIP_MAX_SECONDS || maxClip < EXTEND_CLIP_MIN_SECONDS
   const badges = (
     <>
       <Badge variant="secondary" className="text-[10px]">{t("Как в исходнике")}</Badge>
       {/* (правка 291) Итоговая длительность: исходник + клипы (если исходник
           известен); иначе только сумма клипов. */}
-      <Badge variant="secondary" className="text-[10px]">
+      <Badge variant={overCap ? 'destructive' : 'secondary'} className="text-[10px]">
         {totalDuration.toFixed(1)} {' '}{t("с")}{sourceDur > 0 ? t("(исх.{{p1}}+{{p2}})", { p1: sourceDur.toFixed(0), p2: clipsSum }) : ''}
       </Badge>
       <Badge variant="secondary" className="text-[10px]">{video.extendClips.length} {' '}{t("клип(ов)")}</Badge>
@@ -1215,13 +1242,25 @@ export function ExtendView() {
                     <Label className="text-[10px] text-muted-foreground">{t("Длит., с:")}</Label>
                     <input
                       type="number"
-                      min={3}
-                      max={30}
+                      min={EXTEND_CLIP_MIN_SECONDS}
+                      max={EXTEND_CLIP_MAX_SECONDS}
+                      // (правка 1096) Подсказка на поле: потолок и почему он именно такой.
+                      title={t(
+                        "{{p1}}–{{p2}} с на один клип. Больше {{p2}} с нода не принимает (3600 кадров); модель обучена на 5–15 с, длинные клипы — вне обученного диапазона. Общее число клипов не ограничено.",
+                        { p1: EXTEND_CLIP_MIN_SECONDS, p2: EXTEND_CLIP_MAX_SECONDS },
+                      )}
                       value={Math.round(clip.duration)}
                       onChange={(e) => {
                         const clips = [...video.extendClips]
-                        // (правка 434) минимум 3 с (было 5, правка 309) — см. кламп при отправке.
-                        clips[i] = { ...clips[i], duration: Math.max(3, Math.min(30, parseInt(e.target.value, 10) || 3)) }
+                        clips[i] = {
+                          ...clips[i],
+                          // (правка 434) минимум 3 с (было 5) — см. кламп при отправке;
+                          // (правка 1096) верхняя граница — EXTEND_CLIP_MAX_SECONDS.
+                          duration: Math.max(
+                            EXTEND_CLIP_MIN_SECONDS,
+                            Math.min(EXTEND_CLIP_MAX_SECONDS, parseInt(e.target.value, 10) || EXTEND_CLIP_MIN_SECONDS),
+                          ),
+                        }
                         patchVideo({ extendClips: clips })
                       }}
                       className="w-16 text-xs bg-[var(--surface-3)] border border-border rounded-md px-2 py-1 text-foreground outline-none [color-scheme:dark] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none selection:bg-cyan-500/30 selection:text-foreground focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/30"
@@ -1273,6 +1312,17 @@ export function ExtendView() {
 
             {/* Badges */}
             <div className="flex flex-wrap items-center gap-1.5">{badges}</div>
+            {/* (правка 1096) Ограничение — на ОДИН клип: если какая-то карточка
+                вне EXTEND_CLIP_MIN_SECONDS…EXTEND_CLIP_MAX_SECONDS, говорим об
+                этом прямо. Суммы клипов не ограничены. */}
+            {overCap && (
+              <p className="text-[11px] leading-snug text-red-400">
+                {t(
+                  "Длительность клипа вне диапазона {{p1}}–{{p2}} с: больше {{p2}} с не принимает нода (потолок — 3600 кадров), а короче {{p1}} с портится шов с исходником. Общее число клипов не ограничено.",
+                  { p1: EXTEND_CLIP_MIN_SECONDS, p2: EXTEND_CLIP_MAX_SECONDS },
+                )}
+              </p>
+            )}
           </div>
 
         </div>

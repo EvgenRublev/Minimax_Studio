@@ -123,6 +123,6 @@
   "refImages — массив имён файлов": "refImages must be an array of file names",
   "refVideos — массив объектов с полем path": "refVideos must be an array of objects with a path field",
   "extendClips: от 1 до 64 клипов": "extendClips: from 1 to 64 clips",
-  "Клип продления: промпт обязателен, длительность 1–30 с": "Extension clip: prompt is required, duration 1–30 s",
+  "Клип продления: промпт обязателен, длительность 1–{{p1}} с": "Extension clip: prompt is required, duration 1–{{p1}} s",
   "Файл не найден: {{p1}}": "File not found: {{p1}}"
 }

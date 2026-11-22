@@ -18,7 +18,7 @@ import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
-import { framesForDuration, finalDimsFromMegapixels, h3TransientGB, FREE_MAX_MP } from '@/lib/comfy/minimax-h3-template' // (правка 1047, 1092, 1095)
+import { framesForDuration, finalDimsFromMegapixels, h3TransientGB, FREE_MAX_MP, EXTEND_CLIP_MAX_SECONDS } from '@/lib/comfy/minimax-h3-template' // (правка 1047, 1092, 1095, 1096)
 import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1088, 1089)
 import { st } from '@/lib/i18n/server'
 
@@ -111,11 +111,17 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         )
       }
+      // (правка 1096) Ограничение ДЕЙСТВУЕТ ТОЛЬКО НА ОДИН КЛИП: 150 с — потолок
+      // conditioning-ноды MiniMaxH3ReferenceToVideo (length ≤ 3600 кадров при
+      // 24 fps, comfy_extras/nodes_minimax_h3.py); обученный диапазон модели при
+      // этом 124–362 кадра, так что длиннее = «untested», но не запрещено.
+      // Суммарной границы по всем клипам нет намеренно: длинное видео собирается
+      // их числом (перекрытие шва отнимает 56 кадров контекста на каждый шов).
       for (const c of clips) {
         const cd = Number(c?.duration ?? 5)
-        if (!c || typeof c.prompt !== 'string' || !Number.isFinite(cd) || cd < 1 || framesForDuration(cd) > MAX_GEN_FRAMES) {
+        if (!c || typeof c.prompt !== 'string' || !Number.isFinite(cd) || cd < 1 || cd > EXTEND_CLIP_MAX_SECONDS) {
           return NextResponse.json(
-            { error: st("Клип продления: промпт обязателен, длительность 1–30 с") },
+            { error: st("Клип продления: промпт обязателен, длительность 1–{{p1}} с", { p1: String(EXTEND_CLIP_MAX_SECONDS) }) },
             { status: 400 },
           )
         }
@@ -511,7 +517,18 @@ export async function POST(req: NextRequest) {
           const d = finalDimsFromMegapixels(String(body.aspectRatio ?? '16:9 (Widescreen)'), genCanvasMP)
           return { w: d.genW, h: d.genH }
         })()
-    const genSeqTokens = h3TransientGB(genCanvas.w, genCanvas.h, framesForDuration(Number(body.duration) || 5)).seq
+    // (правка 1096) В «Продлении» body.duration — не длина клипа: последовательность
+    // задаёт самый длинный клип цепочки (plus голова перекрытия). Для авто-правила
+    // bounded attention считаем её честно, иначе 150-секундный клип выглядел бы как
+    // 5-секундный и узел не поставился бы на том прогоне, где он нужен.
+    const genDurSec = (() => {
+      const d = Number(body.duration) || 5
+      if (body.mode !== 'extend') return d
+      const clips: Array<{ duration?: number }> = Array.isArray(body.extendClips) ? body.extendClips : []
+      const maxClip = clips.reduce((m, c) => Math.max(m, Number(c?.duration) || 0), 0)
+      return Math.max(d, maxClip)
+    })()
+    const genSeqTokens = h3TransientGB(genCanvas.w, genCanvas.h, framesForDuration(genDurSec)).seq
     const vramGb = await gpuVramTotalGb()
     body.boundedAttention = resolveBoundedAttention(
       normalizeBoundedAttentionMode(body.boundedAttentionMode),

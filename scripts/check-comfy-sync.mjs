@@ -549,6 +549,25 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   }
 }
 
+// 13e. (правка 1096) Продление: потолок одного клипа = 150 с, и он упирается в
+//      hard-лимит ноды (MiniMaxH3ReferenceToVideo: length ≤ 3600 кадров). Если
+//      кламп в билдере потеряют, длинная карточка соберёт граф с length
+//      3656+ и ComfyUI отвергнет его на валидации — юзер увидит пустой 400.
+{
+  const gen = read('src/lib/comfy/minimax-h3-template.ts')
+  expect(/export const EXTEND_CLIP_MAX_SECONDS = 150/.test(gen) && /export const EXTEND_CLIP_MAX_FRAMES = 3592/.test(gen),
+    'minimax-h3-template: EXTEND_CLIP_MAX_SECONDS/EXTEND_CLIP_MAX_FRAMES на месте')
+  expect(/const clipNewFrames = /.test(gen) && /snapUp\(overlap \+ x\) > EXTEND_CLIP_MAX_FRAMES/.test(gen),
+    'minimax-h3-template: содержимое клипа клампится потолком ноды (clipNewFrames)')
+  expect(/const totalFrames = clipTotalFrames\(i\)/.test(gen),
+    'minimax-h3-template: цикл цепочки берёт длину из clipTotalFrames, а не из duration')
+  const route = read('src/app/api/comfy/generate/route.ts')
+  expect(/cd > EXTEND_CLIP_MAX_SECONDS/.test(route),
+    'generate/route: клип продления проверяется лимитом 150 с, а не MAX_GEN_FRAMES (30 с)')
+  expect(read('src/components/h3/extend-view.tsx').includes('max={EXTEND_CLIP_MAX_SECONDS}'),
+    'extend-view: верхняя граница поля длительности клипа берётся из константы')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

@@ -24,6 +24,7 @@ import { create } from 'zustand'
 import { toast } from 'sonner'
 import { useAssistantChats, type AssistantChatMessage, type AssistantChatMode } from './assistant-chats-store'
 import { useGenStore } from './gen-store'
+import { EXTEND_CLIP_MAX_SECONDS, EXTEND_CLIP_MIN_SECONDS } from './comfy/minimax-h3-template' // (правка 1096)
 import { useControlNetTarget } from './controlnet-target-store' // (правка 502)
 import { H3_SPEC_A, H3_SPEC_B, H3_SPEC_EXTEND } from './h3-prompt-spec'
 import {
@@ -383,6 +384,10 @@ async function buildExtendSystemMessage(
 
   const lines: string[] = []
   lines.push('⚠️ РЕЖИМ ЧАТА: «Продление» (extend). Помогаешь писать промпты КЛИПОВ продления видео. Общего промпта здесь нет — каждый клип продолжает предыдущий (клип 1 продолжает исходное видео).')
+
+  // (правка 1096) Граница ОДНОГО клипа: EXTEND_CLIP_MIN_SECONDS…EXTEND_CLIP_MAX_SECONDS.
+  // Суммарного лимита на все клипы нет — сколько секунд нужно, столько карточек.
+  lines.push(`Лимит действует на ОДИН клип: ${EXTEND_CLIP_MIN_SECONDS}–${EXTEND_CLIP_MAX_SECONDS} с. Суммарного лимита на все клипы нет. Если сюжет длиннее ${EXTEND_CLIP_MAX_SECONDS} с — разбивай его на несколько клипов, а не увеличивай длительность одного.`)
 
   // ── Клипы продления: номер, длительность, текущий промпт ──
   lines.push('')

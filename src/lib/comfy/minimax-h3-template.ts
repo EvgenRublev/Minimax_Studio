@@ -70,6 +70,22 @@ export const MIN_FIRST_PASS_STEPS = 4
 /** (правка 892) Рекомендуемое (дефолтное) число шагов первого прохода. */
 export const DEFAULT_FIRST_PASS_STEPS = 6
 
+/**
+ * (правка 1096) Верхняя граница длительности ОДНОГО клипа продления — 150 с.
+ * Номер не наш: это потолок ноды MiniMaxH3ReferenceToVideo, у которой вход
+ * `length` ограничен 3600 кадрами при 24 fps (ComfyUI/comfy_extras/
+ * nodes_minimax_h3.py), а обученный диапазон — 124–362 кадра (5–15 с), то есть
+ * длиннее модель работает вне того, на чём тренировалась. Раньше студия держала
+ * 30 с (719 кадров = frames_maximum в model-options/route.ts) — пользователи
+ * просили больше, поэтому потолок поднят до границ ноды.
+ * Суммарной границы на ВСЕ клипы нет намеренно: длинное видео собирается
+ * числом карточек, каждая — до EXTEND_CLIP_MAX_SECONDS.
+ */
+export const EXTEND_CLIP_MAX_SECONDS = 150
+export const EXTEND_CLIP_MIN_SECONDS = 3
+/** Кадровый потолок окна одного клипа: max `length` ноды (3600), вниз по сетке 17k+5. */
+export const EXTEND_CLIP_MAX_FRAMES = 3592 // 17·211 + 5 ≤ 3600
+
 /* ── (правка 399) Veda Sparse Attention — настройки ноды ── */
 
 /**
@@ -2127,10 +2143,22 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     return continuityPhrase(picSlot) + '\n\n' + clips[idx].prompt
   }
   const clipSeed = (idx: number) => (clips[idx].seed < 0 ? seed + idx : clips[idx].seed)
+  // (правка 1096) Голова контекста клипа: хвост исходника для клипа 0,
+  // иначе 56 кадров хвоста предыдущего клипа.
+  const clipOverlapFrames = (idx: number) => (idx === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES)
+  // (правка 1096) НОВОЕ содержимое клипа в кадрах, уложенное в потолок ноды
+  // MiniMaxH3ReferenceToVideo (length ≤ 3600 кадров = 150 с при 24 fps). Без
+  // клампа 150-секундная карточка даёт length = голова 56 + 3600 = 3656 и
+  // ComfyUI отвергает весь граф на валидации. Шаг −17 держит сетку 17k+5.
+  const clipNewFrames = (idx: number) => {
+    const overlap = clipOverlapFrames(idx)
+    let x = framesForDuration(clips[idx].duration)
+    while (x > 5 && snapUp(overlap + x) > EXTEND_CLIP_MAX_FRAMES) x -= 17
+    return Math.max(5, x)
+  }
   // Полная длина клипа idx в кадрах (сетка 17k+5) — та же формула, что в
   // цикле ниже: нужна заранее для ext_lf (последний кадр клипа idx).
-  const clipTotalFrames = (idx: number) =>
-    snapUp((idx === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES) + framesForDuration(clips[idx].duration))
+  const clipTotalFrames = (idx: number) => snapUp(clipOverlapFrames(idx) + clipNewFrames(idx))
 
   // Длительность для ноды расчёта кадров превью (как '17'+'46:19' вкладки
   // «Генерация»): берём самый длинный клип — превью анимируется по максимуму.
@@ -2625,9 +2653,10 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
       // чистый, проверено пользователем на одной и той же сцене).
       // Клип 0 берёт кодированный хвост (extv_ssep).
       for (let i = 0; i < clips.length; i++) {
-        const clipFrames = framesForDuration(clips[i].duration)
-        const overlapFrames = i === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES
-        const totalFrames = i === 0 ? snapUp(overlapFrames + clipFrames) : snapUp(CHAIN_OVERLAP_FRAMES + clipFrames)
+        // (правка 1096) Длины через clipOverlapFrames/clipTotalFrames: новое
+        // содержимое клампится потолком ноды (3600 кадров), сетка 17k+5 не ломается.
+        const overlapFrames = clipOverlapFrames(i)
+        const totalFrames = clipTotalFrames(i)
         const oTok = tok(overlapFrames)
         const tTok = tok(totalFrames)
         const aOver = Math.round((overlapFrames * 5) / 3)
@@ -2715,10 +2744,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         let prevVideo: [string, number] = i === 0 ? ['extv_ssep', 0] : [`ext_ssep_${i - 1}`, 0]
         let prevAudio: [string, number] = i === 0 ? ['extv_ssep', 1] : [`ext_ssep_${i - 1}`, 1]
         if (twoPass && i > 0) {
-          const prevCf = framesForDuration(clips[i - 1].duration)
-          const prevTotal = (i - 1) === 0
-            ? snapUp(tailFrames + prevCf)
-            : snapUp(CHAIN_OVERLAP_FRAMES + prevCf)
+          const prevTotal = clipTotalFrames(i - 1)
           const aTailSec = Number((CHAIN_OVERLAP_FRAMES / 24).toFixed(4))
           Object.assign(nodes, {
             [`ext_p2tail_${i}`]: {
