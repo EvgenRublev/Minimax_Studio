@@ -107,6 +107,11 @@ export async function POST(req: NextRequest) {
        *  video_length/resolution/duration для lossless-резолвера латента
        *  и диалога меты. outName = имя готового файла в output/. */
       metaOnly?: boolean
+      /** (правка 1104) Продление: итоговый ролик обрезается до сетки H3 17k+5
+       *  «в меньшую сторону» — ровно на столько же кадров, на сколько обрезан
+       *  combined-латент. Без этого mp4 длиннее латента и Refine теряет
+       *  lossless-ветку (или, хуже, работает по сдвинутому латенту). */
+      extendGridTrim?: boolean
     }
     // (правка 716) Числа валидируются: раньше body.fade = "abc" давал NaN
     // (Math.min(3, "abc") → NaN), и в xfade уходило duration=NaN → ffmpeg
@@ -289,6 +294,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // (правка 1104) Обрезка конца ролика до сетки H3 (17k+5) «в меньшую
+    // сторону» — та же длина, до которой обрезан combined-латент продления.
+    // Считаем по фактическим кадрам входов: сумма минус подрезки голов и
+    // кроссфейды = длина итога.
+    let gridTrim = 0
+    let gridFinalFrames = 0
+    if (body.extendGridTrim === true) {
+      const counts = await Promise.all(resolvedPaths.map(async (pp) => {
+        try {
+          const pr = await probeVideoFile(pp)
+          return pr.frames > 0 ? pr.frames : 0
+        } catch { return 0 }
+      }))
+      let total = 0
+      for (let i = 0; i < infos.length; i++) {
+        const ct = counts[i] || Math.round(infos[i].duration * targetFps)
+        const trimF = i === 0 ? 0 : Math.round((headTrims[i] || 0) * targetFps)
+        const fadeF = i === 0 ? 0 : Math.round((i === 1 ? seamFadeSec : fadeSec) * targetFps)
+        total += Math.max(1, ct - trimF - fadeF)
+      }
+      const grid = 5 + 17 * Math.floor((Math.max(5, total) - 5) / 17)
+      gridTrim = Math.max(0, total - grid)
+      gridFinalFrames = Math.max(5, total - gridTrim)
+      if (gridTrim > 0) {
+        console.log(`[concat] сетка H3: ${total} → ${gridFinalFrames} кадров (обрезано ${gridTrim})`)
+      }
+    }
+
     // Build filter chain: hard-cut concat (fade=0) or xfade/acrossfade (fade>0).
     const filterParts: string[] = []
     const trim0 = sourceTrim > 0 && !!infos[0] && infos[0].duration > sourceTrim + 0.05
@@ -435,6 +468,17 @@ export async function POST(req: NextRequest) {
     const vOutLabel = fadeSec === 0 ? 'vout' : `v${infos.length - 1}`
     const aOutLabel = fadeSec === 0 ? 'aout' : `a${infos.length - 1}`
 
+    // (правка 1104) Финальная обрезка хвоста до сетки H3: combined-латент
+    // обрезан до тех же кадров, поэтому длины mp4 и латента совпадают.
+    let vMap = vOutLabel
+    let aMap = aOutLabel
+    if (gridTrim > 0) {
+      filterParts.push(`[${vOutLabel}]trim=end_frame=${gridFinalFrames},setpts=PTS-STARTPTS[vgrid]`)
+      filterParts.push(`[${aOutLabel}]atrim=end=${(gridFinalFrames / targetFps).toFixed(6)},asetpts=PTS-STARTPTS[agrid]`)
+      vMap = 'vgrid'
+      aMap = 'agrid'
+    }
+
     // (правка 213а) outPath идёт ПОСЛЕДНИМ: раньше -map [a..]/-c:a приклеивались
     // ПОСЛЕ имени файла — ffmpeg считал их опциями фантомного «второго
     // выхода», [a1] оставался незамкнутым, и ВСЕ склейки теряли аудио.
@@ -442,7 +486,7 @@ export async function POST(req: NextRequest) {
       '-hide_banner', '-loglevel', 'error',
       ...inputArgs,
       '-filter_complex', filterParts.join(';'),
-      '-map', `[${vOutLabel}]`,
+      '-map', `[${vMap}]`,
       // (правка 386) кодек/качество — из [video] настроек студии
       '-preset', 'fast', ...ffmpegVideoArgs(getVideoFormatSettings()),
       '-movflags', '+faststart',
@@ -450,7 +494,7 @@ export async function POST(req: NextRequest) {
     ]
 
     let usedAudio = true
-    const audioArgs = ['-map', `[${aOutLabel}]`, '-c:a', 'aac', '-b:a', '192k', outPath]
+    const audioArgs = ['-map', `[${aMap}]`, '-c:a', 'aac', '-b:a', '192k', outPath]
     try {
       await execFileAsync(ffmpeg, [...baseArgs, ...audioArgs], {
         timeout: 600_000, maxBuffer: 32 * 1024 * 1024,
@@ -469,7 +513,7 @@ export async function POST(req: NextRequest) {
             '-hide_banner', '-loglevel', 'error',
             ...inputArgs,
             '-filter_complex', noAudioFilter.join(';'),
-            '-map', `[${vOutLabel}]`,
+            '-map', `[${vMap}]`,
             '-an',
             // (правка 386) кодек/качество — из [video] настроек студии
       '-preset', 'fast', ...ffmpegVideoArgs(getVideoFormatSettings()),

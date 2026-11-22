@@ -748,6 +748,10 @@ export function useVideoGen() {
                         seamFadeSeconds: 12 / 24,
                         headTrims: [0, 5 / 24],
                         sourceTrimSeconds: 0,
+                        // (правка 1104) Обрезать конец ролика до сетки H3
+                        // (17k+5) — ровно та длина, до которой обрезан
+                        // combined-латент: Refine снова идёт lossless.
+                        extendGridTrim: true,
                         seamPolish: true,
                         outName: 'Minimax_Studio_combined',
                         // (правка 364) Итоговый склеенный файл — в ту же

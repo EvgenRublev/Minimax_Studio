@@ -3298,45 +3298,50 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     // Источник в склейке НЕ подрезается (sourceTrimSeconds = 0), а перекрытие
     // шва (5 подрезки головы + 12 xfade = 17 кадров) съедает дублирующаяся
     // голова клипа 0 — значит в латенте исходник идёт ЦЕЛИКОМ, а клип 0
-    // начинается с tailFrames (раньше здесь резали по F−17 / tailFrames−17 —
-    // латент уезжал относительно mp4 на 17 кадров, и Refine по нему давал
-    // артефакты со стыка и до конца).
-    // Дополнительно: H3-латент существует только на сетке 17k+5. Если длина
-    // исходника на сетку не ложится (обычный mp4 — 194 кадра и т.п.), ТОЧНОГО
-    // латента таймлайна не существует: сборка пропускается, Refine честно
-    // кодирует mp4 заново вместо того, чтобы работать по сдвинутому латенту.
+    // начинается с tailFrames.
+    // (правка 1104) Латент пишется ВСЕГДА, даже если таймлайн не на сетке
+    // 17k+5: сборка идёт по формуле «в меньшую сторону» — итоговый латент
+    // обрезается до ближайшей валидной длины сетки, а клиент так же обрезает
+    // конец видео (/api/comfy/concat, extendGridTrim). Потеря — до 16 кадров
+    // (0.67 с) хвоста продления, зато Refine получает валидный lossless-латент,
+    // а не сдвинутый off-grid (раньше такой латент вообще не писали).
     ...((hasSeed && clips.length >= 1) ? (() => {
       const nodes: Record<string, unknown> = {}
       const srcF = Math.max(5, p.extendSourceFrames ?? tailFrames)
       const snapDownGrid = (n: number) => 5 + 17 * Math.floor((Math.max(5, n) - 5) / 17)
-      const srcGrid = snapDownGrid(srcF)
-      const srcAligned = srcGrid === srcF && srcF >= 22 && tailFrames >= 39
-      // Не на сетке 17k+5 — точного латента этого таймлайна не существует.
-      // Пустой блок = в графе нет ext_lsave, клиент не приложит latent_source,
-      // Refine/VaeEncode пойдёт от mp4 (без сдвига и артефактов).
-      if (!srcAligned) return {}
-      const srcCutTok = tok(srcGrid)
-      const srcCutA = Math.round((srcGrid * 5) / 3)
-      const srcV: [string, number] = p.extendSourceLatentFile
-        ? (sourceLatentCrop?.needed ? ['ext_srcfit', 0] : ['ext_srclsep', 0])
-        : ['extv_fenc', 0]
-      const srcA: [string, number] = p.extendSourceLatentFile ? ['ext_srclsep', 1] : ['extv_aful', 0]
-
       // Куски клипов: клип 0 — с начала его НОВОГО содержимого (tailFrames),
       // i>0 — с CHAIN_OVERLAP_FRAMES: ровно там, где заканчивается xfade.
       const clipCut = (i: number) => (i === 0 ? tailFrames : CHAIN_OVERLAP_FRAMES)
       const clipCutTok = (i: number) => tok(clipCut(i))
       const clipCutA = (i: number) => Math.round((clipCut(i) * 5) / 3)
+      // Полная длина итогового видео по той же формуле, что даёт ffmpeg-склейка
+      // (одна длина клипа минус его срез начала на каждый клип).
+      let videoTotal = srcF
+      for (let i = 0; i < clips.length; i++) videoTotal += clipTotalFrames(i) - clipCut(i)
+      const gridTotal = snapDownGrid(videoTotal)
+      // Сколько кадров срежет клиент с конца видео (/api/comfy/concat,
+      // extendGridTrim) — та же величина, что и обрезка латента ниже.
+      const trimTailFrames = Math.max(0, videoTotal - gridTotal)
+      if (trimTailFrames > 0) {
+        console.log(`[extend] сетка H3: ${videoTotal} → ${gridTotal} кадров (хвост −${trimTailFrames})`)
+      }
+      const srcCutTok = tok(srcF)
+      const srcCutA = Math.round((srcF * 5) / 3)
+      if (gridTotal < 22) return {}
+      const srcV: [string, number] = p.extendSourceLatentFile
+        ? (sourceLatentCrop?.needed ? ['ext_srcfit', 0] : ['ext_srclsep', 0])
+        : ['extv_fenc', 0]
+      const srcA: [string, number] = p.extendSourceLatentFile ? ['ext_srclsep', 1] : ['extv_aful', 0]
 
       nodes['ext_ljsrc_v'] = {
         inputs: { samples: srcV, dim: 't', index: 0, amount: srcCutTok },
         class_type: 'LatentCut',
-        _meta: { title: `Итог: исходник[:${srcGrid}] (видео)` },
+        _meta: { title: `Итог: исходник[:${srcF}] (видео)` },
       }
       nodes['ext_ljsrc_a'] = {
         inputs: { samples: srcA, dim: 'x', index: 0, amount: srcCutA },
         class_type: 'LatentCut',
-        _meta: { title: `Итог: исходник[:${srcGrid}] (аудио)` },
+        _meta: { title: `Итог: исходник[:${srcF}] (аудио)` },
       }
       let vCur = 'ext_ljsrc_v'
       let aCur = 'ext_ljsrc_a'
@@ -3366,8 +3371,21 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         vCur = `ext_lj_v_${i}`
         aCur = `ext_lj_a_${i}`
       }
+      // (правка 1104) Финальная обрезка до сетки 17k+5 «в меньшую сторону».
+      // Клиент режет те же trimTail кадров с конца видео — длины совпадают,
+      // поэтому Refine видит латент ровно на свой mp4.
+      nodes['ext_ljtrim_v'] = {
+        inputs: { samples: [vCur, 0], dim: 't', index: 0, amount: tok(gridTotal) },
+        class_type: 'LatentCut',
+        _meta: { title: `Итог: обрезка до сетки ${gridTotal} кадров (видео)` },
+      }
+      nodes['ext_ljtrim_a'] = {
+        inputs: { samples: [aCur, 0], dim: 'x', index: 0, amount: Math.round((gridTotal * 5) / 3) },
+        class_type: 'LatentCut',
+        _meta: { title: `Итог: обрезка аудио под ${gridTotal} кадров` },
+      }
       nodes['ext_ljoin'] = {
-        inputs: { video_latent: [vCur, 0], audio_latent: [aCur, 0] },
+        inputs: { video_latent: ['ext_ljtrim_v', 0], audio_latent: ['ext_ljtrim_a', 0] },
         class_type: 'LTXVConcatAVLatent',
         _meta: { title: 'AV-латент итога продления' },
       }
