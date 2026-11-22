@@ -595,6 +595,7 @@ export function ExtendView() {
       chunkFeedForward: v.chunkFeedForward,
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
+      boundedAttention: v.boundedAttention, // (правка 1089)
       latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
       outputSubfolder: outputFolder, // (правка 997) вручную выбранная папка
       })

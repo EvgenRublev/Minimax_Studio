@@ -155,6 +155,14 @@ export interface VideoGenerateParams {
   chunkFFChunks?: number
   /** ChunkFF: sequence length threshold above which chunking kicks in (default 4096). */
   chunkFFThreshold?: number
+  /** (правка 1089) Bounded attention: 'auto' (авторешение по VRAM) | 'on' | 'off'. */
+  boundedAttention?: 'auto' | 'on' | 'off'
+  /** (правка 1095) MiniMaxLowVRAMAttention: число групп голов (1–56, дефолт 4). */
+  lowVramHeadChunks?: number
+  /** (правка 1095) MiniMaxStudioBoundedAttention: token_chunk; 0 — авторазмер по VRAM. */
+  boundedTokenChunk?: number
+  /** (правка 1095) Полная VRAM карты в ГБ (сервер подставляет сам, если не передана). */
+  vramTotalGb?: number | null
 
   /* ── (правка 829) «Зациклено» ── */
   /** Бесшовный цикл (конец переходит в начало). Модель патчится

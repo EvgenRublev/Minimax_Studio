@@ -1,5 +1,10 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (правка 386)
 import { chainLatentCut } from './latent-cut' // (правка 392)
+import {
+  autoChunkFFChunks,
+  boundedTokenChunk,
+  h3TransientGB,
+} from './minimax-h3-template' // (правка 1095: авторазмеры head_chunks / token_chunk / FFN-чанков)
 import { clampVedaSparsity, sanitizeVedaIndexList, buildCustomLoraNodes, getLastLoraOutput } from './minimax-h3-template' // (правка 399; хелперы LoRA — правка 483)
 // (правка 723) Лестница сигм/пресет Pass 2 вынесены в отдельный модуль без импортов,
 // чтобы вкладка Refine могла их импортировать, не таща в клиентский бандл весь шаблон.
@@ -158,6 +163,11 @@ export interface RefineParams {
   /** (правка 968) тюнинг Chunk FF — из настроек, как в Generate. */
   chunkFFChunks?: number
   chunkFFThreshold?: number
+  /** (правка 1095) head_chunks MiniMaxLowVRAMAttention и token_chunk bounded
+   *  attention (0 = авторазмер); vramTotalGb — для авторазмера token_chunk. */
+  lowVramHeadChunks?: number
+  boundedTokenChunk?: number
+  vramTotalGb?: number | null
   /** MiniMaxSparseAttention / Sol-Attn (default true). */
   sparseAttention?: boolean
   /** (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params). */
@@ -414,12 +424,23 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // (правка 1088) Bounded attention — Refine «Целым» без тайловых швов:
   // на 8 ГБ QKV-буфер pass 2 не влезал, теперь режется по токенам.
   const boundedAttn = p.boundedAttention === true
+  // (правка 1095) head_chunks и FFN-чанки — бесплатные по качеству рычаги, их
+  // поднимаем автоматически по канве. token_chunk авто-только в режиме «Целый»:
+  // в «Частями»/Tessera последовательность короче канвы, и крупный кусок просто
+  // выключил бы узел (он отдаёт управление, когда S ≤ chunk).
+  const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
+  const transients = h3TransientGB(final.genW, final.genH, framesGrid)
+  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  const wholeGrid = p.windowed !== true
+  const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0)
+    || (wholeGrid ? boundedTokenChunk(chainVramGb, transients.seq, undefined) : 4096)))
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
     modelNodes['46:43'] = {
-      inputs: { head_chunks: 4, model: modelSrc },
+      inputs: { head_chunks: headChunks, model: modelSrc },
       class_type: 'MiniMaxLowVRAMAttention',
       _meta: { title: 'Low VRAM Attention' },
     }
@@ -427,7 +448,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   }
   if (boundedAttn) {
     modelNodes['46:45'] = {
-      inputs: { token_chunk: 4096, model: modelSrc },
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
       class_type: 'MiniMaxStudioBoundedAttention',
       _meta: { title: 'Bounded Attention (low VRAM)' },
     }
@@ -436,12 +457,10 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-          chunks: boundedAttn
-            ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
-            : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
-          seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
-          model: modelSrc,
-        },
+        chunks: boundedAttn ? Math.max(8, ffChunks) : ffChunks,
+        seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
+        model: modelSrc,
+      },
       class_type: 'MiniMaxChunkFeedForward',
       _meta: { title: boundedAttn ? 'Chunk FeedForward (bounded)' : 'Chunk FeedForward' },
     }
@@ -1343,6 +1362,12 @@ export interface ChunkedRefineParams {
   /** (правка 968) тюнинг Chunk FF — из настроек. */
   chunkFFChunks?: number
   chunkFFThreshold?: number
+  /** (правка 1095) head_chunks LowVRAM Attention и token_chunk bounded attention
+   *  (0 = 4096 в «Частях»: последовательность окна короче канвы). */
+  lowVramHeadChunks?: number
+  boundedTokenChunk?: number
+  /** (правка 1095) VRAM карты (для авторазмера token_chunk в «Целом»). */
+  vramTotalGb?: number | null
   sparseAttention?: boolean
   // (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params)
   sparseTau?: number
@@ -1613,12 +1638,19 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   // (правка 1088) Bounded attention — и в «Частями»: окна 3–5 с на 1080p всё
   // ещё дают 22–37 латент-кадров, QKV-буфер которых не влезает в 8 ГБ.
   const boundedAttn = p.boundedAttention === true
+  // (правка 1095) head_chunks и FFN-чанки поднимаем автоматически (математика не
+  // меняется), token_chunk — из настроек, по умолчанию 4096: последовательность
+  // окна короче канвы, крупный кусок выключил бы узел.
+  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  const windowFrames = windowedH3Geometry(p.chunkSeconds).context_length
+  const ffChunks = autoChunkFFChunks(h3TransientGB(final.genW, final.genH, windowFrames).ffnGb, p.chunkFFChunks)
+  const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0) || 4096))
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
     modelNodes['46:43'] = {
-      inputs: { head_chunks: 4, model: modelSrc },
+      inputs: { head_chunks: headChunks, model: modelSrc },
       class_type: 'MiniMaxLowVRAMAttention',
       _meta: { title: 'Low VRAM Attention' },
     }
@@ -1626,7 +1658,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   }
   if (boundedAttn) {
     modelNodes['46:45'] = {
-      inputs: { token_chunk: 4096, model: modelSrc },
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
       class_type: 'MiniMaxStudioBoundedAttention',
       _meta: { title: 'Bounded Attention (low VRAM)' },
     }
@@ -1635,9 +1667,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-          chunks: boundedAttn
-            ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
-            : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+          chunks: boundedAttn ? Math.max(8, ffChunks) : ffChunks,
           seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
           model: modelSrc,
         },

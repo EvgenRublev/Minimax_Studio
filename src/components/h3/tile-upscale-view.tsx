@@ -36,6 +36,7 @@ import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
 import { useVideoGallery } from '@/components/h3/use-video-gallery'
 import { useTileUpscaleTarget, type TileUpscaleSource } from '@/lib/tile-upscale-target-store'
 import { useTileUpscaleJob } from '@/lib/tile-upscale-job-store'
+import { useGenStore } from '@/lib/gen-store' // (правка 1089) bounded attention — общие настройки
 import { uploadInputFile } from '@/lib/upload'
 import { useTranslation } from 'react-i18next' // (правка 955)
 import { useOutputFolderStore } from '@/lib/output-folder-store' // (правка 997)
@@ -164,6 +165,10 @@ export function TileUpscaleView() {
       denoise: params.denoise,
       steps: params.steps,
       syncTiles: params.syncTiles,
+      // (правка 1089) bounded attention — выбор из общих настроек («Оптимизация VRAM»)
+      boundedAttentionMode: useGenStore.getState().video.boundedAttention,
+      // (правка 1095) token_chunk из общих настроек (0 = 4096)
+      boundedTokenChunk: useGenStore.getState().video.boundedTokenChunk,
     }
     await jobSubmit(body)
   }, [prompt, uploadingSrc, params, jobSubmit])

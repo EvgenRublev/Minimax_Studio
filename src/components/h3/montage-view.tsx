@@ -934,6 +934,22 @@ export function MontageView() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [ctxMenu])
+
+  // (правка 1094) клик мимо меню закрывает его. Раньше для этого служил
+  // полноэкранный оверлей (`fixed inset-0`), но он перехватывал и следующий
+  // right-click: панорама таймлайна «съедалась» закрытием меню, а при
+  // удержании правой кнопки указатель вообще не доходил до клипа. Слушатель на
+  // document ничего не перехватывает; само меню останавливает pointerdown.
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node | null
+      if (t && (t as HTMLElement).closest?.('[data-clip-ctx-menu]')) return
+      setCtxMenu(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [ctxMenu])
   /** масштаб превью: доля панели 0.2..1 */
   const [vScale, setVScale] = useState(0.8)
   /** (правка 898) размер панели превью в CSS px — чтобы сила дисперсии в
@@ -1603,22 +1619,25 @@ export function MontageView() {
 
   // (правка 896) панорамирование таймлайна: зажать ПРАВУЮ кнопку мыши и
   // тянуть влево-вправо (или вверх-вниз по дорожкам). Контекстное меню на
-  // таймлайне не используется, поэтому подавляем его. Левая кнопка не
-  // затрагивается — клипы/бегунок продолжают работать как раньше.
+  // таймлайне теперь своё (правка 1064), системное подавляется в contextmenu.
+  // Левая кнопка не затрагивается — клипы/бегунок продолжают работать как раньше.
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
-    let drag: { x: number; y: number; left: number; top: number } | null = null
+    let drag: { x: number; y: number; left: number; top: number; id: number; captured?: boolean } | null = null
     const onDown = (e: PointerEvent) => {
       if (e.button !== 2) return
       // (правка 1064) здесь НЕ preventDefault: отменённый pointerdown в Chrome
       // подавляет и contextmenu, поэтому своё меню вообще не приходило. Вместо
       // этого на время панорамы запрещаем выделение текста.
       panMovedRef.current = false
-      drag = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }
+      drag = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, id: e.pointerId }
       el.style.userSelect = 'none'
-      try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
-      el.style.cursor = 'grabbing'
+      // (правка 1094) setPointerCapture НЕ здесь: захват указателя навешивается
+      // ещё до contextmenu и в Electron/Chromium мешает событию дойти до клипа
+      // (путь «contextmenu по клипу» отваливался, оставался лишь запасной
+      // pointerup). Захват ставим на первом реальном сдвиге — панораме.
+      el.style.cursor = 'grab'
     }
     const onMove = (e: PointerEvent) => {
       if (!drag) return
@@ -1630,6 +1649,10 @@ export function MontageView() {
       el.scrollTop = drag.top - (e.clientY - drag.y)
       if (el.scrollLeft !== l || el.scrollTop !== tp) {
         panMovedRef.current = true
+        if (!drag.captured) {
+          drag.captured = true
+          try { el.setPointerCapture(drag.id) } catch { /* noop */ }
+        }
         // (правка 1075) contextmenu приходит в момент нажатия ПКМ, то есть ДО
         // того как мы узнали, что это панорама. Меню, которое уже выскочило,
         // убираем: иначе после прокрутки оно висит невидимым оверлеем и съедает
@@ -1639,10 +1662,11 @@ export function MontageView() {
     }
     const end = (e?: PointerEvent) => {
       if (!drag) return
+      const wasCaptured = drag.captured
       drag = null
       el.style.cursor = ''
       el.style.userSelect = ''
-      if (e) { try { el.releasePointerCapture(e.pointerId) } catch { /* noop */ } }
+      if (wasCaptured && e) { try { el.releasePointerCapture(e.pointerId) } catch { /* noop */ } }
     }
     const onUp = (e: PointerEvent) => {
       if (e.button !== 2) return
@@ -3375,6 +3399,18 @@ export function MontageView() {
     if (panMovedRef.current) { panMovedRef.current = false; return }
     openClipMenuAt(e.clientX, e.clientY, e.target as Element | null)
   }, [openClipMenuAt])
+
+  /**
+   * (правка 1094) React-путь для отдельного элемента клипа (база, слой, аудио).
+   * Нативный слушатель скроллера тоже получает это событие, но дубль отсекает
+   * защита в openClipMenuAt. Через ref, чтобы обработчик не «протухал», пока
+   * слушатель скроллера навешан один раз.
+   */
+  const onClipContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    if (panMovedRef.current) { panMovedRef.current = false; return }
+    openClipMenuAtRef.current?.(e.clientX, e.clientY, e.currentTarget)
+  }, [])
 
   /** (правка 899) удалить все выделенные клипы (группу) сразу, одним снимком истории;
    *  база — без ripple: освободившееся место каждого удалённого клипа переходит
@@ -5571,6 +5607,7 @@ export function MontageView() {
                         key={l.key}
                         data-layer-key={l.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'layer', l)}
+                        onContextMenu={onClipContextMenu}
                         className={cn(
                           'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
                           isSel
@@ -5706,12 +5743,7 @@ export function MontageView() {
                     key={row.shot.key}
                     data-clip={row.shot.key}
                     onPointerDown={(e) => startClipDrag(e, row)}
-                    onContextMenu={(e) => {
-                      // (правка 1064) right-click прямо по клипу: путь на случай,
-                      // если нативный listener скроллера не навесился на узел
-                      e.preventDefault()
-                      openClipMenuAt(e.clientX, e.clientY, e.currentTarget)
-                    }}
+                    onContextMenu={onClipContextMenu}
                     className={cn(
                       'group absolute inset-y-0 cursor-grab select-none overflow-hidden rounded-md border bg-[var(--surface-2)] transition-shadow active:cursor-grabbing',
                       isSel
@@ -5852,11 +5884,7 @@ export function MontageView() {
                         key={a.key}
                         data-audio-key={a.key}
                         onPointerDown={(e) => startFreeClipDrag(e, 'audio', a)}
-                        onContextMenu={(e) => {
-                          // (правка 1064) right-click по аудиоклипу
-                          e.preventDefault()
-                          openClipMenuAt(e.clientX, e.clientY, e.currentTarget)
-                        }}
+                        onContextMenu={onClipContextMenu}
                         className={cn(
                           'group absolute inset-y-0.5 cursor-grab select-none overflow-hidden rounded-md border bg-emerald-600/25 transition-shadow active:cursor-grabbing',
                           isSel
@@ -7319,18 +7347,18 @@ export function MontageView() {
 
       {/* (правка 1064) контекстное меню клипа (ПКМ на таймлайне). Портал в body:
           у fixed-оверлея внутри панели transform-предки стали бы «окном», и меню
-          уехало бы за видимую область (эффект «ПКМ ничего не делает»). */}
+          уехало бы за видимую область (эффект «ПКМ ничего не делает»).
+          (правка 1094) вместо полноэкранного «поддонока» меню закрывается
+          слушателем на document: оверлей съедал следующий right-click (панораму)
+          и вообще перехватывал все события над таймлайном. */}
       {ctxMenu && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[10060]"
-          onPointerDown={() => setCtxMenu(null)}
+          data-clip-ctx-menu
+          className="fixed z-[10060] min-w-[252px] overflow-hidden rounded-xl border border-border bg-[var(--surface-1)] py-1 shadow-2xl ring-1 ring-black/40"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}
         >
-          <div
-            className="absolute min-w-[252px] overflow-hidden rounded-xl border border-border bg-[var(--surface-1)] py-1 shadow-2xl ring-1 ring-black/40"
-            style={{ left: ctxMenu.x, top: ctxMenu.y }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
             {ctxMenu.items.map((it) => (
               <button
                 key={it.id}
@@ -7346,7 +7374,6 @@ export function MontageView() {
                 {it.hint && <span className="shrink-0 truncate text-[10px] text-muted-foreground">{it.hint}</span>}
               </button>
             ))}
-          </div>
         </div>,
         document.body,
       )}

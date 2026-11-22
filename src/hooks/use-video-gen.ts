@@ -721,10 +721,20 @@ export function useVideoGen() {
                       // Python-постобработка (порт ComfyUI-MiniMax-H3-Extender:
                       // seam_fade + optical flow). Это убирает и «растворение»,
                       // и резкий скачок.
+                      // (правка 1090) Чистый hard cut показался слишком резким:
+                      // граница монтажа приходилась ровно на ПЕРВЫЙ свободный кадр
+                      // клипа — самое слабое место непрерывности (модель на этом
+                      // шаге меняет позу, межкадровая разница падает с ~9 до ~3.5).
+                      // Теперь стык перекрывается 8-кадровым xfade: подрезка головы
+                      // клипа (17 кадров) остаётся, а фейд смешивает последние 8
+                      // кадров исходника с первыми 8 НОВЫМИ кадрами, то есть разрыв
+                      // «размазан» через границу, а не показан одним кадром.
+                      // Дублированных кадров при этом нет: таймлайн короче на 8
+                      // кадров, позиция стыка в итоговом файле не меняется.
                       body: JSON.stringify({
                         inputs,
                         fade: 0,
-                        seamFadeSeconds: 0,
+                        seamFadeSeconds: 8 / 24, // (правка 1090)
                         headTrims: [0, 17 / 24],
                         sourceTrimSeconds: 0,
                         seamPolish: true,
@@ -1198,6 +1208,13 @@ export function useVideoGen() {
           chunkFeedForward: params.chunkFeedForward !== false,
           chunkFFChunks: params.chunkFFChunks ?? 2,
           chunkFFThreshold: params.chunkFFThreshold ?? 4096,
+          // (правка 1089) bounded attention: пользовательская настройка; сервер
+          // решает по ней + VRAM (auto = вкл. на картах <12 ГБ).
+          boundedAttentionMode: params.boundedAttention ?? 'auto',
+          // (правка 1095) размеры кусков attention-цепочки (head_chunks и
+          // token_chunk; 0 = авторазмер по VRAM, который знает только сервер).
+          lowVramHeadChunks: params.lowVramHeadChunks ?? 4,
+          boundedTokenChunk: params.boundedTokenChunk ?? 0,
           latentUpscaler3D: params.latentUpscaler3D !== false, // (правка 806)
           // (правка 829) «Зациклено»: только не в extend. Шаблон патчит модель
           // (MiniMaxStudioLoop) и декодирует через MiniMaxStudioLoopDecode.
@@ -1419,6 +1436,12 @@ export function useVideoGen() {
           }),
           low_vram_attention: params.lowVramAttention !== false,
           chunk_feed_forward: params.chunkFeedForward !== false,
+          // (правка 1089) режим bounded attention как выбор пользователя
+          // (фактическое решение принимает сервер по VRAM).
+          bounded_attention_mode: params.boundedAttention ?? 'auto',
+          // (правка 1095) размеры кусков attention-цепочки — для «Повторить».
+          low_vram_head_chunks: params.lowVramHeadChunks ?? 4,
+          bounded_token_chunk: params.boundedTokenChunk ?? 0,
           latent_upscaler_3d: params.latentUpscaler3D !== false, // (правка 806)
           ...(params.chunkFeedForward !== false
             ? {

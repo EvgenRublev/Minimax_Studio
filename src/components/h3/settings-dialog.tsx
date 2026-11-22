@@ -1139,7 +1139,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               {/* (правка 168) Sparse Attention (Sol-Attn) */}
               <SettingsRow
                 label={tt("Разреженное внимание (Sol-Attn)")}
-                description={tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически")}
+                description={tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически. На актуальном ядре работает через узел ядра BlockSparseAttention — строки текста, звука и референсов остаются в точном внимании, а генерируемый звук идёт плотно и не деградирует")}
                 right={
                   <SettingsToggle
                     checked={video.sparseAttention}
@@ -1299,7 +1299,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               {/* Low VRAM Attention */}
               <SettingsRow
                 label="Low VRAM Attention"
-                description={tt("Attention чанками по 4 головы — экономит видеопамять")}
+                description={tt("Attention чанками по головам — экономит видеопамять, математика не меняется")}
                 right={
                   <SettingsToggle
                     checked={video.lowVramAttention}
@@ -1309,10 +1309,28 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 }
               />
 
+              {/* (правка 1095) число групп голов: больше групп — меньше транзиенты
+                  ядра attention при неизменной математике. */}
+              {video.lowVramAttention && (
+                <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
+                    <SettingSlider
+                      label={tt("Low VRAM: групп голов")}
+                      labelTitle={tt("На сколько групп делить головы (head_chunks). Математика та же: головы независимы. Больше групп — меньше пик VRAM, но больше запусков ядра. 4 — как раньше; 8–16 стоит попробовать на картах 8–12 ГБ.")}
+                      value={typeof video.lowVramHeadChunks === 'number' ? video.lowVramHeadChunks : 4}
+                      onChange={(v) => patchVideo({ lowVramHeadChunks: Math.round(v) })}
+                      min={1}
+                      max={56}
+                      step={1}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Chunk FeedForward + settings */}
               <SettingsRow
                 label="Chunk FeedForward"
-                description={tt("FeedForward чанками на длинных последовательностях — экономит VRAM")}
+                description={tt("FeedForward чанками на длинных последовательностях — экономит VRAM. Число чанков автоматически поднимается, если транзиент FFN больше ~1.4 ГБ (математика не меняется)")}
                 right={
                   <SettingsToggle
                     checked={video.chunkFeedForward}
@@ -1341,6 +1359,47 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       max={16384}
                       step={512}
                     />
+                  </div>
+                </div>
+              )}
+
+              {/* Bounded Attention (правка 1089) — поблочный attention для слабых карт;
+                  авторешение по VRAM + ручной вкл/выкл. В цепочке ставится после
+                  Low VRAM Attention; с Veda Sparse Attention несовместим (узел выключается). */}
+              <SettingsRow
+                label="Bounded Attention"
+                description={tt("Attention блоками по токенам — срезает пик VRAM на 1080p и длинных клипах, но замедляет рендер (QKV-проекции считаются дважды, attention-ядро запускается чаще). Авто = включён на картах до 12 ГБ (если последовательность длиннее ~20k токенов), а также на канве от 1.5 Мп на картах до 16 ГБ. На картах от 16 ГБ авто узел не ставит — включай вручную, если нужно. С Veda Sparse Attention несовместим.")}
+                right={
+                  <SettingsChoice
+                    value={video.boundedAttention}
+                    onChange={(next) => patchVideo({ boundedAttention: next })}
+                    cols={3}
+                    options={[
+                      { value: 'auto', label: tt("Авто"), title: tt("Включён на картах до 12 ГБ от ~20k токенов, и на канве от 1.5 Мп на картах до 16 ГБ") },
+                      { value: 'on', label: tt("Вкл") },
+                      { value: 'off', label: tt("Выкл") },
+                    ]}
+                  />
+                }
+              />
+
+              {/* (правка 1095) размер куска токенов bounded attention: на больших
+                  картах крупнее кусок = меньше прогонов qkv_proj = быстрее. */}
+              {video.boundedAttention !== 'off' && (
+                <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
+                    <SettingSlider
+                      label={tt("Bounded: кусок токенов")}
+                      labelTitle={tt("Сколько токенов обрабатывается за один проход Q/K/V и out_proj. 0 = авторазмер по VRAM карты: ~2–3k токена на 8–12 ГБ, 4–5k на 12–16 ГБ, до 12k на 24 ГБ. Крупнее кусок — меньше прогонов проекций и быстрее; меньше кусок — ниже пик. В тайловых режимах авто не применяется, там берётся 4096.")}
+                      value={typeof video.boundedTokenChunk === 'number' ? video.boundedTokenChunk : 0}
+                      onChange={(v) => patchVideo({ boundedTokenChunk: Math.round(v) })}
+                      min={0}
+                      max={12288}
+                      step={1024}
+                    />
+                    <p className="text-[10px] leading-tight text-muted-foreground">
+                      {tt("0 = авторазмер. Математика attention не меняется при любом размере куска.")}
+                    </p>
                   </div>
                 </div>
               )}

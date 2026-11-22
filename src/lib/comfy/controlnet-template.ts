@@ -107,6 +107,13 @@ export interface ControlNetGenParams {
   chunkFFChunks?: number
   /** ChunkFF: sequence length threshold. */
   chunkFFThreshold?: number
+  /** (правка 1089) Bounded attention — прокидывается в стандартный билдер. */
+  boundedAttention?: boolean
+  /** (правка 1095) head_chunks LowVRAM Attention, token_chunk bounded attention
+   *  (0 = авторазмер) и VRAM карты — прокидываются в стандартный билдер. */
+  lowVramHeadChunks?: number
+  boundedTokenChunk?: number
+  vramTotalGb?: number | null
   /** (правка 806) 3D-апскейлер латентов между проходами (default true). */
   latentUpscaler3D?: boolean
   /** Sigma variant (pass 2). */
@@ -513,6 +520,10 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     chunkFeedForward: p.chunkFeedForward,
     chunkFFChunks: p.chunkFFChunks,
     chunkFFThreshold: p.chunkFFThreshold,
+    boundedAttention: p.boundedAttention, // (правка 1089)
+    lowVramHeadChunks: p.lowVramHeadChunks, // (правка 1095)
+    boundedTokenChunk: p.boundedTokenChunk,
+    vramTotalGb: p.vramTotalGb,
     latentUpscaler3D: p.latentUpscaler3D, // (правка 806)
     sigmaVariant: p.sigmaVariant,
     pass1Sampler: p.pass1Sampler,

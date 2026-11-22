@@ -387,6 +387,10 @@ export function ControlNetView() {
           chunkFeedForward: v.chunkFeedForward,
           chunkFFChunks: v.chunkFFChunks,
           chunkFFThreshold: v.chunkFFThreshold,
+          boundedAttentionMode: v.boundedAttention, // (правка 1089) 'auto' | 'on' | 'off'
+          // (правка 1095) размеры кусков attention-цепочки из общих настроек
+          lowVramHeadChunks: v.lowVramHeadChunks,
+          boundedTokenChunk: v.boundedTokenChunk,
           latentUpscaler3D: v.latentUpscaler3D, // (правка 806)
         }
       })(),

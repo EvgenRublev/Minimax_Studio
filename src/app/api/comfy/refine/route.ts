@@ -8,7 +8,8 @@ import { setActivePrompt } from '@/lib/comfy/progress-tracker'
 import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
-import { refineDimensions, buildChunkedRefineWorkflow, planChunkWindows, refineChunkStages } from '@/lib/comfy/refine-template'
+import { refineDimensions, buildChunkedRefineWorkflow, planChunkWindows, refineChunkStages, windowedH3Geometry } from '@/lib/comfy/refine-template' // (правка 1095: геометрия окон для авторешения bounded)
+import { h3TransientGB } from '@/lib/comfy/minimax-h3-template' // (правка 1095)
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
 import { readPromptChain, readPromptChainParts, readMetaImageRefs, readMetaLoop, resolveSourceLatent } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
@@ -17,7 +18,7 @@ import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
 // (правка 1058) Ручки тайлового режима Tessera: климпы/дефолты — и для
 // воркфлоу, и для сайдкара (по мете видно, с какими настройками считали).
 import { resolveTesseraTiles, type TesseraTileParams } from '@/lib/comfy/tessera-params'
-import { gpuVramTotalGb } from '@/lib/comfy/gpu-vram' // (правка 1076)
+import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1076, 1089)
 import { st } from '@/lib/i18n/server'
 
 /**
@@ -213,6 +214,12 @@ export async function POST(req: NextRequest) {
       /** (правка 968) тюнинг Chunk FF из настроек. */
       chunkFFChunks?: number
       chunkFFThreshold?: number
+      /** (правка 1089) «Bounded Attention» из настроек: 'auto' | 'on' | 'off'. */
+      boundedAttentionMode?: unknown
+      /** (правка 1095) head_chunks LowVRAM Attention и token_chunk bounded
+       *  attention (0 = авторазмер по VRAM) — из настроек. */
+      lowVramHeadChunks?: number
+      boundedTokenChunk?: number
       /** (правка 494) «Свободное разрешение»: цель в мегапикселях (до 4K =
        *  8.3 Мп). Перебивает target — конвертация в короткую сторону здесь,
        *  по реальным размерам источника (канва латента в lossless-ветке). */
@@ -245,8 +252,25 @@ export async function POST(req: NextRequest) {
     const lowVram = vramGb !== null && vramGb < 16
     // (правка 1088) Bounded attention для Refine без тайлов: на 8 ГБ «Целый»
     // 1080p упирался в QKV-буфер pass 2, а тайлы Tessera оставляют швы.
-    const boundedAttention = vramGb !== null && vramGb > 0 && vramGb < 12
-      && body.vedaAttention !== true
+    // (правка 1089) — общая функция с учётом настройки auto/on/off.
+    // (правка 1092) Порог считается по реальной канве рефайна (её знают только
+    // после probe/resolve источника), поэтому это функция, а не константа.
+    // (правка 1095) туда же передаётся длина последовательности: короткие окна
+    // «Частями» и маленькие канвы поблочный attention только тормозят.
+    const boundedFor = (d: { genW: number; genH: number }, frames: number) => resolveBoundedAttention(
+      normalizeBoundedAttentionMode(body.boundedAttentionMode),
+      vramGb,
+      {
+        vedaAttention: body.vedaAttention === true,
+        genMP: (d.genW * d.genH) / 1e6,
+        seqTokens: h3TransientGB(d.genW, d.genH, frames).seq,
+      },
+    )
+    // (правка 1095) длина последовательности для авторешения: в «Частях» это окно,
+    // в «Целом» — весь клип.
+    const windowFrames = windowedH3Geometry(Number(body.chunkSeconds) || 5).context_length
+    const framesFor = (windowed: boolean, totalFrames: number) =>
+      windowed ? windowFrames : Math.max(5, totalFrames)
 
     // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
     // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
@@ -444,7 +468,7 @@ export async function POST(req: NextRequest) {
               sourceVideo: inName,
               diffusionModel: cfg.diffusionModel || undefined,
               lowVram, // (правка 1076)
-              boundedAttention, // (правка 1088)
+              boundedAttention: boundedFor(dims, windowFrames), // (правки 1088, 1092, 1095)
               sourceWidth: srcW,
               sourceHeight: srcH,
               sourceFrames: probe.frames,
@@ -459,6 +483,11 @@ export async function POST(req: NextRequest) {
               chunkFeedForward: body.chunkFeedForward !== false,
               chunkFFChunks: body.chunkFFChunks,
               chunkFFThreshold: body.chunkFFThreshold,
+              // (правка 1095) head_chunks/token_chunk из настроек + VRAM карты
+              // для авторазмера token_chunk в шаблоне.
+              lowVramHeadChunks: body.lowVramHeadChunks,
+              boundedTokenChunk: body.boundedTokenChunk,
+              vramTotalGb: vramGb,
               outputSubfolder: '',
               ...veda, // (правка 408)
               ...sparse, // (правка 466)
@@ -522,7 +551,7 @@ export async function POST(req: NextRequest) {
           sourceVideo: inName,
           diffusionModel: cfg.diffusionModel || undefined,
           lowVram, // (правка 1076)
-          boundedAttention, // (правка 1088)
+          boundedAttention: boundedFor(dims, framesFor(body.windowed === true, probe.frames)), // (правки 1088, 1092, 1095)
           windowed: body.windowed === true,
           // (правка 1056) «Частями»: длина части → геометрия окон H3
           chunkSeconds: Number(body.chunkSeconds) || 5,
@@ -542,6 +571,11 @@ export async function POST(req: NextRequest) {
           chunkFeedForward: body.chunkFeedForward !== false,
               chunkFFChunks: body.chunkFFChunks,
               chunkFFThreshold: body.chunkFFThreshold,
+              // (правка 1095) head_chunks/token_chunk из настроек + VRAM карты
+              // для авторазмера token_chunk в шаблоне.
+              lowVramHeadChunks: body.lowVramHeadChunks,
+              boundedTokenChunk: body.boundedTokenChunk,
+              vramTotalGb: vramGb,
           ...veda, // (правка 408)
           ...sparse, // (правка 466)
           ...loraParams, // (правка 483)
@@ -786,7 +820,7 @@ export async function POST(req: NextRequest) {
             sourceVideo: destName,
             diffusionModel: cfg.diffusionModel || undefined,
             lowVram, // (правка 1076)
-            boundedAttention, // (правка 1088)
+            boundedAttention: boundedFor(dims, windowFrames), // (правки 1088, 1092, 1095)
             videoFormat: getVideoFormatSettings(), // (правка 386)
             // (правка 382) lossless-ветка «Частями»: окна режутся токенами
             // из сохранённого латента; размеры = канва латента
@@ -809,6 +843,11 @@ export async function POST(req: NextRequest) {
             chunkFeedForward: body.chunkFeedForward !== false,
               chunkFFChunks: body.chunkFFChunks,
               chunkFFThreshold: body.chunkFFThreshold,
+              // (правка 1095) head_chunks/token_chunk из настроек + VRAM карты
+              // для авторазмера token_chunk в шаблоне.
+              lowVramHeadChunks: body.lowVramHeadChunks,
+              boundedTokenChunk: body.boundedTokenChunk,
+              vramTotalGb: vramGb,
             ...veda, // (правка 408)
             ...sparse, // (правка 466)
             ...loraParams, // (правка 483)
@@ -884,7 +923,7 @@ export async function POST(req: NextRequest) {
         sourceVideo: destName,
         diffusionModel: cfg.diffusionModel || undefined,
         lowVram, // (правка 1076)
-        boundedAttention, // (правка 1088)
+        boundedAttention: boundedFor(dims, framesFor(body.windowed === true, probe.frames)), // (правки 1088, 1092, 1095)
         windowed: body.windowed === true,
         // (правка 1056) «Частями»: длина части → геометрия окон H3
         chunkSeconds: Number(body.chunkSeconds) || 5,
@@ -912,6 +951,11 @@ export async function POST(req: NextRequest) {
         chunkFeedForward: body.chunkFeedForward !== false,
               chunkFFChunks: body.chunkFFChunks,
               chunkFFThreshold: body.chunkFFThreshold,
+              // (правка 1095) head_chunks/token_chunk из настроек + VRAM карты
+              // для авторазмера token_chunk в шаблоне.
+              lowVramHeadChunks: body.lowVramHeadChunks,
+              boundedTokenChunk: body.boundedTokenChunk,
+              vramTotalGb: vramGb,
         ...veda, // (правка 408)
         ...sparse, // (правка 466)
         ...loraParams, // (правка 483)

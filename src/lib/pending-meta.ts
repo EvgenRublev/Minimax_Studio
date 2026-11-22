@@ -440,6 +440,13 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     }),
     low_vram_attention: body.lowVramAttention !== false,
     chunk_feed_forward: body.chunkFeedForward !== false,
+    // (правка 1089) фактическое решение по bounded attention (роут считает его
+    // из настройки auto/on/off + VRAM) — для сайдкара/«Повторить».
+    bounded_attention: body.boundedAttention === true,
+    // (правка 1095) размеры кусков attention-цепочки из настроек: head_chunks и
+    // token_chunk (0 = авторазмер по VRAM, который знает только сервер).
+    low_vram_head_chunks: body.lowVramHeadChunks ?? 4,
+    bounded_token_chunk: body.boundedTokenChunk ?? 0,
     latent_upscaler_3d: body.latentUpscaler3D !== false, // (правка 806)
     ...(body.chunkFeedForward !== false
       ? {

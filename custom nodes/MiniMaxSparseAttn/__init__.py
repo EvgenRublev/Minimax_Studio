@@ -12,6 +12,15 @@
 VSA- и SLA-режимы НЕ поддерживаются (требуют to_gate_compress / minimax_h3_layout,
 которых нет в H3-модели 0.33.0). Sol-Attn — training-free, работает на любой модели.
 
+(правка 1095) На ядре 0.44+ нода делегирует родному comfy_extras.nodes_sparse_attention
+(BlockSparseAttention, есть с 0.35): он ставит H3-патч блоков и sink_conditioning
+('exact_kv_and_rows' — текстовые/аудио/reference-строки пакованной последовательности
+всегда получают точное внимание, а строки генерируемого звука идут плотными), и
+корректно композится с MiniMaxLowVRAMAttention (KJNodes отдаёт свой forward через
+transformer_options['sol_take_forward']). Порт такого не умеет: он режет attention
+по всей пакованной последовательности, т.е. без защиты звука и референсов.
+Локальный путь остаётся только для ядра 0.33.x, где родной ноды нет.
+
 Дефолт: tau=1.3, min_tokens=12288 (короткие последовательности остаются dense).
 При ошибке (нет ядра, неподходящий dtype и т.п.) — автоматический фолбэк на dense.
 
@@ -25,6 +34,14 @@ import torch
 
 import comfy.patcher_extension
 import comfy_kitchen as ck
+
+# (правка 1095) На ядрах с родным block-sparse узлом (0.35+; у нас это 0.44)
+# используем его, а не порт ниже: только он умеет sink_conditioning для
+# пакованной H3-последовательности и совместимость с MiniMaxLowVRAMAttention.
+try:
+    from comfy_extras.nodes_sparse_attention import apply_block_sparse_attention as _core_sparse
+except ImportError:
+    _core_sparse = None
 
 HEAD_DIM = 128
 BLOCK_SIZE = 64
@@ -176,8 +193,20 @@ def install_override(patch: SparseAttnPatch, transformer_options):
 
 
 def apply_sparse_attention(model, *, tau, start_percent, end_percent,
-                           min_tokens, dense_blocks, extra_tokens, verbose):
+                           min_tokens, dense_blocks, extra_tokens, verbose,
+                           sink_conditioning="exact_kv_and_rows"):
     """Основная функция: создаёт patched-копию модели с sparse attention override."""
+    if _core_sparse is not None:
+        # Родной узел ядра: sol-attn (topk_ratio=0 → адаптивный tau) + защита
+        # кондиционирующих строк (sink_conditioning) + sol_take_forward-связка
+        # с MiniMaxLowVRAMAttention.
+        return _core_sparse(
+            model, tau=tau, topk_ratio=0.0, vsa=False,
+            start_percent=start_percent, end_percent=end_percent,
+            min_tokens=min_tokens, dense_blocks=dense_blocks,
+            sink_conditioning=sink_conditioning, extra_tokens=extra_tokens,
+            verbose=verbose,
+        )
     model_sampling = model.get_model_object("model_sampling")
     patch = SparseAttnPatch(
         tau=tau,

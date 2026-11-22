@@ -483,6 +483,10 @@ export async function POST(req: NextRequest) {
     // (правка 982) Позиции стыков в итоговом таймлайне. Считаем по числу
     // кадров входов: source целиком, у клипа 1 вычитаем 17 кадров головы,
     // остальные клипы уже приходят без головы.
+    // (правка 1090) Если на первом стыке стоит xfade (seamFadeSeconds), он
+    // забирает по f кадров с обеих сторон, поэтому суммарная длина следующего
+    // стыка уменьшается на f. Сам номер стыка не меняется: xfade начинается
+    // ровно за f кадров до границы и кончается на ней.
     const seamFrames: number[] = []
     if (body.seamPolish === true && infos.length >= 2) {
       // (правка 982) Точные номера кадров: format.duration может включать
@@ -500,12 +504,16 @@ export async function POST(req: NextRequest) {
         seamFrames.push(acc)
         const clipFrames = frameCounts[i] || Math.round(infos[i].duration * targetFps)
         const trimFrames = i === 1 ? Math.round((headTrims[1] || 0) * targetFps) : 0
-        acc += Math.max(1, clipFrames - trimFrames)
+        const fadeFrames = i === 1 && seamFadeSec > 0.001 ? Math.round(seamFadeSec * targetFps) : 0
+        acc += Math.max(1, clipFrames - trimFrames) - fadeFrames
       }
     }
 
     // (правка 982) Пост-обработка швов: цветовое совмещение + оптический
     // поток. Если Python/OpenCV недоступны — молча оставляем обычную склейку.
+    // (правка 1090) На стыке с кроссфейдом оптический поток нужен только на
+    // двух приграничных кадрах (radius 1): радиус 3 подмешивал бы кадры
+    // уже смешанного xfade-окна и давал бы «размаз» вокруг шва.
     if (seamFrames.length > 0) {
       const script = path.join(process.cwd(), 'scripts', 'seam-polish.py')
       const py = cfg.pythonExe
@@ -515,7 +523,8 @@ export async function POST(req: NextRequest) {
           await execFileAsync(
             py,
             [script, '--input', outPath, '--output', polished,
-              '--seams', seamFrames.join(','), '--fade-span', '24', '--radius', '3',
+              '--seams', seamFrames.join(','), '--fade-span', '24',
+              '--radius', seamFadeSec > 0.001 ? '1' : '3',
               // (правка 1018) длиннее tone-fade: на 8 кадрах остаток ещё виден
               '--tone-fade-frames', '16', '--tone-fade-max', '3',
               '--ffmpeg', ffmpeg],

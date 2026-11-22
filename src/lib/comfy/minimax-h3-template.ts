@@ -259,6 +259,17 @@ export interface MiniMaxH3Params {
   chunkFFChunks?: number
   /** ChunkFF: sequence length threshold above which chunking kicks in (default 4096). */
   chunkFFThreshold?: number
+  /** (правка 1095) MiniMaxLowVRAMAttention: число групп голов (head_chunks,
+   *  дефолт 4, максимум 56). Больше групп — меньше транзиенты ядра attention при
+   *  той же математике; платим числом запусков ядра. */
+  lowVramHeadChunks?: number
+  /** (правка 1095) MiniMaxStudioBoundedAttention: размер куска токенов
+   *  (token_chunk). 0/undefined — авторазмер по VRAM (boundedTokenChunk): на
+   *  больших картах крупнее кусок = меньше прогонов qkv_proj = быстрее. */
+  boundedTokenChunk?: number
+  /** (правка 1095) Полная VRAM карты (ГБ) — для авторазмера token_chunk; null —
+   *  неизвестна (тогда авторазмер берёт консервативный бюджет 12 ГБ). */
+  vramTotalGb?: number | null
   /** (правка 806) MinimaxH3LatentUpscaler3D между pass 1 и pass 2. Default true;
    *  false — простое растягивание латента (core LatentUpscale) вместо обученного
    *  3D-апскейлера: быстрее и без загрузки модели в VRAM, но качество хуже. */
@@ -467,13 +478,15 @@ export function flfNominalDimensions(
  * а общий размер в мегапикселях; пропорция — ТОЧНАЯ из первого кадра (как у
  * flfNominalDimensions). Стороны округляются до чётных (yuv420p), нижняя
  * граница 0.2 MP — как у ползунка «Свободное разрешение».
+ * (правка 1092) Верхняя граница — FREE_MAX_MP: во flf pass 1 = pass 2
+ * (singleCanvas), поэтому большая канва стоит сразу полного бюджета.
  */
 export function flfNominalFromMegapixels(
   frameW: number,
   frameH: number,
   megapixels: number,
 ): { w: number; h: number } {
-  const targetPx = Math.max(0.2, megapixels) * 1024 * 1024
+  const targetPx = Math.min(FREE_MAX_MP, Math.max(0.2, megapixels)) * 1024 * 1024
   const ratio = frameW / frameH
   if (ratio >= 1) {
     const h = Math.sqrt(targetPx / ratio)
@@ -575,7 +588,9 @@ export function finalDimsFromMegapixels(
 ): FinalDimensions {
   const [rw, rh] = parseAspect(aspect)
   const ratio = rw / rh
-  const targetPixels = Math.max(0.2, megapixels) * 1024 * 1024
+  // (правка 1092) Цель зажимается сверху FREE_MAX_MP: и UI, и сервер идут
+  // через эту функцию, поэтому подпись в карточке всегда равна реальной канве.
+  const targetPixels = Math.min(FREE_MAX_MP, Math.max(0.2, megapixels)) * 1024 * 1024
   const hT = Math.sqrt(targetPixels / ratio)
   const wT = hT * ratio
   const genW = Math.max(multiple, pyRound(wT / multiple) * multiple)
@@ -691,13 +706,80 @@ export function clampLowResMP(lowResMP: number, finalRes: number): number {
 export const BYPASS_MAX_UPSCALE = 1.5
 
 /**
+ * (правка 1095) Оценка транзиентов attention-цепочки для подбора head_chunks,
+ * token_chunk и числа FFN-чанков. Размеры взяты из конфига H3
+ * (comfy/ldm/minimax/model.py:478): hidden 5376, heads 56 × head_dim 128 →
+ * inner 7168, ffn 14336, патч (1,2,2) при латенте /16 → сетка токенов = /32.
+ * Отсюда QKV-буфер = S·3·inner·2 байт (3.2 ГБ на 75k токенов — ровно пик правки
+ * 1088), а транзип SwiGLU = S·2·ffn·2 байт (4.4 ГБ на 1080p/5 с — пик, из-за
+ * которого bounded форсит ChunkFF). S считается по канве: сетка /32 на латентное
+ * время (сетка 17k+5) плюс строки кондёра (текст/аудио/референсы) — верхняя
+ * граница: решение о ВКЛЮЧЕНИИ bounded attention здесь не принимается, только о
+ * размере кусков (экономия по времени/пикам без изменения математики).
+ */
+export function h3TransientGB(
+  canvasW: number,
+  canvasH: number,
+  frames: number,
+): { seq: number; qkvGb: number; ffnGb: number } {
+  const inner = 56 * 128
+  const ffn = 14336
+  const grid = Math.max(1, Math.round(canvasW / 32)) * Math.max(1, Math.round(canvasH / 32))
+  const latentT = Math.max(2, Math.round(((frames - 5) / 17) * 5 + 2))
+  const seq = latentT * grid + 3072
+  return {
+    seq,
+    qkvGb: (seq * 3 * inner * 2) / 1024 ** 3,
+    ffnGb: (seq * 2 * ffn * 2) / 1024 ** 3,
+  }
+}
+
+/** (правка 1095) token_chunk для bounded attention. Узел считает qkv_proj два
+ *  раза (K/V и Q) независимо от размера куска, но на каждом куске заново
+ *  читает полные K/V: чем крупнее кусок, тем меньше трафик и прогонов SDPA,
+ *  и тем больше буфер Q (chunk·inner·2 байт, inner = 7168). Поэтому авторазмер — это
+ *  «крупнейший кусок, который не раздувает пик»: 4096 на картах <12 ГБ
+ *  (как раньше), 8192 на 12–16 ГБ, 12288 от 16 ГБ; сверху кусок ограничен
+ *  длиной самой последовательности (иначе узел отдаёт управление LowVRAM).
+ *  Математика attention от размера куска не зависит. */
+export function boundedTokenChunk(
+  vramGb: number | null,
+  seq: number,
+  tokenChunk: number | undefined,
+): number {
+  const manual = Math.round(Number(tokenChunk) || 0)
+  if (manual >= 512) return Math.min(32768, manual)
+  const cap = !vramGb || vramGb < 12 ? 4096 : vramGb < 16 ? 8192 : 12288
+  return Math.max(2048, Math.min(cap, Math.round(Math.max(2048, seq) / 512) * 512))
+}
+
+/** (правка 1095) Чанки FFN: держим ≤1.4 ГБ на чанк — это бесплатно по качеству
+ *  (per-row int8-квант и математика не меняются), а на 1080p снимает ~3 ГБ пика. */
+export function autoChunkFFChunks(ffnGb: number, userChunks: number | undefined): number {
+  const need = Math.ceil(ffnGb / 1.4)
+  return Math.max(1, Math.min(16, Math.max(Math.round(userChunks ?? 2), need)))
+}
+
+/**
+ * (правка 1092) Верхняя граница «Свободного разрешения» во вкладке
+ * «Генерация». Ниже FREE_WARN_MP — штатный режим, выше — только через
+ * предупреждение. 4 Мп (≈2720×1536 для 16:9) — это уже ~151k токенов за
+ * 5 с pass 2; ручное поле раньше пускало до 16 Мп (≈607k токенов, ×8
+ * работы против пресета 1080p) без какой-либо защиты.
+ */
+export const FREE_MAX_MP = 4
+/** (правка 1092) Выше этой цели pass 1 обязательно поднимаем до ¼ канвы. */
+export const FREE_WARN_MP = 2
+
+/**
  * (правка 810) Канва pass 1 (низкое разрешение) — ЕДИНЫЙ источник истины
  * для workflow и метаданных (pending-meta, use-video-gen).
  *
  * (правка 525 REVISED) В пресетном режиме подбираем lowResMP так, чтобы
  * пропорция pass 1 совпадала с final (апскейл равномерный), при этом pass 1
  * не больше final ни по одной оси. В singleCanvas (flf/draft) pass 1 = final
- * (апскейлер early-return). В free-MP — selectResolution(aspect, lowResMP).
+ * (апскейлер early-return). В free-MP (правка 1092) — min(ползунок, final),
+ * но не меньше четверти канвы по площади.
  */
 export function computePass1Canvas(
   aspect: string,
@@ -743,8 +825,19 @@ export function computePass1Canvas(
     // (правка 439 аналог) Ничего не нашли — pass 1 = final (early-return).
     lowRes = bestDistortion === Infinity ? { w: final.genW, h: final.genH } : bestResult
   } else {
-    // 'full' без targetDimensions (free-MP)
-    lowRes = selectResolution(aspect, lowResMP)
+    // 'full' без targetDimensions (свободное разрешение).
+    // (правка 1092) Раньше канва pass 1 = selectResolution(aspect, lowResMP),
+    // т.е. ползунок 0.2 Мп, а цель могла быть 2-16 Мп: MinimaxH3LatentUpscaler3D
+    // растягивал латент в ×3.2…×9, и pass 2 дорисовывал кадр из «мыла».
+    // Ползунок по-прежнему потолок, но pass 1 не может стать меньше четверти
+    // канвы по площади — линейный стретч зажат ×2, как в пресетной ветке.
+    const finalMP = (final.genW * final.genH) / (1024 * 1024)
+    const wantMP = Math.max(finalMP / 4, Math.min(lowResMP, finalMP))
+    lowRes = selectResolution(aspect, wantMP)
+    let guard = 0
+    while ((lowRes.w > final.genW || lowRes.h > final.genH) && guard++ < 20) {
+      lowRes = selectResolution(aspect, (lowRes.w * lowRes.h) / (1024 * 1024) * 0.8)
+    }
   }
 
   return lowRes
@@ -1059,8 +1152,9 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   //
   // В singleCanvas (flf/draft) lowRes = ceil32(targetDimensions) или
   // selectResolution(aspect, finalRes) — апскейлер early-return.
-  // В 'full' без targetDimensions (free-MP) — как раньше: selectResolution
-  // (aspect, lowResMP); aspect и final имеют ОДНУ ПРОПОРЦИЮ → апскейл ~1×.
+   // В free-MP (без targetDimensions) пропорция та же, что у final, но
+   // масштаб раньше равнялся ползунку: 0.2 MP при цели 8 MP = стретч x6.3.
+   // С правки 1092 pass 1 не меньше четверти канвы по площади (линейно x2).
   // (правка 810) Канва pass 1 — общий расчёт (workflow/метаданные), включая
   // ограничение масштаба при обходе 3D-апскейлера.
   const lowRes = computePass1Canvas(
@@ -1166,12 +1260,21 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // на короткой отдаёт управление LowVRAM. В этом режиме FFN обязан быть
   // порезан, иначе его пик (4,3 ГБ на 1080p) съедает выигрыш.
   const boundedAttn = p.boundedAttention === true
+  // (правка 1095) Размеры кусков подбираем по канве: head_chunks, token_chunk и
+  // число FFN-чанков — бесплатные по качеству рычаги (математика не меняется),
+  // а FFN-чанки поднимаем автоматически, если транзиент FFN больше ~1.4 ГБ.
+  // Порядок chain: LowVRAM (головы) → Bounded (токены) → ChunkFF.
+  const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
+  const transients = h3TransientGB(final.genW, final.genH, framesForDuration(p.duration ?? 5))
+  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  const tokenChunk = boundedTokenChunk(chainVramGb, transients.seq, p.boundedTokenChunk)
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
     modelNodes['46:43'] = {
-      inputs: { head_chunks: 4, model: modelSrc },
+      inputs: { head_chunks: headChunks, model: modelSrc },
       class_type: 'MiniMaxLowVRAMAttention',
       _meta: { title: 'Low VRAM Attention' },
     }
@@ -1179,7 +1282,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   }
   if (boundedAttn) {
     modelNodes['46:45'] = {
-      inputs: { token_chunk: 4096, model: modelSrc },
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
       class_type: 'MiniMaxStudioBoundedAttention',
       _meta: { title: 'Bounded Attention (low VRAM)' },
     }
@@ -1188,9 +1291,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-        chunks: boundedAttn
-          ? Math.max(8, Math.round(p.chunkFFChunks ?? 2))
-          : Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+        chunks: boundedAttn ? Math.max(8, ffChunks) : ffChunks,
         seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
         model: modelSrc,
       },
@@ -1933,29 +2034,47 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   const sigmaVariant = pickSigmaVariant(p) // (правка 815: bypass-лестница при выключенном 3D)
   const pass2Sampler = p.pass2Sampler || 'euler'
 
-  // Model chain: UNET → [LowVRAM] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift → [Sparse] → Attention
+  // Model chain: UNET → [LowVRAM] → [Bounded] → [ChunkFF] → [custom LoRAs, incl. turbo] → SigmaShift → [Sparse] → Attention
   const lowVram = p.lowVramAttention !== false
-  const chunkFF = p.chunkFeedForward !== false
+  // (правка 1089) Bounded attention и в продлении: pass 1 гоняет окна той же
+  // геометрии, что «Генерация», и на 8 ГБ упирался в тот же QKV-пик.
+  const boundedAttn = p.boundedAttention === true
+  // (правка 1095) Те же авторазмеры кусков, что и в «Генерации» (бесплатно по
+  // качеству): pass 2 продления идёт по финальной канве, pass 1 — по окнам.
+  const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
+  const transients = h3TransientGB(final.genW, final.genH, framesForDuration(p.duration ?? 5))
+  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  const tokenChunk = boundedTokenChunk(chainVramGb, transients.seq, p.boundedTokenChunk)
+  const chunkFF = p.chunkFeedForward !== false || boundedAttn
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
 
   if (lowVram) {
     modelNodes['46:43'] = {
-      inputs: { head_chunks: 4, model: modelSrc },
+      inputs: { head_chunks: headChunks, model: modelSrc },
       class_type: 'MiniMaxLowVRAMAttention',
       _meta: { title: 'Low VRAM Attention' },
     }
     modelSrc = ['46:43', 0]
   }
+  if (boundedAttn) {
+    modelNodes['46:45'] = {
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['46:45', 0]
+  }
   if (chunkFF) {
     modelNodes['46:40'] = {
       inputs: {
-        chunks: Math.max(1, Math.round(p.chunkFFChunks ?? 2)),
+        chunks: boundedAttn ? Math.max(8, ffChunks) : ffChunks,
         seq_threshold: Math.max(0, Math.round(p.chunkFFThreshold ?? 4096)),
         model: modelSrc,
       },
       class_type: 'MiniMaxChunkFeedForward',
-      _meta: { title: 'Chunk FeedForward' },
+      _meta: { title: boundedAttn ? 'Chunk FeedForward (bounded)' : 'Chunk FeedForward' },
     }
     modelSrc = ['46:40', 0]
   }
@@ -2198,13 +2317,15 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     },
     // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
     // Превью не должно валить длинную генерацию; сама генерация не ограничена.
+    // (правка 1089) В bounded-режиме tiny-VAE декодирует каждый кадр в полном
+    // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
     '46:19c': {
       inputs: {
-        expression: `min(a, ${PREVIEW_MAX_FRAMES})`,
+        expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`,
         'values.a': ['46:19', 1],
       },
       class_type: 'ComfyMathExpression',
-      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
     },
 
     // ═══════════════════════════════════════════════

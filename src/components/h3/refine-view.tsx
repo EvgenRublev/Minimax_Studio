@@ -418,6 +418,11 @@ export function RefineView() {
       chunkFeedForward: useGenStore.getState().video.chunkFeedForward,
       chunkFFChunks: useGenStore.getState().video.chunkFFChunks,
       chunkFFThreshold: useGenStore.getState().video.chunkFFThreshold,
+      // (правка 1089) bounded attention — тот же выбор, что на «Генерации»
+      boundedAttentionMode: useGenStore.getState().video.boundedAttention,
+      // (правка 1095) head_chunks / token_chunk — общие для всех вкладок
+      lowVramHeadChunks: useGenStore.getState().video.lowVramHeadChunks,
+      boundedTokenChunk: useGenStore.getState().video.boundedTokenChunk,
       // (правка 407) Veda-настройки из общих настроек программы (gen-store)
       ...(useGenStore.getState().video.vedaAttention === true && {
         vedaAttention: true,

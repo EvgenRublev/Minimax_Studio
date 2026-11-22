@@ -8,6 +8,7 @@ import { getAppConfig } from '@/lib/app-config'
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import { buildTileUpscaleWorkflow, computeTileGeometry, DEFAULT_TILE_UPSCALE_PROMPT } from '@/lib/comfy/tile-upscale-template'
+import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1089)
 import { recordPendingMetaRaw } from '@/lib/pending-meta'
 import { readPromptChain, readMetaImageRefs, resolveSourceLatent } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
@@ -57,6 +58,10 @@ export async function POST(req: NextRequest) {
       denoise?: number
       steps?: number
       syncTiles?: boolean
+      /** (правка 1089) «Bounded Attention» из настроек: 'auto' | 'on' | 'off'. */
+      boundedAttentionMode?: unknown
+      /** (правка 1095) token_chunk bounded attention (0 = 4096). */
+      boundedTokenChunk?: number
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
@@ -69,6 +74,13 @@ export async function POST(req: NextRequest) {
     }
 
     const cfg = getAppConfig()
+
+    // (правка 1089) Bounded attention — общее авторешение по VRAM + настройка
+    // auto/on/off. Veda/Sparse в этом режиме не задействованы.
+    const boundedAttention = resolveBoundedAttention(
+      normalizeBoundedAttentionMode(body.boundedAttentionMode),
+      await gpuVramTotalGb(),
+    )
 
     // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
     // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
@@ -170,6 +182,9 @@ export async function POST(req: NextRequest) {
             steps: body.steps,
             syncTiles: body.syncTiles,
             ...(customLoras ? { customLoras } : {}), // (правка 483)
+            boundedAttention, // (правка 1089)
+          // (правка 1095) token_chunk из настроек (0 = 4096)
+          boundedTokenChunk: body.boundedTokenChunk,
           }),
           [['tu_upscale']],
           tuGeom,
@@ -317,6 +332,9 @@ export async function POST(req: NextRequest) {
           steps: body.steps,
           syncTiles: body.syncTiles,
           ...(customLoras ? { customLoras } : {}), // (правка 483)
+          boundedAttention, // (правка 1089)
+          // (правка 1095) token_chunk из настроек (0 = 4096)
+          boundedTokenChunk: body.boundedTokenChunk,
         }),
         [['tu_upscale']],
         tuGeom, // (правка 479)

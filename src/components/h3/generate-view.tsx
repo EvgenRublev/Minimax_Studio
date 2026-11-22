@@ -36,7 +36,7 @@ import { SettingSlider } from './setting-slider'
 import { useVideoGen, computeOutputDimensions } from '@/hooks/use-video-gen'
 // (правка 829) «Зациклено»: фактическое число кадров — та же формула, что у
 // узла 46:19 и в метаданных (сетка 17n+5).
-import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS, DEFAULT_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
+import { framesForDuration, flfNominalFromMegapixels, MIN_FIRST_PASS_STEPS, DEFAULT_FIRST_PASS_STEPS, FREE_MAX_MP, FREE_WARN_MP } from '@/lib/comfy/minimax-h3-template' // (правка 1092: границы свободного разрешения)
 
 import { useModelOptions } from '@/hooks/use-model-options'
 import { useGenProgress } from '@/lib/gen-progress-store'
@@ -879,6 +879,7 @@ export function GenerateView() {
       chunkFeedForward: v.chunkFeedForward,
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
+      boundedAttention: v.boundedAttention, // (правка 1089)
       // (правка 829) «Зациклено»: не в продлении — там шаблон собирает клипы.
       loop: v.mode !== 'extend' && v.loop === true,
       loopPadClips: v.loopPadClips,
@@ -1477,9 +1478,9 @@ export function GenerateView() {
                     <div className="space-y-1 px-1">
                       <SettingSlider
                         label={tt("Разрешение (MP)")}
-                        labelTitle="Точный размер видео в мегапикселях. Рядом показано итоговое разрешение в пикселях; в поле справа можно ввести вручную до 16 MP."
+                        labelTitle={tt("Точный размер видео в мегапикселях. Рядом показано итоговое разрешение в пикселях; в поле справа можно ввести вручную до 4 MP.")}
                         value={freeMP}
-                        onChange={(v) => patchVideo({ finalResolution: Math.round(v * 100) / 100 })}
+                        onChange={(v) => patchVideo({ finalResolution: Math.min(FREE_MAX_MP, Math.max(0.2, Math.round(v * 100) / 100)) })}
                         min={0.2}
                         max={3.0}
                         step={0.05}
@@ -1490,9 +1491,16 @@ export function GenerateView() {
                           return `${v.toFixed(2)} MP (${d.w}×${d.h})`
                         }}
                         inputMin={0.2}
-                        inputMax={16}
-                        inputHint="0.2–16 MP. Выше 3 MP — заметно больше VRAM и времени рендера"
+                        inputMax={FREE_MAX_MP}
+                        inputHint={`0.2–${FREE_MAX_MP} MP. Выше ${FREE_WARN_MP} MP — заметно больше VRAM и времени рендера`}
                       />
+                      {/* (правка 1092) Выше предупреждающего порога показываем,
+                          что шаблон поднимет и черновой проход, и bounded attention. */}
+                      {freeOn && freeMP > FREE_WARN_MP && (
+                        <p className="text-[10px] leading-tight text-amber-300/90">
+                          {tt("Цель выше {{mp}} MP: черновой проход поднимается до четверти канвы, attention ставится поблочным — рендер дольше, но без провалов по VRAM.", { mp: FREE_WARN_MP })}
+                        </p>
+                      )}
                     </div>
                   </motion.div>
                 )}

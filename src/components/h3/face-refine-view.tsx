@@ -48,6 +48,7 @@ import {
   type FaceRefineSource,
 } from '@/lib/face-refine-target-store'
 import { useFaceRefineJob } from '@/lib/face-refine-job-store'
+import { useGenStore } from '@/lib/gen-store' // (правка 1089) bounded attention — общие настройки
 import { uploadInputFile } from '@/lib/upload'
 import type { FaceSelectMode } from '@/lib/comfy/face-refine-template'
 import { useTranslation } from 'react-i18next' // (правка 955)
@@ -279,6 +280,10 @@ export function FaceRefineView() {
       denoiseLarge: params.denoiseLarge,
       // (правка 889) аудио-гайд мимики (дорожка исходника → AddGuide).
       audioGuide: params.audioGuide,
+      // (правка 1089) bounded attention — выбор из общих настроек («Оптимизация VRAM»)
+      boundedAttentionMode: useGenStore.getState().video.boundedAttention,
+      // (правка 1095) token_chunk из общих настроек (0 = 4096)
+      boundedTokenChunk: useGenStore.getState().video.boundedTokenChunk,
       // (правка 722) детектор человека — только если он реально есть в списке
       // комбо ComfyUI (иначе сервер молча оставит 'none').
       fallback: params.fallback && fallbackAvailable === true,

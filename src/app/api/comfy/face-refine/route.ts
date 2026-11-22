@@ -21,6 +21,7 @@ import { readMetaImageRefs, readPromptChain } from '@/lib/refine-meta'
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { resolveFaceDetectors } from '@/lib/comfy/face-detectors'
+import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1089)
 import { enabledCustomLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
 import { st } from '@/lib/i18n/server'
 
@@ -124,6 +125,10 @@ export async function POST(req: NextRequest) {
       fallback?: boolean
       /** (правка 723) Клик по лицу в превью: пиксели кадра + его номер. */
       facePoint?: { x?: number; y?: number; frame?: number }
+      /** (правка 1089) «Bounded Attention» из настроек: 'auto' | 'on' | 'off'. */
+      boundedAttentionMode?: unknown
+      /** (правка 1095) token_chunk bounded attention (0 = 4096). */
+      boundedTokenChunk?: number
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
@@ -255,6 +260,13 @@ export async function POST(req: NextRequest) {
     // метаданные — иначе повтор не воспроизвести.
     const seed = (body.seed ?? -1) < 0 ? Math.floor(Math.random() * 2 ** 31) : (body.seed ?? -1)
 
+    // (правка 1089) Bounded attention — общее авторешение по VRAM + настройка
+    // auto/on/off (Face Refine не использует Veda, поэтому исключение не нужно).
+    const boundedAttention = resolveBoundedAttention(
+      normalizeBoundedAttentionMode(body.boundedAttentionMode),
+      await gpuVramTotalGb(),
+    )
+
     // (правка 722) Детекторы берём из комбо живого ComfyUI: после регистрации
     // папки models/ultralytics имена приходят с подпапкой (bbox\face_yolov8m.pt),
     // и старое значение без подпапки валидация промпта отклонила бы.
@@ -271,6 +283,9 @@ export async function POST(req: NextRequest) {
     const workflow = buildFaceRefineWorkflow({
       sourceVideo: inName,
       diffusionModel: cfg.diffusionModel || undefined,
+      boundedAttention, // (правка 1089)
+      // (правка 1095) token_chunk из настроек (0 = 4096)
+      boundedTokenChunk: body.boundedTokenChunk,
       prompt,
       seed,
       canvas,

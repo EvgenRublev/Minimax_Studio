@@ -138,6 +138,16 @@ export interface FaceRefineParams {
    * равно из исходника (fr_out), гайд влияет только на видео.
    */
   audioGuide?: boolean
+  /**
+   * (правка 1089) Bounded attention: поблочный QKV/attention/out_proj по
+   * токенам — срезает пик VRAM на длинных последовательностях (мелкие лица
+   * на большой канве). Ставится после LoRA; при короткой последовательности
+   * нода сама отдаёт управление штатному attention.
+   */
+  boundedAttention?: boolean
+  /** (правка 1095) token_chunk bounded attention (0 = 4096; авторазмер по канве
+   *  не применяется — окно face-refine короткое). */
+  boundedTokenChunk?: number
   /** Diffusion model name. */
   diffusionModel?: string
   /** Турбо-LoRA (шаги должны совпадать с ней). */
@@ -237,6 +247,30 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       _meta: { title: `Turbo LoRA (${p.lora})` },
     }
     modelSrc = ['fr_lora', 0]
+  }
+
+  // (правка 1089) Bounded attention — как на «Генерации»/Refine: обёртка над
+  // штатным Attention.forward (низкоуровневый LowVRAM-патч здесь не нужен).
+  // В bounded-режиме FFN обязан быть порезан, иначе его пик съедает выигрыш;
+  // при seq_threshold ниже порога нода сама работает как сквозная.
+  const boundedAttn = p.boundedAttention === true
+  if (boundedAttn) {
+    // (правка 1095) В face-тракте последовательность короткая (окно 512–768 px),
+    // поэтому авторазмер по канве не применяется: кусок больше последовательности
+    // просто выключил бы узел. 0 в настройках = 4096 (как раньше).
+    const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0) || 4096))
+    modelNodes['fr_bounded'] = {
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['fr_bounded', 0]
+    modelNodes['fr_chunkff'] = {
+      inputs: { chunks: 8, seq_threshold: 4096, model: modelSrc },
+      class_type: 'MiniMaxChunkFeedForward',
+      _meta: { title: 'Chunk FeedForward (bounded)' },
+    }
+    modelSrc = ['fr_chunkff', 0]
   }
 
   const refImages = (p.refImages ?? []).filter(Boolean).slice(0, 9)
@@ -573,9 +607,11 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       : {}),
 
     'fr_prev_clamp': {
-      inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': ['fr_track', 6] },
+      // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
+      // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
+      inputs: { expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`, 'values.a': ['fr_track', 6] },
       class_type: 'ComfyMathExpression',
-      _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
     },
     ...modelNodes,
 

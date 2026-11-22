@@ -192,6 +192,21 @@ export interface VideoGenState {
   chunkFFChunks: number
   /** ChunkFF: sequence length threshold above which chunking kicks in. */
   chunkFFThreshold: number
+  /** (правка 1089) MiniMaxStudioBoundedAttention — поблочный attention,
+   *  срезает пик VRAM на длинных последовательностях. 'auto' (default) —
+   *  авторешение по VRAM (вкл. на картах <12 ГБ, как в правке 1088);
+   *  'on'/'off' — принудительная установка пользователя для всех режимов
+   *  (Генерация, Продление, ControlNet, Refine, Tile Upscale, Face Refine).
+   *  С Veda Sparse Attention узел несовместим — всегда выключен. */
+  boundedAttention: 'auto' | 'on' | 'off'
+  /** (правка 1095) MiniMaxLowVRAMAttention: число групп голов (head_chunks).
+   *  4 (default) — как было; 8–16 режут транзиенты ядра attention вдвое-вчетверо
+   *  при НЕИЗМЕННОЙ математике (головы независимы), платим числом запусков ядра. */
+  lowVramHeadChunks: number
+  /** (правка 1095) MiniMaxStudioBoundedAttention: размер куска токенов.
+   *  0 (default) — авторазмер по VRAM карты (на 24 ГБ кусок крупнее → меньше
+   *  прогонов qkv_proj → быстрее); 2048–12288 — вручную. */
+  boundedTokenChunk: number
   /** (правка 806) MinimaxH3LatentUpscaler3D между pass 1 и pass 2.
    *  true (default) — обученный 3D-апскейлер латентов; false — простое
    *  растягивание латента (LatentUpscale): быстрее, легче по VRAM, хуже качество. */
@@ -264,6 +279,9 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   chunkFeedForward: true,
   chunkFFChunks: 2,
   chunkFFThreshold: 4096,
+  boundedAttention: 'auto', // (правка 1089)
+  lowVramHeadChunks: 4, // (правка 1095) 0/4 = штатное поведение KJNodes
+  boundedTokenChunk: 0, // (правка 1095) 0 = авторазмер по VRAM карты
   latentUpscaler3D: true, // (правка 806)
   outputFolder: '',
   // (правка 829) «Зациклено» — по умолчанию выкл.
@@ -552,6 +570,22 @@ export const useGenStore = create<GenStoreState>()(
           if (typeof result.video.chunkFFThreshold !== 'number' || isNaN(result.video.chunkFFThreshold)) {
             result.video.chunkFFThreshold = DEFAULT_VIDEO_STATE.chunkFFThreshold
           }
+          // (правка 1089) bounded attention — три-state настройка; всё прочее = auto.
+          if (result.video.boundedAttention !== 'on' && result.video.boundedAttention !== 'off') {
+            result.video.boundedAttention = DEFAULT_VIDEO_STATE.boundedAttention
+          }
+          // (правка 1095) размеры кусков: head_chunks 1..56 (потолок ноды),
+          // boundedTokenChunk 0 (авто) либо 512..32768.
+          if (typeof result.video.lowVramHeadChunks !== 'number' || isNaN(result.video.lowVramHeadChunks)) {
+            result.video.lowVramHeadChunks = DEFAULT_VIDEO_STATE.lowVramHeadChunks
+          }
+          result.video.lowVramHeadChunks = Math.max(1, Math.min(56, Math.round(result.video.lowVramHeadChunks)))
+          if (typeof result.video.boundedTokenChunk !== 'number' || isNaN(result.video.boundedTokenChunk)) {
+            result.video.boundedTokenChunk = DEFAULT_VIDEO_STATE.boundedTokenChunk
+          }
+          result.video.boundedTokenChunk = result.video.boundedTokenChunk >= 512
+            ? Math.min(32768, Math.round(result.video.boundedTokenChunk))
+            : 0
           if (typeof result.video.latentUpscaler3D !== 'boolean') {
             result.video.latentUpscaler3D = DEFAULT_VIDEO_STATE.latentUpscaler3D
           }

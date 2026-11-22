@@ -20,7 +20,8 @@ import { probeVideoFile } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress'
 import { getVideoFormatSettings } from '@/lib/video-format-server'
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
-import { videoSamplerStages, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { videoSamplerStages, MIN_FIRST_PASS_STEPS, h3TransientGB, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1089)
 import { st } from '@/lib/i18n/server'
 
 /**
@@ -101,6 +102,12 @@ export async function POST(req: NextRequest) {
       chunkFFChunks?: number
       chunkFFThreshold?: number
       latentUpscaler3D?: boolean // (правка 806)
+      /** (правка 1089) «Bounded Attention» из настроек: 'auto' | 'on' | 'off'. */
+      boundedAttentionMode?: unknown
+      /** (правка 1095) head_chunks LowVRAM Attention и token_chunk bounded
+       *  attention (0 = авторазмер по VRAM). */
+      lowVramHeadChunks?: number
+      boundedTokenChunk?: number
     }
 
     if (!body?.sourceFilename && !body?.inputSource) {
@@ -113,6 +120,22 @@ export async function POST(req: NextRequest) {
     }
 
     const cfg = getAppConfig()
+
+    // (правка 1089) Bounded attention — как на вкладке «Генерация»: ControlNet
+    // строит модель через стандартный билдер, и узел прокидывается в него.
+    // (правка 1092) Порог считается по реальной канве (её даёт controlNetSize
+    // после ffprobe источника), поэтому это функция, а не константа.
+    // (правка 1095) туда же передаётся длина последовательности источника.
+    const cnVramGb = await gpuVramTotalGb()
+    const boundedFor = (genW: number, genH: number, frames: number) => resolveBoundedAttention(
+      normalizeBoundedAttentionMode(body.boundedAttentionMode),
+      cnVramGb,
+      {
+        vedaAttention: body.vedaAttention === true,
+        genMP: (genW * genH) / 1e6,
+        seqTokens: h3TransientGB(genW, genH, frames).seq,
+      },
+    )
 
     // Пользовательские LoRA из настроек
     const customLoraEntries = enabledCustomLoras()
@@ -311,6 +334,11 @@ export async function POST(req: NextRequest) {
           chunkFeedForward: body.chunkFeedForward,
           chunkFFChunks: body.chunkFFChunks,
           chunkFFThreshold: body.chunkFFThreshold,
+          // (правка 1095) head_chunks/token_chunk из настроек + VRAM карты.
+          lowVramHeadChunks: body.lowVramHeadChunks,
+          boundedTokenChunk: body.boundedTokenChunk,
+          vramTotalGb: cnVramGb,
+          boundedAttention: boundedFor(size.genW, size.genH, probe.frames), // (правки 1089, 1092, 1095)
           latentUpscaler3D: body.latentUpscaler3D, // (правка 806)
         })
         // Стадии прогресса — как у стандартного ref-воркфлоу

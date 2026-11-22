@@ -95,6 +95,15 @@ export interface TileUpscaleParams {
   /** (правка 483) LoRA из настроек — цепочкой customLoras (включая
    *  турбо-лору, если она включена), до AdaLN-фикса и SigmaShift. */
   customLoras?: Array<{ name: string; strength: number }>
+  /**
+   * (правка 1089) Bounded attention: поблочный QKV/attention/out_proj по
+   * токенам — срезает пик VRAM сэмплинга тайлов (чанк 136 кадров × тайл
+   * 768px — последовательность того же порядка, что у «Генерации»).
+   */
+  boundedAttention?: boolean
+  /** (правка 1095) token_chunk bounded attention (0 = 4096: в тайловом тракте
+   *  последовательность = окно, авторазмер по канве выключил бы узел). */
+  boundedTokenChunk?: number
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini). */
   videoFormat?: VideoFormatSettings
 }
@@ -279,6 +288,32 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
     modelSrc = [id, 0]
   })
 
+  // (правка 1089) Bounded attention — как на «Генерации»/Refine: режет
+  // QKV/attention/out_proj по токенам внутри per-tile сэмплинга
+  // MMH3UltimateUpscale. Патч ложится на блоки диффуза, которые нода берёт
+  // из переданной модели, поэтому достаточно поставить узел в model-цепочку.
+  // В bounded-режиме FFN обязан быть порезан, иначе его пик съедает выигрыш.
+  const boundedAttn = p.boundedAttention === true
+  if (boundedAttn) {
+    // (правка 1095) token_chunk здесь НЕ авторазмерится по канве: MMH3UltimateUpscale
+    // снимпалит по тайлам (по умолчанию 768 px), и кусок больше последовательности
+    // тайла превратил бы узел в сквозной — пик вернулся бы. Берём значение из
+    // настроек (0 = 4096, как раньше).
+    const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0) || 4096))
+    modelNodes['tu_bounded'] = {
+      inputs: { token_chunk: tokenChunk, model: modelSrc },
+      class_type: 'MiniMaxStudioBoundedAttention',
+      _meta: { title: 'Bounded Attention (low VRAM)' },
+    }
+    modelSrc = ['tu_bounded', 0]
+    modelNodes['tu_chunkff'] = {
+      inputs: { chunks: 8, seq_threshold: 4096, model: modelSrc },
+      class_type: 'MiniMaxChunkFeedForward',
+      _meta: { title: 'Chunk FeedForward (bounded)' },
+    }
+    modelSrc = ['tu_chunkff', 0]
+  }
+
   modelNodes['tu_sigma'] = {
     inputs: { shift_video: 12, shift_audio: 3, model: modelSrc },
     class_type: 'MiniMaxH3SigmaShift',
@@ -305,7 +340,9 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   const previewFramesSrc: number | [string, number] = latentMode ? framesGrid : ['tu_src', 1]
   const previewFrames: number | [string, number] =
     typeof previewFramesSrc === 'number'
-      ? clampPreviewFrames(previewFramesSrc)
+      // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
+      // разрешении — держим 8 кадров и в latent-ветке (кламп на TS-стороне).
+      ? clampPreviewFrames(boundedAttn ? Math.min(previewFramesSrc, 8) : previewFramesSrc)
       : ['tu_prev_clamp', 1]
   const needsPreviewClampNode = typeof previewFramesSrc !== 'number'
   modelNodes['tu_preview'] = {
@@ -361,9 +398,11 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
     },
     ...(needsPreviewClampNode ? {
       'tu_prev_clamp': {
-        inputs: { expression: `min(a, ${PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
+        // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
+        // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
+        inputs: { expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
         class_type: 'ComfyMathExpression',
-        _meta: { title: `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+        _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
       },
     } : {}),
     ...modelNodes,

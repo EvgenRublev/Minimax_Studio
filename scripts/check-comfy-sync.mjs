@@ -470,6 +470,85 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   }
 }
 
+// 13c. (правка 1089) Bounded attention (правка 1088) обязана стоять во всех
+//      H3-цепочках: «Генерация» и «Продление» (один файл — два билдера), Refine
+//      «Целым»/«Частями», Tile Upscale, Face Refine; ControlNet прокидывает
+//      флаг в стандартный билдер. Плюс настройка auto/on/off доходит до роутов.
+{
+  const node = read('custom nodes/minimax_studio_bounded_attn/__init__.py')
+  expect(/"MiniMaxStudioBoundedAttention"\s*:\s*MiniMaxStudioBoundedAttention/.test(node),
+    'minimax_studio_bounded_attn: нода зарегистрирована в NODE_CLASS_MAPPINGS')
+  for (const t of [
+    'src/lib/comfy/minimax-h3-template.ts',
+    'src/lib/comfy/refine-template.ts',
+    'src/lib/comfy/tile-upscale-template.ts',
+    'src/lib/comfy/face-refine-template.ts',
+  ]) {
+    expect(read(t).includes("class_type: 'MiniMaxStudioBoundedAttention'"),
+      `${t}: model-цепочка использует MiniMaxStudioBoundedAttention`)
+  }
+  // Две независимые цепочки в одном файле: основной билдер + buildExtendWorkflow.
+  expect((read('src/lib/comfy/minimax-h3-template.ts').match(/class_type: 'MiniMaxStudioBoundedAttention'/g) || []).length >= 2,
+    'minimax-h3-template: bounded стоит и в «Генерации», и в «Продлении»')
+  const cn = read('src/lib/comfy/controlnet-template.ts')
+  expect(cn.includes('boundedAttention: p.boundedAttention'),
+    'controlnet-template: boundedAttention прокидывается в стандартные параметры')
+  for (const r of [
+    'src/app/api/comfy/generate/route.ts',
+    'src/app/api/comfy/refine/route.ts',
+    'src/app/api/comfy/controlnet/route.ts',
+    'src/app/api/comfy/face-refine/route.ts',
+    'src/app/api/comfy/tile-upscale/route.ts',
+  ]) {
+    expect(read(r).includes('resolveBoundedAttention('),
+      `${r}: роут решает bounded через общий хелпер (настройка auto/on/off работает везде)`)
+  }
+}
+
+// 13d. (правка 1095) Sol-Attn: на ядре 0.44+ наша нода делегирует родному
+//      узлу ядра (BlockSparseAttention) — только он защищает строки кондёра
+//      (sink_conditioning) и совместим с MiniMaxLowVRAMAttention. Порт остаётся
+//      запасным путём для откатного ядра 0.33, где узла ядра нет.
+{
+  const sparse = read('custom nodes/MiniMaxSparseAttn/__init__.py')
+  expect(/from comfy_extras\.nodes_sparse_attention import apply_block_sparse_attention/.test(sparse),
+    'MiniMaxSparseAttn: делегирование узлу ядра (sink_conditioning + sol_take_forward)')
+  expect(/except ImportError/.test(sparse) && /_core_sparse = None/.test(sparse),
+    'MiniMaxSparseAttn: путь для откатного ядра 0.33 сохранён')
+  // Размеры кусков больше не зашиты: head_chunks/token_chunk берутся из настроек
+  // (или авторазмера), иначе настройка в «Оптимизации» ничего бы не меняла.
+  const gen = read('src/lib/comfy/minimax-h3-template.ts')
+  const refine = read('src/lib/comfy/refine-template.ts')
+  for (const [f, src] of [['minimax-h3-template', gen], ['refine-template', refine]]) {
+    expect((src.match(/head_chunks: headChunks/g) || []).length >= 2,
+      `${f}: head_chunks из настройки в обеих model-цепочках (без зашитого 4)`)
+    expect((src.match(/token_chunk: tokenChunk/g) || []).length >= 2,
+      `${f}: token_chunk из настройки/авторазмера в обеих model-цепочках`)
+  }
+  // Настройка должна доходить из хука и очередей Refine до шаблонов.
+  expect(read('src/hooks/use-video-gen.ts').includes('lowVramHeadChunks: params.lowVramHeadChunks'),
+    'use-video-gen: head_chunks уходит в /api/comfy/generate')
+  const rq = read('src/lib/refine-queue.ts')
+  expect(rq.includes('lowVramHeadChunks: task.lowVramHeadChunks') && rq.includes('boundedTokenChunk: task.boundedTokenChunk'),
+    'refine-queue: размеры кусков прокидываются в очередь Refine')
+  const store = read('src/lib/gen-store.ts')
+  expect(store.includes('lowVramHeadChunks: 4') && store.includes('boundedTokenChunk: 0'),
+    'gen-store: дефолты новых настроек (4 головы / авто-кусок)')
+  // (правка 1095) auto на малых картах больше не ставит узел вслепую: роуты
+  // передают длину последовательности, а порог живёт в gpu-vram.ts.
+  const gv = read('src/lib/comfy/gpu-vram.ts')
+  expect(/BOUNDED_ATTN_MIN_SEQ_TOKENS/.test(gv) && /seqTokens\?: number/.test(gv),
+    'gpu-vram: авто-решение bounded учитывает длину последовательности')
+  for (const r of [
+    'src/app/api/comfy/generate/route.ts',
+    'src/app/api/comfy/refine/route.ts',
+    'src/app/api/comfy/controlnet/route.ts',
+  ]) {
+    expect(read(r).includes('seqTokens:'),
+      `${r}: роут считает seqTokens для авто-решения bounded (иначе на 480p узел тормозит впустую)`)
+  }
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

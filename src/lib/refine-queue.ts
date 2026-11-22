@@ -73,6 +73,12 @@ export interface RefineTask {
   /** (правка 968) тюнинг Chunk FF из настроек. */
   chunkFFChunks?: number
   chunkFFThreshold?: number
+  /** (правка 1089) Bounded Attention из настроек: 'auto' | 'on' | 'off'. */
+  boundedAttentionMode?: 'auto' | 'on' | 'off'
+  /** (правка 1095) head_chunks LowVRAM Attention и token_chunk bounded attention
+   *  (0 = авторазмер по VRAM) — из общих настроек. */
+  lowVramHeadChunks?: number
+  boundedTokenChunk?: number
   /** (правка 509) Картинки-референсы от пользователя (имена в input/) —
    *  для источников с диска без метаданных. */
   refImages?: string[]
@@ -276,6 +282,11 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
       ...(task.chunkFeedForward !== undefined && { chunkFeedForward: task.chunkFeedForward }),
       ...(task.chunkFFChunks !== undefined && { chunkFFChunks: task.chunkFFChunks }),
       ...(task.chunkFFThreshold !== undefined && { chunkFFThreshold: task.chunkFFThreshold }),
+      // (правка 1089) bounded attention — настройка из «Оптимизация VRAM»
+      ...(task.boundedAttentionMode !== undefined && { boundedAttentionMode: task.boundedAttentionMode }),
+      // (правка 1095) размеры кусков attention-цепочки из общих настроек
+      ...(task.lowVramHeadChunks !== undefined && { lowVramHeadChunks: task.lowVramHeadChunks }),
+      ...(task.boundedTokenChunk !== undefined && { boundedTokenChunk: task.boundedTokenChunk }),
       // (правка 509) Референсы от пользователя (источник с диска)
       ...(task.refImages && task.refImages.length > 0 && { refImages: task.refImages }),
     }),
