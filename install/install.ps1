@@ -2188,17 +2188,31 @@ $ComfyRollbackCodeloadUrl = 'https://codeload.github.com/Comfy-Org/ComfyUI/zip/r
 # Канал ядра (current | rollback) переживает ремонты: файл пишет и студия
 # (кнопка «Откатить ядро»), и установщик с -CoreRollback. Без него обычный
 # ремонт молча вернул бы пользователя на 0.44.
+# (правка 1120) Поколение по умолчанию: ЧИСТАЯ установка ставит откатное ядро
+# 0.33 + comfy-aimdo 0.4.13 — как V6, который на слабых картах стабильнее
+# (у 0.44 + aimdo 0.5.5-0.6.0 подтверждённый регресс: веса перечитываются с
+# диска). Актуальное 0.44 включается кнопкой «Вернуть актуальное ядро».
+# ВАЖНО: уже установленное ядро без файла канала не понижаем — иначе обычный
+# ремонт молча откатил бы 0.44 у тех, кто ставился до появления channel-файла.
 $ChannelFile = Join-Path $Root 'config\comfy_core_channel.txt'
+$coreInstalled = Test-Path -LiteralPath (Join-Path $comfyApp 'main.py')
 if (-not $CoreRollback -and -not $CoreCurrent) {
+    $chan = ''
     try {
         if (Test-Path -LiteralPath $ChannelFile) {
             $chan = ((Get-Content -LiteralPath $ChannelFile -Encoding UTF8 -TotalCount 1) -as [string]).Trim()
-            if ($chan -eq 'rollback') {
-                $CoreRollback = $true
-                Info ('канал ядра rollback (config\comfy_core_channel.txt) - ставлю ' + $ComfyRollbackVersion)
-            }
         }
     } catch { }
+    if ($chan -eq 'rollback') {
+        $CoreRollback = $true
+        Info ('канал ядра rollback (config\comfy_core_channel.txt) - ставлю ' + $ComfyRollbackVersion)
+    } elseif ($chan -eq 'current') {
+        $CoreCurrent = $true
+        Info ('канал ядра current (config\comfy_core_channel.txt) - оставляю ' + $ComfyVersion)
+    } elseif (-not $coreInstalled) {
+        $CoreRollback = $true
+        Info ('чистая установка: ставлю откатное ядро ' + $ComfyRollbackVersion + ' (comfy-aimdo 0.4.13); актуальное 0.44 - кнопкой в Настройках')
+    }
 }
 if ($CoreRollback -and $CoreCurrent) {
     Fail ('нельзя одновременно -CoreRollback и -CoreCurrent')

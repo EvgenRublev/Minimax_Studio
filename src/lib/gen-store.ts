@@ -284,7 +284,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   chunkFeedForward: true,
   chunkFFChunks: 2,
   chunkFFThreshold: 4096,
-  boundedAttention: 'auto', // (правка 1089)
+  boundedAttention: 'off', // (правка 1119) по умолчанию выкл., как в V6
   lowVramHeadChunks: 4, // (правка 1095) 0/4 = штатное поведение KJNodes
   boundedTokenChunk: 0, // (правка 1095) 0 = авторазмер по VRAM карты
   latentUpscaler3D: true, // (правка 806)
@@ -434,7 +434,7 @@ export const useGenStore = create<GenStoreState>()(
       // (правка 1012) version 10: дефолт вида лупа — 1 (движение/rotate),
       // а не 2 (звук). Старый дефолт 2 мигрируем один раз; осознанный выбор
       // 2 после миграции сохраняется.
-      version: 10,
+      version: 11,
       // (правка 804) Настройки пишутся в два места: localStorage + файл на сервере
       // (data/settings/h3-gen-store.json). Выбирается более свежая копия, поэтому
       // жёсткое убийство процесса на выходе, чистка профиля или смена origin
@@ -490,6 +490,12 @@ export const useGenStore = create<GenStoreState>()(
         // (правка 1012) version 10: старый дефолт вида лупа 2 → новый 1.
         if (oldVersion < 10 && state?.video && state.video.loopViews === 2) {
           state.video = { ...state.video, loopViews: 1 }
+        }
+        // (правка 1119) Bounded Attention по умолчанию выкл. — как в V6, где
+        // такого узла не было. Разово гасим сохранённый 'auto' (старый дефолт);
+        // осознанные «Авто»/«Вкл» после миграции сохраняются.
+        if (oldVersion < 11 && state?.video && state.video.boundedAttention === 'auto') {
+          state.video = { ...state.video, boundedAttention: 'off' }
         }
         return state
       },
@@ -575,8 +581,12 @@ export const useGenStore = create<GenStoreState>()(
           if (typeof result.video.chunkFFThreshold !== 'number' || isNaN(result.video.chunkFFThreshold)) {
             result.video.chunkFFThreshold = DEFAULT_VIDEO_STATE.chunkFFThreshold
           }
-          // (правка 1089) bounded attention — три-state настройка; всё прочее = auto.
-          if (result.video.boundedAttention !== 'on' && result.video.boundedAttention !== 'off') {
+          // (правка 1089) bounded attention — три-state настройка; всё прочее = дефолт.
+          // (правка 1119) 'auto' — валидное значение и не должно съедаться: дефолт
+          // стал 'off', а прежняя проверка «не on/off → дефолт» превращала
+          // осознанное «Авто» в «выкл» при каждой загрузке.
+          if (result.video.boundedAttention !== 'on' && result.video.boundedAttention !== 'off'
+            && result.video.boundedAttention !== 'auto') {
             result.video.boundedAttention = DEFAULT_VIDEO_STATE.boundedAttention
           }
           // (правка 1095) размеры кусков: head_chunks 1..56 (потолок ноды),

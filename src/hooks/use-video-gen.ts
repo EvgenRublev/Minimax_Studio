@@ -1221,7 +1221,7 @@ export function useVideoGen() {
           chunkFFThreshold: params.chunkFFThreshold ?? 4096,
           // (правка 1089) bounded attention: пользовательская настройка; сервер
           // решает по ней + VRAM (auto = вкл. на картах <12 ГБ).
-          boundedAttentionMode: params.boundedAttention ?? 'auto',
+          boundedAttentionMode: params.boundedAttention ?? 'off', // (правка 1119) дефолт выкл.
           // (правка 1095) размеры кусков attention-цепочки (head_chunks и
           // token_chunk; 0 = авторазмер по VRAM, который знает только сервер).
           lowVramHeadChunks: params.lowVramHeadChunks ?? 4,
@@ -1449,7 +1449,7 @@ export function useVideoGen() {
           chunk_feed_forward: params.chunkFeedForward !== false,
           // (правка 1089) режим bounded attention как выбор пользователя
           // (фактическое решение принимает сервер по VRAM).
-          bounded_attention_mode: params.boundedAttention ?? 'auto',
+          bounded_attention_mode: params.boundedAttention ?? 'off', // (правка 1119)
           // (правка 1095) размеры кусков attention-цепочки — для «Повторить».
           low_vram_head_chunks: params.lowVramHeadChunks ?? 4,
           bounded_token_chunk: params.boundedTokenChunk ?? 0,

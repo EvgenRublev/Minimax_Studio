@@ -108,7 +108,8 @@ export function resolveBoundedAttention(
 
 /** Нормализация поля из тела запроса: всё, кроме on/off, трактуем как auto. */
 export function normalizeBoundedAttentionMode(v: unknown): BoundedAttentionMode {
-  return v === 'on' || v === 'off' ? v : 'auto'
+  // (правка 1119) дефолт 'off' (как в V6): поле не пришло или мусор → узел не ставим
+  return v === 'on' || v === 'off' || v === 'auto' ? v : 'off'
 }
 
 async function fromComfy(): Promise<number | null> {

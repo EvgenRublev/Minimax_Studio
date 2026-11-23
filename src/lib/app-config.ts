@@ -252,11 +252,11 @@ export function getAppConfig(): AppConfig {
     // паттерн в остальных полях — здесь он остался.
     // (правка 803) Дефолт reserve_gb снижен 3 → 1: 3 ГБ + 1 ГБ headroom
     // отнимали у 12–16 ГБ карт слишком много и провоцировали оффлоад.
-    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '1', 1),
+    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '4', 4),
     // (правка 490) 0 = выкл (флаг не передаётся), диапазон как в UI: 0–8 ГБ.
     // (правка 803) По умолчанию 1 ГБ вместо 2: при DynamicVRAM этот запас
     // складывается с reserve_gb, поэтому суммарно держим ~2 ГБ.
-    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '1') || 0)),
+    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '0') || 0)),
     // (правка 1029) Принудительный fast-disk: только явный 1 включает.
     // auto/0/отсутствие ключа — UI показывает выключенную галочку.
     fastDisk: (ini['vram.fast_disk'] ?? 'auto').trim() === '1',
@@ -290,7 +290,7 @@ export function getAppConfig(): AppConfig {
     // (правка 53) по умолчанию ВКЛ: видео-рефы идут в ассистент сжатым
     // digest-описанием (кэшируется по содержимому), а не сырыми кадрами.
     // Старые config.ini без ключа тоже получают новый дефолт; явный 0 — выкл.
-    llmVideoVision: ini['llm.video_vision'] !== '0',
+    llmVideoVision: ini['llm.video_vision'] === '1', // (правка 1119) дефолт 0, как в V6
     // (правка 109) квантизация KV-кэша; (правка 119) по умолчанию q4_0 — экономия памяти
     llmKvCache: (['off', 'q8_0', 'q5_1', 'q4_0'].includes(ini['llm.kv_cache'] ?? '')
       ? ini['llm.kv_cache']
@@ -420,19 +420,21 @@ export function setConfigValue(section: string, key: string, value: string): voi
  * первой установке.
  */
 const DEFAULT_CONFIG_INI = `[vram]
-reserve_gb=1
+reserve_gb=4
 dynamic_vram=1
 ; 0 = синхронная загрузка моделей (стабильно), 1 = async-офлоад
 async_offload=0
-; (правка 1073) host-кэш весов для DynamicVRAM. 1 = включён (нужен, чтобы H3
-; не перечитывался с диска на каждом шаге); 0 только если загрузка модели
-; падает ошибкой 1450/1453
-pinned_memory=1
+; (правка 1119) host-кэш весов: 0 = как в V6 — меньше занятой RAM и без падений
+; 1450/1453 на pinned-аллокациях; 1 = включён (только если модель не грузится)
+pinned_memory=0
 ; (правка 1077) nvml_pressure: 1 = aimdo учитывает, сколько VRAM реально занято
 ; чужими процессами (браузер, рабочий стол, DLSS). 0 = веса получают больше карты;
 ; на 12 ГБ с H3 стоит попробовать, если генерация встает на инициализации
 nvml_pressure=1
-vram_headroom=1
+; (правка 1120) запас VRAM держим только через reserve_gb=4; headroom 0,
+; как в V6, где отдельного headroom-флага не было вовсе
+; если на 8 ГБ не хватает VRAM (OOM/своп) — уменьшить reserve_gb до 3
+vram_headroom=0
 ; auto = ComfyUI сам решает; 1 = принудительный --fast-disk; 0 = --disable-fast-disk
 fast_disk=auto
 
@@ -454,7 +456,7 @@ top_p=0.95
 temperature=0.7
 sampling_override=0
 kv_cache=q4_0
-video_vision=1
+video_vision=0
 model=Qwen3.5-9B-Q4_K_M.gguf
 max_output_tokens=4096
 context_size=25600
