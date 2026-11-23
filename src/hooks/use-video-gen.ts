@@ -10,7 +10,7 @@ import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenDurations } from '@/lib/gen-duration-store'
 import { useGenStore } from '@/lib/gen-store'
-import { playNotificationSound } from '@/lib/sound'
+import { notifyGenerationDone } from '@/lib/sound'
 import { finalDimsFromMegapixels, framesForDuration, flfNominalDimensions, flfNominalFromMegapixels, clampLowResMP, computePass1Canvas, resolveGenerationFinalDims, MIN_FIRST_PASS_STEPS } from '@/lib/comfy/minimax-h3-template'
 import { t as tt } from '@/lib/i18n' // (правка 955)
 
@@ -555,12 +555,8 @@ export function useVideoGen() {
             // staggered-reload): гарантирует перерисовку в ЛЮБОЙ смонтиро-
             // ванной вкладке сразу по завершении джоба.
             useGalleryRefresh.getState().bump()
-            // Notification sound (if enabled)
-            if (typeof window !== 'undefined') {
-              fetch('/api/config').then((r) => r.json()).then((d) => {
-                if (d.sound_on !== false) playNotificationSound()
-              }).catch(() => {})
-            }
+            // Notification sound (if enabled) — (правка 1113) общий хелпер
+            notifyGenerationDone()
             // Save metadata with output filename
             // Fallback: if history returns no outputs, find the newest video file from the output dir
             const doSave = async () => {

@@ -1593,6 +1593,22 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
 
   // ─── (правка 382) Lossless-ветка: окна из сохранённого латента ───
   const latentMode = !!p.sourceLatent
+  /**
+   * (правка 1108) mp4-путь С апскейлом: кодируем и апскейлим ИСТОЧНИК ЦЕЛИКОМ
+   * один раз (та же схема, что lossless-ветка), а окна режем токенами.
+   *
+   * Раньше апскейлер шёл на КАЖДОЕ окно отдельно: временной 3D-апскейлер
+   * получал разный контекст на границах, соседние окна выходили с чуть разным
+   * масштабом/геометрией — на стыке читалось как деформация сцены (та же
+   * болезнь, которую правка 1031 вылечила в lossless-ветке). Плюс у ноды
+   * force_unload: true — это была ещё и N-кратная загрузка модели апскейлера.
+   * Память не растёт: VAE-энкод и 3D-апскейлер H3 сами режут время на чанки
+   * (encode_temporal / enable_temporal_chunking), а кадры исходника и так
+   * лежат в памяти одним батчем.
+   */
+  const wholeSeed = !latentMode && needsUpscale
+  /** Окна режем токенами (точные границы сетки) и в mp4-пути с апскейлом. */
+  const tokenGeom = latentMode || wholeSeed
   // (правка 468) Токены полного латента — точно по FPT: tokOf — линейная
   // аппроксимация, на несеточных длинах ошибается на ±1 токен.
   const totalTok = Math.max(1, tokCover(Math.max(5, p.sourceFrames ?? 0)))
@@ -1610,7 +1626,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
    *  токенов и аудио-шагов. mp4-путь: effSkip/effCap = план (точные кадры);
    *  latent-путь: выравнивание по токен-границам полного латента. */
   const winGeo = windows.map((w) => {
-    if (!latentMode) {
+    if (!tokenGeom) {
       return {
         effSkip: w.skip,
         effCap: w.cap,
@@ -1848,6 +1864,47 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         class_type: 'VHS_LoadVideo',
         _meta: { title: 'Исходник (24 fps)' },
       },
+      // (правка 1108) mp4 + апскейл: один общий энкод и ОДИН апскейл на всё
+      // видео (как в lossless-ветке). Окна ниже режутся из r_wup токенами.
+      ...(wholeSeed ? {
+        'r_wres': {
+          inputs: {
+            image: ['r_src', 0],
+            width: encW,
+            height: encH,
+            upscale_method: 'lanczos',
+            keep_proportion: 'stretch',
+            pad_color: '0, 0, 0',
+            crop_position: 'center',
+            divisible_by: 16,
+            device: 'cpu',
+          },
+          class_type: 'ImageResizeKJv2',
+          _meta: { title: `Исходник целиком → ${encW}×${encH}` },
+        },
+        'r_wenc': {
+          inputs: { pixels: ['r_wres', 0], vae: ['46:3', 0] },
+          class_type: 'VAEEncode',
+          _meta: { title: 'VAE-кодирование исходника целиком (один раз)' },
+        },
+        'r_wup': {
+          inputs: {
+            model_name: 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
+            mode: 'target dimensions',
+            'mode.width': final.genW,
+            'mode.height': final.genH,
+            align: 32,
+            enable_chunking: true,
+            enable_temporal_chunking: true,
+            force_unload: true,
+            device: 'cuda',
+            precision: 'fp16',
+            latent: ['r_wenc', 0],
+          },
+          class_type: 'MinimaxH3LatentUpscaler3D',
+          _meta: { title: `Latent Upscaler (3D) целиком → ${final.genW}×${final.genH}` },
+        },
+      } : {}),
     }),
 
     // ─── Цепочка кусков ───
@@ -1879,14 +1936,16 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         //    [sTok, sTok+tTok) — без h264-декода и кодирований.
         // Дальше оба пути едины: [апскейл до gen-канвы] → латент окна.
         let encLatent: [string, number]
-        if (latentMode) {
+        if (tokenGeom) {
           // (правка 1031) Lossless-ветка: апскейлим ИСХОДНЫЙ латент ОДИН раз
           // (r_up, уже построен выше) и режем окна уже из него. Раньше каждое
           // окно апскейлилось отдельно (cu_k): временной 3D-апскейлер получал
           // разный контекст на границах, и соседние окна выходили с чуть
           // разным масштабом/геометрией — это читалось как деформация сцены
           // на стыке. Один общий апскейл гарантирует одну шкалу на всё видео.
-          const latentSrc: [string, number] = needsUpscale ? ['r_up', 0] : ['r_lsep', 0]
+          const latentSrc: [string, number] = wholeSeed
+            ? ['r_wup', 0]
+            : (needsUpscale ? ['r_up', 0] : ['r_lsep', 0])
           encLatent = chainLatentCut(
             nodes, `cl_${k}`,
             latentSrc,
@@ -1924,7 +1983,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         // (правка 1031) В latent-ветке апскейл уже сделан один раз над всем
         // исходником (r_up). Повторный cu_k на каждом окне только сбивал
         // масштаб на стыках. В mp4-ветке по-прежнему апскейлим окно.
-        const genLatent: [string, number] = (needsUpscale && !latentMode)
+        const genLatent: [string, number] = (needsUpscale && !tokenGeom)
           ? (() => {
               nodes[`cu_${k}`] = {
                 inputs: {
@@ -1965,17 +2024,20 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           )
         } else {
           nodes[`cask_${k}`] = {
-            inputs: { audio: ['r_src', 2], fallback_seconds: Number(((w.cap / 24) + 0.5).toFixed(2)) },
+            inputs: { audio: ['r_src', 2], fallback_seconds: Number(((effCap / 24) + 0.5).toFixed(2)) },
             class_type: 'MiniMaxH3AudioOrSilent',
             _meta: { title: `Аудио окна ${k + 1} (или тишина)` },
           }
           nodes[`caw_${k}`] = {
             inputs: {
               audio: [`cask_${k}`, 0],
-              start_seconds: Number((w.skip / 24).toFixed(4)),
+              // (правка 1108) effSkip, а не плановый skip: в токен-геометрии
+              // окно начинается на пару кадров раньше — звук должен совпадать
+              // с картинкой.
+              start_seconds: Number((effSkip / 24).toFixed(4)),
             },
             class_type: 'MiniMaxH3AudioSliceFrom',
-            _meta: { title: `Окно аудио ${k + 1} от ${w.skip} кадра` },
+            _meta: { title: `Окно аудио ${k + 1} от ${effSkip} кадра` },
           }
           nodes[`caenc_${k}`] = {
             inputs: { audio: [`caw_${k}`, 0], vae: ['46:4', 0] },

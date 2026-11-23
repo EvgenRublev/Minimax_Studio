@@ -35,6 +35,11 @@ def parse_args():
                    help="короткий локальный tone-fade после стыка (0 = выкл.)")
     p.add_argument("--tone-fade-max", type=float, default=3.0,
                    help="максимальная поправка тона на кадр, 0–255")
+    p.add_argument("--audio-patch-seconds", type=float, default=0.0,
+                   help="сколько секунд нового звука после стыка заполнить эмбиентом "
+                        "предыдущего куска (0 = выкл.; продление — 0.5)")
+    p.add_argument("--audio-patch-fade", type=float, default=0.3,
+                   help="длина кроссфейда обратно в родной звук, секунды")
     p.add_argument("--ffmpeg", required=True)
     return p.parse_args()
 
@@ -233,6 +238,102 @@ def declick_audio(audio, seams, fps, sr=44100):
     return audio
 
 
+def _is_stationary_ambience(tail, sr):
+    """Похож ли хвост на ровный эмбиент (дождь, гул, ветер), а не на музыку/речь.
+
+    Возвращает (ok, почему). Зацикливать можно только стационарный шум: у
+    музыки и речи повтор полусекунды слышен как «тот же звук ещё раз», поэтому
+    для них патч не ставим вовсе.
+    """
+    x = tail.mean(axis=1)
+    n = len(x)
+    if n < int(0.1 * sr):
+        return False, 'хвост короче 0.1 с'
+    # 1) Ровность громкости: у речи/ударов RMS по 20 мс скачет.
+    win = max(16, int(0.02 * sr))
+    frames = n // win
+    if frames < 4:
+        return False, 'мало фреймов'
+    rms = np.array([float(np.sqrt(np.mean(x[i * win:(i + 1) * win] ** 2))) for i in range(frames)])
+    mean_rms = float(rms.mean())
+    if mean_rms < 1e-4:
+        return True, 'тишина'
+    # 1a) Уровень: «мост» имеет смысл только для ТИХОГО фона. Громкий звук
+    # (музыка, речь, эффекты) при копировании слышен как повтор последнего
+    # звука — порог −34 dBFS.
+    if mean_rms > 0.02:
+        return False, f'слишком громко для фонового моста (RMS {mean_rms:.3f})'
+    if float(rms.std()) / mean_rms > 0.5:
+        return False, 'громкость скачет (речь/удары/бит)'
+    # 2) Периодичность: у музыки/тонального гула автокорреляция даёт чёткий пик.
+    x = x - x.mean()
+    denom = float(np.dot(x, x))
+    if denom <= 1e-8:
+        return True, 'тишина'
+    lo = max(1, int(0.03 * sr))
+    hi = min(n - 1, int(0.40 * sr))
+    if hi <= lo:
+        return False, 'хвост короткий для проверки тона'
+    peak = 0.0
+    step = max(1, (hi - lo) // 64)
+    for lag in range(lo, hi, step):
+        c = float(np.dot(x[:-lag], x[lag:])) / denom
+        if c > peak:
+            peak = c
+    if peak > 0.45:
+        return False, f'тонально/периодично (autocorr {peak:.2f}) — музыка'
+    return True, f'эмбиент (autocorr {peak:.2f})'
+
+
+def patch_audio_seams(audio, seams, fps, sr=44100, patch_sec=0.5, fade_sec=0.3):
+    """(правка 1109) Скрыть «перезапуск» ровного эмбиента на стыке.
+
+    Полсекунды нового звука после стыка заполняются хвостом предыдущего куска
+    (БЕЗ зацикливания — один проход, не длиннее самого хвоста), затем кроссфейд
+    обратно в родной звук клипа. Длина дорожки не меняется.
+
+    Ставится только для СТАЦИОНАРНОГО эмбиента (дождь, гул, ветер). Для музыки,
+    речи и любых событий патч пропускается: повтор уже услышанного там читается
+    как «последний звук повторился» — ровно то, от чего патч должен спасать.
+    """
+    if audio is None or patch_sec <= 0.01 or len(audio) < 16:
+        return audio
+    amb_n = max(1, int(round(0.5 * sr)))
+    patch_n = max(1, int(round(patch_sec * sr)))
+    for seam in sorted(seams, reverse=True):
+        center = int(round(seam / float(fps) * sr))
+        if center < amb_n or center + patch_n > len(audio):
+            continue
+        tail = audio[center - amb_n:center]
+        ok, why = _is_stationary_ambience(tail, sr)
+        if not ok:
+            print(f"[audio-patch] seam {seam}: пропуск — {why}")
+            continue
+        # Без зацикливания: максимум один проход хвоста.
+        use_n = min(patch_n, len(tail))
+        fade_n = max(1, min(use_n - 1, int(round(fade_sec * sr))))
+        if use_n - fade_n < 1:
+            continue
+        # Громкость нового звука не должна быть заметно выше «моста».
+        head_n = max(1, int(round(0.15 * sr)))
+        native_head = audio[center:min(len(audio), center + head_n)]
+        if native_head.size and \
+                float(np.abs(native_head).mean()) > 2.0 * float(np.abs(tail).mean()) + 1e-4:
+            print(f"[audio-patch] seam {seam}: пропуск (новый звук громче эмбиента — речь/удар)")
+            continue
+        fill = tail[:use_n]
+        t = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+        w = 0.5 * (1.0 - np.cos(np.pi * t))  # equal-power-ish
+        fade_start = center + use_n - fade_n
+        native = audio[fade_start:center + use_n]
+        audio[center:fade_start] = fill[:use_n - fade_n]
+        audio[fade_start:center + use_n] = (
+            fill[use_n - fade_n:] * (1.0 - w[:, None]) + native * w[:, None]
+        )
+        print(f"[audio-patch] seam {seam}: {use_n / sr:.2f} c эмбиента + фейд {fade_sec:.2f} c")
+    return audio
+
+
 def write_wav(path, audio, sr=44100):
     pcm = np.clip(audio, -1.0, 1.0)
     pcm16 = (pcm * 32767.0).astype(np.int16)
@@ -290,6 +391,13 @@ def main():
     if audio is not None and len(audio) > 0:
         # звук не растягиваем: только 10 мс де-клик на стыке
         audio = declick_audio(audio, seams, fps)
+        # (правка 1109) После де-клика: «мост» из эмбиента прошлого куска на
+        # стыке, чтобы музыка/эмбиент не стартовали заново.
+        if args.audio_patch_seconds > 0.01:
+            audio = patch_audio_seams(
+                audio, seams, fps, 44100,
+                args.audio_patch_seconds, args.audio_patch_fade,
+            )
         write_wav(audio_path, audio)
     else:
         audio_path = None

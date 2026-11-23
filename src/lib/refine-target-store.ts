@@ -16,6 +16,7 @@
  */
 import { create } from 'zustand'
 import type { CropRect } from '@/lib/crop' // (правка 908)
+import { REFINE_PASS2_SIGMA, REFINE_PASS2_STEPS } from '@/lib/comfy/refine-sigmas' // (правка 1111)
 // (правка 1058) Ручки тайлового режима Tessera (только тип/дефолты —
 // модуль без импортов, в клиентский бандл не тянет шаблон воркфлоу).
 import { DEFAULT_TESSERA_TILES, type TesseraTileParams } from '@/lib/comfy/tessera-params'
@@ -72,12 +73,11 @@ const DEFAULT_PARAMS: RefineUiParams = {
   target: 'same',
   mode: 'whole',
   chunkSec: '5',
-  steps: '3',
-  // (правка 698) Дефолт 90% (σ 0.90) для режима «Целый»: пользователь
-  // хочет, чтобы рефайн по умолчанию заметно улучшал картинку. Для режима
-  // «Частями» при переключении в refine-view.tsx автоматически ставится 80%
-  // (правка 1041): context windows дают бесшовность, силу можно вернуть.
-  strength: 0.9,
+  steps: String(REFINE_PASS2_STEPS) as '2' | '3' | '4' | '5' | '6' | '7',
+  // (правка 1111) По умолчанию — пресет «Pass 2»: ровно сигмы второго прохода
+  // двухпроходной генерации (σ 0.9035 → 0.6316 → 0.3158 → 0). Раньше стояло
+  // «просто 0.9 влияние», и лестница чуть отличалась от эталонной.
+  strength: REFINE_PASS2_SIGMA,
   refDetail: 'max', // (правка 1) дефолт Max — требование пользователя
   targetMp: 2.0, // (правка 494)
   tessera: false, // (правка 1057) по умолчанию — обычный оконный «Частями»

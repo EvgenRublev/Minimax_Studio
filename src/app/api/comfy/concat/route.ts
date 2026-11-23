@@ -579,6 +579,10 @@ export async function POST(req: NextRequest) {
               '--radius', seamFadeSec > 0.001 ? '1' : '3',
               // (правка 1018) длиннее tone-fade: на 8 кадрах остаток ещё виден
               '--tone-fade-frames', '16', '--tone-fade-max', '3',
+              // (правка 1109) Стык звука: первые 0.5 с нового звука заполняются
+              // эмбиентом предыдущего куска + кроссфейд 0.3 с обратно. Иначе
+              // музыка/эмбиент на стыке стартуют заново.
+              '--audio-patch-seconds', '0.5', '--audio-patch-fade', '0.3',
               '--ffmpeg', ffmpeg],
             { timeout: 900_000, maxBuffer: 16 * 1024 * 1024 },
           )

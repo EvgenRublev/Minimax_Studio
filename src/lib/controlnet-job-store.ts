@@ -17,6 +17,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenQueue } from '@/lib/gen-queue-store' // (правка 512) общая очередь
 import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 import { t } from '@/lib/i18n' // (правка 955)
+import { notifyGenerationDone } from './sound' // (правка 1113)
 
 export type ControlNetPhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -274,6 +275,7 @@ async function pollOnce() {
     if (cur.promptId !== promptId) return // уже другой джоб
     if (data.status === 'done') {
       useControlNetJob.setState({ phase: 'done', progress: 100, busy: false })
+      notifyGenerationDone() // (правка 1113)
       // (правка 512) Обновляем очередь
       const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
       if (qi) useGenQueue.getState().setStatus(qi.id, 'done')

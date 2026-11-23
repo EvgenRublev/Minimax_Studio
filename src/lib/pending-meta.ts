@@ -23,8 +23,39 @@ import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { probeVideoFile } from '@/lib/video-probe' // (правка 410)
 import { resolveGenerationFinalDims, framesForDuration, clampLowResMP, computePass1Canvas, MIN_FIRST_PASS_STEPS, type MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { replaceVideoAudio, resolveOriginalAudioReplacement } from '@/lib/replace-video-audio' // (правка 699)
+import { loadLoras } from '@/lib/loras-config' // (правка 1110) триггеры/силы LoRA в сайдкар
 
 /* ──────────────────── shared helpers ──────────────────── */
+
+/**
+ * (правка 1110) Что реально поехало в модель: список LoRA с силами и
+ * триггерными словами. Источник имён — параметры задачи (`customLoras` у
+ * генерации/рефайна/тайлов, `lora` строкой у Face Refine), силы и триггеры —
+ * из `data/loras.json` по имени, чтобы сайдкар не зависел от того, какой
+ * писатель его создал.
+ */
+function loraMetaList(params: Record<string, unknown>): Array<{ name: string; strength: number; trigger: string }> {
+  const byName = new Map(loadLoras().map((e) => [e.name, e]))
+  const out: Array<{ name: string; strength: number; trigger: string }> = []
+  const push = (name: string, strength?: unknown) => {
+    const n = name.trim()
+    if (!n || out.some((x) => x.name === n)) return
+    const entry = byName.get(n)
+    const s = typeof strength === 'number' && Number.isFinite(strength) ? strength : (entry?.strength ?? 1)
+    out.push({ name: n, strength: Math.round(s * 100) / 100, trigger: (entry?.trigger ?? '').trim() })
+  }
+  const raw = params.customLoras
+  if (Array.isArray(raw)) {
+    for (const it of raw) {
+      if (!it || typeof it !== 'object') continue
+      const rec = it as { name?: unknown; strength?: unknown }
+      if (typeof rec.name === 'string') push(rec.name, rec.strength)
+    }
+  } else if (typeof params.lora === 'string') {
+    for (const n of params.lora.split(',')) push(n)
+  }
+  return out
+}
 
 /** (правки 121, 124 → 930) Итоговые размеры видео ПОСЛЕ точного кропа —
  *  вызов ТОЙ ЖЕ resolveGenerationFinalDims, что в шаблоне: пресет → номинал,
@@ -160,6 +191,36 @@ export function writeMetaSidecar(
     metadata = {
       ...params,
       created_at: Date.now() / 1000,
+    }
+  }
+  // (правка 1110) Основная модель и LoRA — во ВСЕХ режимах, а не только там,
+  // где их пишет конкретный роут. Если параметры задачи модель не назвали
+  // (рефайн/тайлы/фейс берут её из конфига) — подставляем текущую из
+  // config.ini; список LoRA собираем по параметрам задачи + loras.json.
+  const modelKnown = typeof metadata.diffusion_model === 'string' && metadata.diffusion_model.trim() !== ''
+  if (!modelKnown) {
+    const fromTask = typeof params.diffusionModel === 'string'
+      ? params.diffusionModel
+      : typeof params.diffusion_model === 'string'
+        ? params.diffusion_model
+        : ''
+    const model = fromTask.trim() || (getAppConfig().diffusionModel ?? '').trim()
+    if (model) metadata.diffusion_model = model
+  }
+  if (!Array.isArray(metadata.loras)) {
+    let list = loraMetaList({ ...params, ...metadata })
+    // Режимы, у которых модель идёт цепочкой customLoras (генерация, продление,
+    // рефайн, ControlNet, тайловый апскейл): если задача не принесла список
+    // (клиентский сайдкар продления), берём фактически включённые LoRA.
+    const mode = String(metadata.generation_mode ?? params.generation_mode ?? '').toLowerCase()
+    const usesCustomLoras = ['t2v', 'ref', 'flf', 'extend', 'refine', 'controlnet', 'tileupscale'].includes(mode)
+    if (list.length === 0 && usesCustomLoras) {
+      list = loadLoras()
+        .filter((e) => e.enabled)
+        .map((e) => ({ name: e.name, strength: Math.round(e.strength * 100) / 100, trigger: (e.trigger ?? '').trim() }))
+    }
+    if (list.length > 0 || Array.isArray(params.customLoras) || typeof params.lora === 'string' || usesCustomLoras) {
+      metadata.loras = list
     }
   }
   metadata.job_id = (params.job_id as string) || (metadata.job_id as string) || `srv_${Date.now().toString(36)}`
@@ -457,6 +518,10 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     // Фактически применённые LoRA (включая встроенную турбо-лору, если она
     // не пропущена в flf+audio). Может быть пусто; MetaDialog «Ещё» удаляет поле.
     lora: (body.customLoras ?? []).map((l) => l.name).join(', '),
+    // (правка 1110) Для диалога метаданных: основная модель и LoRA с силами и
+    // триггерными словами (структурой, а не только строкой имён).
+    diffusion_model: body.diffusionModel || getAppConfig().diffusionModel || '',
+    loras: loraMetaList({ customLoras: body.customLoras }),
     references,
     // (правка 161) extend-режим: клипы + рефы
     ...(genMode === 'extend' && {

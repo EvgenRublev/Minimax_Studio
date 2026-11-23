@@ -89,6 +89,7 @@ import { dispersionCoeffs, dispersionMaxShift } from '@/lib/montage-dispersion' 
 import { collectGrainOverlays } from '@/lib/montage-grain' // (правка 910)
 import { tempShifts } from '@/lib/montage-temp' // (правка 966)
 import { useVideoGallery } from './use-video-gallery'
+import { notifyGenerationDone } from '@/lib/sound' // (правка 1113)
 import type { VideoGalleryFile } from './video-gallery-grid'
 import { useTranslation } from 'react-i18next' // (правка 955)
 import { createPortal } from 'react-dom' // (правка 1064) контекстное меню таймлайна
@@ -3916,6 +3917,7 @@ export function MontageView() {
       }
       setResult({ filename: data.filename, url: data.url })
       showToast(`Видео собрано: ${data.filename}`, 'success')
+      notifyGenerationDone() // (правка 1113) — звук завершения сборки
       bump()
     } catch (e) {
       dropHistSnapshot()

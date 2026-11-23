@@ -15,6 +15,7 @@
  * исполнения ComfyUI обеспечивает `comfy-turn.ts`.
  */
 import { useGenQueue, type QueueItem } from './gen-queue-store'
+import { notifyGenerationDone } from './sound' // (правка 1113)
 // (правка 1058) Тип ручек тайлового режима — модуль без импортов.
 import type { TesseraTileParams } from './comfy/tessera-params'
 import { acquireComfyTurn, isComfyTurnActive, stallLabel } from './comfy-turn'
@@ -478,6 +479,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
     }
     q().setStatus(id, 'done')
     q().setProgress(id, 100, 100)
+    notifyGenerationDone() // (правка 1113)
     useGalleryRefresh.getState().bump()
     return
   }
@@ -640,6 +642,7 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
         if (single) await noteArrivalFromMeta({ filename: single.filename, subfolder: single.subfolder || '' })
         q().setStatus(item.id, 'done')
         q().setProgress(item.id, 100, 100)
+        notifyGenerationDone() // (правка 1113)
         useGalleryRefresh.getState().bump()
         return
       }
@@ -722,6 +725,7 @@ async function recoverOrphanRefineItem(item: QueueItem): Promise<void> {
       }
       q().setStatus(item.id, 'done')
       q().setProgress(item.id, 100, 100)
+      notifyGenerationDone() // (правка 1113)
       useGalleryRefresh.getState().bump()
       return
     }

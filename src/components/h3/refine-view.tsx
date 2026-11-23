@@ -931,14 +931,13 @@ export function RefineView() {
                   key={m}
                   type="button"
                   title={t(hint)}
-                  // (правка 698) При переключении режима — дефолтное влияние
-                  // Refine для этого режима (Целый 90% / Частями 80%).
-                  // Перезаписываем ТОЛЬКО при смене режима; если пользователь
-                  // уже вручную подвинул слайдер, его значение остаётся.
+                  // (правка 698, обновлено 1111) При переключении режима —
+                  // пресет «Pass 2» (сигмы второго прохода генерации) для
+                  // любого режима: раньше «Частями» ставил 80%, и это
+                  // расходилось с эталонной лестницей.
                   onClick={() => {
                     if (mode === m) return
-                    const defaultStrength = m === 'chunks' ? 0.8 : 0.9
-                    patchParams({ mode: m, strength: defaultStrength })
+                    patchParams({ mode: m, strength: REFINE_PASS2_SIGMA })
                   }}
                   className={cn(
                     'h-8 rounded-md border text-xs font-medium transition-all',

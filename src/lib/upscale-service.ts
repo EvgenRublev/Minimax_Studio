@@ -21,6 +21,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n' // (правка 955)
+import { notifyGenerationDone } from '@/lib/sound' // (правка 1113)
 
 /* ────────────────────────────────────────────────────────────────
  * Типы API (вынесены из upscale-view.tsx)
@@ -329,6 +330,7 @@ export const useUpscaleService = create<UpscaleServiceState>((set, get) => ({
       get()._setJob(d)
       if (d.status === 'done') {
         toast.success(t("Обработка завершена — результат в общей галерее"))
+        notifyGenerationDone() // (правка 1113)
       } else if (d.status === 'error') {
         toast.error(d.error ?? 'Ошибка обработки')
       } else if (d.status === 'cancelled') {

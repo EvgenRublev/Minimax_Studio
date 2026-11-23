@@ -15,6 +15,7 @@ import { useGalleryRefresh } from '@/lib/gallery-refresh-store'
 import { useGenQueue } from '@/lib/gen-queue-store'
 import { acquireComfyTurn, isComfyTurnActive } from '@/lib/comfy-turn'
 import { t } from '@/lib/i18n' // (правка 955)
+import { notifyGenerationDone } from './sound' // (правка 1113)
 
 export type FaceRefinePhase = 'idle' | 'submitting' | 'running' | 'done' | 'error'
 
@@ -250,6 +251,7 @@ async function pollOnce() {
     if (cur.promptId !== promptId) return
     if (data.status === 'done') {
       useFaceRefineJob.setState({ phase: 'done', progress: 100, busy: false })
+      notifyGenerationDone() // (правка 1113)
       const qi = useGenQueue.getState().items.find((i) => i.promptId === promptId)
       if (qi) {
         useGenQueue.getState().setStatus(qi.id, 'done')

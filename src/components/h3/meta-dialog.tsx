@@ -239,6 +239,32 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
         : []
   ).filter((r) => r?.path !== firstFrame && r?.path !== lastFrame)
   const videoLength = typeof params?.video_length === 'number' ? params.video_length : null
+  // (правка 1110) Основная модель и LoRA: показываем и структуру `loras`
+  // (сила + триггер), и старую строку `lora` у прежних сайдкаров.
+  const diffusionModel = typeof params?.diffusion_model === 'string' && params.diffusion_model
+    ? params.diffusion_model
+    : typeof params?.diffusionModel === 'string' && params.diffusionModel
+      ? params.diffusionModel
+      : null
+  const loraList: Array<{ name: string; strength: number | null; trigger: string }> = (() => {
+    const raw = params?.loras
+    if (Array.isArray(raw)) {
+      return raw
+        .map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>) : null))
+        .filter((x): x is Record<string, unknown> => !!x && typeof x.name === 'string')
+        .map((x) => ({
+          name: String(x.name),
+          strength: typeof x.strength === 'number' && Number.isFinite(x.strength) ? x.strength : null,
+          trigger: typeof x.trigger === 'string' ? x.trigger : '',
+        }))
+    }
+    const legacy = typeof params?.lora === 'string' ? params.lora : ''
+    return legacy
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((name) => ({ name, strength: null, trigger: '' }))
+  })()
   // fps не выдумываем: если его нет в метаданных — не считаем длительность
   // из числа кадров по дефолтным 24 (получалось неверное значение).
   const fps = typeof params?.fps === 'number' && params.fps > 0 ? params.fps : null
@@ -291,6 +317,11 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
       delete p.activated_loras
       delete p.loras_multipliers
       delete p.lora
+      // (правка 1110) показаны блоком «Модель и LoRA»
+      delete p.loras
+      delete p.customLoras
+      delete p.diffusion_model
+      delete p.diffusionModel
       delete p.references
       delete p.minimax_h3_references
       delete p.minimax_h3_turbo_mode
@@ -465,6 +496,49 @@ export function MetaDialog({ filePath, filename, onClose }: MetaDialogProps) {
                   </div>
                   <div className="rounded-md bg-[var(--surface-2)] border border-border p-2.5 text-xs text-foreground/90 whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-relaxed">
                     {prompt}
+                  </div>
+                </div>
+              )}
+
+              {/* (правка 1110) Модель и LoRA — во всех режимах генерации. */}
+              {(diffusionModel || loraList.length > 0) && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                    {t("Модель и LoRA")}
+                  </p>
+                  <div className="rounded-md border border-border bg-[var(--surface-2)] p-2.5 space-y-1.5">
+                    {diffusionModel && (
+                      <div className="flex items-baseline gap-2">
+                        <span className="w-12 shrink-0 text-[10px] text-muted-foreground">{t("Модель")}</span>
+                        <span className="font-mono text-[11px] break-all" title={diffusionModel}>
+                          {basename(diffusionModel)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-start gap-2">
+                      <span className="w-12 shrink-0 text-[10px] text-muted-foreground">LoRA</span>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        {loraList.length === 0 ? (
+                          <span className="text-[11px] text-muted-foreground/70">{t("не применялись")}</span>
+                        ) : (
+                          loraList.map((l) => (
+                            <div key={l.name} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span className="font-mono text-[11px] break-all">{basename(l.name)}</span>
+                              {l.strength != null && (
+                                <span className="shrink-0 rounded bg-cyan-500/10 px-1 font-mono text-[10px] text-cyan-300">
+                                  ×{l.strength.toFixed(2)}
+                                </span>
+                              )}
+                              {l.trigger && (
+                                <span className="text-[10px] italic text-muted-foreground/80 break-words">
+                                  «{l.trigger}»
+                                </span>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

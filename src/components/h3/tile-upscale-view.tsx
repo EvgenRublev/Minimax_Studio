@@ -75,6 +75,23 @@ export function TileUpscaleView() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [uploadingSrc, setUploadingSrc] = useState(false)
+  // (правка 1112) Зацикленный источник: тайловый апскейл цикл не поддерживает.
+  // Читаем флаг `loop` из сайдкара оригинала (у файла с диска меты нет).
+  const [srcLooped, setSrcLooped] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setSrcLooped(false)
+    const s = source
+    if (!s || s.inputSource || !s.filename) return
+    const metaPath = s.subfolder ? `${s.subfolder}/${s.filename}` : s.filename
+    fetch(`/api/comfy/meta?path=${encodeURIComponent(metaPath)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => {
+        if (!cancelled && m && (m as { loop?: unknown }).loop === true) setSrcLooped(true)
+      })
+      .catch(() => { /* нет сайдкара — считаем обычным видео */ })
+    return () => { cancelled = true }
+  }, [source])
   // (правка 319) Состояние джоба — из модульного стора (переживает unmount).
   const busy = useTileUpscaleJob((s) => s.busy)
   const phase = useTileUpscaleJob((s) => s.phase)
@@ -275,6 +292,12 @@ export function TileUpscaleView() {
                 <FileVideoIcon className="w-4 h-4 shrink-0" />
                 <span>{t("Кликните для выбора, перетащите карточку из галереи или файл с диска")}</span>
               </div>
+            )}
+            {/* (правка 1112) Предупреждение: цикл в тайловом апскейле не работает. */}
+            {srcLooped && (
+              <p className="text-[11px] leading-snug text-amber-400">
+                {t("Источник зациклен: в тайловом апскейле цикл не поддерживается — стык «конец → начало» может нарушиться. Для зацикленных видео используйте Refine «Целым».")}
+              </p>
             )}
             {/* (правка 274) Скрытый input — клик-выбор видео с диска */}
             <input

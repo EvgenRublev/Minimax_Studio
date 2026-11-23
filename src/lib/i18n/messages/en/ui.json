@@ -861,5 +861,9 @@
   "Возврат ядра…": "Restoring the core…",
   "Вернуть ядро": "Restore the core",
   "этап": "stage",
-  "шаг": "step"
+  "шаг": "step",
+  "Модель и LoRA": "Model and LoRA",
+  "Модель": "Model",
+  "не применялись": "none applied",
+  "Источник зациклен: в тайловом апскейле цикл не поддерживается — стык «конец → начало» может нарушиться. Для зацикленных видео используйте Refine «Целым».": "The source is a seamless loop: tile upscale does not support looping — the end → start seam may break. For looped videos use Refine \"Whole\"."
 }

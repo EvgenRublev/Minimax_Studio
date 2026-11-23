@@ -49,3 +49,31 @@ export function playNotificationSound(): void {
     /* AudioContext unavailable (e.g. autoplay policy) — ignore */
   }
 }
+
+/**
+ * (правка 1113) Звук завершения для ЛЮБОГО режима студии.
+ *
+ * Раньше «динь» играл только видео-поток «Генерации»/«Продления»
+ * (use-video-gen), а Refine, Tile Upscale, Face Refine, FPS, ControlNet,
+ * монтаж и DLSS-апскейл завершались молча. Настройка одна на всё —
+ * `sound_on` из /api/config; результат кэшируем, чтобы не дёргать конфиг
+ * на каждую задачу.
+ */
+let soundOnPromise: Promise<boolean> | null = null
+
+function soundOn(): Promise<boolean> {
+  if (!soundOnPromise) {
+    soundOnPromise = fetch('/api/config')
+      .then((r) => r.json())
+      .then((d: { sound_on?: boolean }) => d.sound_on !== false)
+      .catch(() => true)
+  }
+  return soundOnPromise
+}
+
+export function notifyGenerationDone(): void {
+  if (typeof window === 'undefined') return
+  void soundOn().then((on) => {
+    if (on) playNotificationSound()
+  })
+}
