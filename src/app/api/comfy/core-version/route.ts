@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getAppConfig } from '@/lib/app-config'
-import { CORE_CURRENT_MIN, CORE_MIN_VERSION, CORE_ROLLBACK_MAX, CORE_ROLLBACK_MIN, coreSupport, isCoreOutdated, parseComfyVersion, readCoreChannel } from '@/lib/comfy/core-version'
+import { CORE_CURRENT_MIN, CORE_MIN_VERSION, CORE_ROLLBACK_MAX, CORE_ROLLBACK_MIN, coreSupport, coreSupportsVeda, isCoreOutdated, parseComfyVersion, readCoreChannel } from '@/lib/comfy/core-version'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +39,8 @@ export async function GET() {
       channel: readCoreChannel(),
       outdated: isCoreOutdated(version),
       unknown: coreExists && !version,
+      // (правка 1115) какие настройки вообще имеют смысл на этом ядре
+      capabilities: { veda: coreSupportsVeda(cfg.comfyCore) },
     })
   } catch {
     // Не смогли прочитать конфиг/диск — молчим, баннер не показываем.

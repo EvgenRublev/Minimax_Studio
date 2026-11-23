@@ -225,6 +225,99 @@ console.log('[patches-033] utils/extra_config.py: списки путей из �
   console.log('[patches-033] comfy/ldm/minimax/model.py: cond_audio для аудио-keyframe')
 }
 
+
+// 8) comfy/model_base.py — keyframe-гиды внутри context windows.
+// В 0.44 MiniMaxH3 сам режет гайды по окну и переносит их во времени. В 0.33
+// этих методов нет, а ключевое для продления — _window_payload: без него
+// якорь головы остаётся на абсолютной позиции в КАЖДОМ окне, и первые кадры
+// клипа «пересвечиваются», пока модель не подстроит свет (баг на откатном ядре).
+// Методы перенесены из ядра 0.44; API окон (Window.total_frames,
+// get_window_for_modality, causal_anchor_index) в 0.33 совпадает.
+{
+  const p = join(DST, 'comfy', 'model_base.py')
+  let src = readFileSync(p, 'utf8')
+  const methods = `    @staticmethod
+    def _cond_latents(keyframes, refs):
+        # condition latents in packed-layout order: keyframes, then references
+        keyframes, refs = keyframes or [], refs or []
+        return {"cond_video_latents": [kf["latent"] for kf in keyframes if kf.get("latent") is not None] + [r["latent"] for r in refs if "latent" in r],
+                "cond_audio_latents": [kf["audio_latent"] for kf in keyframes if kf.get("audio_latent") is not None] + [r["audio_latent"] for r in refs if r.get("audio_latent") is not None]}
+
+    def context_window_modality_dims(self, latent_shapes, dim):
+        # audio is [B, C, 2, T], time on the last axis
+        return [dim] + [len(s) - 1 for s in latent_shapes[1:]]
+
+    @staticmethod
+    def _latent_pixel_starts(latent_t):
+        # pixel frame each video latent starts at, plus the end of the last one
+        starts = [0]
+        for k in range(latent_t):
+            starts.append(starts[-1] + comfy.ldm.minimax.model.FRAME_PER_TOKEN[k % 5])
+        return starts
+
+    def map_context_window_to_modalities(self, primary_indices, latent_shapes, dim):
+        # the streams share one time axis: split the audio at the video latents' pixel frame boundaries
+        starts = self._latent_pixel_starts(latent_shapes[0][dim])
+        edges = [round(s * latent_shapes[1][-1] / starts[-1]) for s in starts]
+        return [primary_indices, [a for k in primary_indices for a in range(edges[k], edges[k + 1])]]
+
+    def _window_payload(self, payload, window):
+        # keyframes anchor the full video's timeline: keep the part of each guide
+        # inside the window, cropped and re-anchored to it
+        starts = self._latent_pixel_starts(window.total_frames)
+        first, last = window.index_list[0], window.index_list[-1]
+        origin = starts[first]
+        if getattr(window, "causal_anchor_index", None) is not None:
+            origin -= comfy.ldm.minimax.model.FRAME_PER_TOKEN[0]
+        audio_window = window.get_window_for_modality(1)
+        a0, a1 = audio_window.index_list[0], audio_window.index_list[-1] + 1
+        rescale = comfy.ldm.minimax.model.FRAME_RESCALE
+        keyframes = []
+        for kf in payload.get("keyframes") or []:
+            f = kf["resolved_frame_index"]
+            latent = kf.get("latent")
+            if latent is not None:
+                vt = latent.shape[2]
+                guide_starts = self._latent_pixel_starts(vt)
+                chunks = [g for g in range(0, vt, 5)
+                          if f + guide_starts[g] < starts[last + 1] and f + guide_starts[min(g + 5, vt)] > starts[first]]
+                if chunks:
+                    keyframes.append({"resolved_frame_index": f + guide_starts[chunks[0]] - origin,
+                                      "latent": latent[:, :, chunks[0]:chunks[-1] + 5]})
+            audio = kf.get("audio_latent")
+            if audio is not None:
+                t = rescale * f
+                j0, j1 = max(0, math.ceil(a0 - t)), min(audio.shape[-1], math.ceil(a1 - t))
+                if j1 > j0:
+                    keyframes.append({"resolved_frame_index": (t + j0 - a0) / rescale, "audio_latent": audio[..., j0:j1]})
+        payload = {k: v for k, v in payload.items() if k != "layout"}
+        payload["keyframes"] = keyframes
+        payload.update(self._cond_latents(keyframes, payload.get("refs")))
+        return payload
+
+    def resize_cond_for_context_window(self, cond_key, cond_value, window, x_in, device, retain_index_list=[]):
+        if cond_key == "audio_denoise_mask":
+            return cond_value._copy_with(window.get_window_for_modality(1).get_tensor(cond_value.cond, device))
+        if cond_key == "minimax_payload" and cond_value.cond.get("keyframes"):
+            return cond_value._copy_with(self._window_payload(cond_value.cond, window))
+        return super().resize_cond_for_context_window(cond_key, cond_value, window, x_in, device, retain_index_list=retain_index_list)
+
+`
+  const classAt = src.indexOf('class MiniMaxH3(')
+  if (classAt < 0) {
+    console.error('[patches-033] в model_base 0.33 нет class MiniMaxH3')
+    process.exit(1)
+  }
+  const nextClass = src.indexOf('\nclass ', classAt + 1)
+  if (nextClass < 0) {
+    console.error('[patches-033] не найден конец класса MiniMaxH3')
+    process.exit(1)
+  }
+  src = src.slice(0, nextClass + 1) + methods + src.slice(nextClass + 1)
+  writeFileSync(p, src, 'utf8')
+  console.log('[patches-033] comfy/model_base.py: keyframe-гиды в context windows (как в 0.44)')
+}
+
 writeFileSync(join(DST, 'README.txt'), [
   'Патчи ядра ComfyUI 0.33.x — откатная ветка бэкенда (comfy-aimdo 0.4.13).',
   '',
@@ -240,6 +333,9 @@ writeFileSync(join(DST, 'README.txt'), [
   '  • comfy/model_base.py и comfy/ldm/minimax/model.py — 0.33 + keyframe',
   '    с одним аудио-гайдом (без видео-латента): в 0.44 такие кадры',
   '    поддерживаются, в 0.33 extra_conds падал KeyError: latent;',
+  '  • в model_base перенесены методы 0.44, которых нет в 0.33:',
+  '    _window_payload / resize_cond_for_context_window / map_context_window_to_modalities.',
+  '    Без них якорь головы не режется по context window и не переносится во времени:',
   '  • comfy/ldm/minimax/* и comfy/context_windows.py не подменяются: 0.44-версии',
   '    тянут ComfyAttention из 0.44, а в файлах 0.33 есть всё нужное',
   '    (FRAME_PER_TOKEN, FRAME_RESCALE, IMAGENET_MEAN, ContextSchedules,',

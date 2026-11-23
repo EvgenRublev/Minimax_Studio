@@ -2321,8 +2321,10 @@ if (-not $SkipComfy) {
             Info ('ставлю ядро ComfyUI ' + $ComfyVersion)
         }
 
+        Write-SetupStatus 'running' 4 9 ('Архив ядра ComfyUI ' + $ComfyVersion) 'Скачиваем архив ядра (в кэше — мгновенно); 12 МБ, скорость покажем в деталях'
         $zip = Join-Path $Cache $ComfyZipName
         Get-DownloadAny @($ComfyCodeloadUrl, $ComfyUrl) $zip
+        Write-SetupStatus 'running' 4 9 ('Распаковка ядра ComfyUI ' + $ComfyVersion) 'Архив проверен по контрольной сумме; распаковываем во временную папку'
         $tmp = Join-Path $Cache 'comfy-extract'
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         Expand-ZipSafe $zip $tmp
@@ -2357,6 +2359,7 @@ if (-not $SkipComfy) {
                 throw ('папка ComfyUI.keep не пуста (' + $stage + ') - перенеси её содержимое в ComfyUI вручную и запусти установку снова')
             }
         }
+        Write-SetupStatus 'running' 4 9 ('Замена файлов ядра на ' + $ComfyVersion) 'Меняются только файлы ядра: models, custom_nodes, user, output и input остаются на месте'
         try {
             Install-ComfyCoreTree -App $comfyApp -NewCore $inner.FullName -Backup $backup -Keep $keep | Out-Null
         } catch {
@@ -2367,6 +2370,7 @@ if (-not $SkipComfy) {
         Ok ('ComfyUI ' + $ComfyVersion + ' распакован')
         # (правка 1086) База 0.44 не читается ядром 0.33 (ревизия alembic 0009):
         # уводим её в user\comfyui.db.0.44-* и возвращаем при переходе обратно.
+        Write-SetupStatus 'running' 4 9 ('База ассетов: ' + $(if ($CoreRollback) { 'сохраняю 0.44' } else { 'возвращаю 0.44' })) 'Базы 0.44 и 0.33 несовместимы по схеме; старую сохраняем, а не удаляем'
         $dbSwitch = Switch-ComfyUserDatabase -App $comfyApp -FromVersion $installedComfy -ToVersion $ComfyVersion
         if ($dbSwitch.MovedDb) {
             Warn ('база 0.44 несовместима с ядром 0.33 - сохранил как ' + $dbSwitch.MovedDb + ' (вернётся при переходе на 0.44)')
@@ -2379,6 +2383,7 @@ if (-not $SkipComfy) {
         # comfyui-frontend-package, workflow-templates и embedded-docs. Ставим их
         # из requirements.txt нового ядра (только строки с точным пином `==`:
         # голые имена вроде torch тянули бы свежий torch и ломали CUDA-сборку).
+        Write-SetupStatus 'running' 4 9 ('Python-пины ядра ' + $ComfyVersion) 'comfy-aimdo, comfy-kitchen и frontend ставятся из requirements.txt нового ядра: 1-3 минуты, нужна сеть'
         Install-ComfyCorePins $comfyApp
         # Выбор канала помечаем, чтобы обычный ремонт позже молча не вернул
         # прежнее поколение.

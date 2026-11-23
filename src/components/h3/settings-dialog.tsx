@@ -53,7 +53,7 @@ import { ModelMigrationPanel } from './model-migration-panel'
 import { LlmModelSelector } from './llm-model-selector'
 import { VoiceSettingsPanel } from './voice-settings-panel'
 // (правка 1080) карточка поколения ядра ComfyUI (откат 0.33 <-> актуальное 0.44)
-import { CoreChannelCard } from './core-channel-card'
+import { CoreChannelCard, useCoreVersion } from './core-channel-card' // (правка 1115)
 import { MODELS, MODEL_CATEGORIES, getManualRenameHint } from '@/lib/models-config'
 import { useGenStore, DEFAULT_VIDEO_STATE } from '@/lib/gen-store'
 import { pushPrefs } from '@/lib/prefs-sync' // (правка 804)
@@ -254,6 +254,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
      zustand-сторе, что и раньше в «Доп. параметрах»; генерация читает их оттуда. */
   const video = useGenStore((s) => s.video)
   const patchVideo = useGenStore((s) => s.patchVideo)
+  // (правка 1115) Какие настройки вообще имеют смысл на текущем ядре.
+  // Veda требует ComfyUI >= 0.38: на откатном 0.33 её блок не показываем.
+  const { info: coreInfo } = useCoreVersion(5000)
+  const vedaSupported = coreInfo?.capabilities?.veda !== false
 
   const checkConnection = useCallback(async () => {
     setLoading(true)
@@ -1219,6 +1223,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </div>
               )}
 
+              {/* (правка 1115) Veda скрыта на ядре < 0.38 */}
+              {vedaSupported && (<>
               {/* (правка 301) Veda Sparse Attention */}
               <SettingsRow
                 label="Veda Sparse Attention"
@@ -1295,6 +1301,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   </div>
                 </div>
               )}
+
+              </>)}
 
               {/* Low VRAM Attention */}
               <SettingsRow

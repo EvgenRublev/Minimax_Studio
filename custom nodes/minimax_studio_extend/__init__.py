@@ -131,6 +131,10 @@ class MiniMaxStudioLatentLock:
                 "audio_steps_locked": ("INT", {"default": 0, "min": 0, "max": 65536}),
                 "audio_steps_total": ("INT", {"default": 8, "min": 1, "max": 65536}),
                 "handoff_ramp": ("INT", {"default": 0, "min": 0, "max": 4096}),
+                # (правка 1118) Мягкий выпуск последних video-токенов лока: резкая
+                # граница «залочено / сгенерировано» даёт микродёрганье на стыке,
+                # особенно на откатном ядре. 1 токен ≈ 4 кадра.
+                "video_handoff_ramp": ("INT", {"default": 0, "min": 0, "max": 32}),
             },
         }
 
@@ -140,13 +144,18 @@ class MiniMaxStudioLatentLock:
     DESCRIPTION = "Hard-lock the overlap region of an extension clip to the previous clip's tail latent."
 
     def lock(self, model, lock_video=None, video_tokens_locked=0, video_tokens_total=2,
-             lock_audio=None, audio_steps_locked=0, audio_steps_total=8, handoff_ramp=0):
+             lock_audio=None, audio_steps_locked=0, audio_steps_total=8, handoff_ramp=0,
+             video_handoff_ramp=0):
         lock_v = w_v = lock_a = w_a = None
         if lock_video is not None and video_tokens_locked > 0:
             T = max(int(video_tokens_total), int(video_tokens_locked))
             lock_v = lock_video["samples"].float()
             w_v = torch.zeros(T)
             w_v[:video_tokens_locked] = 1.0
+            v_ramp = int(video_handoff_ramp)
+            if v_ramp and video_tokens_locked > 2 * v_ramp:
+                w_v[video_tokens_locked - v_ramp:video_tokens_locked] = \
+                    1.0 - torch.arange(1, v_ramp + 1, dtype=torch.float32) / (v_ramp + 1)
         if lock_audio is not None and audio_steps_locked > 0:
             A = max(int(audio_steps_total), int(audio_steps_locked))
             lock_a = lock_audio["samples"].float()

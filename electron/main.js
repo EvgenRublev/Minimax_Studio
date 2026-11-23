@@ -731,6 +731,13 @@ ipcMain.handle('h3:core-switch', async (_e, to) => {
   coreSwitchBusy = true
   try {
     // 1) остановить ComfyUI — иначе файлы ядра заняты и перенос не получится
+    // (правка 1114) Прогресс смены ядра виден в настройках: перед каждым этапом
+    // пишем статус в .install-cache\setup_status.json (его читает
+    // /api/setup-status). Дальше по шагу 4/9 статус пишет сам установщик —
+    // распаковка, замена файлов, база ассетов, Python-пины.
+    writeSetupStatus('running', 1, 9,
+      to === 'rollback' ? 'Откат ядра: останавливаю ComfyUI…' : 'Возврат ядра 0.44: останавливаю ComfyUI…',
+      'Python держит файлы ядра — сначала гасим бэкенд, потом меняем файлы.')
     const old = comfyChild
     comfyChild = null
     if (old && old.pid) {
@@ -753,7 +760,7 @@ ipcMain.handle('h3:core-switch', async (_e, to) => {
     }
     const switchFlag = to === 'rollback' ? '-CoreRollback' : '-CoreCurrent'
     appendConsole(`[desktop] смена ядра ComfyUI: запускаю install\\install.ps1 ${switchFlag} -SkipApp\n`)
-    writeSetupStatus('running', 4, 9,
+    writeSetupStatus('running', 1, 9,
       to === 'rollback' ? 'Откат ядра ComfyUI до 0.33…' : 'Возврат ядра ComfyUI 0.44…',
       'Меняется только ядро: модели, custom_nodes, user, output и input остаются на месте. Окно можно свернуть, не закрывайте его.')
     const inst = spawnChild(POWERSHELL, [
@@ -762,16 +769,20 @@ ipcMain.handle('h3:core-switch', async (_e, to) => {
     ])
     const code = await new Promise((resolve) => inst.on('exit', (c) => resolve(c)))
     const ok = code === 0
-    writeSetupStatus(ok ? 'done' : 'error', 4, 9,
-      ok
-        ? (to === 'rollback' ? 'Ядро ComfyUI откатилось на 0.33' : 'Ядро ComfyUI вернулось на 0.44')
-        : 'Смена ядра не завершилась',
-      ok
-        ? 'ComfyUI сейчас перезапустится сам; версия ядра видна в баннере сверху.'
-        : 'Подробности в install.log; можно запустить install.bat вручную или нажать кнопку ещё раз.')
     appendConsole(`[desktop] смена ядра: установщик завершился с кодом ${code}\n`)
+    // (правка 1114) Статус держим «running» до реального запуска бэкенда:
+    // иначе карточка в настройках показывала «готово» ещё до старта ComfyUI.
+    if (!ok) {
+      writeSetupStatus('error', 9, 9,
+        'Смена ядра не завершилась',
+        'Подробности в install.log; можно запустить install.bat вручную или нажать кнопку ещё раз.')
+      return { ok: false, error: `Установщик завершился с кодом ${code} — подробности в «Консоли» и install.log`, version: comfyCoreVersion(resolveComfyCore(COMFY_ROOT)) }
+    }
     // 3) поднять ComfyUI заново (startComfy сам синхронизирует патчи того набора,
     //    который соответствует новой версии ядра)
+    writeSetupStatus('running', 9, 9,
+      'Запускаю ComfyUI на новом ядре…',
+      'Обычно 20–60 с: загрузка модулей и sync патчей. Окно можно свернуть.')
     const child = startComfy()
     let up = false
     if (child) {
@@ -786,14 +797,17 @@ ipcMain.handle('h3:core-switch', async (_e, to) => {
       }
     }
     const ver = comfyCoreVersion(resolveComfyCore(COMFY_ROOT))
-    if (!ok) {
-      return { ok: false, error: `Установщик завершился с кодом ${code} — подробности в «Консоли» и install.log`, version: ver }
-    }
     // Раньше сюда возвращался ok даже когда ComfyUI не поднялся: UI писал
     // «ядро обновлено, ComfyUI перезапущен», а бэкенд лежал. Честно сообщаем.
     if (!up) {
+      writeSetupStatus('error', 9, 9,
+        'Ядро установлено, но ComfyUI не запустился',
+        `Версия ${ver || '?'}: подробности в «Консоли».`)
       return { ok: false, error: `Ядро ${ver || '?'} установлено, но ComfyUI не поднялся за 240 с — подробности в «Консоли»`, version: ver }
     }
+    writeSetupStatus('done', 9, 9,
+      to === 'rollback' ? 'Ядро ComfyUI откатилось на 0.33' : 'Ядро ComfyUI вернулось на 0.44',
+      'ComfyUI перезапущен на новом ядре; версия видна в баннере сверху.')
     return { ok: true, version: ver }
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) }

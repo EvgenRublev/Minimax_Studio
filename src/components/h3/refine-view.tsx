@@ -836,7 +836,7 @@ export function RefineView() {
           )}
 
           {/* (правка 276) Режим размера референсов — как во вкладке
-              «Генерация» (referenceDetail), дефолт Max. */}
+              «Генерация» (referenceDetail), дефолт Match (правка 1117). */}
           <div className="space-y-2">
             <Label
               className="text-xs text-muted-foreground font-medium"

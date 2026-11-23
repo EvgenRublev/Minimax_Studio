@@ -499,7 +499,7 @@ export function buildControlNetWorkflow(p: ControlNetGenParams): Record<string, 
     firstSamplerSteps: p.firstSamplerSteps,
     // Всего шагов в расписании pass 1 (undefined = точка сплита, «6 из 6»).
     firstSamplerTotalSteps: p.firstSamplerTotalSteps,
-    refImageSize: p.refImageSize ?? 'max', // (правка 511) дефолт max
+    refImageSize: p.refImageSize ?? 'match', // (правка 1117) дефолт match
     outputSubfolder: p.outputSubfolder ?? '',
     videoFormat: p.videoFormat,
     customLoras: p.customLoras,

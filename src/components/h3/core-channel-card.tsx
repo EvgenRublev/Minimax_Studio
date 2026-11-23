@@ -31,6 +31,8 @@ export interface CoreVersionInfo {
   currentMin?: string
   rollbackMin?: string
   rollbackMax?: string
+  /** (правка 1115) какие настройки поддерживает установленное ядро */
+  capabilities?: { veda?: boolean }
   /** канал, выбранный пользователем: 'rollback' | 'current' | '' */
   channel?: string
   outdated?: boolean
@@ -55,6 +57,17 @@ export function useCoreVersion(pollMs = 0) {
   return { info, refresh }
 }
 
+/** (правка 1114) Строка прогресса из /api/setup-status (её пишут установщик и Electron). */
+interface SetupProgress {
+  state?: 'running' | 'done' | 'error'
+  step?: number
+  total?: number
+  title?: string
+  hint?: string
+  detail?: string
+  elapsed_min?: number
+}
+
 /**
  * Карточка «Ядро ComfyUI» в настройках: версия, поколение и обе кнопки
  * переключения. Ответ за себя не держит — состояние приходит с
@@ -65,6 +78,26 @@ export function CoreChannelCard() {
   const { info, refresh } = useCoreVersion()
   const [busy, setBusy] = useState<'' | 'rollback' | 'current'>('')
   const [msg, setMsg] = useState<string>('')
+  const [prog, setProg] = useState<SetupProgress | null>(null)
+
+  // (правка 1114) Пока идёт смена ядра — опрашиваем статус установщика:
+  // остановка ComfyUI → архив/распаковка → замена файлов → база → Python-пины →
+  // запуск бэкенда. Раньше в карточке была только надпись «идёт смена».
+  useEffect(() => {
+    if (!busy) { setProg(null); return }
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/setup-status', { cache: 'no-store' })
+        if (!r.ok) return
+        const d = (await r.json()) as { status?: SetupProgress | null }
+        if (!cancelled && d?.status) setProg(d.status)
+      } catch { /* установщик ещё не записал статус — покажем «Готовлю…» */ }
+    }
+    void tick()
+    const timer = setInterval(tick, 700)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [busy])
 
   const canSwitch = typeof window !== 'undefined' && !!window.h3desktop?.comfy?.switchCore
   const version = info?.version || '?'
@@ -128,12 +161,35 @@ export function CoreChannelCard() {
           {' '}{tt('Вернуть актуальное ядро')}
         </Button>
       </div>
-
-      {busy && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          {tt('Идёт смена ядра: ComfyUI перезапущется сам, окно можно свернуть.')}
-        </p>
-      )}
+      {busy && (() => {
+        const total = prog?.total && prog.total > 0 ? prog.total : 9
+        const step = typeof prog?.step === 'number' ? prog.step : 0
+        const pct = step > 0 ? Math.min(99, Math.max(4, Math.round((step / total) * 100))) : 6
+        return (
+          <div className="mt-3 space-y-1.5">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-3)]">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-[width] duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="min-w-0 truncate text-foreground/90">
+                {prog?.title || tt('Готовлю смену ядра…')}
+              </span>
+              <span className="shrink-0 font-mono text-muted-foreground">
+                {step > 0 ? `${step}/${total}` : '…'}
+              </span>
+            </div>
+            {prog?.hint && <p className="text-[11px] leading-snug text-muted-foreground">{prog.hint}</p>}
+            {prog?.detail && <p className="text-[10px] font-mono text-muted-foreground/70">{prog.detail}</p>}
+            <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground/70">
+              <span>{tt('ComfyUI перезапустится сам, окно можно свернуть.')}</span>
+              {(prog?.elapsed_min ?? 0) > 0 && <span className="font-mono">· {prog?.elapsed_min} {tt('мин')}</span>}
+            </div>
+          </div>
+        )
+      })()}
       {msg && (
         <p className="mt-2 text-[11px] text-muted-foreground">{msg}</p>
       )}

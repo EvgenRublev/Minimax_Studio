@@ -934,7 +934,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // якорь внешнего вида (правка 315). Нода та же, что в режиме 'ref'
     // вкладки «Генерация» ('46:11'): латент-выход не используется, только
     // conditioning. (правка 323) Режим размера референсов — параметр
-    // refImageSize ('match' НЕ апскейлит референс, дефолт 'max'). ───
+    // refImageSize ('match' НЕ апскейлит референс — дефолт с правки 1117). ───
     '46:4': {
       inputs: { vae_name: 'minimax_h3_audio_vae_fp32.safetensors' },
       class_type: 'VAELoader',
@@ -971,7 +971,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         // сетке 17k+5 — совпадает с T загруженного латента); mp4-ветка —
         // из графа ('r_cap'). (правка 829) в цикле — 17k+5 ('r_len').
         length: loopOn ? ['r_len', 1] : latentMode ? framesGrid : ['r_cap', 1],
-        ref_image_size: p.refImageSize ?? 'max', // (правка 323)
+        ref_image_size: p.refImageSize ?? 'match', // (правка 1117, было 'max')
         clip: ['46:15', 0],
         vae: ['46:3', 0],
         audio_vae: ['46:4', 0],
@@ -2223,7 +2223,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
             // (правка 382) длина окна: mp4 — план; latent — фактические кадры
             // токен-среза (последнее окно может быть короче из-за клампа)
             length: effCap,
-            ref_image_size: p.refImageSize ?? 'max', // (правка 324) режим размера рефов, как в whole (правка 323)
+            ref_image_size: p.refImageSize ?? 'match', // (правка 1117) режим размера рефов, как в whole
             clip: ['46:15', 0],
             vae: ['46:3', 0],
             audio_vae: ['46:4', 0],

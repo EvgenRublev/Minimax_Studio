@@ -249,7 +249,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
       ...(task.sigmaStart ? { sigmaStart: task.sigmaStart } : {}),
       seed: task.seed,
       prompt: task.prompt.trim() ? task.prompt.trim() : undefined,
-      refImageSize: task.refImageSize ?? 'max', // (правка 315)
+      refImageSize: task.refImageSize ?? 'match', // (правка 1117) дефолт Match
       // (правка 407) Veda + настройки ноды — только при включённом тоггле
       ...(task.vedaAttention === true && {
         vedaAttention: true,

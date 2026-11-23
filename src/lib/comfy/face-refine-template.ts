@@ -382,7 +382,7 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
         width: ['fr_track', 4],
         height: ['fr_track', 5],
         length: ['fr_track', 6],
-        ref_image_size: p.refImageSize === 'match' ? 'match' : 'max',
+        ref_image_size: p.refImageSize === 'max' ? 'max' : 'match', // (правка 1117) дефолт match
         ...Object.fromEntries(refImages.map((_, i) => [`ref_images.ref_image_${i}`, ['fr_ref_' + i, 0]])),
       },
       class_type: 'MiniMaxH3ReferenceToVideo',

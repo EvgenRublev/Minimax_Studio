@@ -163,6 +163,15 @@ expect(/function\s+pickCorePatchSet\s*\(/.test(sync),
     const main033 = readFileSync(join(rb, 'main.py'), 'utf-8')
     expect(/_keep_free_gb = _reserve_gb \+ _headroom_gb/.test(main033),
       'comfy-patches-0.33: main.py несёт патч 967 (headroom применяется)',)
+    // (правка 1116) keyframe-гиды в context windows: без методов 0.44 якорь
+    // головы продления остаётся на абсолютной позиции в каждом окне, и первые
+    // кадры клипа пересвечиваются (видно только на откатном ядре).
+    const mb033 = readFileSync(join(rb, 'comfy', 'model_base.py'), 'utf-8')
+    for (const fn of ['def _window_payload', 'def map_context_window_to_modalities',
+      'def resize_cond_for_context_window', 'def context_window_modality_dims']) {
+      expect(mb033.includes(fn),
+        `comfy-patches-0.33: model_base.py без ${fn} — keyframes не режутся по контекстному окну`)
+    }
   }
 }
 // версия из core-version.ts (баннер) обязана совпадать с таблицей наборов

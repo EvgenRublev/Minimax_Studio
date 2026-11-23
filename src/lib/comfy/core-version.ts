@@ -98,3 +98,19 @@ export function readCoreChannel(): 'rollback' | 'current' | '' {
     return ''
   }
 }
+
+/**
+ * (правка 1115) Минимальная версия ядра для Veda Sparse Attention: пак
+ * `veda-sparse-attention` требует ComfyUI >= 0.38 (его разреженный путь
+ * работает через per-block патчи, появившиеся в 0.38). На откатном 0.33 нода
+ * импортируется, но в рантайме работать не будет — поэтому настройку прячем в
+ * интерфейсе и не даём роутам поставить узел.
+ */
+export const VEDA_MIN_CORE = '0.38.0'
+
+/** Поддерживает ли установленное ядро Veda (неизвестная версия — да, не блокируем). */
+export function coreSupportsVeda(comfyCore: string): boolean {
+  const v = parseComfyVersion(comfyCore)
+  if (!v) return true
+  return compareCoreVersions(v, VEDA_MIN_CORE) >= 0
+}

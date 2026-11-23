@@ -72,7 +72,7 @@ const DEFAULT_PARAMS: ControlNetUiParams = {
   duration: 5,
   targetShortSide: 480,
   preprocessOnly: false,
-  refImageSize: 'max', // (правка 511) было 'match'
+  refImageSize: 'match', // (правка 1117) дефолт Match во всех режимах
   pipeline: 'draft',
   compressSource: true, // (правка 512) default ON — во всех режимах
   draftSteps: 6, // (правки 890, 892) стандарт; вручную можно от 4

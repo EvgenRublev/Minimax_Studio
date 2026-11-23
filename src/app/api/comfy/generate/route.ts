@@ -11,6 +11,7 @@ import { recordPendingMeta } from '@/lib/pending-meta'
 import { recordInflight } from '@/lib/inflight-journal'
 import { loadLoras, listLoraFiles, filterBrokenLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
 import { getAppConfig } from '@/lib/app-config'
+import { coreSupportsVeda } from '@/lib/comfy/core-version' // (правка 1115)
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { resolveSourceLatent } from '@/lib/refine-meta' // (правка 420)
 import { resolveFfmpeg } from '@/lib/thumb'
@@ -529,6 +530,13 @@ export async function POST(req: NextRequest) {
       return Math.max(d, maxClip)
     })()
     const genSeqTokens = h3TransientGB(genCanvas.w, genCanvas.h, framesForDuration(genDurSec)).seq
+    // (правка 1115) Veda Sparse Attention требует ядро >= 0.38: на откатном
+    // 0.33 узел импортируется, но в рантайме не работает. Настройку на старом
+    // ядре не показываем, а если она осталась включённой — тихо выключаем.
+    if (body.vedaAttention === true && !coreSupportsVeda(cfg.comfyCore)) {
+      console.warn('[generate] Veda Sparse Attention недоступна на ядре ' + (cfg.comfyCore || '?') + ' — выключена')
+      body.vedaAttention = false
+    }
     const vramGb = await gpuVramTotalGb()
     body.boundedAttention = resolveBoundedAttention(
       normalizeBoundedAttentionMode(body.boundedAttentionMode),

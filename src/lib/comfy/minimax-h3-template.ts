@@ -2894,6 +2894,10 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
               lock_audio: [`ext_atrim_${i}`, 0],
               audio_steps_locked: aOver,
               audio_steps_total: aTotal,
+              // (правка 1118) последний токен головы отпускаем плавно (вес 0.5):
+              // жёсткая граница «залочено/сгенерировано» давала микродёрганье
+              // первого нового кадра на стыке продления.
+              video_handoff_ramp: 1,
             },
             class_type: 'MiniMaxStudioLatentLock',
             _meta: { title: `Лок перекрытия клип ${i + 1} (${oTok} ток. видео / ${aOver} аудио)` },

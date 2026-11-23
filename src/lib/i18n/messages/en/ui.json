@@ -850,7 +850,6 @@
   "Вернуть актуальное ядро": "Restore the current core",
   "Возвращает ядро 0.44+ и comfy-aimdo 0.6.0": "Brings back core 0.44+ with comfy-aimdo 0.6.0",
   "Доступно в десктопной версии студии": "Available in the desktop version of the studio",
-  "Идёт смена ядра: ComfyUI перезапущется сам, окно можно свернуть.": "Switching the core: ComfyUI restarts on its own, you can minimise the window.",
   "Ядро обновлено, ComfyUI перезапущен.": "Core updated, ComfyUI has restarted.",
   "Смена ядра не удалась": "Switching the core failed",
   "Модели, custom_nodes, user, output и input остаются на месте: меняется только ядро и его Python-пины.": "Models, custom_nodes, user, output and input stay where they are: only the core and its Python pins change.",
@@ -865,5 +864,8 @@
   "Модель и LoRA": "Model and LoRA",
   "Модель": "Model",
   "не применялись": "none applied",
-  "Источник зациклен: в тайловом апскейле цикл не поддерживается — стык «конец → начало» может нарушиться. Для зацикленных видео используйте Refine «Целым».": "The source is a seamless loop: tile upscale does not support looping — the end → start seam may break. For looped videos use Refine \"Whole\"."
+  "Источник зациклен: в тайловом апскейле цикл не поддерживается — стык «конец → начало» может нарушиться. Для зацикленных видео используйте Refine «Целым».": "The source is a seamless loop: tile upscale does not support looping — the end → start seam may break. For looped videos use Refine \"Whole\".",
+  "Готовлю смену ядра…": "Preparing the core switch…",
+  "ComfyUI перезапустится сам, окно можно свернуть.": "ComfyUI will restart by itself; you can minimize the window.",
+  "мин": "min"
 }

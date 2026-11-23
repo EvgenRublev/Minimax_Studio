@@ -6,6 +6,7 @@ import path from 'path'
 import { submitRefine, submitWorkflowJson } from '@/lib/comfy/minimax-h3-client'
 import { setActivePrompt } from '@/lib/comfy/progress-tracker'
 import { getAppConfig } from '@/lib/app-config'
+import { coreSupportsVeda } from '@/lib/comfy/core-version' // (правка 1115)
 import { sanitizeFolderPath } from '@/lib/gallery-folders' // (правка 495)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import { refineDimensions, buildChunkedRefineWorkflow, planChunkWindows, refineChunkStages, windowedH3Geometry } from '@/lib/comfy/refine-template' // (правка 1095: геометрия окон для авторешения bounded)
@@ -289,10 +290,15 @@ export async function POST(req: NextRequest) {
 
     // (правка 317) Режим размера референсов: валидация, дефолт 'max'
     // (требование пользователя — точнее идентичность).
-    const refImageSize: 'match' | 'max' = body.refImageSize === 'match' ? 'match' : 'max'
+    const refImageSize: 'match' | 'max' = body.refImageSize === 'max' ? 'max' : 'match' // (правка 1117) дефолт match
 
     // (правка 408) Veda Sparse Attention: тоггл + параметры ноды (валидация
     // формата — в refine-template через clampVedaSparsity/sanitizeVedaIndexList).
+    // (правка 1115) см. generate: Veda требует ядро >= 0.38
+    if (body.vedaAttention === true && !coreSupportsVeda(cfg.comfyCore)) {
+      console.warn('[refine] Veda Sparse Attention недоступна на этом ядре — выключена')
+      body.vedaAttention = false
+    }
     const veda = body.vedaAttention === true
       ? {
           vedaAttention: true as const,

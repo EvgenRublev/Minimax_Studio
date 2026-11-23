@@ -38,7 +38,7 @@ import { st } from '@/lib/i18n/server'
  *   targetShortSide?— короткая сторона генерации, px (default 480)
  *   controlType?    — 'depth' (default) | 'canny'
  *   refImages?      — картинки-референсы (имена файлов в input/, до 9)
- *   refImageSize?   — 'match' | 'max' (default 'max', правка 511)
+ *   refImageSize?   — 'match' | 'max' (default 'match', правки 511 → 1117)
  *   preprocessOnly? — true = только карта (depth/canny видео без генерации)
  *   compress?       — сжать контрольное видео до 480p (все режимы)
  *   pipeline?       — 'draft' | 'full'
