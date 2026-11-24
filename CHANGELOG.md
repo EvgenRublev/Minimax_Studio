@@ -9,6 +9,41 @@
 
 ---
 
+## [7.2.4] — 2026-11-25
+
+### Генерация падала на Sol-Attn + Low VRAM Attention: `'list' object has no attribute 'shape'` (правка 1130)
+
+- **Симптом.** На ядре 0.44 задача в «Генерации» умирала на первом шаге
+  сэмплирования: `AttributeError: 'list' object has no attribute 'shape'` в
+  `comfy_extras/nodes_sparse_attention.py` (`n_tokens = x.shape[0]`), в логе ноды —
+  `SamplerCustomAdvanced`. Падение через ~100 с после старта, модель уже
+  прогружена — то есть время потрачено.
+- **Причина.** В графе одновременно стоят `MiniMaxLowVRAMAttention` (KJNodes) и
+  `MiniMaxSparseAttention`/Sol-Attn. Считая блок годным для разреженной аттенти,
+  ядро подставляет в неё СВОЙ callable, а KJNodes по внутренней договорённости
+  передаёт вход аттенте СПИСКОМ (`h = [...]`, чтобы своя
+  `minimax_attn_lowmem_forward` забрала его через `x.pop()` и отпустила после
+  qkv-GEMM). Ядро ждёт тензор — отсюда `.shape` у списка. Правка 1129 сняла
+  предыдущий TypeError (`unexpected keyword argument 'attention'`) и тем самым
+  открыла путь к следующему конфликту.
+- **Что сделано.** `scripts/sync_custom_nodes.js` → `patchKjnodesLowmemCompat`
+  дописывает в `minimax_block_lowmem_forward` флаг
+  `external_attention = attention is not None` и оборачивает в список только
+  СВОЮ аттенту: `attention([h] if not external_attention else h, …)`. На ядре
+  0.33 kwarg `attention` не приходит вовсе, поведение не меняется. Патч
+  идемпотентен и добирает установки, которым уже доехала правка 1129 (они
+  апгрейдятся, а не пропускаются). Правка сделана регулярками и с сохранением
+  переводов строк файла: KJNodes в разных сборках лежит с CRLF и гуляющими
+  пробелами, а молча пропустить патч — значит оставить юзера с падением.
+  Доезжает при запуске ComfyUI: апдейт-зип папку ComfyUI не трогает.
+- Проверки без ГПУ: расширенный блок 13f в `scripts/check-comfy-sync.mjs`
+  (апстрим → пропатчен, версия 1129 → апгрейд, CRLF-файл с другими пробелами →
+  пропатчен ровно двумя добавленными строками, повторный запуск — без изменений,
+  чужой файл не трогается), всего 219 пунктов;
+  `scratchpad/optresearch/kj-lowmem-test.py` — вызов `minimax_block_lowmem_forward`
+  из файла KJNodes на заглушках: свой путь получает список, Sol-Attn — тензор;
+  `py_compile` файла KJNodes OK.
+
 ## [7.2.3] — 2026-11-24
 
 ### Ошибка `minimax_block_lowmem_forward() got an unexpected keyword argument 'attention'` (правка 1129)

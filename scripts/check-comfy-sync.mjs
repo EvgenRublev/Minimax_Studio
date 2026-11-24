@@ -580,16 +580,23 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
 }
 
 
-// 13f. (правка 1129) KJNodes lowmem-блок и ядро 0.44: у DiTBlock.forward
+// 13f. (правка 1129 + 1130) KJNodes lowmem-блок и ядро 0.44: у DiTBlock.forward
 //      появился kwarg attention=, а патченный forward KJNodes его не принимал —
 //      генерация падала с «minimax_block_lowmem_forward() got an unexpected
-//      keyword argument 'attention'». Синхронизатор обязан править этот файл
-//      при каждом запуске (апдейт не трогает ComfyUI), причём идемпотентно.
+//      keyword argument 'attention'». Второй слой той же связки (1130): KJNodes
+//      отдаёт вход аттенте СПИСКОМ, и когда ядро подставляет свой Sol-Attn, он
+//      падает уже на «'list' object has no attribute 'shape'». Синхронизатор
+//      обязан править этот файл при каждом запуске (апдейт не трогает ComfyUI),
+//      идемпотентно и с апгрейдом уже пропатченных (1129) установок.
 {
   const syncJs = read('scripts/sync_custom_nodes.js')
   expect(/function\s+patchKjnodesLowmemCompat\s*\(/.test(syncJs),
     'sync_custom_nodes.js: есть patchKjnodesLowmemCompat()')
-  expect(syncJs.includes('attention=None):'), 'sync_custom_nodes.js: патч добавляет kwarg attention в lowmem forward')
+  expect(syncJs.includes('attention=None'), 'sync_custom_nodes.js: патч добавляет kwarg attention в lowmem forward')
+  expect(syncJs.includes('external_attention = attention is not None'),
+    'sync_custom_nodes.js: патч различает свою и наружную (Sol-Attn) аттенту')
+  expect(syncJs.includes('KJ_LOWMEM_LIST_RE') && syncJs.includes('KJ_LOWMEM_HOOK_RE'),
+    'sync_custom_nodes.js: патч KJNodes идёт регулярками (не зависит от пробелов и CRLF)')
   expect(/patchKjnodesLowmemCompat\(comfyRoot\)/.test(syncJs),
     'sync_custom_nodes.js: патч применяется внутри syncStudioNodes (апдейт + start.bat)')
 
@@ -607,20 +614,58 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     '    pass',
     '',
   ].join('\n')
+  // Как выглядит файл у тех, кому уже доехала правка 1129 (kwarg есть, h всё
+  // ещё списком) — их установка обязана быть обновлена, а не пропущена.
+  const v1129Fn = oldFn
+    .replace('transformer_options={}):', 'transformer_options={}, attention=None):')
+    .replace('    # DiTBlock.forward, but hands h to attn in a list',
+      '    attention = self.attn if attention is None else attention\n    # DiTBlock.forward, but hands h to attn in a list')
+    .replace('self.attn(h, rope_freqs', 'attention(h, rope_freqs')
   const tmp = mkdtempSync(join(tmpdir(), 'kjcompat-'))
   try {
     writeFileSync(join(tmp, 'main.py'), '')
     mkdirSync(dirname(join(tmp, KJ_REL)), { recursive: true })
+
+    // апстрим без наших правок
     writeFileSync(join(tmp, KJ_REL), oldFn)
     expect(patchKjnodesLowmemCompat(tmp) === true, 'kjnodes compat: старый файл патчится')
-    const patched = readFileSync(join(tmp, KJ_REL), 'utf8')
+    let patched = readFileSync(join(tmp, KJ_REL), 'utf8')
     expect(patched.includes('transformer_options={}, attention=None):'), 'kjnodes compat: kwarg attention добавлен')
-    expect(patched.includes('attention(h, rope_freqs=rope_freqs'), 'kjnodes compat: attn вызывается через attention(...)')
+    expect(patched.includes('external_attention = attention is not None'), 'kjnodes compat: наружный attention помечен')
+    expect(patched.includes('attention([h] if not external_attention else h, rope_freqs=rope_freqs'),
+      'kjnodes compat: Sol-Attn получает тензор, а не список h (правка 1130)')
+    expect(!patched.includes('h = [_mod_scale_shift('), 'kjnodes compat: h больше не список по умолчанию')
     expect(patched.includes('class MiniMaxLowVRAMAttention'), 'kjnodes compat: остальной файл не пострадал')
     expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: повторный запуск ничего не меняет')
-    writeFileSync(join(tmp, KJ_REL), oldFn.replace(
-      'transformer_options={}):', 'transformer_options={}, attention=None):'))
+
+    // уже пропатчено правкой 1129 — апгрейдим до 1130 и только один раз
+    writeFileSync(join(tmp, KJ_REL), v1129Fn)
+    expect(patchKjnodesLowmemCompat(tmp) === true, 'kjnodes compat: версия правки 1129 апгрейдится')
+    patched = readFileSync(join(tmp, KJ_REL), 'utf8')
+    expect(patched.includes('attention([h] if not external_attention else h, rope_freqs=rope_freqs'),
+      'kjnodes compat: 1129 → 1130, список только для своей аттенти')
+    expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: апгрейд идемпотентен')
+
+    // чужой файл без список-трюка — не трогаем
+    writeFileSync(join(tmp, KJ_REL), oldFn.replace('h = [_mod_scale_shift(self.norm1(x), shift_msa, scale_msa, mod_segments)]',
+      'h = something_else(self.norm1(x))'))
     expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: чужую/новую версию не трогает')
+
+    // CRLF + гуляющие пробелы (KJNodes на windows-сборках, разные версии) —
+    // пропустить патч = оставить юзера с падением, поэтому регулярки, а не строки
+    const crlfFn = oldFn
+      .replace(/\n/g, '\r\n')
+      .replace('h = [_mod_scale_shift(self.norm1(x), shift_msa, scale_msa, mod_segments)]',
+        'h = [ _mod_scale_shift( self.norm1(x), shift_msa, scale_msa, mod_segments ) ]')
+    writeFileSync(join(tmp, KJ_REL), crlfFn)
+    expect(patchKjnodesLowmemCompat(tmp) === true, 'kjnodes compat: CRLF-файл с другими пробелами тоже патчится')
+    patched = readFileSync(join(tmp, KJ_REL), 'utf8')
+    expect(patched.includes('attention([h] if not external_attention else h, rope_freqs=rope_freqs'),
+      'kjnodes compat: CRLF-вариант починен')
+    expect(!patched.includes('h = [ _mod_scale_shift('), 'kjnodes compat: список h убран и в CRLF-варианте')
+    expect(patched.split('\r\n').length === crlfFn.split('\r\n').length + 2,
+      'kjnodes compat: добавлены ровно две строки, переводы строк не смешаны')
+    expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: CRLF-вариант идемпотентен')
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

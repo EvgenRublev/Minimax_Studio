@@ -171,35 +171,65 @@ function syncStudioNodes(appRoot, comfyRoot) {
  * keyword argument 'attention'» в SamplerCustomAdvanced, как только включён
  * Low VRAM / bounded attention. Правим сигнатуру и вызов внутри функции на
  * диске; операция идемпотентна и ничего не делает на чужой/новой версии.
+ *
+ * (правка 1130) Второй шаг той же связки. KJNodes передаёт вход аттенти
+ * СПИСКОМ (`h = [...]`), чтобы своя же `minimax_attn_lowmem_forward` забрала
+ * его через `x.pop()` и отпустила после qkv-GEMM. Когда ядро подставляет СВОЙ
+ * attention (Sol-Attn, `comfy_extras/nodes_sparse_attention` →
+ * `h3_sparse_attention`), тот ждёт обычный тензор и падает на
+ * `n_tokens = x.shape[0]`: «AttributeError: 'list' object has no attribute
+ * 'shape'» — генерация умерает на первом же шаге, если в графе одновременно
+ * MiniMaxLowVRAMAttention (46:43) и Sparse Attention (Sol-Attn) (46:44).
+ * Список остаётся только для собственной аттенти блока: наружную передаём
+ * тензором. На ядре 0.33 kwarg `attention` не приходит вовсе, там поведение
+ * не меняется.
  */
 const KJ_LOWMEM_REL = 'custom_nodes/comfyui-kjnodes/nodes/minimax_nodes.py'
-const KJ_LOWMEM_SIG_OLD = 'def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}):'
-const KJ_LOWMEM_SIG_NEW = 'def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}, attention=None):'
+const KJ_LOWMEM_SIG_RE = /def minimax_block_lowmem_forward\(([^\n)]*)\):\r?\n/
+const KJ_LOWMEM_HOOK = 'attention = self.attn if attention is None else attention'
+const KJ_LOWMEM_HOOK_RE = /^([ \t]*)attention = self\.attn if attention is None else attention[ \t]*$/m
+// Список-трюк KJNodes и вызов аттенти — читаем регуляркой, а не точной строкой:
+// отступы и пробелы в разных версиях KJNodes гуляют, а молча пропустить патч
+// значит оставить юзера с падением.
+const KJ_LOWMEM_LIST_RE = /h\s*=\s*\[\s*(_mod_scale_shift\((?:[^()\n]|\([^()\n]*\))*\))\s*\]/
+const KJ_LOWMEM_CALL_RE = /(?:self\.attn|attention)\(\s*h\s*,\s*rope_freqs=/
+// Маркер нашей правки: если он есть — файл уже в актуальном состоянии.
+const KJ_LOWMEM_MARK = 'external_attention'
 
 function patchKjnodesLowmemCompat(comfyRoot) {
   const file = path.join(resolveComfyCore(comfyRoot), KJ_LOWMEM_REL)
   if (!existsSync(file)) return false
   let text
   try { text = readFileSync(file, 'utf8') } catch { return false }
-  // уже пропатчено (или апстрим сам добавил параметр) — не трогаем
-  if (text.includes(KJ_LOWMEM_SIG_NEW)) return false
-  if (!text.includes(KJ_LOWMEM_SIG_OLD)) return false
-  const start = text.indexOf(KJ_LOWMEM_SIG_OLD)
-  const after = text.indexOf('\nclass ', start)
-  const nextDef = text.indexOf('\ndef ', start)
-  const end = Math.min(...[after, nextDef].filter((n) => n > start))
-  if (!Number.isFinite(end) || end <= start) return false
-  const body = text.slice(start, end)
-  if (!body.includes('self.attn(h,')) return false
-  const patchedBody = body
-    .replace(KJ_LOWMEM_SIG_OLD, KJ_LOWMEM_SIG_NEW + '\n    attention = self.attn if attention is None else attention')
-    .replace('self.attn(h,', 'attention(h,')
-  const out = text.slice(0, start) + patchedBody + text.slice(end)
+  const sig = KJ_LOWMEM_SIG_RE.exec(text)
+  if (!sig) return false                                     // функция KJNodes не найдена
+  if (!KJ_LOWMEM_LIST_RE.test(text)) return false             // нет список-трюка: уже наш вариант или чужой апстрим
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'           // не подмешиваем LF в CRLF-файл
+  let out = text
+
+  // 1) kwarg attention= (правка 1129)
+  const params = sig[1].includes('attention=None') ? sig[1] : `${sig[1]}, attention=None`
+  const sigLine = `def minimax_block_lowmem_forward(${params}):${eol}`
+  out = out.replace(sig[0], sigLine)
+
+  // 2) выбор аттенти + пометка «наружная» (правка 1130). Для установок, куда
+  //    уже доехала правка 1129, hook на месте — добавляем только маркер.
+  if (!KJ_LOWMEM_HOOK_RE.test(out)) {
+    out = out.replace(sigLine, `${sigLine}    external_attention = attention is not None${eol}    ${KJ_LOWMEM_HOOK}${eol}`)
+  } else if (!out.includes(KJ_LOWMEM_MARK)) {
+    out = out.replace(KJ_LOWMEM_HOOK_RE, (_m, ind) => `${ind}external_attention = attention is not None${eol}${ind}${KJ_LOWMEM_HOOK}`)
+  }
+
+  // 3) h больше не список по умолчанию: список — только собственной аттенте блока
+  out = out.replace(KJ_LOWMEM_LIST_RE, (_m, expr) => `h = ${expr}`)
+  out = out.replace(KJ_LOWMEM_CALL_RE, 'attention([h] if not external_attention else h, rope_freqs=')
+
+  if (out === text) return false
   const tmp = file + '.studio-tmp'
   try {
     require('node:fs').writeFileSync(tmp, out, 'utf8')
     require('node:fs').renameSync(tmp, file)
-    console.log('[kjnodes-compat] minimax_block_lowmem_forward: добавлен kwarg attention')
+    console.log('[kjnodes-compat] minimax_block_lowmem_forward: kwarg attention + список h только для своей аттенти (правка 1129+1130)')
     return true
   } catch (err) {
     try { require('node:fs').unlinkSync(tmp) } catch { /* нет временного файла */ }
