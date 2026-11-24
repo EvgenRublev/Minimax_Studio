@@ -31,6 +31,9 @@ export const EXTRA_CATEGORIES: Array<{ key: string; label: string; exts: string[
   { key: 'text_encoders', label: 'Текстовые энкодеры (CLIP)', exts: ['.safetensors', '.bin', '.gguf'] },
   { key: 'latent_upscale_models', label: 'Латентные апскейлеры', exts: ['.safetensors', '.pt'] },
   { key: 'upscale_models', label: 'Пиксельные апскейлеры', exts: ['.safetensors', '.pt', '.pth'] },
+  // (правка 1127) Модели ассистента (.gguf): их тоже можно держать в своей
+  // папке — раньше категории не было, и LLM из «Своих папок» не находились.
+  { key: 'llm', label: 'Модели ассистента (LLM, .gguf)', exts: ['.gguf'] },
 ]
 
 /** Подпапки корня, означающие категорию (алиасы имён ComfyUI). */
@@ -45,6 +48,8 @@ const CATEGORY_ALIASES: Record<string, string> = {
   clip: 'text_encoders',
   latent_upscale_models: 'latent_upscale_models',
   upscale_models: 'upscale_models',
+  llm: 'llm',
+  gguf: 'llm',
 }
 
 /** Есть ли у папки стандартная структура models/ (подпапки-категории)? */

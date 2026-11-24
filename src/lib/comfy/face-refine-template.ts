@@ -126,6 +126,12 @@ export interface FaceRefineParams {
   gamma?: number
   /** Сглаживание кривой силы, кадры. Default 9. */
   smoothFrames?: number
+  /**
+   * (правка 1125) Сколько кадров оставить в итоге. Вход мог быть добит клоном
+   * хвоста до сетки H3 (17k+5) в роуте — здесь лишние кадры отрезаются ДО
+   * VideoCombine и латента, чтобы итог совпал с исходной длиной.
+   */
+  trimFrames?: number
   /** Картинки-референсы персонажа (имена файлов в input/). */
   refImages?: string[]
   /** Размер референсов: 'match' | 'max' (max — лучше идентичность). */
@@ -522,13 +528,30 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       class_type: 'H3FaceStitch',
       _meta: { title: 'Stitch Back' },
     },
+    // (правка 1125) вход face-refine паддится клоном последнего кадра до сетки
+    // H3 (17k+5) — здесь отрезаем добитые кадры, чтобы итог был ровно исходной
+    // длины. Без этого на последних кадрах лица был шумный квадрат: H3 добивал
+    // хвост референсным контентом, а stitch вклеивал его в реальные кадры.
+    ...(p.trimFrames && p.trimFrames > 0
+      ? {
+          fr_trim: {
+            inputs: {
+              images: ['fr_stitch', 0],
+              start_index: 0,
+              num_frames: Math.max(1, Math.round(p.trimFrames)),
+            },
+            class_type: 'GetImageRangeFromBatch',
+            _meta: { title: `Итог → ${Math.round(p.trimFrames)} кадров (сетка H3)` },
+          },
+        }
+      : {}),
 
     // ═══════════════════════════════════════════════
     //  OUTPUT (звук — из исходника)
     // ═══════════════════════════════════════════════
     fr_out: {
       inputs: {
-        images: ['fr_stitch', 0],
+        images: [p.trimFrames && p.trimFrames > 0 ? 'fr_trim' : 'fr_stitch', 0],
         audio: ['fr_src', 2],
         frame_rate: 24,
         loop_count: 0,
@@ -558,7 +581,7 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
       ? {
           fr_ls_res: {
             inputs: {
-              image: ['fr_stitch', 0],
+              image: [p.trimFrames && p.trimFrames > 0 ? 'fr_trim' : 'fr_stitch', 0],
               width: Math.ceil(p.width / 32) * 32,
               height: Math.ceil(p.height / 32) * 32,
               upscale_method: 'lanczos',

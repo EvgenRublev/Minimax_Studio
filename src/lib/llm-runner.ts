@@ -13,7 +13,7 @@ import path from 'path'
 import { existsSync, statSync } from 'fs'
 import { getAppConfig } from './app-config'
 import { MODELS } from './models-config'
-import { resolveModelFilePath } from './model-downloader'
+import { resolveModelFilePath, resolveRegistryModelPath } from './model-downloader'
 
 const execFileAsync = promisify(execFile)
 
@@ -242,6 +242,11 @@ export function llmModelPath(): string {
   if (llmBackend() === 'bonsai') return llmBonsaiPaths().model
   // Резолвим через MODELS + активную модель (правка 52): так корректно
   // работают и кванты Gemma в llm/, и Qwen3.5 9B в подпапке llm/qwen3.5-9b/.
+  // (правка 1127) Ищем и в ComfyUI/models, и во «Своих папках моделей»:
+  // раньше проверка «модель скачана» внешние папки учитывала, а движок искал
+  // только в ComfyUI/models — пользователь видел галку, а ассистент не стартовал.
+  const resolved = resolveRegistryModelPath(activeLlmModelId())
+  if (resolved) return resolved
   const def = MODELS.find((m) => m.id === activeLlmModelId())
   const raw = path.join(cfg.comfyCore, 'models', def?.relPath ?? 'llm')
   // (правка 732) Модель могла быть положена папкой с именем файла — отдаём
@@ -269,6 +274,9 @@ function llmMmprojPath(): string | null {
   const mmId = activeLlmModelId() === 'llm_assistant_qwen'
     ? 'llm_assistant_qwen_mmproj'
     : 'llm_assistant_mmproj'
+  // (правка 1127) …и во внешних папках моделей тоже.
+  const resolved = resolveRegistryModelPath(mmId)
+  if (resolved) return resolved
   const def = MODELS.find((m) => m.id === mmId)
   if (!def) return null
   const p = path.join(cfg.comfyCore, 'models', def.relPath)

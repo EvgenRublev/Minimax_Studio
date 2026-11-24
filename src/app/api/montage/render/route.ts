@@ -349,43 +349,54 @@ function parseSpeed(v: number | string | null | undefined): number {
   return Math.round(n * 1000) / 1000
 }
 
-/** (правка 848, 859, 861) чистка 5-точечной 2D-кривой (или legacy 3-точечной) */
+/**
+ * (правка 1124) Чистка кривой цвета: список точек ЛЮБОЙ длины (как в UI),
+ * плюс legacy-форматы — 5-точечный массив и совсем старый [y1,y2,y3].
+ * Неявные концы (0,0)/(1,1) отбрасываются: их добавляет fmtCurve.
+ */
 function cleanCurveChannel(raw: unknown): CurveNode[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null
   const clamp01 = (v: unknown, def: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, Math.round(v * 1000) / 1000)) : def
+
+  const finish = (list: CurveNode[]): CurveNode[] | null => {
+    const sorted = list
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+      .map(([x, y]) => [clamp01(x, 0), clamp01(y, 0)] as CurveNode)
+      .sort((a, b) => a[0] - b[0])
+      // неявные концы кривой
+      .filter(([x, y]) => !((x <= 0.004 || x >= 0.996) && Math.abs(y - x) <= 0.004))
+    // строгое возрастание x для фильтра ffmpeg curves
+    const nodes: CurveNode[] = []
+    for (const n of sorted) {
+      const prev = nodes[nodes.length - 1]
+      if (prev && n[0] - prev[0] < 0.015) continue
+      nodes.push(n)
+    }
+    return nodes.length ? nodes : null
+  }
+
   // legacy-формат: [y1, y2, y3] на x = 0.25, 0.5, 0.75
   if (raw.length === 3 && typeof raw[0] === 'number') {
-    const y1 = clamp01(raw[0], 0.25)
-    const y2 = clamp01(raw[1], 0.5)
-    const y3 = clamp01(raw[2], 0.75)
-    if (Math.abs(y1 - 0.25) < 0.003 && Math.abs(y2 - 0.5) < 0.003 && Math.abs(y3 - 0.75) < 0.003) return null
-    return [[0, 0], [0.25, y1], [0.5, y2], [0.75, y3], [1, 1]]
+    return finish([
+      [0.25, clamp01(raw[0], 0.25)],
+      [0.5, clamp01(raw[1], 0.5)],
+      [0.75, clamp01(raw[2], 0.75)],
+    ])
   }
-  if (raw.length !== 5) return null
+
   const nodes: CurveNode[] = []
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < raw.length && i < 32; i++) {
     const item = raw[i]
     const def = i * 0.25
     if (Array.isArray(item) && item.length >= 2) {
       nodes.push([clamp01(item[0], def), clamp01(item[1], def)])
-    } else {
-      nodes.push([def, def])
+    } else if (typeof item === 'number') {
+      // совсем старый плоский список Y
+      nodes.push([def, clamp01(item, def)])
     }
   }
-  // гарантируем строгое возрастание x для фильтра ffmpeg curves
-  for (let i = 1; i < nodes.length; i++) {
-    if (nodes[i][0] <= nodes[i - 1][0] + 0.01) {
-      nodes[i][0] = Math.min(1, +(nodes[i - 1][0] + 0.015).toFixed(3))
-    }
-  }
-  for (let i = nodes.length - 2; i >= 0; i--) {
-    if (nodes[i][0] >= nodes[i + 1][0] - 0.01) {
-      nodes[i][0] = Math.max(0, +(nodes[i + 1][0] - 0.015).toFixed(3))
-    }
-  }
-  const isIdentity = nodes.every(([x, y], i) => Math.abs(x - i * 0.25) < 0.004 && Math.abs(y - i * 0.25) < 0.004)
-  return isIdentity ? null : nodes
+  return finish(nodes)
 }
 
 function cleanFx(fx?: ShotFx | null): ShotFx {
@@ -456,9 +467,10 @@ function fxChainParts(fx: ShotFx, srcW: number, srcH: number, tag: string): stri
       const nodes = cleanCurveChannel(raw)
       if (!nodes) return ''
       const pts: string[] = []
-      if (nodes[0][0] > 0.002) pts.push(`0/${nodes[0][1].toFixed(3)}`)
+      // (правка 1124) неявные концы: прямая вне заданных точек
+      if (nodes[0][0] > 0.002) pts.push('0/0')
       for (const [x, y] of nodes) pts.push(`${x.toFixed(3)}/${y.toFixed(3)}`)
-      if (nodes[nodes.length - 1][0] < 0.998) pts.push(`1/${nodes[nodes.length - 1][1].toFixed(3)}`)
+      if (nodes[nodes.length - 1][0] < 0.998) pts.push('1/1')
       return pts.join(' ')
     }
     const cparts: string[] = []
@@ -551,8 +563,6 @@ interface RenderBody {
   inputs: MontageInput[]
   /** (правка 846) настройки секвенции; не заданы = прежнее поведение */
   seq?: MontageSeq | null
-  /** (правка 720 v8) общая громкость таймлайна, 0..1; применяется к mixes-output */
-  masterVol?: number | string | null
   /** (правка 874) клипы видео-слоёв поверх базовой дорожки */
   layers?: MontageLayerInput[] | null
   /** (правка 874) аудиоклипы звуковых дорожек (.montage-audio) */
@@ -959,7 +969,6 @@ export async function POST(req: Request) {
     const FPS = nInt(seqIn.fps, 1, 120) || 24
     const FIT = ['stretch', 'cover', 'contain', 'blur'].includes(String(seqIn.fit)) ? String(seqIn.fit) : 'stretch'
     const QUAL_KEY = QUALITY[String(seqIn.quality)] ? String(seqIn.quality) : 'standard'
-    const masterVol = parseVol(body.masterVol)
     // ---- (правка 882) выбор кодировщика: auto = NVENC если есть, cpu = libx264,
     // gpu = только NVENC (400, если его нет). ----
     const CODEC = ['cpu', 'gpu', 'auto'].includes(String(seqIn.codec)) ? String(seqIn.codec) : 'auto'
@@ -1248,13 +1257,16 @@ export async function POST(req: Request) {
         ...layerAudioTags.map((t) => `[${t}]`),
       ].join('')
       parts.push(`${mixIn}amix=inputs=${mixInputs + 1}:normalize=0:duration=longest:dropout_transition=0[mix]`)
+      // (правка 1122) Общая громкость монтажки — регулятор ПРОСЛУШИВАНИЯ:
+      // в готовый файл она больше не вплавляется (раньше volume= после микса
+      // делал сохранённое видео тише, чем слышно в превью).
       const trimOut = totalOut > 0 ? `atrim=0:${totalOut.toFixed(4)},asetpts=PTS-STARTPTS,` : ''
-      const vol = masterVol !== 1 ? `volume=${masterVol.toFixed(4)}` : 'anull'
-      parts.push(`[mix]${trimOut}${vol}[aoutm]`)
-      aOutTag = 'aoutm'
-    } else if (masterVol !== 1) {
-      parts.push(`[aout]volume=${masterVol.toFixed(4)}[aoutm]`)
-      aOutTag = 'aoutm'
+      if (trimOut) {
+        parts.push(`[mix]${trimOut}anull[aoutm]`)
+        aOutTag = 'aoutm'
+      } else {
+        aOutTag = 'mix'
+      }
     }
 
     // ---- (правка 874) наложение видео-слоёв поверх базы: порядок цепочки =

@@ -188,7 +188,9 @@ type HistSnap = {
  *  0: Чёрные (0,0), 1: Тени (0.25,0.25), 2: Средние (0.5,0.5), 3: Света (0.75,0.75), 4: Белые (1,1).
  *  Каждая точка двигается и вверх/вниз (Y), и влево/вправо (X), как в DaVinci Resolve. */
 type CurveNode = [number, number]
-type CurvePts = [CurveNode, CurveNode, CurveNode, CurveNode, CurveNode]
+/** (правка 1124) Кривая — УПОРЯДОЧЕННЫЙ по X список точек любой длины.
+ *  Пустой список = прямая (identity), точек на графике нет. */
+type CurvePts = CurveNode[]
 
 type ShotCurves = {
   master?: CurvePts
@@ -228,35 +230,45 @@ type ShotFx = {
   bypassed?: Partial<Record<FxBypassKey, boolean>>
 }
 
-const DEFAULT_CURVE: CurvePts = [
-  [0, 0],
-  [0.25, 0.25],
-  [0.5, 0.5],
-  [0.75, 0.75],
-  [1, 1],
-]
-
-/** (правка 861) конвертирует как 5-точечный массив [[x,y],...], так и старый 3-точечный [y1,y2,y3] в CurvePts */
+/**
+ * (правка 1124) Нормализация: поддерживает новый список точек любой длины,
+ * legacy-формат из 5 точек и совсем старый [y1,y2,y3]. Неявные концы (0,0) и
+ * (1,1) отбрасываются — они и так есть у любой кривой, поэтому старые проекты
+ * с нетронутой диагональю открываются БЕЗ точек на графике.
+ */
 function normalizeCurvePts(raw?: unknown): CurvePts {
-  if (!Array.isArray(raw)) return DEFAULT_CURVE.map(([x, y]) => [x, y]) as CurvePts
+  const clean = (arr: CurveNode[]): CurvePts =>
+    arr
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+      .map(([x, y]) => [clamp01(x), clamp01(y)] as CurveNode)
+      .sort((a, b) => a[0] - b[0])
+      .filter(([x, y], i, all) => {
+        // неявные концы кривой
+        if ((x <= 0.004 || x >= 0.996) && Math.abs(y - x) <= 0.004) return false
+        // точки, схлопнувшиеся по X
+        const prev = all[i - 1]
+        return !prev || x - prev[0] > 0.004
+      })
+
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  // legacy [y1, y2, y3] на x = 0.25 / 0.5 / 0.75
   if (raw.length === 3 && typeof raw[0] === 'number') {
-    return [
-      [0, 0],
+    return clean([
       [0.25, clamp01(Number(raw[0]))],
       [0.5, clamp01(Number(raw[1]))],
       [0.75, clamp01(Number(raw[2]))],
-      [1, 1],
-    ]
+    ])
   }
-  if (raw.length === 5 && Array.isArray(raw[0])) {
-    return raw.map((p, i) => {
-      const def = i * 0.25
-      const x = Array.isArray(p) && Number.isFinite(p[0]) ? clamp01(Number(p[0])) : def
-      const y = Array.isArray(p) && Number.isFinite(p[1]) ? clamp01(Number(p[1])) : def
-      return [x, y] as CurveNode
-    }) as CurvePts
+  if (!Array.isArray(raw[0])) return []
+  const pts: CurveNode[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const p = raw[i] as unknown
+    const def = i * 0.25
+    const x = Array.isArray(p) && Number.isFinite(p[0]) ? clamp01(Number(p[0])) : def
+    const y = Array.isArray(p) && Number.isFinite(p[1]) ? clamp01(Number(p[1])) : def
+    pts.push([x, y])
   }
-  return DEFAULT_CURVE.map(([x, y]) => [x, y]) as CurvePts
+  return clean(pts)
 }
 
 /** (правка 849) настройки секвенции (правка 846 бэкенда) */
@@ -411,11 +423,10 @@ function effRange(s: MontageShot): { start: number; end: number } {
   return { start, end }
 }
 
-/** (правка 859, 861) отличается ли канал 5-точечной кривой от линейной диагонали */
+/** (правка 1124) отличается ли канал от прямой: любая точка вне диагонали y = x */
 function isCurveActive(raw?: unknown): boolean {
-  if (!raw) return false
   const pts = normalizeCurvePts(raw)
-  return pts.some(([x, y], i) => Math.abs(x - i * 0.25) > 0.004 || Math.abs(y - i * 0.25) > 0.004)
+  return pts.some(([x, y]) => Math.abs(y - x) > 0.004)
 }
 
 function hasCurves(c?: ShotCurves): boolean {
@@ -424,28 +435,33 @@ function hasCurves(c?: ShotCurves): boolean {
 }
 
 /**
- * (правка 859, 861) Монотонная кубическая интерполяция (Фрич–Карлсон, как в DaVinci Resolve)
- * по 5 узлам [x_i, y_i] с произвольными X и Y (0 <= x0 < x1 < x2 < x3 < x4 <= 1).
- * Слева от x0 удерживается y0 (точка чёрного), справа от x4 — y4 (точка белого).
+ * (правка 1124) Монотонная кубическая интерполяция (Фрич–Карлсон, как в
+ * DaVinci Resolve) по ЛЮБОМУ числу узлов. Неявные концы (0,0)/(1,1) добавляются,
+ * если своих точек в 0/1 нет; за крайними точками значение удерживается.
  */
 function evalCurve(raw: unknown, x: number): number {
   if (!raw || !isCurveActive(raw)) return x
   const pts = normalizeCurvePts(raw)
-  const cx = Math.max(0, Math.min(1, x))
-  if (cx <= pts[0][0]) return pts[0][1]
-  if (cx >= pts[4][0]) return pts[4][1]
+  if (pts.length === 0) return x
+  const nodes: CurveNode[] = []
+  if (pts[0][0] > 0.002) nodes.push([0, 0])
+  nodes.push(...pts)
+  if (pts[pts.length - 1][0] < 0.998) nodes.push([1, 1])
 
-  const n = 5
-  const xs = pts.map((p) => p[0])
-  const ys = pts.map((p) => p[1])
+  const cx = Math.max(0, Math.min(1, x))
+  if (nodes.length === 1) return nodes[0][1]
+  if (cx <= nodes[0][0]) return nodes[0][1]
+  if (cx >= nodes[nodes.length - 1][0]) return nodes[nodes.length - 1][1]
+
+  const n = nodes.length
+  const xs = nodes.map((p) => p[0])
+  const ys = nodes.map((p) => p[1])
   const dx: number[] = []
-  const dy: number[] = []
   const m: number[] = []
   for (let i = 0; i < n - 1; i++) {
     const dxi = Math.max(0.001, xs[i + 1] - xs[i])
     dx.push(dxi)
-    dy.push(ys[i + 1] - ys[i])
-    m.push(dy[i] / dxi)
+    m.push((ys[i + 1] - ys[i]) / dxi)
   }
   const tangents: number[] = [m[0]]
   for (let i = 1; i < n - 1; i++) {
@@ -1227,32 +1243,66 @@ export function MontageView() {
    *  перестроилась (вставка/перетаскивание/удаление клипа сдвигает соседние) */
   const shotOffsetsRef = useRef<Record<string, number>>({})
   /**
-   * (правка 1064) отделённый звук едет вместе со своим видеоклипом: если клип
-   * сдвинулся из-за перестроения базовой дорожки, связанный аудиоклип сдвигаем на
-   * ту же величину. Ручной перенос самого аудиоклипа на другое место не
-   * «притягивается» назад — после отделения клипы независимы.
+   * (правка 1123) Пока звук ПРИКЛЕЕН к видеоклипу (shot.audioClipKey ↔
+   * audio.fromShotKey), он обязан повторять клип целиком: позицию на шкале,
+   * подрезку по исходнику (trimStart/trimEnd) и длительность. Раньше
+   * синхронизировалась только позиция — обрезка клипа за края звук не трогала,
+   * и «единый» клип расползался. Теперь источник истины — видеоклип: звук
+   * пересчитывается из его effRange при любом изменении шотов.
+   *
+   * Скорость: звук не тянется вместе с видео (atempo для клипа отдельный), поэтому
+   * при speed ≠ 1 пара автоматически разъединяется — иначе звук поедет.
    */
   useEffect(() => {
-    const prev = shotOffsetsRef.current
     const next: Record<string, number> = {}
     for (const r of seq) next[r.shot.key] = r.offset
     shotOffsetsRef.current = next
-    const shift = new Map<string, number>()
-    for (const a of audios) {
-      if (!a.fromShotKey) continue
-      if (a.key === dragAudioKeyRef.current) continue
-      const p = prev[a.fromShotKey]
-      const n = next[a.fromShotKey]
-      if (p == null || n == null) continue
-      const d = +(n - p).toFixed(3)
-      if (Math.abs(d) > 0.01) shift.set(a.key, d)
+
+    const rows = new Map(seq.map((r) => [r.shot.key, r]))
+    const want = new Map<string, { at: number; trimStart: number; trimEnd: number }>()
+    const unlink: string[] = []
+    for (const s of shots) {
+      if (!s.audioClipKey) continue
+      const r = rows.get(s.key)
+      if (!r) continue
+      if (Math.abs(shotSpeed(s) - 1) > 0.001) {
+        // скорость изменилась — звук отвязываем, он остаётся независимым
+        unlink.push(s.key)
+        continue
+      }
+      const eff = effRange(s)
+      want.set(s.audioClipKey, {
+        at: Math.max(0, r.offset),
+        trimStart: Math.max(0, eff.start),
+        trimEnd: s.duration > 0 ? Math.max(0, s.duration - eff.end) : 0,
+      })
     }
-    if (!shift.size) return
-    setAudios((cur) => cur.map((a) => {
-      const d = shift.get(a.key)
-      return d ? { ...a, at: Math.max(0, +(a.at + d).toFixed(3)) } : a
-    }))
-  }, [seq, audios])
+
+    if (unlink.length) {
+      const set = new Set(unlink)
+      setShots((prev) => prev.map((s) => (set.has(s.key) ? { ...s, audioClipKey: undefined } : s)))
+      setAudios((prev) => prev.map((a) => (a.fromShotKey && set.has(a.fromShotKey) ? { ...a, fromShotKey: undefined } : a)))
+      showToast('Скорость клипа ≠ 1× — звук отвязан и остался на своей дорожке')
+      return
+    }
+
+    if (!want.size) return
+    setAudios((cur) => {
+      let changed = false
+      const out = cur.map((a) => {
+        if (!a.fromShotKey) return a
+        const w = want.get(a.key)
+        if (!w) return a
+        const at = +w.at.toFixed(3)
+        const ts = +w.trimStart.toFixed(3)
+        const te = +w.trimEnd.toFixed(3)
+        if (Math.abs(a.at - at) < 0.01 && Math.abs(a.trimStart - ts) < 0.01 && Math.abs(a.trimEnd - te) < 0.01) return a
+        changed = true
+        return { ...a, at, trimStart: ts, trimEnd: te }
+      })
+      return changed ? out : cur
+    })
+  }, [seq, shots])
   /** (правка 879) полная длина композиции: учитывает все дорожки, не только V1 */
   const tlEndRef = useRef(0)
   useEffect(() => { tlEndRef.current = tlEnd }, [tlEnd])
@@ -2780,13 +2830,20 @@ export function MontageView() {
   const removeShot = useCallback((key: string) => {
     pushHistory()
     stopSeq(false)
-    // (правка 1064) видеоклип и вынесенный звук — раздельные сущности: удаляя
-    // клип, его аудиоклип с дорожки НЕ выбрасываем, только снимаем привязку
-    setAudios((prev) =>
-      prev.some((a) => a.fromShotKey === key)
-        ? prev.map((a) => (a.fromShotKey === key ? { ...a, fromShotKey: undefined } : a))
-        : prev,
-    )
+    // (правка 1123) Приклеенный звук — часть клипа: удаляем его вместе с видео,
+    // а не оставляем сиротой на дорожке (как было до правки).
+    const shotNow = shotsRef.current.find((s) => s.key === key)
+    const linkedAudio = new Set<string>()
+    if (shotNow?.audioClipKey) linkedAudio.add(shotNow.audioClipKey)
+    for (const a of audiosRef.current) if (a.fromShotKey === key) linkedAudio.add(a.key)
+    if (linkedAudio.size) {
+      setAudios((prev) => prev.filter((a) => !linkedAudio.has(a.key)))
+      setSelectedAudioKey((cur) => (cur && linkedAudio.has(cur) ? null : cur))
+      setSelExtra((p) => {
+        const keep = p.audio.filter((k) => !linkedAudio.has(k))
+        return keep.length === p.audio.length ? p : { ...p, audio: keep }
+      })
+    }
     setShots((prev) => {
       const i = prev.findIndex((s) => s.key === key)
       if (i < 0) return prev
@@ -2885,6 +2942,11 @@ export function MontageView() {
         showToast('Длительность файла ещё не известна — попробуйте позже', 'error')
         return
       }
+      // (правка 1123) приклеенный звук режется вместе с видеоклипом
+      if (aud.fromShotKey) {
+        showToast('Звук приклеен к клипу — разрежьте видеоклип или сначала «Разъединить аудио»', 'error')
+        return
+      }
       const pair = splitAudioAt(aud, t)
       if (!pair) {
         showToast('Поставьте плейхед внутрь аудиоклипа (не на его край)', 'error')
@@ -2906,10 +2968,29 @@ export function MontageView() {
     const loc = sq.length && t < baseEnd - 0.001 ? findAtTime(t) : null
     const row = loc && !loc.inGap ? sq[loc.idx] : null
     const shotPair = row ? splitShotAt(row, t) : null
+    // (правка 1123) у разрезаемого клипа есть ПРИКЛЕЕННЫЙ звук → режем и его:
+    // левая половина остаётся у левого клипа, правой даём свой аудиоклип. Иначе
+    // один аудиоклип висел бы на двух клипах и разъезжался с обеими половинами.
+    let glued: { left: AudioClip; right: AudioClip; rightShotKey: string } | null = null
+    if (shotPair && row?.shot.audioClipKey) {
+      const a = audiosRef.current.find((x) => x.key === row.shot.audioClipKey)
+      const ap = a ? splitAudioAt(a, t) : null
+      if (a && ap) {
+        glued = { left: ap[0], right: ap[1], rightShotKey: shotPair[1].key }
+        shotPair[1] = { ...shotPair[1], audioClipKey: ap[1].key }
+      } else {
+        // аудио разрезать не удалось (длительность неизвестна) — правой половине
+        // возвращаем её собственный звук, иначе она осталась бы немой
+        shotPair[1] = { ...shotPair[1], audioClipKey: undefined, muted: false }
+      }
+    }
     const layPairs = layersRef.current
       .map((l) => ({ key: l.key, pair: splitLayerAt(l, t) }))
       .filter((p): p is { key: string; pair: [LayerClip, LayerClip] } => !!p.pair)
     const audPairs = audiosRef.current
+      // (правка 1123) приклеенный звук режется только вместе со своим клипом
+      // (это делает блок `glued` выше), отдельно его не трогаем
+      .filter((a) => !a.fromShotKey && (!glued || a.key !== glued.left.key))
       .map((a) => ({ key: a.key, pair: splitAudioAt(a, t) }))
       .filter((p): p is { key: string; pair: [AudioClip, AudioClip] } => !!p.pair)
     if (!shotPair && !layPairs.length && !audPairs.length) {
@@ -2921,7 +3002,7 @@ export function MontageView() {
       showToast(`Не более ${MAX_LAYER_CLIPS} клипов видео-слоёв`, 'error')
       return
     }
-    if (audPairs.length && audiosRef.current.length + audPairs.length > MAX_AUDIO_CLIPS) {
+    if ((audPairs.length || glued) && audiosRef.current.length + audPairs.length + (glued ? 1 : 0) > MAX_AUDIO_CLIPS) {
       showToast(`Не более ${MAX_AUDIO_CLIPS} аудиоклипов`, 'error')
       return
     }
@@ -2945,6 +3026,14 @@ export function MontageView() {
       const lmap = new Map(layPairs.map((p) => [p.key, p.pair]))
       setLayers((prev) => prev.flatMap((x) => (lmap.has(x.key) ? lmap.get(x.key) as [LayerClip, LayerClip] : [x])))
       setSelectedLayerKey(layPairs[0].pair[1].key)
+    }
+    if (glued) {
+      const g = glued
+      setAudios((prev) =>
+        prev.flatMap((x) =>
+          x.key === g.left.key ? [g.left, { ...g.right, fromShotKey: g.rightShotKey }] : [x],
+        ),
+      )
     }
     if (audPairs.length) {
       const amap = new Map(audPairs.map((p) => [p.key, p.pair]))
@@ -3870,7 +3959,8 @@ export function MontageView() {
               gap: s.gap && s.gap >= 0.02 ? +s.gap.toFixed(3) : undefined,
             }
           }),
-          masterVol,
+          // (правка 1122) masterVol (громкость превью на таймлайне) в рендер
+          // НЕ отправляем: она влияет только на прослушивание в монтажке.
           // (правка 874) видео-слои: трек от 0 (первый над базой), подрезка конца —
           // АБСОЛЮТНАЯ секунда конца исходника (бэкенд делает trim=start:end)
           layers: layers
@@ -3925,7 +4015,7 @@ export function MontageView() {
     } finally {
       setRendering(false)
     }
-  }, [shots, masterVol, seqSet, rendering, bump, stopSeq])
+  }, [shots, seqSet, rendering, bump, stopSeq])
 
   // (правка 845) пока идёт сборка, опрашиваем GET /api/montage/render: там
   // прогресс ffmpeg (-progress pipe:1) — без этого «Сборка…» висит без индикатора
@@ -4525,6 +4615,11 @@ export function MontageView() {
   const startFreeTrimDrag = useCallback(
     (e: React.PointerEvent, kind: 'layer' | 'audio', clip: LayerClip | AudioClip, side: 'start' | 'end') => {
       if (e.button !== 0) return // (правка 896) правой кнопкой — панорамирование таймлайна
+      // (правка 1123) приклеенный звук подрезается только вместе с клипом
+      if (kind === 'audio' && (clip as AudioClip).fromShotKey) {
+        showToast('Звук приклеен к клипу — сначала «Разъединить аудио»', 'error')
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       suppressDrag.current = true
@@ -5446,7 +5541,7 @@ export function MontageView() {
               </button>
               <div
                 className="w-20"
-                title={tt("Общая громкость таймлайна (вплавляется и в готовое видео)")}
+                title={tt("Громкость превью — только для прослушивания, на готовое видео не влияет")}
               >
                 <Slider
                   min={0}
@@ -6836,31 +6931,45 @@ export function MontageView() {
                             return { ...cur, curves: hasCurves(nextCurves) ? nextCurves : undefined }
                           })
                         }
-                        const startPointDrag = (idx: 0 | 1 | 2 | 3 | 4, ev: React.PointerEvent) => {
+                        // (правка 1124) координаты курсора → нормированные 0..1 через CTM
+                        const VIEW_W = 200
+                        const VIEW_H = 140
+                        const toNorm = (clientX: number, clientY: number): [number, number] => {
+                          const svg = curveSvgRef.current
+                          if (!svg) return [0.5, 0.5]
+                          const m = svg.getScreenCTM()
+                          if (!m) return [0.5, 0.5]
+                          const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse())
+                          return [
+                            Math.max(0, Math.min(1, p.x / VIEW_W)),
+                            Math.max(0, Math.min(1, 1 - p.y / VIEW_H)),
+                          ]
+                        }
+                        /** (правка 1124) ЛКМ по пустому месту графика — добавить точку */
+                        const addPointAt = (ev: React.PointerEvent) => {
+                          if (ev.button !== 0) return
+                          const target = ev.target as Element | null
+                          if (target?.closest('[data-curve-handle]')) return
+                          ev.preventDefault()
+                          ev.stopPropagation()
+                          const [nx, ny] = toNorm(ev.clientX, ev.clientY)
+                          // не плодим точки ближе 2% по X друг к другу
+                          if (activePts.some(([x]) => Math.abs(x - nx) < 0.02)) return
+                          pushHistory()
+                          const next = [...activePts, [+nx.toFixed(3), +ny.toFixed(3)] as CurveNode]
+                            .sort((a, b) => a[0] - b[0])
+                          setChannelPts(next)
+                        }
+                        const startPointDrag = (idx: number, ev: React.PointerEvent) => {
                           ev.preventDefault()
                           ev.stopPropagation()
                           pushHistory()
-                          const svg = curveSvgRef.current
-                          if (!svg) return
-                          // (правка 862) переводим координаты курсора в систему viewBox
-                          // (0..200 × 0..140) через CTM: раньше делили на getBoundingClientRect,
-                          // а SVG вписан с полями -> ручка «улетала» при захвате
-                          const VIEW_W = 200
-                          const VIEW_H = 140
-                          const toNorm = (clientX: number, clientY: number): [number, number] => {
-                            const m = svg.getScreenCTM()
-                            if (!m) return [0, 0]
-                            const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse())
-                            return [
-                              Math.max(0, Math.min(1, p.x / VIEW_W)),
-                              Math.max(0, Math.min(1, 1 - p.y / VIEW_H)),
-                            ]
-                          }
                           const basePts = activePts.map(([x, y]) => [x, y] as CurveNode) as CurvePts
                           const start = toNorm(ev.clientX, ev.clientY)
                           const startNode = basePts[idx]
+                          if (!startNode) return
                           const minX = idx === 0 ? 0 : +(basePts[idx - 1][0] + 0.03).toFixed(3)
-                          const maxX = idx === 4 ? 1 : +(basePts[idx + 1][0] - 0.03).toFixed(3)
+                          const maxX = idx === basePts.length - 1 ? 1 : +(basePts[idx + 1][0] - 0.03).toFixed(3)
                           const onMove = (me: PointerEvent) => {
                             const cur = toNorm(me.clientX, me.clientY)
                             // тянем ОТНОСИТЕЛЬНО точки захвата: клик по ручке не сдвигает её рывком
@@ -6878,13 +6987,12 @@ export function MontageView() {
                           window.addEventListener('pointermove', onMove)
                           window.addEventListener('pointerup', onUp)
                         }
-                        const pointLabels = ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые'] as const
                         return (
                           <div className={cn('space-y-2 rounded-lg border border-border bg-[var(--surface-2)] p-2.5', (isAllBypassed || isByp('curves')) && 'opacity-65')}>
                             <div className="flex items-center justify-between gap-1">
                               <div className="flex items-center gap-1.5">
                                 {renderBypassBtn('curves', 'Кривые цвета')}
-                                <span className="text-[11px] font-medium text-foreground/90">{tt("Кривые цвета (5 точек)")}</span>
+                                <span className="text-[11px] font-medium text-foreground/90">{tt("Кривые цвета")}</span>
                               </div>
                               <button
                                 onClick={() => { pushHistory(); setChannelPts(undefined) }}
@@ -6923,6 +7031,7 @@ export function MontageView() {
                                 ref={curveSvgRef}
                                 viewBox="0 0 200 140"
                                 className="block h-[140px] w-full select-none"
+                                onPointerDown={addPointAt}
                               >
                                 {/* сетка 4x4 */}
                                 {[1, 2, 3].map((g) => (
@@ -6955,12 +7064,11 @@ export function MontageView() {
                                   stroke={strokeColor}
                                   strokeWidth="2.2"
                                 />
-                                {/* 5 узловых точек: Чёрные (0), Тени (1), Средние (2), Света (3), Белые (4) */}
-                                {([0, 1, 2, 3, 4] as const).map((idx) => {
-                                  const [pxNorm, pyNorm] = activePts[idx]
+                                {/* (правка 1124) точки кривой: ЛКМ по графику добавляет,
+                                    ПКМ по точке — удаляет; сами точки перетаскиваются */}
+                                {activePts.map(([pxNorm, pyNorm], idx) => {
                                   const cx = Math.max(5, Math.min(195, pxNorm * 200))
                                   const cy = Math.max(5, Math.min(135, (1 - pyNorm) * 140))
-                                  const defVal = idx * 0.25
                                   return (
                                     <circle
                                       key={idx}
@@ -6973,25 +7081,22 @@ export function MontageView() {
                                       strokeWidth="2.2"
                                       className="cursor-move"
                                       onPointerDown={(ev) => startPointDrag(idx, ev)}
-                                      onDoubleClick={() => {
+                                      onContextMenu={(ev) => {
+                                        ev.preventDefault()
+                                        ev.stopPropagation()
                                         pushHistory()
-                                        const next = activePts.map(([x, y], i) =>
-                                          i === idx ? ([defVal, defVal] as CurveNode) : ([x, y] as CurveNode),
-                                        ) as CurvePts
-                                        setChannelPts(next)
+                                        setChannelPts(activePts.filter((_, i) => i !== idx))
                                       }}
                                     >
-                                      <title>{tt("{{p1}}: X={{p2}}%, Y={{p3}}% (тяните в любую сторону, двойной клик — сброс)", { p1: pointLabels[idx], p2: Math.round(pxNorm * 100), p3: Math.round(pyNorm * 100) })}</title>
+                                      <title>{tt("X={{p1}}%, Y={{p2}}% — тяните, ПКМ — удалить точку", { p1: Math.round(pxNorm * 100), p2: Math.round(pyNorm * 100) })}</title>
                                     </circle>
                                   )
                                 })}
                               </svg>
-                              <div className="pointer-events-none flex justify-between px-1.5 pb-1 text-[9px] text-muted-foreground">
-                                <span>{tt("Чёрн")}{' '} {Math.round(activePts[0][1] * 100)}%</span>
-                                <span>{tt("Тени")}{' '} {Math.round(activePts[1][1] * 100)}%</span>
-                                <span>{tt("Сред")}{' '} {Math.round(activePts[2][1] * 100)}%</span>
-                                <span>{tt("Света")}{' '} {Math.round(activePts[3][1] * 100)}%</span>
-                                <span>{tt("Бел")}{' '} {Math.round(activePts[4][1] * 100)}%</span>
+                              <div className="pointer-events-none px-1.5 pb-1 text-[9px] text-muted-foreground">
+                                {activePts.length === 0
+                                  ? tt("Прямая. ЛКМ по графику — добавить точку, ПКМ по точке — удалить")
+                                  : tt("{{p1}} точ. · ЛКМ — добавить, ПКМ по точке — удалить", { p1: activePts.length })}
                               </div>
                             </div>
                             {/* пресеты кривых */}

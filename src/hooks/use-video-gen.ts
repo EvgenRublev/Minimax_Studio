@@ -163,6 +163,9 @@ const RES_TO_ASPECT: Record<string, string> = {
   '1920x1080': '16:9 (Widescreen)',
   '1080x1920': '9:16 (Portrait Widescreen)',
   '1080x1080': '1:1 (Square)',
+  // (правка 1128) 1080p 4:3 / 3:4 — было только у 480p/720p
+  '1440x1080': '4:3 (Standard)',
+  '1080x1440': '3:4 (Portrait Standard)',
   '2520x1080': '21:9 (Ultrawide)',
 }
 

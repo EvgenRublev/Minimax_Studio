@@ -89,6 +89,30 @@ export function LlmModelSelector() {
   // Путь своей GGUF-модели из конфига: если задан — в списке появляется
   // пункт «Своя модель», и он же выбран, когда backend=custom.
   const [customPath, setCustomPath] = useState('')
+  // (правка 1121) Что реально лежит на диске: отсутствующие встроенные модели
+  // помечаем «нет файла» (раньше список врал: выбираешь — а файла нет), а свои
+  // .gguf из папки Models показываем отдельной группой, без ручного ввода пути.
+  const [missing, setMissing] = useState<Set<string>>(new Set())
+  const [localModels, setLocalModels] = useState<Array<{ path: string; name: string; sizeGb: number; source: string; mmproj?: string | null }>>([])
+
+  useEffect(() => {
+    fetch('/api/models/status')
+      .then((r) => r.json())
+      .then((d) => {
+        const m = new Set<string>()
+        for (const s of Array.isArray(d?.models) ? d.models : []) {
+          if (s?.status !== 'ready' && typeof s?.relPath === 'string') {
+            m.add(s.relPath.split(/[\\/]/).pop() as string)
+          }
+        }
+        setMissing(m)
+      })
+      .catch(() => {})
+    fetch('/api/models/llm-local')
+      .then((r) => r.json())
+      .then((d) => setLocalModels(Array.isArray(d?.models) ? d.models : []))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     fetch('/api/config')
@@ -142,7 +166,42 @@ export function LlmModelSelector() {
 
   const handleSelect = (value: string) => {
     setSelected(value)
+    if (value.startsWith('local:')) {
+      const picked = localModels.find((m) => `local:${m.path}` === value)
+      void saveLocal(value.slice('local:'.length), picked?.mmproj ?? null)
+      return
+    }
     void save(value)
+  }
+
+  /** (правка 1121) Выбор найденного на диске .gguf: это и есть своя модель. */
+  const saveLocal = async (absPath: string, mmproj?: string | null) => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          llm_custom_model: absPath,
+          llm_model: 'llm_custom',
+          // (правка 1127) зрение: mmproj из той же папки, если он там есть
+          llm_custom_mmproj: mmproj || '',
+        }),
+      })
+      if (res.ok) {
+        setCustomPath(absPath)
+        void fetch('/api/llm/stop', { method: 'POST' }).catch(() => {})
+        toast.success(t("LLM: своя модель (GGUF)"), {
+          description: t("Ассистент перезапустится с ней при следующем сообщении."),
+        })
+      } else {
+        toast.error(t("Не удалось сохранить"))
+      }
+    } catch {
+      toast.error(t("Не удалось сохранить"))
+    } finally {
+      setSaving(false)
+    }
   }
 
   // Имя файла своей модели для подписи пункта (путь может быть и папкой).
@@ -160,14 +219,35 @@ export function LlmModelSelector() {
           {customPath && (
             <option value="llm_custom">{t("Своя модель (GGUF):")}{' '} {customBase}</option>
           )}
-          {LLM_OPTIONS.map((opt) => (
-            <option key={opt.id} value={opt.filename}>
-              {t(opt.label)} — {opt.sizeLabel}
-            </option>
-          ))}
+          {localModels.length > 0 && (
+            <optgroup label={t('Найдено на диске')}>
+              {localModels.map((m) => (
+                <option key={m.path} value={`local:${m.path}`}>
+                  {m.name} — {m.sizeGb} ГБ ({m.source})
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label={t('Встроенные')}>
+            {LLM_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.filename}>
+                {t(opt.label)} — {opt.sizeLabel}{missing.has(opt.filename) ? ` · ${t('нет файла')}` : ''}
+              </option>
+            ))}
+          </optgroup>
         </select>
         {saving && <Loader2Icon className="w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground" />}
       </div>
+      {selected !== 'llm_custom' && missing.has(selected) && (
+        <p className="text-[11px] leading-snug text-amber-400/90">
+          {t('Файл этой модели не найден на диске: ассистент не запустится. Скачайте её в разделе «Ссылки» или выберите свою .gguf ниже.')}
+        </p>
+      )}
+      {localModels.length === 0 && (
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          {t('Свои .gguf ищем в папке моделей студии и в «Своих папках моделей»; путь можно задать и вручную ниже.')}
+        </p>
+      )}
       <p className="text-[11px] leading-snug text-muted-foreground">
         {customPath
           ? t("Своя модель задаётся путём в поле ниже; выбор встроенной модели в списке переключает обратно (путь при этом сохраняется).")

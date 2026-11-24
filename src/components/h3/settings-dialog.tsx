@@ -998,19 +998,41 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   className="h-7 w-full justify-start gap-1.5 text-xs font-normal"
                   onClick={async () => {
                     try {
-                      const res = await fetch('/api/dialog/folder', {
+                      // (правка 1121) Выбираем ФАЙЛ, а не папку: при нескольких
+                      // .gguf в папке сервер брал первый попавшийся. И сразу
+                      // сохраняем — раньше путь жил только в состоянии формы до
+                      // нажатия «Сохранить» на вкладке LLM.
+                      const res = await fetch('/api/dialog/file', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ title: tt("Выберите папку с моделью .gguf") }),
+                        body: JSON.stringify({
+                          title: tt("Выберите файл модели .gguf"),
+                          filter: 'Модели (*.gguf)|*.gguf|Все файлы (*.*)|*.*',
+                        }),
                       })
                       const data = await res.json()
                       if (!res.ok) {
-                        toast.error(data.error || 'Не удалось открыть диалог выбора папки.')
+                        toast.error(data.error || 'Не удалось открыть диалог выбора файла.')
                         return
                       }
-                      if (data.path) setLlmCustomModel(data.path as string)
+                      const picked = (data.path as string) || ''
+                      if (!picked) return
+                      setLlmCustomModel(picked)
+                      const saved = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ llm_custom_model: picked, llm_model: 'llm_custom' }),
+                      })
+                      if (saved.ok) {
+                        void fetch('/api/llm/stop', { method: 'POST' }).catch(() => {})
+                        toast.success(tt("Своя модель сохранена"), {
+                          description: tt("Ассистент перезапустится с ней при следующем сообщении."),
+                        })
+                      } else {
+                        toast.error(await saveErrorText(saved))
+                      }
                     } catch {
-                      toast.error(tt("Не удалось открыть диалог выбора папки."))
+                      toast.error(tt("Не удалось открыть диалог выбора файла."))
                     }
                   }}
                 >
@@ -1746,6 +1768,9 @@ function ExtraModelPathsPanel() {
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [savedOnce, setSavedOnce] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const canRestart = typeof window !== 'undefined' && !!window.h3desktop?.comfy?.restart
 
   useEffect(() => {
     fetch('/api/config')
@@ -1759,6 +1784,16 @@ function ExtraModelPathsPanel() {
       })
       .catch(() => setEntries([]))
   }, [])
+
+  /** (правка 1121) Любая правка списка (удаление, смена категории, путь)
+   *  сохраняется сама через 0.9 с — чтобы «Сохранить папки» не была
+   *  обязательным шагом, который легко пропустить. */
+  useEffect(() => {
+    if (!dirty) return
+    const id = setTimeout(() => { void save() }, 900)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, dirty])
 
   /** Добавить папку: сервер раскладывает корень со стандартной структурой
    *  ComfyUI по категориям автоматически; плоской папке ставит выбранную
@@ -1780,17 +1815,18 @@ function ExtraModelPathsPanel() {
         return
       }
       const found: Array<{ path: string; category: string }> = d.entries || []
-      setEntries((prev) => {
-        const seen = new Set(prev.map((e) => `${e.path}|${e.category}`))
-        return [
-          ...prev,
-          ...found
-            .filter((e) => !seen.has(`${e.path}|${e.category}`))
-            .map((e) => ({ ...e, uid: nextExtraEntryUid() })),
-        ]
-      })
+      const seen = new Set(entries.map((e) => `${e.path}|${e.category}`))
+      const added = found
+        .filter((e) => !seen.has(`${e.path}|${e.category}`))
+        .map((e) => ({ ...e, uid: nextExtraEntryUid() }))
+      const nextEntries = [...entries, ...added]
+      setEntries(nextEntries)
       setNewPath('')
       setDirty(true)
+      // (правка 1121) Сохраняем СРАЗУ после добавления: кнопка «Сохранить папки»
+      // стояла внизу карточки и терялась (юзер выбирал папку, видел список
+      // моделей, перезапускал — и всё пропадало). Теперь добавление = сохранение.
+      void save(nextEntries)
       toast.success(
         found.length > 1
           ? tt("Добавлено категорий: {{p1}} (структура ComfyUI)", { p1: found.length })
@@ -1803,15 +1839,16 @@ function ExtraModelPathsPanel() {
     }
   }
 
-  const save = async () => {
+  const save = async (override?: Array<{ path: string; category: string }>) => {
     setSaving(true)
     try {
+      const list = override ?? entries
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // (правка 262) Отправляем только path+category — exists не хранится
         body: JSON.stringify({
-          model_extra_paths: entries.map(({ path, category }) => ({ path, category })),
+          model_extra_paths: list.map(({ path, category }) => ({ path, category })),
         }),
       })
       const d = await res.json()
@@ -1820,6 +1857,7 @@ function ExtraModelPathsPanel() {
         return
       }
       setDirty(false)
+      setSavedOnce(true)
       if (d.restart_required) {
         toast.success(tt("Папки сохранены"), {
           description: tt("Перезапустите start.bat — ComfyUI подхватит внешние папки при старте."),
@@ -1943,9 +1981,40 @@ function ExtraModelPathsPanel() {
           </Button>
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="h-8 w-fit text-xs">
-          {saving ? tt("Сохранение…") : tt("Сохранить папки")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="h-8 w-fit text-xs">
+            {saving ? tt("Сохранение…") : tt("Сохранить папки")}
+          </Button>
+          {/* (правка 1121) Сохранение происходит само; кнопка перезапуска нужна,
+              потому что ComfyUI читает extra_model_paths.yaml только на старте. */}
+          {savedOnce && canRestart && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-fit text-xs"
+              disabled={restarting}
+              onClick={async () => {
+                setRestarting(true)
+                try {
+                  const r = await window.h3desktop?.comfy?.restart?.()
+                  if (r && r.ok === false) toast.error(r.error || tt("ComfyUI не перезапустился"))
+                  else toast.success(tt("ComfyUI перезапускается"))
+                } catch {
+                  toast.error(tt("ComfyUI не перезапустился"))
+                } finally {
+                  setRestarting(false)
+                }
+              }}
+            >
+              {restarting ? tt("Перезапуск…") : tt("Перезапустить ComfyUI")}
+            </Button>
+          )}
+        </div>
+        {savedOnce && (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {tt("Папки сохранены. Модели из них появятся после перезапуска ComfyUI.")}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -1960,6 +2029,8 @@ const EXTRA_CATEGORY_OPTIONS: Array<[string, string]> = [
   ['text_encoders', 'Энкодеры (CLIP)'],
   ['latent_upscale_models', 'Латентные апскейлеры'],
   ['upscale_models', 'Пиксельные апскейлеры'],
+  // (правка 1127) модели ассистента (.gguf) из своей папки
+  ['llm', 'Модели ассистента (LLM)'],
 ]
 
 /* ─── Manual download links (all models: URLs + target paths) ─── */

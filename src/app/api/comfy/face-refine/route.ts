@@ -24,6 +24,11 @@ import { resolveFaceDetectors } from '@/lib/comfy/face-detectors'
 import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1089)
 import { enabledCustomLoras, TURBO_LORA_NAME } from '@/lib/loras-config'
 import { st } from '@/lib/i18n/server'
+import { promisify } from 'util'
+import { execFile } from 'child_process'
+import { resolveFfmpeg } from '@/lib/thumb'
+
+const execFileAsync = promisify(execFile)
 
 /**
  * POST /api/comfy/face-refine — перерисовка мелких лиц в готовом видео
@@ -148,9 +153,11 @@ export async function POST(req: NextRequest) {
     // (правка 1048) sourceFilename — только строка (см. fps/route.ts)
     const safeName = path.basename(typeof body.sourceFilename === 'string' ? body.sourceFilename : '')
     let inName: string
-    let probe: { width: number; height: number; frames: number; durationSec: number }
+    let probe: { width: number; height: number; frames: number; durationSec: number; fps?: number }
     let promptSource: 'user' | 'draft-meta' | 'default' = 'user'
     let metaRefs: Array<{ path: string; role: string }> = []
+    /** (правка 1125) сколько кадров оставить в итоге (вход добит клоном до сетки) */
+    let trimFrames: number | undefined
 
     if (typeof body.inputSource === 'string' && body.inputSource) {
       inName = path.basename(body.inputSource)
@@ -201,6 +208,47 @@ export async function POST(req: NextRequest) {
           { error: st("Не удалось прочитать видео: {{p1}}", { p1: e instanceof Error ? e.message : String(e) }) },
           { status: 400 },
         )
+      }
+
+      // (правка 1125) Сетка H3 — 17k+5 кадров. Если исходник не по сетке, H3
+      // округляет длину ВВЕРХ и добивает хвост референсным контентом; после
+      // stitch это давало шумный квадрат на лице в последних кадрах (особенно
+      // после «Обрезать», где длина почти никогда не попадает на сетку).
+      // Паддим ВХОД клоном последнего кадра до сетки — модель видит реальные
+      // кадры, без подмены контентом, — а в графе режем итог обратно до
+      // исходной длины (GetImageRangeFromBatch). Звук VHS подрезает по -shortest.
+      if (probe.frames > 0 && (((probe.frames - 5) % 17) + 17) % 17 !== 0) {
+        let aligned = probe.frames
+        while ((((aligned - 5) % 17) + 17) % 17 !== 0) aligned++
+        const pad = aligned - probe.frames
+        if (pad > 0 && pad <= 16) {
+          try {
+            const bin = await resolveFfmpeg()
+            const ext = path.extname(inName)
+            const paddedName = `${inName.slice(0, inName.length - ext.length)}_gridpad${ext}`
+            const paddedPath = path.join(cfg.inputDir, paddedName)
+            const fps = probe.fps && probe.fps > 0 ? probe.fps : 24
+            await execFileAsync(bin, [
+              '-hide_banner', '-loglevel', 'error',
+              '-i', destPath,
+              '-vf', `tpad=stop_mode=clone:stop_duration=${(pad / fps).toFixed(4)}`,
+              '-frames:v', String(aligned),
+              '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10',
+              '-pix_fmt', 'yuv420p', '-an', '-y', paddedPath,
+            ])
+            const pp = await probeVideoFile(paddedPath)
+            if (pp.frames >= probe.frames + pad) {
+              console.log(`[face-refine] сетка H3: ${probe.frames} → ${aligned} кадров (клон хвоста), итог обрежется до ${probe.frames}`)
+              inName = paddedName
+              trimFrames = probe.frames
+            } else {
+              await fs.unlink(paddedPath).catch(() => {})
+              console.warn(`[face-refine] паддинг не дал нужную длину (${pp.frames}), работаю без него`)
+            }
+          } catch (e) {
+            console.warn(`[face-refine] паддинг до сетки не удался: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
       }
       // Промпт и референсы — из сайдкара исходника: Face Refine перерисовывает
       // ЛИЦО, сцена и персонажи должны остаться теми же.
@@ -322,6 +370,9 @@ export async function POST(req: NextRequest) {
       width: probe.width,
       height: probe.height,
       frames: probe.frames,
+      // (правка 1125) сколько кадров оставить после stitch: вход мог быть
+      // добит клоном хвоста до сетки H3, лишнее отрезаем в графе
+      trimFrames,
       outputSubfolder: outSub,
       videoFormat: getVideoFormatSettings(),
     })

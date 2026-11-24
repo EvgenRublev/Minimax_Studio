@@ -137,6 +137,54 @@ export function resolveModelFilePath(absPath: string): string | null {
   }
 }
 
+/**
+ * (правка 1127) Найти файл модели из реестра: сначала в ComfyUI/models, затем
+ * во «Своих папках моделей» (по категории и подпути). Возвращает ПУТЬ к файлу
+ * (его же использует запуск LLM — раньше существование проверялось с внешними
+ * папками, а движок искал только в ComfyUI/models, и ассистент «не видел»
+ * модель, лежащую в своей папке).
+ */
+function findRegistryModelFile(model: ModelDef): string | null {
+  const abs = modelAbsPath(model)
+  // (правка 732) Модель ассистента могли положить папкой с именем файла —
+  // resolveModelFilePath разворачивает такой каталог в файл. Для остальных
+  // моделей так не делаем: ComfyUI вложенный файл всё равно не найдёт.
+  const core = model.category === 'llm'
+    ? resolveModelFilePath(abs)
+    : (existsSync(abs) ? abs : null)
+  if (core) return core
+  // (правка 505) Внешние папки моделей: relPath 'llm/qwen3.5-9b/xxx.gguf' →
+  // категория 'llm', подпуть 'qwen3.5-9b/xxx.gguf'. Сначала полный подпуть
+  // (как его видит ComfyUI), затем — только имя файла.
+  const parts = model.relPath.split('/')
+  if (parts.length < 2) return null
+  const categoryDir = parts[0]
+  const fileName = parts[parts.length - 1]
+  const subPath = parts.slice(1).join('/')
+  const cfg = getAppConfig()
+  for (const e of (cfg.modelExtraPaths || []).filter((x) => x.category === categoryDir)) {
+    for (const candidate of subPath !== fileName ? [subPath, fileName] : [fileName]) {
+      const extPath = join(e.path, ...candidate.split('/'))
+      const extFile = model.category === 'llm'
+        ? resolveModelFilePath(extPath)
+        : (existsSync(extPath) ? extPath : null)
+      if (extFile) return extFile
+    }
+  }
+  return null
+}
+
+/** (правка 1127) Путь к файлу модели реестра или null. */
+export function resolveRegistryModelPath(modelId: string): string | null {
+  const model = MODELS.find((m) => m.id === modelId)
+  if (!model) return null
+  try {
+    return findRegistryModelFile(model)
+  } catch {
+    return null
+  }
+}
+
 /** Check if a model file already exists (and has reasonable size) */
 export function modelExists(modelId: string): boolean {
   const model = MODELS.find(m => m.id === modelId)
@@ -148,43 +196,8 @@ export function modelExists(modelId: string): boolean {
       const dir = modelAbsPath(model)
       return model.extractFiles.every(f => existsSync(join(dir, f)))
     }
-    const abs = modelAbsPath(model)
-    // (правка 732) Модель ассистента могли положить папкой с именем файла —
-    // resolveModelFilePath разворачивает такой каталог в файл. Для остальных
-    // моделей так не делаем: ComfyUI вложенный файл всё равно не найдёт.
-    const found = model.category === 'llm'
-      ? resolveModelFilePath(abs)
-      : (existsSync(abs) ? abs : null)
-    if (found && sizeOk(found, model.sizeBytes)) return true
-    // (правка 505) Проверяем внешние папки моделей (extra paths) — если
-    // пользователь указал свою папку с моделями, файл может лежать там.
-    // relPath вида 'vae/xxx.safetensors' → категория='vae', файл='xxx.safetensors'.
-    // (релиз) Сохраняем ПОДПУТЬ внутри категории: у моделей с подпапкой
-    // ('llm/qwen3.5-9b/xxx.gguf') файл во внешней папке лежит как
-    // 'qwen3.5-9b/xxx.gguf' — искали только по имени файла и не находили.
-    const parts = model.relPath.split('/')
-    if (parts.length >= 2) {
-      const categoryDir = parts[0]
-      const fileName = parts[parts.length - 1]
-      const subPath = parts.slice(1).join('/')
-      const cfg = getAppConfig()
-      const externalDirs = (cfg.modelExtraPaths || [])
-        .filter(e => e.category === categoryDir)
-        .map(e => e.path)
-      for (const extDir of externalDirs) {
-        // Сначала полный подпуть (как его видит ComfyUI), затем — только имя.
-        for (const candidate of subPath !== fileName ? [subPath, fileName] : [fileName]) {
-          const extPath = join(extDir, ...candidate.split('/'))
-          // (правка 732) Во внешней папке модель ассистента тоже может лежать
-          // каталогом с именем файла.
-          const extFile = model.category === 'llm'
-            ? resolveModelFilePath(extPath)
-            : (existsSync(extPath) ? extPath : null)
-          if (extFile && sizeOk(extFile, model.sizeBytes)) return true
-        }
-      }
-    }
-    return false
+    const found = findRegistryModelFile(model)
+    return !!found && sizeOk(found, model.sizeBytes)
   } catch {
     return false
   }
