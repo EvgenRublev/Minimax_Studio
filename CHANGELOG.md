@@ -9,6 +9,28 @@
 
 ---
 
+## [7.2.3] — 2026-11-24
+
+### Ошибка `minimax_block_lowmem_forward() got an unexpected keyword argument 'attention'` (правка 1129)
+
+- **Симптом.** На генерации падает `SamplerCustomAdvanced` с
+  `minimax_block_lowmem_forward() got an unexpected keyword argument 'attention'`.
+- **Причина.** В новых сборках ядра 0.44 `DiTBlock.forward` получил параметр
+  `attention=` (туда подставляется attention-override, например Sol-Attn), и
+  ядро передаёт его при вызове блока. Нода `MiniMaxLowVRAMAttention` из KJNodes
+  подменяет forward блока своей функцией `minimax_block_lowmem_forward`, а в
+  установленной версии KJNodes у неё этого параметра нет → TypeError, как только
+  включён Low VRAM / bounded attention. На ядре 0.33 параметра нет, поэтому там
+  не проявлялось.
+- **Фикс.** Синхронизатор `scripts/sync_custom_nodes.js` при каждом запуске
+  (электрон и `start.bat`, а также установщик) правит файл KJNodes на диске:
+  добавляет в сигнатуру `attention=None`, выбирает `self.attn` или переданный
+  override и вызывает его вместо жёсткого `self.attn`. Патч идемпотентен, на
+  уже исправленной/чужой версии файла ничего не делает. Новая проверка
+  `check:comfy-sync` гоняет патч на фикстуре (добавлено 9 пунктов, всего 207).
+- Доезжает через апдейт-зип и срабатывает при первом запуске, без переустановки
+  ComfyUI. Установленные студии на этой машине пропатчены сразу.
+
 ## [7.2.2] — 2026-11-24
 
 ### 1080p: не хватало соотношений 4:3 и 3:4 (правка 1128)

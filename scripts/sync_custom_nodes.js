@@ -157,7 +157,55 @@ function syncStudioNodes(appRoot, comfyRoot) {
       console.error(`[custom-nodes] ${name}: ${err && err.message ? err.message : err}`)
     }
   }
+  // (правка 1129) сторонняя нода KJNodes: совместимость с ядром 0.44
+  patchKjnodesLowmemCompat(comfyRoot)
   return synced
+}
+
+
+/**
+ * (правка 1129) Совместимость с ядром 0.44: у DiTBlock.forward появился kwarg
+ * `attention=` (ядро подставляет туда Sol-Attn/override), а установленная
+ * версия KJNodes патчит блок своей `minimax_block_lowmem_forward` без этого
+ * параметра. Итог — TypeError «minimax_block_lowmem_forward() got an unexpected
+ * keyword argument 'attention'» в SamplerCustomAdvanced, как только включён
+ * Low VRAM / bounded attention. Правим сигнатуру и вызов внутри функции на
+ * диске; операция идемпотентна и ничего не делает на чужой/новой версии.
+ */
+const KJ_LOWMEM_REL = 'custom_nodes/comfyui-kjnodes/nodes/minimax_nodes.py'
+const KJ_LOWMEM_SIG_OLD = 'def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}):'
+const KJ_LOWMEM_SIG_NEW = 'def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}, attention=None):'
+
+function patchKjnodesLowmemCompat(comfyRoot) {
+  const file = path.join(resolveComfyCore(comfyRoot), KJ_LOWMEM_REL)
+  if (!existsSync(file)) return false
+  let text
+  try { text = readFileSync(file, 'utf8') } catch { return false }
+  // уже пропатчено (или апстрим сам добавил параметр) — не трогаем
+  if (text.includes(KJ_LOWMEM_SIG_NEW)) return false
+  if (!text.includes(KJ_LOWMEM_SIG_OLD)) return false
+  const start = text.indexOf(KJ_LOWMEM_SIG_OLD)
+  const after = text.indexOf('\nclass ', start)
+  const nextDef = text.indexOf('\ndef ', start)
+  const end = Math.min(...[after, nextDef].filter((n) => n > start))
+  if (!Number.isFinite(end) || end <= start) return false
+  const body = text.slice(start, end)
+  if (!body.includes('self.attn(h,')) return false
+  const patchedBody = body
+    .replace(KJ_LOWMEM_SIG_OLD, KJ_LOWMEM_SIG_NEW + '\n    attention = self.attn if attention is None else attention')
+    .replace('self.attn(h,', 'attention(h,')
+  const out = text.slice(0, start) + patchedBody + text.slice(end)
+  const tmp = file + '.studio-tmp'
+  try {
+    require('node:fs').writeFileSync(tmp, out, 'utf8')
+    require('node:fs').renameSync(tmp, file)
+    console.log('[kjnodes-compat] minimax_block_lowmem_forward: добавлен kwarg attention')
+    return true
+  } catch (err) {
+    try { require('node:fs').unlinkSync(tmp) } catch { /* нет временного файла */ }
+    console.error(`[kjnodes-compat] ${err && err.message ? err.message : err}`)
+    return false
+  }
 }
 
 /** Собирает версии по схеме `<имя>-<версия>.(dist-)info` и возвращает высшую. */
@@ -383,7 +431,7 @@ function syncVhsPatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
+module.exports = { patchKjnodesLowmemCompat, syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

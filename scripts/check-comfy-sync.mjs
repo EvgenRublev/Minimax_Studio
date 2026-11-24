@@ -9,8 +9,10 @@
 // Скрипт запускается из scripts/release.mjs на шаге verify и валит релиз,
 // если связка нарушена. Ничего не пишет, только читает файлы.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 
 const ROOT = resolve(process.cwd())
 const problems = []
@@ -575,6 +577,53 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
     'generate/route: клип продления проверяется лимитом 150 с, а не MAX_GEN_FRAMES (30 с)')
   expect(read('src/components/h3/extend-view.tsx').includes('max={EXTEND_CLIP_MAX_SECONDS}'),
     'extend-view: верхняя граница поля длительности клипа берётся из константы')
+}
+
+
+// 13f. (правка 1129) KJNodes lowmem-блок и ядро 0.44: у DiTBlock.forward
+//      появился kwarg attention=, а патченный forward KJNodes его не принимал —
+//      генерация падала с «minimax_block_lowmem_forward() got an unexpected
+//      keyword argument 'attention'». Синхронизатор обязан править этот файл
+//      при каждом запуске (апдейт не трогает ComfyUI), причём идемпотентно.
+{
+  const syncJs = read('scripts/sync_custom_nodes.js')
+  expect(/function\s+patchKjnodesLowmemCompat\s*\(/.test(syncJs),
+    'sync_custom_nodes.js: есть patchKjnodesLowmemCompat()')
+  expect(syncJs.includes('attention=None):'), 'sync_custom_nodes.js: патч добавляет kwarg attention в lowmem forward')
+  expect(/patchKjnodesLowmemCompat\(comfyRoot\)/.test(syncJs),
+    'sync_custom_nodes.js: патч применяется внутри syncStudioNodes (апдейт + start.bat)')
+
+  const require = createRequire(import.meta.url)
+  const { patchKjnodesLowmemCompat } = require('./sync_custom_nodes.js')
+  const KJ_REL = join('custom_nodes', 'comfyui-kjnodes', 'nodes', 'minimax_nodes.py')
+  const oldFn = [
+    'def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}):',
+    '    # DiTBlock.forward, but hands h to attn in a list',
+    '    h = [_mod_scale_shift(self.norm1(x), shift_msa, scale_msa, mod_segments)]',
+    '    x = _mod_gate(x, gate_msa, self.attn(h, rope_freqs=rope_freqs, transformer_options=transformer_options), mod_segments)',
+    '    return _mod_gate(x, gate_mlp, self.mlp(h), mod_segments)',
+    '',
+    'class MiniMaxLowVRAMAttention(io.ComfyNode):',
+    '    pass',
+    '',
+  ].join('\n')
+  const tmp = mkdtempSync(join(tmpdir(), 'kjcompat-'))
+  try {
+    writeFileSync(join(tmp, 'main.py'), '')
+    mkdirSync(dirname(join(tmp, KJ_REL)), { recursive: true })
+    writeFileSync(join(tmp, KJ_REL), oldFn)
+    expect(patchKjnodesLowmemCompat(tmp) === true, 'kjnodes compat: старый файл патчится')
+    const patched = readFileSync(join(tmp, KJ_REL), 'utf8')
+    expect(patched.includes('transformer_options={}, attention=None):'), 'kjnodes compat: kwarg attention добавлен')
+    expect(patched.includes('attention(h, rope_freqs=rope_freqs'), 'kjnodes compat: attn вызывается через attention(...)')
+    expect(patched.includes('class MiniMaxLowVRAMAttention'), 'kjnodes compat: остальной файл не пострадал')
+    expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: повторный запуск ничего не меняет')
+    writeFileSync(join(tmp, KJ_REL), oldFn.replace(
+      'transformer_options={}):', 'transformer_options={}, attention=None):'))
+    expect(patchKjnodesLowmemCompat(tmp) === false, 'kjnodes compat: чужую/новую версию не трогает')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
 }
 
 if (problems.length) {
