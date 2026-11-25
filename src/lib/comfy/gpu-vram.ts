@@ -20,11 +20,26 @@ let cache: { gb: number; at: number } | null = null
 let nullUntil = 0
 
 /**
+ * (правка 1131) Ручной объём VRAM для тестов на «слабой карте»: vram-hog.bat
+ * держит часть памяти процессом, но vram_total остаётся прежним, и авто-ветки
+ * (bounded attention, окна, бюджет) не включаются. `MINIMAX_VRAM_GB=8` перед
+ * запуском студии заставляет все решения считать карту 8-гигабайтной.
+ */
+export function gpuVramOverrideGb(): number | null {
+  const n = parseFloat(process.env.MINIMAX_VRAM_GB || '')
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
  * Всего VRAM, ГБ; null — определить не удалось (AMD/CPU-only и т. п.).
  * Отрицательный результат тоже кэшируется, но ненадолго: иначе на машине без
  * nvidia-smi каждая отправка задачи ждала бы оба таймаута.
  */
 export async function gpuVramTotalGb(): Promise<number | null> {
+  // (правка 1131) Тестовый override — до кэша и опроса, чтобы менять его без
+  // перезапуска студии.
+  const override = gpuVramOverrideGb()
+  if (override !== null) return override
   if (cache && Date.now() - cache.at < TTL_MS) return cache.gb
   if (Date.now() < nullUntil) return null
   const gb = (await fromComfy()) ?? (await fromNvidiaSmi())
@@ -108,8 +123,10 @@ export function resolveBoundedAttention(
 
 /** Нормализация поля из тела запроса: всё, кроме on/off, трактуем как auto. */
 export function normalizeBoundedAttentionMode(v: unknown): BoundedAttentionMode {
-  // (правка 1119) дефолт 'off' (как в V6): поле не пришло или мусор → узел не ставим
-  return v === 'on' || v === 'off' || v === 'auto' ? v : 'off'
+  // (правка 1131) Дефолт 'auto', а не 'off': главный рычаг памяти на картах
+  // 8–12 ГБ должен включаться сам. 'off' остаётся явным выбором пользователя,
+  // а на 16 ГБ+ авто всё равно узел не ставит (см. resolveBoundedAttention).
+  return v === 'on' || v === 'off' || v === 'auto' ? v : 'auto'
 }
 
 async function fromComfy(): Promise<number | null> {

@@ -1,10 +1,115 @@
 from comfy_api.latest import ComfyExtension, io
+import logging
+
 import comfy.context_windows
+import comfy.model_management as mm
 import nodes
 from comfy_extras.nodes_minimax_h3 import video_latent_t
 
+LOG = logging.getLogger(__name__)
+
+
+def _studio_install_window_meta():
+    """(правка 1145, фикс) Запоминаем РЕАЛЬНЫЕ total_windows/num_frames окна.
+
+    Колбэк EVALUATE_CONTEXT_WINDOWS получает x_in — это уже упакованный
+    мультимодальный тензор (огромное число), а не видеолатент: `shape[dim]`
+    давал 5 635 008 вместо 62. Оборачиваем evaluate_context_windows и берём
+    `window_state.latents[0].shape[dim]` + len(enumerated_context_windows) —
+    ровно то, что печатает ядро в «Context window 3/4: ... of 62».
+    """
+    try:
+        handler_cls = comfy.context_windows.IndexListContextHandler
+        if getattr(handler_cls, "_studio_meta_wrapped", False):
+            return
+        orig = handler_cls.evaluate_context_windows
+
+        def _wrapped(self, calc_cond_batch, model, x_in, conds, timestep,
+                     enumerated_context_windows, model_options, window_state, *args, **kwargs):
+            try:
+                lat = window_state.latents[0]
+                self._studio_total_frames = int(lat.shape[self.dim])
+                self._studio_total_windows = int(len(enumerated_context_windows))
+            except Exception:
+                pass
+            return orig(self, calc_cond_batch, model, x_in, conds, timestep,
+                        enumerated_context_windows, model_options, window_state, *args, **kwargs)
+
+        handler_cls.evaluate_context_windows = _wrapped
+        handler_cls._studio_meta_wrapped = True
+    except Exception as exc:
+        LOG.debug("context windows: window meta wrapper not installed: %s", exc)
+
+
+_studio_install_window_meta()
+
+
+def _studio_window_vram_cleanup():
+    """(правка 1137) Очистки aimdo между окнами контекста.
+
+    Обработчик окон сэмплирует окна внутри ОДНОГО sampler-вызова. Ядро делает
+    cleanup_prefetch_queues / reset_cast_buffers / vbars_reset_watermark_limits
+    только после ноды, поэтому после первого окна очереди пре-фетча пиннят
+    страницы VBAR, watermark дренируется, и первый fault следующего окна
+    возвращает OOM/дедлок (comfy-aimdo #117): «VRAM полна, GPU ~60 Вт, стоит».
+    Это те же три действия, что делает MiniMaxStudioVRAMReset, но без unload
+    моделей — веса остаются резидентными, перечитывания с диска нет.
+    """
+    try:
+        import comfy.model_prefetch as mp
+        fn = getattr(mp, "cleanup_prefetch_queues", None)
+        if fn is not None:
+            fn()
+    except Exception:
+        pass
+    try:
+        fn = getattr(mm, "reset_cast_buffers", None)
+        if fn is not None:
+            fn()
+    except Exception:
+        pass
+    try:
+        import comfy.memory_management as mem
+        if getattr(mem, "aimdo_enabled", False):
+            import comfy_aimdo.model_vbar as vbar
+            fn = getattr(vbar, "vbars_reset_watermark_limits", None)
+            if fn is not None:
+                fn()
+    except Exception:
+        pass
+
+
+def _studio_window_cleanup_callback(handler, model, x_in, conds, timestep, model_options,
+                                    window_idx, window, *args, **kwargs):
+    # (правка 1145) Сообщаем студии, какое окно считается: верхняя панель
+    # показывает «Окно 3/4: кадры 25–46 из 62» вместо немого сэмплера.
+    try:
+        from server import PromptServer  # noqa: PLC0415 — сервер есть только в ComfyUI
+        total_windows = int(getattr(handler, "_studio_total_windows", 0) or 0)
+        total_frames = int(getattr(handler, "_studio_total_frames", 0) or 0)
+        first = int(window.index_list[0]) if getattr(window, "index_list", None) else 0
+        last = int(window.index_list[-1]) if getattr(window, "index_list", None) else 0
+        PromptServer.instance.send_sync("minimax_context_window", {
+            "index": int(window_idx) + 1,
+            "total": total_windows,
+            "start": first,
+            "end": last,
+            "frames": total_frames,
+        })
+    except Exception as exc:
+        LOG.debug("context windows: status event not sent: %s", exc)
+
+    # Первое окно — сразу после загрузки модели, чистить нечего.
+    if window_idx >= 1:
+        LOG.info("Context windows: VRAM cleanup перед окном %d (prefetch/cast/watermark)", window_idx + 1)
+        _studio_window_vram_cleanup()
+
 
 class ContextWindowsManualNode(io.ComfyNode):
+    # (правка 1137) Только H3: между окнами чистим aimdo (#117). Для Wan/LTXV
+    # окна живут на других моделях и другой памяти — там не включаем.
+    window_vram_cleanup = False
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -42,7 +147,7 @@ class ContextWindowsManualNode(io.ComfyNode):
     def execute(cls, model: io.Model.Type, context_length: int, context_overlap: int, context_schedule: str, context_stride: int, closed_loop: bool, fuse_method: str, dim: int, freenoise: bool,
                 cond_retain_index_list: list[int]=[], split_conds_to_windows: bool=False, latent_retain_index_list: list[int]=[], causal_window_fix: bool=True) -> io.Model:
         model = model.clone()
-        model.model_options["context_handler"] = comfy.context_windows.IndexListContextHandler(
+        handler = comfy.context_windows.IndexListContextHandler(
             context_schedule=context_schedule if isinstance(context_schedule, comfy.context_windows.ContextSchedule) else comfy.context_windows.get_matching_context_schedule(context_schedule),
             fuse_method=comfy.context_windows.get_matching_fuse_method(fuse_method),
             context_length=context_length,
@@ -56,6 +161,25 @@ class ContextWindowsManualNode(io.ComfyNode):
             latent_retain_index_list=latent_retain_index_list,
             causal_window_fix=causal_window_fix,
         )
+        # (правка 1137) Колбэк перед каждым окном: чистим prefetch-очереди,
+        # cast-буферы и watermark, иначе второе окно ловит OOM/дедлок aimdo.
+        if getattr(cls, "window_vram_cleanup", False):
+            try:
+                callbacks = getattr(comfy.context_windows, "IndexListCallbacks", None)
+                if callbacks is not None and hasattr(handler, "callbacks"):
+                    # (правка 1137) ВАЖНО: структура — как у
+                    # comfy.patcher_extension.add_callback (внешний ключ
+                    # "callbacks"), иначе get_all_callbacks в обработчике окон
+                    # находит пустой список и колбэк не вызывается.
+                    import comfy.patcher_extension as _pe
+                    _pe.add_callback(
+                        callbacks.EVALUATE_CONTEXT_WINDOWS,
+                        _studio_window_cleanup_callback,
+                        handler.callbacks,
+                    )
+            except Exception as exc:
+                LOG.warning("context windows: cleanup callback not registered: %s", exc)
+        model.model_options["context_handler"] = handler
         # make memory usage calculation only take into account the context window latents
         comfy.context_windows.create_prepare_sampling_wrapper(model)
         if freenoise: # no other use for this wrapper at this time
@@ -169,6 +293,9 @@ def _h3_static_phased_windows(num_frames: int, handler, model_options: dict) -> 
 
 
 class MiniMaxH3ContextWindowsNode(ContextWindowsManualNode):
+    # (правка 1137) Чистка aimdo между окнами H3 (см. _studio_window_vram_cleanup).
+    window_vram_cleanup = True
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         schema = super().define_schema()

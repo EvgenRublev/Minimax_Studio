@@ -1,5 +1,6 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (правка 386)
-import { clampPreviewFrames, PREVIEW_MAX_FRAMES } from './preview-limit'
+import { clampPreviewFrames } from './preview-limit'
+import { h3PreviewParams } from './minimax-h3-template' // (правка 1132) превью: 8 fps реального времени
 /**
  * Tile Upscale — латентный tiled-апскейл готового видео
  * (MMH3UltimateUpscale — монолитная нода: temporal chunks → latent upscale →
@@ -76,6 +77,10 @@ export interface TileUpscaleParams {
   anchorStrength?: number
   /** Upscale model name. Default: minimax_h3_latent_upscaler_3d_fp16.safetensors */
   upscaleModel?: string
+  /** (правка 1135) Где крутить 3D-апскейлер: 'cuda' (быстро, но на больших
+   *  целях не влезает в 8–12 ГБ) или 'cpu' (медленно, зато без OOM).
+   *  Роут выбирает по VRAM и целевой стороне. */
+  upscaleDevice?: 'cuda' | 'cpu'
   /** Diffusion model name. */
   diffusionModel?: string
   /** Подпапка вывода. */
@@ -104,6 +109,10 @@ export interface TileUpscaleParams {
   /** (правка 1095) token_chunk bounded attention (0 = 4096: в тайловом тракте
    *  последовательность = окно, авторазмер по канве выключил бы узел). */
   boundedTokenChunk?: number
+  /** (правка 1132) Полная VRAM карты — для бюджета кадров живого превью. */
+  vramTotalGb?: number | null
+  /** (правка 1133) Живое превью шагов (false — узла превью в графе нет). */
+  previewEnabled?: boolean
   /** (правка 386) Формат/качество видео-выхода ([video] config.ini). */
   videoFormat?: VideoFormatSettings
 }
@@ -173,6 +182,8 @@ export interface TileGeometry {
   totalChunks: number
   stepsPerUnit: number
   totalUnits: number
+  /** (правка 1134) Живое превью выключено → прогресс считать по progress-событиям. */
+  previewEnabled?: boolean
 }
 
 /**
@@ -246,6 +257,11 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   const target = p.targetResolution ?? 1080
   const { targetW, targetH, outW, outH } = computeTileTarget(srcW, srcH, target)
   const needsCrop = outW !== targetW || outH !== targetH
+  // (правка 1138) Если цель не больше источника (1080p→1080p), 3D-апскейлер
+  // не нужен: тайлы сами перерисуют кадр на той же канве. Иначе впустую
+  // прогоняем 345M-модель на весь чанк — это минуты и пик VRAM. Допуск 5%:
+  // канва /32 может «вырасти» на 32–40 px чисто из-за выравнивания.
+  const needsUpscale = targetW > srcW * 1.05 || targetH > srcH * 1.05
 
   // Temporal params (must be multiples of 17)
   const chunkLen = snap17(p.chunkFrames ?? 136)
@@ -338,28 +354,44 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
   // (правка 1045) KJ-нода принимает preview_frames 1..1024; длинная
   // генерация не должна падать из-за превью.
   const previewFramesSrc: number | [string, number] = latentMode ? framesGrid : ['tu_src', 1]
+  // (правка 1132) Превью — реальная скорость: 8 кадров/с времени клипа.
+  const previewSeconds = Math.max(1, (latentMode ? framesGrid : 124) / 24)
+  const preview = h3PreviewParams(
+    typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null,
+    previewSeconds,
+    targetW,
+    targetH,
+  )
+  // (правка 1134) Тайловый апскейл сэмплирует КАЖДЫЙ тайл заново: превью
+  // декодируется/кодируется на каждый шаг каждого тайла. 27 кадров на 2K —
+  // это лишние минуты; 12 хватает, чтобы видеть движение, и вдвое дешевле.
+  const tilePreviewFrames = Math.min(12, preview.frames)
+  const tilePreviewFps = Math.max(1, Math.min(8, Math.round(tilePreviewFrames / previewSeconds)))
   const previewFrames: number | [string, number] =
     typeof previewFramesSrc === 'number'
-      // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
-      // разрешении — держим 8 кадров и в latent-ветке (кламп на TS-стороне).
-      ? clampPreviewFrames(boundedAttn ? Math.min(previewFramesSrc, 8) : previewFramesSrc)
+      ? Math.min(tilePreviewFrames, clampPreviewFrames(previewFramesSrc))
       : ['tu_prev_clamp', 1]
   const needsPreviewClampNode = typeof previewFramesSrc !== 'number'
-  modelNodes['tu_preview'] = {
-    inputs: {
-      model: modelSrc,
-      vae: ['tu_vae', 0],
-      tiny_vae: 'taeh3.safetensors',
-      max_resolution: 1024,
-      jpeg_quality: 80,
-      suppress_default_preview: true,
-      preview_frames: previewFrames,
-      preview_fps: 6,
-    },
-    class_type: 'ModelPreviewOverrideKJ',
-    _meta: { title: 'Model Preview Override (правка 478)' },
+  // (правка 1133) Живое превью можно выключить совсем: узла нет, сэмплер
+  // берёт modelSrc напрямую.
+  const previewOn = p.previewEnabled !== false
+  if (previewOn) {
+    modelNodes['tu_preview'] = {
+      inputs: {
+        model: modelSrc,
+        vae: ['tu_vae', 0],
+        tiny_vae: 'taeh3.safetensors',
+        max_resolution: 1024,
+        jpeg_quality: 80,
+        suppress_default_preview: true,
+        preview_frames: previewFrames,
+        preview_fps: tilePreviewFps,
+      },
+      class_type: 'ModelPreviewOverrideKJ',
+      _meta: { title: 'Model Preview Override (правка 478)' },
+    }
   }
-  const previewModel: [string, number] = ['tu_preview', 0]
+  const previewModel: [string, number] = previewOn ? ['tu_preview', 0] : modelSrc
 
   const sub = p.outputSubfolder ? `${p.outputSubfolder}/` : ''
 
@@ -396,13 +428,12 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
       class_type: 'VAELoader',
       _meta: { title: 'VAE (audio)' },
     },
-    ...(needsPreviewClampNode ? {
+    ...(previewOn && needsPreviewClampNode ? {
       'tu_prev_clamp': {
-        // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
-        // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
-        inputs: { expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`, 'values.a': previewFramesSrc },
+        // (правка 1132) Кадров не больше бюджета превью (см. h3PreviewParams).
+        inputs: { expression: `min(a, ${tilePreviewFrames})`, 'values.a': previewFramesSrc },
         class_type: 'ComfyMathExpression',
-        _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+        _meta: { title: `Превью: до ${tilePreviewFrames} кадров, ${tilePreviewFps} fps` },
       },
     } : {}),
     ...modelNodes,
@@ -517,8 +548,11 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
         model_name: p.upscaleModel || 'minimax_h3_latent_upscaler_3d_fp16.safetensors',
         width: targetW,
         height: targetH,
-        device: 'cuda',
-        precision: 'fp16',
+        // (правка 1135) Большая цель на 8–12 ГБ: 3D-апскейлер на GPU — главный
+        // пик VRAM (активации растут площадью кадра), поэтому такие цели
+        // считаем на CPU. fp16 на CPU медленный/не везде — берём fp32.
+        device: p.upscaleDevice ?? 'cuda',
+        precision: p.upscaleDevice === 'cpu' ? 'fp32' : 'fp16',
         offload_model: true,
       },
       class_type: 'MMH3LatentUpscaleWithModelParams',
@@ -598,13 +632,18 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
         // per-tile сэмплинга внутри ноды попадают в превью-окошко вкладки
         model: previewModel,
         conditioning: ['tu_cond', 0],
-        // (правка 381) latent-ветка: затравка — сам загруженный латент
-        latent: [latentMode ? 'tu_lat' : 'tu_inject', 0],
+        // (правка 381) latent-ветка: затравка — сам загруженный латент.
+        // (правка 1138) Сброс перед монолитом нужен ТОЛЬКО при реальном
+        // апскейле: 3D-апскейлер идёт на GPU и не должен делить VRAM с уже
+        // загруженным текстовым энкодером (иначе его forward встаёт намертво).
+        // Когда апскейла нет (1080p→1080p), сброс только добавляет минуты.
+        latent: [needsUpscale ? 'tu_reset_in' : (latentMode ? 'tu_lat' : 'tu_inject'), 0],
         noise: ['tu_noise', 0],
         sampler: ['tu_sampler', 0],
         sigmas: ['tu_sigmas', 0],
         cfg: 1.0,
-        latent_upscale_param: ['tu_up_param', 0],
+        // (правка 1138) апскейлер подключаем только когда цель реально больше.
+        ...(needsUpscale ? { latent_upscale_param: ['tu_up_param', 0] } : {}),
         temporal_split_param: ['tu_temporal', 0],
         spatial_split_param: ['tu_spatial', 0],
       },
@@ -615,9 +654,29 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
     // ═══════════════════════════════════════════════
     //  DECODE + OUTPUT
     // ═══════════════════════════════════════════════
+    ...(needsUpscale ? {
+      'tu_reset_in': {
+        inputs: {
+          flow: [latentMode ? 'tu_lat' : 'tu_inject', 0],
+          // (правка 1140) барьер: сброс выполняется после загрузки TE и до
+          // 3D-апскейлера — иначе TE/DiT остаются в VRAM и апскейлер встаёт.
+          gate: ['tu_cond', 0],
+          label: 'перед Tile Upscale (апскейл)',
+        },
+        class_type: 'MiniMaxStudioVRAMReset',
+        _meta: { title: 'VRAM Reset (перед 3D-апскейлером)' },
+      },
+    } : {}),
+    // (правка 1135) сброс перед декодом: освобождает DiT/апскейлер под
+    // VAE-декод большой канвы (как в «Генерации» и Refine).
+    'tu_reset_out': {
+      inputs: { flow: ['tu_upscale', 0], label: 'перед декодом' },
+      class_type: 'MiniMaxStudioVRAMReset',
+      _meta: { title: 'VRAM Reset (перед декодом)' },
+    },
     'tu_decode': {
       inputs: {
-        samples: ['tu_upscale', 0],
+        samples: ['tu_reset_out', 0],
         vae: ['tu_vae', 0],
       },
       class_type: 'VAEDecode',
@@ -639,6 +698,18 @@ export function buildTileUpscaleWorkflow(p: TileUpscaleParams): Record<string, u
         _meta: { title: `Кроп → ${outW}×${outH}` },
       },
     } : {}),
+    // (правка 1146) Сохраняем AV-латент результата: повторный Refine/Tile по
+    // этому mp4 пойдёт lossless-путём, без VAE-перекодирования. Канва и длина
+    // уже на сетке (framesGrid), поэтому файл валиден для resolveSourceLatent.
+    'tu_savelat': {
+      inputs: {
+        samples: ['tu_upscale', 0],
+        filename_prefix: `${sub}latents/Minimax_Studio_tile`,
+        vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors',
+      },
+      class_type: 'MiniMaxStudioSaveAVLatent',
+      _meta: { title: 'Save AV Latent (tile upscale → lossless)' },
+    },
     'tu_out': {
       inputs: {
         frame_rate: 24,

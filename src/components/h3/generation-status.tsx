@@ -99,6 +99,20 @@ function stageLabel(
   return `Pass ${stage}/${totalStages}${stage === 1 ? firstPass : ' · детализация'}`
 }
 
+/**
+ * (правка 1145) Подпись текущего окна контекста «Частями». Раньше верхняя
+ * панель показывала только «шаг 1/3», и многоминутные окна выглядели как
+ * зависание; теперь видно, какое окно и какие кадры считаются.
+ */
+function contextWindowLabel(
+  cw?: { index: number; total: number; start: number; end: number; frames: number } | null,
+): string {
+  if (!cw || !cw.index) return ''
+  const total = cw.total > 0 ? `/${cw.total}` : ''
+  const frames = cw.frames > 0 ? ` из ${cw.frames}` : ''
+  return ` · Окно ${cw.index}${total}: кадры ${cw.start}–${cw.end}${frames}`
+}
+
 /** Live preview of the current denoising step (from ComfyUI WebSocket). */
 export function GenPreview({
   promptId,
@@ -133,6 +147,10 @@ export function GenPreview({
       total: number
       /** (правка 487) tile-upscale: модель ещё готовится, сэмплинг не начался. */
       preparing?: boolean
+      /** (правка 1134) Сэмплинг закончен — идёт декод/сохранение (минуты на 2K). */
+      finalizing?: boolean
+      /** (правка 1145) Окно контекста «Частями». */
+      contextWindow?: { index: number; total: number; start: number; end: number; frames: number } | null
     } | null
   } | null>(null)
 
@@ -150,7 +168,7 @@ export function GenPreview({
         // the KJ preview override (pass 1 only) emits nothing, so the last
         // pass-1 frame stays on screen while the label must move to 2/2.
         if (data.stage) {
-          const s = data.stage as { stage: number; totalStages: number; step: number; total: number; preparing?: boolean }
+          const s = data.stage as { stage: number; totalStages: number; step: number; total: number; preparing?: boolean; finalizing?: boolean; contextWindow?: { index: number; total: number; start: number; end: number; frames: number } | null }
           setPreviewData((prev) =>
             prev ? { ...prev, stage: s } : {
               url: '', mime: 'image/jpeg', step: 0, total: 0, width: 0, height: 0, stage: s,
@@ -192,9 +210,11 @@ export function GenPreview({
           <span className="text-[10px] text-cyan-300 font-medium">
             {/* (правка 487) фаза подготовки модели — без ложных «Тайл 1/N»;
                 правка 696 — frozen kind во время генерации */}
-            {stageOnly.preparing
+            {stageOnly.finalizing
+              ? tt("Декодирование и сохранение…")
+              : stageOnly.preparing
               ? tt("Подготовка модели…")
-              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{stageOnly.total > 0 ? tt("· шаг {{p1}}/{{p2}}", { p1: stageOnly.step, p2: stageOnly.total }) : ''}</>}
+              : <>{stageLabel(isGenerating ? (frozenKind ?? stageKind) : stageKind, stageOnly.stage, stageOnly.totalStages, passFullRes)}{contextWindowLabel(stageOnly.contextWindow)}{stageOnly.total > 0 ? tt("· шаг {{p1}}/{{p2}}", { p1: stageOnly.step, p2: stageOnly.total }) : ''}</>}
           </span>
         )}
       </div>
@@ -217,11 +237,16 @@ export function GenPreview({
   const stage = previewData.stage
   const passLabel = stage
     // (правка 487) фаза подготовки модели — без ложных «Тайл 1/N»
-    ? (stage.preparing ? 'Подготовка модели…' : stageLabel(activeKind, stage.stage, stage.totalStages, passFullRes))
+    // (правка 1134) после сэмплинга — декод/сохранение, а не «100%, шаг N/N»
+    ? (stage.finalizing
+        ? tt("Декодирование и сохранение…")
+        : stage.preparing ? 'Подготовка модели…' : stageLabel(activeKind, stage.stage, stage.totalStages, passFullRes))
     : 'Превью'
   const step = stage && stage.total > 0 ? stage.step : previewData.step
   const total = stage && stage.total > 0 ? stage.total : previewData.total
-  const stepLabel = !stage?.preparing && total > 0 ? ` · шаг ${step}/${total}` : ''
+  const stepLabel = !stage?.preparing && !stage?.finalizing && total > 0 ? ` · шаг ${step}/${total}` : ''
+  // (правка 1145) Окно контекста важнее шага: показываем его первым.
+  const windowLabel = !stage?.preparing && !stage?.finalizing ? contextWindowLabel(stage?.contextWindow) : ''
 
   return (
     // (правка 447) Рамка превью — нейтральная border-border, без голубого cyan-обвода.
@@ -257,7 +282,7 @@ export function GenPreview({
         <span className="absolute bottom-1 right-1 px-1 py-0.5 bg-black/50 rounded text-[10px] text-cyan-300">anim</span>
       )}
       <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-black/60 rounded text-[10px] text-cyan-300 font-medium flex items-center gap-1.5">
-        <span>{passLabel}{stepLabel}</span>
+        <span>{passLabel}{windowLabel}{stepLabel}</span>
         {previewData.width > 0 && previewData.height > 0 && (
           <span className="text-white/40 font-normal">{previewData.width}×{previewData.height}</span>
         )}

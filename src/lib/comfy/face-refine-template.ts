@@ -1,5 +1,5 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format'
-import { PREVIEW_MAX_FRAMES } from './preview-limit'
+import { h3PreviewParams } from './minimax-h3-template' // (правка 1132) превью: реальная скорость
 
 /**
  * Face Refine — перерисовка мелких лиц в готовом видео MiniMax H3.
@@ -154,6 +154,11 @@ export interface FaceRefineParams {
   /** (правка 1095) token_chunk bounded attention (0 = 4096; авторазмер по канве
    *  не применяется — окно face-refine короткое). */
   boundedTokenChunk?: number
+  /** (правка 1132) Кадры исходника (ffprobe) — длительность живого превью.
+   *  (правка 1133) vramTotalGb — бюджет кадров; previewEnabled — вкл/выкл. */
+  sourceFrames?: number
+  vramTotalGb?: number | null
+  previewEnabled?: boolean
   /** Diffusion model name. */
   diffusionModel?: string
   /** Турбо-LoRA (шаги должны совпадать с ней). */
@@ -298,19 +303,30 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
   // Upscale: обёртка нужна только пути сэмплинга. preview_frames — счётчик
   // кадров трекера (тот же INT, что уходит в length у H3), taeh3 — taesd-
   // декодер H3.
-  modelNodes['fr_preview'] = {
-    inputs: {
-      model: ['fr_denoise', 2],
-      vae: ['fr_vae_video', 0],
-      tiny_vae: 'taeh3.safetensors',
-      max_resolution: 1024,
-      jpeg_quality: 80,
-      suppress_default_preview: true,
-      preview_frames: ['fr_prev_clamp', 1],
-      preview_fps: 6,
-    },
-    class_type: 'ModelPreviewOverrideKJ',
-    _meta: { title: 'Model Preview Override (правка 722)' },
+  // (правка 1132) Превью — реальная скорость: 8 кадров/с времени клипа и кадров
+  // не больше бюджета tiny-VAE. (правка 1133) previewEnabled=false — узла нет.
+  const previewOn = p.previewEnabled !== false
+  const preview = h3PreviewParams(
+    p.vramTotalGb ?? null,
+    Math.max(1, (p.sourceFrames ?? 120) / 24),
+    p.canvas ?? 512,
+    p.canvas ?? 512,
+  )
+  if (previewOn) {
+    modelNodes['fr_preview'] = {
+      inputs: {
+        model: ['fr_denoise', 2],
+        vae: ['fr_vae_video', 0],
+        tiny_vae: 'taeh3.safetensors',
+        max_resolution: 1024,
+        jpeg_quality: 80,
+        suppress_default_preview: true,
+        preview_frames: ['fr_prev_clamp', 1],
+        preview_fps: preview.fps,
+      },
+      class_type: 'ModelPreviewOverrideKJ',
+      _meta: { title: 'Model Preview Override (правка 722)' },
+    }
   }
 
   return {
@@ -488,8 +504,9 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
     },
     fr_guider: {
       // (правка 722) модель с KJ-обёрткой превью; fr_sigmas — без неё.
+      // (правка 1133) превью выключено — guider берёт fr_denoise напрямую.
       // (правка 889) conditioning — хвост цепочки аудио-гайда (без галочки = fr_h3).
-      inputs: { model: ['fr_preview', 0], conditioning: p.audioGuide === true ? ['fr_aguide', 0] : ['fr_h3', 0] },
+      inputs: { model: previewOn ? ['fr_preview', 0] : ['fr_denoise', 2], conditioning: p.audioGuide === true ? ['fr_aguide', 0] : ['fr_h3', 0] },
       class_type: 'BasicGuider',
       _meta: { title: 'Guider' },
     },
@@ -599,10 +616,25 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
             class_type: 'VAEEncode',
             _meta: { title: 'VAE-кодирование итога' },
           },
+          // (правка 1146) Звук подрезаем до итоговой сетки — иначе в .latent
+          // видео 107 кадров, а аудио на исходные 120: пара A/V невалидна.
+          ...(p.trimFrames && p.trimFrames > 0
+            ? {
+                fr_ls_atrim: {
+                  inputs: {
+                    audio: ['fr_src', 2],
+                    start_index: 0,
+                    duration: Number((Math.round(p.trimFrames) / 24).toFixed(4)),
+                  },
+                  class_type: 'TrimAudioDuration',
+                  _meta: { title: `Звук → ${Math.round(p.trimFrames)} кадров` },
+                },
+              }
+            : {}),
           fr_ls_asafe: {
             inputs: {
-              audio: ['fr_src', 2],
-              fallback_seconds: Number(((p.frames ?? 120) / 24).toFixed(2)),
+              audio: p.trimFrames && p.trimFrames > 0 ? ['fr_ls_atrim', 0] : ['fr_src', 2],
+              fallback_seconds: Number((((p.trimFrames && p.trimFrames > 0 ? p.trimFrames : p.frames) ?? 120) / 24).toFixed(2)),
             },
             class_type: 'MiniMaxH3AudioOrSilent',
             _meta: { title: 'Аудио исходника (или тишина)' },
@@ -629,13 +661,14 @@ export function buildFaceRefineWorkflow(p: FaceRefineParams): Record<string, unk
         }
       : {}),
 
+    ...(previewOn ? {
     'fr_prev_clamp': {
-      // (правка 1089) bounded: tiny-VAE декодирует каждый кадр в полном
-      // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
-      inputs: { expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`, 'values.a': ['fr_track', 6] },
+      // (правка 1132) Кадров не больше бюджета превью и 8 fps реального времени.
+      inputs: { expression: `min(a, ${preview.frames})`, 'values.a': ['fr_track', 6] },
       class_type: 'ComfyMathExpression',
-      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: `Превью: до ${preview.frames} кадров, ${preview.fps} fps` },
     },
+    } : {}),
     ...modelNodes,
 
     // Картинка-референс «этого человека» (для identity_reference).

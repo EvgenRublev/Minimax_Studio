@@ -39,13 +39,15 @@ if (!existsSync(join(V33, 'main.py'))) {
 const ANCHOR = '    simple_vram_headroom = None if args.reserve_vram is None else int(args.reserve_vram * 1024 ** 3)'
 const BLOCK = [
   '    # (правка 967) --vram-headroom в ядре только парсился и нигде не применялся:',
-  '    # DynamicVRAM (comfy-aimdo) получал лишь reserve_vram. Теперь запас',
-  '    # складывается с резервом — ползунок «Запас свободной VRAM» реально держит',
-  '    # эту память свободной (с учётом чужих приложений по NVML).',
+  '    # DynamicVRAM (comfy-aimdo) получал лишь reserve_vram. Теперь ползунок',
+  '    # «Запас свободной VRAM» реально держит эту память свободной.',
+  '    #',
+  '    # (правка 1131) Здесь только reserve_vram: headroom уходит отдельным',
+  '    # per-device extra_vram_headroom в init_devices(), и aimdo складывает оба.',
+  '    # Раньше сумма попадала в простой бюджет ещё раз — на 8 ГБ это держало',
+  '    # ~5 ГБ свободными и оставляло генерации 3 ГБ.',
   '    _reserve_gb = args.reserve_vram or 0',
-  '    _headroom_gb = getattr(args, "vram_headroom", 0) or 0',
-  '    _keep_free_gb = _reserve_gb + _headroom_gb',
-  '    simple_vram_headroom = int(_keep_free_gb * 1024 ** 3) if _keep_free_gb > 0 else None',
+  '    simple_vram_headroom = int(_reserve_gb * 1024 ** 3) if _reserve_gb > 0 else None',
 ].join('\n')
 
 const SHIM = `

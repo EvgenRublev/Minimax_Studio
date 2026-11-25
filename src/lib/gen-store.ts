@@ -212,6 +212,10 @@ export interface VideoGenState {
    *  0 (default) — авторазмер по VRAM карты (на 24 ГБ кусок крупнее → меньше
    *  прогонов qkv_proj → быстрее); 2048–12288 — вручную. */
   boundedTokenChunk: number
+  /** (правка 1131) Авто-временные окна в «Генерации»: если прогноз пика VRAM
+   *  выше бюджета карты, сервер сам режет клип на окна 17n+5 кадров
+   *  (MiniMaxH3ContextWindows). true (default) — включено. */
+  autoContextWindows: boolean
   /** (правка 806) MinimaxH3LatentUpscaler3D между pass 1 и pass 2.
    *  true (default) — обученный 3D-апскейлер латентов; false — простое
    *  растягивание латента (LatentUpscale): быстрее, легче по VRAM, хуже качество. */
@@ -284,9 +288,10 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   chunkFeedForward: true,
   chunkFFChunks: 2,
   chunkFFThreshold: 4096,
-  boundedAttention: 'off', // (правка 1119) по умолчанию выкл., как в V6
-  lowVramHeadChunks: 4, // (правка 1095) 0/4 = штатное поведение KJNodes
+  boundedAttention: 'auto', // (правка 1131) дефолт 'auto': на 8–12 ГБ узел нужен всегда
+  lowVramHeadChunks: 0, // (правка 1131) 0 = авто по VRAM (4/6/8/16 групп); было 4
   boundedTokenChunk: 0, // (правка 1095) 0 = авторазмер по VRAM карты
+  autoContextWindows: true, // (правка 1131) длинный клип сам режется на окна
   latentUpscaler3D: true, // (правка 806)
   outputFolder: '',
   // (правка 829) «Зациклено» — по умолчанию выкл.
@@ -434,7 +439,7 @@ export const useGenStore = create<GenStoreState>()(
       // (правка 1012) version 10: дефолт вида лупа — 1 (движение/rotate),
       // а не 2 (звук). Старый дефолт 2 мигрируем один раз; осознанный выбор
       // 2 после миграции сохраняется.
-      version: 11,
+      version: 12,
       // (правка 804) Настройки пишутся в два места: localStorage + файл на сервере
       // (data/settings/h3-gen-store.json). Выбирается более свежая копия, поэтому
       // жёсткое убийство процесса на выходе, чистка профиля или смена origin
@@ -496,6 +501,20 @@ export const useGenStore = create<GenStoreState>()(
         // осознанные «Авто»/«Вкл» после миграции сохраняются.
         if (oldVersion < 11 && state?.video && state.video.boundedAttention === 'auto') {
           state.video = { ...state.video, boundedAttention: 'off' }
+        }
+        // (правка 1131) Курс развернулся: на 8–12 ГБ bounded attention — главный
+        // рычаг памяти, и дефолт снова 'auto'. Миграция 11 только что погасила
+        // старый 'auto', поэтому здесь возвращаем авто всем, кроме явного 'on'
+        // и явного 'off', выставленного ПОСЛЕ 11-й миграции (его не отличить от
+        // погашенного — поэтому возвращаем: пользователь сможет выключить снова).
+        // Заодно 4 группы голов = старый дефолт → 0 = авто по VRAM.
+        if (oldVersion < 12 && state?.video) {
+          const v = state.video
+          const patch: Record<string, unknown> = {}
+          if (v.boundedAttention !== 'on') patch.boundedAttention = 'auto'
+          if (v.lowVramHeadChunks === 4) patch.lowVramHeadChunks = 0
+          if (typeof v.autoContextWindows !== 'boolean') patch.autoContextWindows = true
+          if (Object.keys(patch).length) state.video = { ...v, ...patch }
         }
         return state
       },
@@ -589,18 +608,23 @@ export const useGenStore = create<GenStoreState>()(
             && result.video.boundedAttention !== 'auto') {
             result.video.boundedAttention = DEFAULT_VIDEO_STATE.boundedAttention
           }
-          // (правка 1095) размеры кусков: head_chunks 1..56 (потолок ноды),
-          // boundedTokenChunk 0 (авто) либо 512..32768.
+          // (правка 1095) размеры кусков: head_chunks 0 (авто по VRAM) либо
+          // 1..56 (потолок ноды), boundedTokenChunk 0 (авто) либо 512..32768.
           if (typeof result.video.lowVramHeadChunks !== 'number' || isNaN(result.video.lowVramHeadChunks)) {
             result.video.lowVramHeadChunks = DEFAULT_VIDEO_STATE.lowVramHeadChunks
           }
-          result.video.lowVramHeadChunks = Math.max(1, Math.min(56, Math.round(result.video.lowVramHeadChunks)))
+          result.video.lowVramHeadChunks = result.video.lowVramHeadChunks >= 1
+            ? Math.min(56, Math.round(result.video.lowVramHeadChunks))
+            : 0
           if (typeof result.video.boundedTokenChunk !== 'number' || isNaN(result.video.boundedTokenChunk)) {
             result.video.boundedTokenChunk = DEFAULT_VIDEO_STATE.boundedTokenChunk
           }
           result.video.boundedTokenChunk = result.video.boundedTokenChunk >= 512
             ? Math.min(32768, Math.round(result.video.boundedTokenChunk))
             : 0
+          if (typeof result.video.autoContextWindows !== 'boolean') {
+            result.video.autoContextWindows = DEFAULT_VIDEO_STATE.autoContextWindows
+          }
           if (typeof result.video.latentUpscaler3D !== 'boolean') {
             result.video.latentUpscaler3D = DEFAULT_VIDEO_STATE.latentUpscaler3D
           }

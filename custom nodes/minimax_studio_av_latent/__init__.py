@@ -16,6 +16,7 @@ JSON-шапка (fps, vae) в metadata. Расширение .latent.
 """
 
 import json
+import logging
 import os
 
 import safetensors.torch
@@ -23,6 +24,8 @@ import safetensors.torch
 import comfy.nested_tensor
 import comfy.utils
 import folder_paths
+
+LOG = logging.getLogger(__name__)
 
 
 class MiniMaxStudioSaveAVLatent:
@@ -49,6 +52,29 @@ class MiniMaxStudioSaveAVLatent:
         if not streams.is_nested:
             raise ValueError("MiniMaxStudioSaveAVLatent: ожидается AV-латент (NestedTensor video+audio)")
         video_samples, audio_samples = streams.unbind()
+
+        # (правка 1146) Валидность длины: H3-латент живёт на сетке 17k+5
+        # кадров, т.е. T = 5m+2. Сохраняем как есть, но громко предупреждаем:
+        # off-grid файл Refine/Tile отвергнут (resolveSourceLatent) и молча
+        # уйдут в VAE-перекодирование mp4. Loop сюда не доходит (не сохраняет).
+        try:
+            t = int(video_samples.shape[2])
+            frames = 5 + 17 * ((t - 2) // 5) if t >= 2 else 0
+            if t < 2 or (t - 2) % 5 != 0:
+                LOG.warning(
+                    "SaveAVLatent: длина латента T=%s вне сетки 17k+5 (получилось бы %s кадров) — "
+                    "lossless-рефайн отклонит файл", t, frames,
+                )
+            else:
+                expected_audio = round(frames * 5 / 3)
+                a = int(audio_samples.shape[-1])
+                if abs(a - expected_audio) > 2:
+                    LOG.warning(
+                        "SaveAVLatent: аудио %s шагов при видео %s кадрах (ожидалось ~%s) — "
+                        "A/V могут разъехаться", a, frames, expected_audio,
+                    )
+        except Exception:
+            pass
 
         full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
             filename_prefix, self.output_dir)

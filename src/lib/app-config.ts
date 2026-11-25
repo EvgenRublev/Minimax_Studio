@@ -97,6 +97,11 @@ export interface AppConfig {
   llmRepeatPenalty: number
   /** Play notification sound when generation completes (default true). */
   soundOn: boolean
+  /** (правка 1133) Живое превью шагов во всех режимах (default true).
+   *  false — узлы ModelPreviewOverrideKJ в граф не ставятся вообще: экономит
+   *  VRAM и время tiny-VAE-декода на каждом шаге, но прогресс виден только
+   *  полосой. Настройка общая: генерация, продление, Refine, Tile, Face. */
+  livePreview: boolean
   /** (правка 65) Голосовой ввод (whisper STT): включён ли диктат в UI. */
   sttEnabled: boolean
   /** (правка 72) Папка встроенного STT-рантайма (transcribe.dll + models/). Дефолт <проект>/stt. */
@@ -250,13 +255,16 @@ export function getAppConfig(): AppConfig {
     // (правка 716) parseNum0, а не `|| 3`: сохранённый reserve_gb = 0
     // (валидное значение) молча превращался в 3. Правка 556 убрала этот
     // паттерн в остальных полях — здесь он остался.
-    // (правка 803) Дефолт reserve_gb снижен 3 → 1: 3 ГБ + 1 ГБ headroom
-    // отнимали у 12–16 ГБ карт слишком много и провоцировали оффлоад.
-    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '4', 4),
+    // (правки 1131, 1143) 2 ГБ резерва: на 12 ГБ это оставляет ~9 ГБ бюджета
+    // aimdo, чего хватает окну 1080p/5 с (~5.8 ГБ) плюс активации. Меньше 2
+    // на 12 ГБ Refine «Частями» забивает карту до 97% и встаёт.
+    reserveGb: parseNum0(ini['vram.reserve_gb'] ?? ini['reserve_gb'] ?? '2', 2),
     // (правка 490) 0 = выкл (флаг не передаётся), диапазон как в UI: 0–8 ГБ.
-    // (правка 803) По умолчанию 1 ГБ вместо 2: при DynamicVRAM этот запас
-    // складывается с reserve_gb, поэтому суммарно держим ~2 ГБ.
-    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '0') || 0)),
+    // (правка 1141) Дефолт 1 ГБ: тест на 12 ГБ показал, что без headroom
+    // Refine «Частями» забивает VRAM до предела и aimdo зависает; с 1 ГБ
+    // проходит. headroom больше не дублируется в простом бюджете (1131),
+    // поэтому «reserve 1 + headroom 1» — это ровно 2 ГБ, а не 3.
+    vramHeadroom: Math.max(0, Math.min(8, parseFloat(ini['vram.vram_headroom'] ?? '1') || 0)),
     // (правка 1029) Принудительный fast-disk: только явный 1 включает.
     // auto/0/отсутствие ключа — UI показывает выключенную галочку.
     fastDisk: (ini['vram.fast_disk'] ?? 'auto').trim() === '1',
@@ -308,6 +316,7 @@ export function getAppConfig(): AppConfig {
     llmFrequencyPenalty: Math.max(0, Math.min(2.5, parseFloat(ini['llm.frequency_penalty'] ?? '0.0') || 0.0)),
     llmRepeatPenalty: Math.max(1.0, Math.min(2.0, parseFloat(ini['llm.repeat_penalty'] ?? '1.0') || 1.0)),
     soundOn: ini['ui.sound_on'] !== '0',
+    livePreview: ini['ui.live_preview'] !== '0', // (правка 1133) 0 = выключить живое превью
     // (правка 65) Голосовой ввод — whisper (transcribe.cpp), CPU-only.
     // По умолчанию ВКЛ: кнопка диктата видна, а при отсутствии модели
     // показывает понятную ошибку с подсказкой, где её скачать.
@@ -420,7 +429,10 @@ export function setConfigValue(section: string, key: string, value: string): voi
  * первой установке.
  */
 const DEFAULT_CONFIG_INI = `[vram]
-reserve_gb=4
+; (правки 1131, 1143) 2 ГБ системе + 1 ГБ headroom. headroom не дублируется в
+; простом бюджете aimdo (1131), поэтому это ровно 3 ГБ. (1143) На 12 ГБ меньше
+; 2 ГБ резерва Refine «Частями» забивал VRAM до 97% и вставал.
+reserve_gb=2
 dynamic_vram=1
 ; 0 = синхронная загрузка моделей (стабильно), 1 = async-офлоад
 async_offload=0
@@ -429,12 +441,10 @@ async_offload=0
 pinned_memory=0
 ; (правка 1077) nvml_pressure: 1 = aimdo учитывает, сколько VRAM реально занято
 ; чужими процессами (браузер, рабочий стол, DLSS). 0 = веса получают больше карты;
-; на 12 ГБ с H3 стоит попробовать, если генерация встает на инициализации
+; на 8–12 ГБ с H3 стоит попробовать, если генерация встает на инициализации
 nvml_pressure=1
-; (правка 1120) запас VRAM держим только через reserve_gb=4; headroom 0,
-; как в V6, где отдельного headroom-флага не было вовсе
-; если на 8 ГБ не хватает VRAM (OOM/своп) — уменьшить reserve_gb до 3
-vram_headroom=0
+; (правка 1141) 1 ГБ headroom — минимальный запас; 0 вешает aimdo на полной VRAM
+vram_headroom=1
 ; auto = ComfyUI сам решает; 1 = принудительный --fast-disk; 0 = --disable-fast-disk
 fast_disk=auto
 
@@ -464,6 +474,8 @@ device=auto
 
 [ui]
 sound_on=1
+; (правка 1133) живое превью шагов: 0 = выключить во всех режимах
+live_preview=1
 
 [stt]
 dir=

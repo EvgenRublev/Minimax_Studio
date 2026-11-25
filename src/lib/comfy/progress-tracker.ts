@@ -86,6 +86,12 @@ interface ProgressEntry {
   /** (правка 950) Время последнего WS-события по промпту (мс). */
   lastEventAt: number | null
   /**
+   * (правка 1145) Текущее окно контекста «Частями»: ComfyUI присылает
+   * minimax_context_window перед каждым окном. Верхняя панель показывает
+   * «Окно 3/4: кадры 25–46 из 62» вместо немого счётчика шагов.
+   */
+  contextWindow: { index: number; total: number; start: number; end: number; frames: number } | null
+  /**
    * Последний сэмплер, от которого было ЛЮБОЕ событие (executing или
    * progress). Прогресс сэмплера течёт непрерывно, пока он работает, —
    * это самое надёжное «что исполняется СЕЙЧАС»: одиночное забегающее
@@ -104,6 +110,8 @@ interface ProgressEntry {
   tileTotalChunks: number | null
   tileStepsPerUnit: number | null
   tileKjCount: number
+  /** (правка 1134) Считать шаги тайлов по progress-событиям (превью выкл.). */
+  tileUseProgress: boolean
 }
 
 interface PreviewEntry {
@@ -130,8 +138,9 @@ function newEntry(): ProgressEntry {
     stageSpecs: null, nodeStage: null, stageObserved: [], maxStage: -1,
     executingNode: null, lastStageEvidence: null,
     nodeTitles: null, nodeStartedAt: null, lastEventAt: null,
+    contextWindow: null,
     tileTotalUnits: null, tileTotalTiles: null, tileTotalChunks: null,
-    tileStepsPerUnit: null, tileKjCount: 0,
+    tileStepsPerUnit: null, tileKjCount: 0, tileUseProgress: false,
   }
 }
 
@@ -143,6 +152,9 @@ export interface TileGeometry {
   totalChunks: number
   stepsPerUnit: number
   totalUnits: number
+  /** (правка 1134) Живое превью выключено → шаги считаем по `progress`-событиям
+   *  сэмплера, а не по KJ-превью (иначе прогресс навсегда 0). */
+  previewEnabled?: boolean
 }
 
 /**
@@ -181,6 +193,8 @@ export function registerPromptStages(
     // прислать steps: 0, и получался NaN-шаг/NaN-прогресс.
     entry.tileStepsPerUnit = Math.max(1, Math.floor(tileGeometry.stepsPerUnit || 0) || 1)
     entry.tileKjCount = 0
+    // (правка 1134) Превью выключено → KJ-событий не будет вообще.
+    entry.tileUseProgress = tileGeometry.previewEnabled === false
   }
 }
 
@@ -291,6 +305,12 @@ export function applyTrackerMessage(msg: {
       entry.lastEventAt = Date.now() // (правка 950) признак жизни задачи
       entry.byNode[node].value = (msg.data.value as number) || 0
       entry.byNode[node].max = (msg.data.max as number) || 1
+      // (правка 1134) Tile без живого превью: KJ-событий нет, шаги считаем
+      // по progress-событиям сэмплера (одно событие = один шаг одного юнита).
+      if (entry.tileTotalUnits !== null && entry.tileUseProgress
+        && ((msg.data.value as number) || 0) >= 1) {
+        entry.tileKjCount++
+      }
       if (!entry.nodes.includes(node)) {
         entry.nodes.push(node)
       }
@@ -301,6 +321,42 @@ export function applyTrackerMessage(msg: {
       if (obsIdx !== null) {
         entry.maxStage = Math.max(entry.maxStage, obsIdx)
         entry.lastStageEvidence = node
+      }
+    }
+
+    // (правка 1145) Окно контекста от MiniMaxH3ContextWindows: ComfyUI шлёт
+    // кастомное событие перед каждым окном. prompt_id в нём нет (нода не знает
+    // id промпта), поэтому цепляем к самому свежему незавершённому промпту.
+    if (msg.type === 'minimax_context_window' && msg.data) {
+      const d = msg.data as {
+        prompt_id?: string; index?: number; total?: number
+        start?: number; end?: number; frames?: number
+      }
+      let pid = typeof d.prompt_id === 'string' ? d.prompt_id : ''
+      if (!pid || !progressMap.has(pid)) {
+        let bestKey = ''
+        let bestAt = -1
+        for (const [key, e] of progressMap) {
+          if (e.done) continue
+          const at = e.lastEventAt ?? 0
+          if (at > bestAt) { bestAt = at; bestKey = key }
+        }
+        pid = bestKey
+      }
+      if (pid) {
+        let entry = progressMap.get(pid)
+        if (!entry) {
+          entry = newEntry()
+          progressMap.set(pid, entry)
+        }
+        entry.contextWindow = {
+          index: Math.max(1, Number(d.index) || 1),
+          total: Math.max(0, Number(d.total) || 0),
+          start: Math.max(0, Number(d.start) || 0),
+          end: Math.max(0, Number(d.end) || 0),
+          frames: Math.max(0, Number(d.frames) || 0),
+        }
+        entry.lastEventAt = Date.now()
       }
     }
 
@@ -353,7 +409,7 @@ export function applyTrackerMessage(msg: {
         // является: считаем только step>=1, иначе каждый тайл добавлял
         // лишнюю единицу и шкала убегала вперёд (прогресс «тайлы уже
         // проходят» ещё во время инициализации модели).
-        if (entry.tileTotalUnits !== null && entry.tileStepsPerUnit !== null) {
+        if (entry.tileTotalUnits !== null && entry.tileStepsPerUnit !== null && !entry.tileUseProgress) {
           if ((d.step || 0) >= 1) entry.tileKjCount++
         }
         const node = 'preview'
@@ -662,6 +718,15 @@ export interface TileStageInfo {
    * UI показывает «Подготовка модели…» вместо ложного «Тайл 1/N · шаг 1/2».
    */
   preparing?: boolean
+  /**
+   * (правка 1134) Все тайлы/шаги отсэмплированы, но задача ещё не завершена:
+   * идёт VAE-декод и сборка/сохранение видео. На 2K это минуты без событий
+   * прогресса — UI должен писать «Декодирование», а не показывать «100%,
+   * шаг N/N» и выглядеть зависшим.
+   */
+  finalizing?: boolean
+  /** (правка 1145) Окно контекста «Частями» для верхней панели. */
+  contextWindow?: { index: number; total: number; start: number; end: number; frames: number }
 }
 
 export function getStageInfo(
@@ -670,7 +735,7 @@ export function getStageInfo(
   ensureConnected()
   const entry = progressMap.get(promptId)
   if (!entry) return null
-
+  const cw = entry.contextWindow ?? undefined
   // (правка 479) Tile-upscale: «Тайл X/Y» по счётчику KJ-событий.
   // Тайлы идут в порядке row-major: тайл 1 (чанк 1..N), тайл 2 (чанк 1..N), …
   // currentTile = floor((unit-1) / totalChunks) + 1
@@ -695,6 +760,8 @@ export function getStageInfo(
       // (инициализация, динамическая подгрузка весов): не обманываем
       // пользователя меткой «Тайл 1/N».
       preparing: entry.tileKjCount === 0,
+      // (правка 1134) Сэмплинг закончен, но задача жива → декод/сохранение.
+      finalizing: entry.tileKjCount >= entry.tileTotalUnits * entry.tileStepsPerUnit,
       tileInfo: {
         totalTiles,
         currentTile,
@@ -702,6 +769,7 @@ export function getStageInfo(
         currentUnit,
         stepsPerUnit: entry.tileStepsPerUnit,
       },
+      contextWindow: cw,
     }
   }
 
@@ -721,7 +789,7 @@ export function getStageInfo(
         step = Math.min(np.value || 0, np.max)
       }
     }
-    return { stage: cur + 1, totalStages: n, step, total }
+    return { stage: cur + 1, totalStages: n, step, total, contextWindow: cw }
   }
 
   const stage = currentStage(entry)
@@ -735,7 +803,7 @@ export function getStageInfo(
       step = Math.min(np.value || 0, np.max)
     }
   }
-  return { stage, totalStages: TOTAL_STAGES, step, total }
+  return { stage, totalStages: TOTAL_STAGES, step, total, contextWindow: cw }
 }
 
 /** Get progress for a prompt_id. Returns null if unknown. */
@@ -760,11 +828,13 @@ export interface PromptNodeInfo {
   totalStages: number | null
   step: number | null
   total: number | null
+  /** (правка 1145) Текущее окно контекста (номер/всего/кадры) для верхней панели. */
+  contextWindow: { index: number; total: number; start: number; end: number; frames: number } | null
 }
 
 const EMPTY_NODE_INFO: PromptNodeInfo = {
   node: null, title: null, nodeMs: null, lastEventMs: null,
-  stage: null, totalStages: null, step: null, total: null,
+  stage: null, totalStages: null, step: null, total: null, contextWindow: null,
 }
 
 export function getPromptNodeInfo(promptId: string): PromptNodeInfo {
@@ -782,6 +852,7 @@ export function getPromptNodeInfo(promptId: string): PromptNodeInfo {
     totalStages: stage?.totalStages ?? null,
     step: stage?.total && stage.total > 0 ? stage.step : null,
     total: stage?.total && stage.total > 0 ? stage.total : null,
+    contextWindow: stage?.contextWindow ?? null,
   }
 }
 

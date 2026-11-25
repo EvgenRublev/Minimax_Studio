@@ -47,6 +47,7 @@ function GenerationInfo() {
     stage: number | null
     totalStages: number | null
     nodeMs: number | null
+    contextWindow: { index: number; total: number; start: number; end: number; frames: number } | null
   } | null>(null)
 
   useEffect(() => {
@@ -67,6 +68,7 @@ function GenerationInfo() {
           stage?: number | null
           totalStages?: number | null
           nodeMs?: number | null
+          contextWindow?: { index: number; total: number; start: number; end: number; frames: number } | null
         }
         if (cancelled) return
         setLive({
@@ -77,6 +79,7 @@ function GenerationInfo() {
           stage: typeof d.stage === 'number' ? d.stage : null,
           totalStages: typeof d.totalStages === 'number' ? d.totalStages : null,
           nodeMs: typeof d.nodeMs === 'number' ? d.nodeMs : null,
+          contextWindow: d.contextWindow ?? null,
         })
       } catch { /* сеть/таймаут — панель просто без деталей */ }
     }
@@ -115,6 +118,7 @@ function GenerationInfo() {
   const stage = live?.stage ?? null
   const totalStages = live?.totalStages ?? null
   const nodeMs = live?.nodeMs ?? (videoDetail ? v.nodeElapsedMs : null)
+  const cw = live?.contextWindow ?? null
 
   return (
     <div className="min-w-0 flex-1">
@@ -133,6 +137,11 @@ function GenerationInfo() {
         {detail && (
           <span className="min-w-0 truncate text-[11px] text-muted-foreground">
             {t(detail)}
+          </span>
+        )}
+        {cw && (
+          <span className="shrink-0 text-[10px] font-mono tabular-nums text-cyan-200/90">
+            {t('Окно')} {cw.index}{cw.total > 0 ? `/${cw.total}` : ''}: {t('кадры')} {cw.start}–{cw.end}{cw.frames > 0 ? ` ${t('из')} ${cw.frames}` : ''}
           </span>
         )}
         {step != null && total != null && total > 0 && (

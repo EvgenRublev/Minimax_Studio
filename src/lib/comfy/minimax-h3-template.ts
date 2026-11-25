@@ -342,6 +342,15 @@ export interface MiniMaxH3Params {
    *  полцикла для звука (убирает «кашу»/перегруз на стыке, ~1.8× времени
    *  сэмплинга); 1 — один вид. */
   loopViews?: number
+  /** (правка 1131) Временные окна модели (MiniMaxH3ContextWindows) для
+   *  «Генерации»: length/overlap в РЕАЛЬНЫХ кадрах, форма 17n+5. Сервер
+   *  заполняет это поле по VRAM-плану (h3-vram-plan.ts), когда клип не
+   *  влезает в бюджет одним окном. Математика та же, пик зависит от окна,
+   *  а не от всей длины. Несовместимо с loop (там своя обёртка латента). */
+  contextWindow?: { length: number; overlap: number }
+  /** (правка 1133) Живое превью шагов: false — узлы ModelPreviewOverrideKJ
+   *  в граф не ставятся (настройка «Живое превью» в Оптимизации). */
+  previewEnabled?: boolean
 }
 
 /** Node IDs for reference images (up to 9). */
@@ -754,8 +763,8 @@ export function h3TransientGB(
  *  раза (K/V и Q) независимо от размера куска, но на каждом куске заново
  *  читает полные K/V: чем крупнее кусок, тем меньше трафик и прогонов SDPA,
  *  и тем больше буфер Q (chunk·inner·2 байт, inner = 7168). Поэтому авторазмер — это
- *  «крупнейший кусок, который не раздувает пик»: 4096 на картах <12 ГБ
- *  (как раньше), 8192 на 12–16 ГБ, 12288 от 16 ГБ; сверху кусок ограничен
+ *  «крупнейший кусок, который не раздувает пик»: 2048 на картах <10 ГБ,
+ *  3072 на 10–12 ГБ, 8192 на 12–16 ГБ, 12288 от 16 ГБ; сверху кусок ограничен
  *  длиной самой последовательности (иначе узел отдаёт управление LowVRAM).
  *  Математика attention от размера куска не зависит. */
 export function boundedTokenChunk(
@@ -765,15 +774,87 @@ export function boundedTokenChunk(
 ): number {
   const manual = Math.round(Number(tokenChunk) || 0)
   if (manual >= 512) return Math.min(32768, manual)
-  const cap = !vramGb || vramGb < 12 ? 4096 : vramGb < 16 ? 8192 : 12288
+  // (правка 1131) На 8 ГБ кусок 4096 — это 0.18 ГБ только под Q плюс рабочая
+  // область SDPA; 2048 снимает ~0.1 ГБ пика ценой лишнего прогона проекций.
+  const cap = !vramGb || vramGb < 10 ? 2048 : vramGb < 12 ? 3072 : vramGb < 16 ? 8192 : 12288
   return Math.max(2048, Math.min(cap, Math.round(Math.max(2048, seq) / 512) * 512))
 }
 
+/** (правка 1131) Число групп голов для MiniMaxLowVRAMAttention по объёму карты.
+ *  Головы независимы — математика не меняется, платим только числом запусков
+ *  ядра. 8–16 групп на 8–12 ГБ режут транзиенты attention в 2–4 раза, а
+ *  именно они вместе с FFN и определяют пик pass 2. */
+export function autoHeadChunks(vramGb: number | null, seq: number): number {
+  if (!vramGb || vramGb <= 0) return 4
+  if (vramGb < 10) return seq >= 20000 ? 16 : 8
+  if (vramGb < 12) return 8
+  if (vramGb < 16) return 6
+  return 4
+}
+
 /** (правка 1095) Чанки FFN: держим ≤1.4 ГБ на чанк — это бесплатно по качеству
- *  (per-row int8-квант и математика не меняются), а на 1080p снимает ~3 ГБ пика. */
-export function autoChunkFFChunks(ffnGb: number, userChunks: number | undefined): number {
-  const need = Math.ceil(ffnGb / 1.4)
-  return Math.max(1, Math.min(16, Math.max(Math.round(userChunks ?? 2), need)))
+ *  (per-row int8-квант и математика не меняются), а на 1080p снимает ~3 ГБ пика.
+ *  (правка 1131) На 8–12 ГБ целевой чанк меньше (0.8–0.9 ГБ): разница между
+ *  OOM и работой на 1080p — как раз один такой чанк. */
+export function autoChunkFFChunks(
+  ffnGb: number,
+  userChunks: number | undefined,
+  vramGb: number | null = null,
+): number {
+  const target = !vramGb || vramGb >= 16 ? 1.4 : vramGb < 10 ? 0.8 : vramGb < 12 ? 0.9 : 1.4
+  const need = Math.ceil(ffnGb / target)
+  return Math.max(1, Math.min(32, Math.max(Math.round(userChunks ?? 2), need)))
+}
+
+/**
+ * (правка 1131) Геометрия временных окон H3 для «Генерации»: длина окна и
+ * нахлёст только вида 17n+5 кадров (родная сетка H3, аудио синхронизировано).
+ * Окна — единственный способ провести длинный клип на слабой карте: пик
+ * attention/FFN зависит от ЧИСЛА ТОКЕНОВ окна, а не всего клипа.
+ * Раньше эта формула жила только в Refine (правка 1056) — здесь общий источник.
+ */
+export function h3WindowGeometry(chunkSeconds?: number): {
+  context_length: number
+  context_overlap: number
+} {
+  const sec = Math.max(2, Math.min(15, Number(chunkSeconds) || 5))
+  const length = 17 * Math.max(1, Math.round((sec * 24 - 5) / 17)) + 5
+  const overlap = 17 * Math.max(0, Math.round((0.315 * length - 5) / 17)) + 5
+  // Нахлёст не может съедать окно целиком: минимум один клип нового содержимого.
+  return { context_length: length, context_overlap: Math.min(overlap, length - 17) }
+}
+
+/**
+ * (правка 1132) Кадры и скорость живого превью (KJ ModelPreviewOverrideKJ).
+ *
+ * Раньше превью получало ВСЕ кадры клипа и играло их на 6 fps: 5-секундный
+ * ролик превращался в 20-секундный slow-motion, а в bounded-режиме (который
+ * теперь включён по умолчанию) — в 8 кадров на 6 fps, то есть в 1.3-секундное
+ * ускоренное мельтешение. Оба края плохие.
+ *
+ * Здесь превью сэмплируется с частотой 8 кадров/с реального времени и играет
+ * на 8 fps — ролик в превью идёт с той же скоростью, что и финальный файл.
+ * Кадров не больше, чем влезает в бюджет tiny-VAE (~1.2 ГБ на 12 ГБ-карте,
+ * ~0.35 ГБ на 8 ГБ): 1080p/5 с → 40 кадров, 10 с → 40 кадров уже на 4 fps
+ * (реальное время), 2K → 27 кадров на 5 fps.
+ */
+export function h3PreviewParams(
+  vramGb: number | null,
+  durationSec: number,
+  width: number,
+  height: number,
+): { frames: number; fps: number } {
+  const lowVram = typeof vramGb === 'number' && vramGb > 0 && vramGb < 10
+  const mp = Math.max(0.25, (width * height) / 1e6)
+  // 124 кадра 1080p ≈ 3.1 ГБ → ~25 МБ на кадр при 2.09 Мп.
+  const frameMb = 25 * (mp / 2.09)
+  const budgetMb = lowVram ? 350 : 1228
+  const maxByMemory = Math.max(8, Math.floor(budgetMb / frameMb))
+  const byTime = Math.round(Math.max(1, durationSec) * 8)
+  const frames = Math.max(8, Math.min(PREVIEW_MAX_FRAMES, maxByMemory, byTime))
+  // fps = кадры / секунды: превью не ускоряется. 8 fps — стандарт для 1080p/5 с.
+  const fps = Math.max(1, Math.min(8, Math.round(frames / Math.max(1, durationSec))))
+  return { frames, fps }
 }
 
 /**
@@ -1281,11 +1362,30 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // а FFN-чанки поднимаем автоматически, если транзиент FFN больше ~1.4 ГБ.
   // Порядок chain: LowVRAM (головы) → Bounded (токены) → ChunkFF.
   const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
-  const transients = h3TransientGB(final.genW, final.genH, framesForDuration(p.duration ?? 5))
-  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  // (правка 1131) Временные окна: длинный клип на слабой карте идёт не одним
+  // проходом, а окнами 17n+5 кадров. С «Зациклено» несовместимо (там своя
+  // обёртка латента). Размеры кусков считаем по ОКНУ, иначе шаблон резал бы
+  // FFN по длине всего клипа и делал лишние чанки.
+  const contextWindow = p.contextWindow && p.contextWindow.length > 0 && p.loop !== true
+    ? p.contextWindow
+    : null
+  const chainFrames = contextWindow ? contextWindow.length : framesForDuration(p.duration ?? 5)
+  const transients = h3TransientGB(final.genW, final.genH, chainFrames)
+  // (правка 1132) Превью — 8 fps реального времени, кадров не больше бюджета
+  // tiny-VAE (см. h3PreviewParams). От bounded attention больше не зависит.
+  // (правка 1133) Живое превью можно выключить совсем (настройка [ui] live_preview):
+  // тогда узлы превью не ставятся, а сэмплеры/гайдеры берут модель напрямую.
+  const previewOn = p.previewEnabled !== false
+  const preview = h3PreviewParams(chainVramGb, p.duration ?? 5, final.genW, final.genH)
+  // (правка 1131) На 8–12 ГБ число групп голов и чанков FFN подбирается по
+  // объёму карты (математика та же, меньше транзиентов). Пользовательское
+  // значение >0 по-прежнему главнее.
+  const headChunks = p.lowVramHeadChunks && p.lowVramHeadChunks > 0
+    ? Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks)))
+    : autoHeadChunks(chainVramGb, transients.seq)
   const tokenChunk = boundedTokenChunk(chainVramGb, transients.seq, p.boundedTokenChunk)
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
-  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks, chainVramGb)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
@@ -1328,8 +1428,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   const loopOn = p.loop === true
   const loopPadClips = Math.max(1, Math.min(8, Math.round(p.loopPadClips ?? 1)))
   const loopViews = p.loopViews === 2 ? 2 : 1
+  // (правка 1131) contextWindow объявлен выше, до расчёта транзиентов: размеры
+  // кусков должны считаться по окну, а не по всей длине клипа.
   // (правка 829) хвост цепочки модели: sparse-нода, если включена, иначе backend
-  const modelChainTail: [string, number] = (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0]
+  const modelChainTail: [string, number] = contextWindow
+    ? ['46:70', 0]
+    : (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0]
   // «Зациклено»: патч цикла — ПОСЛЕДНИМ в цепочке, чтобы сэмплер, гайдер и
   // превью получили модель с уже навешенной обёрткой.
   const modelTail: [string, number] = loopOn ? ['46:60', 0] : modelChainTail
@@ -1358,17 +1462,22 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     },
     // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
     // Превью не должно валить длинную генерацию; сама генерация не ограничена.
-    // (правка 1088) В bounded-режиме tiny-VAE декодирует КАЖДЫЙ кадр в полном
-    // разрешении и складывает их в один GPU-тензор: 124 кадра 1080p — это 3,1 ГБ
-    // на каждом шаге. Восьми кадров хватает для анимации и они не съедают бюджет.
+    // (правка 1088) tiny-VAE декодирует КАЖДЫЙ кадр в полном разрешении: 124
+    // кадра 1080p — это 3,1 ГБ на каждом шаге, поэтому кадров не больше
+    // бюджета (1,2 ГБ на 12 ГБ, 0,35 ГБ на 8 ГБ).
+    // (правка 1132) Зато скорость превью — как у файла: 8 кадров/с времени
+    // клипа и 8 fps воспроизведения. Раньше bounded-режим отдавал 8 кадров на
+    // 6 fps, и превью «ускорялось» в 5–7 раз.
+    ...(previewOn ? {
     '46:19c': {
       inputs: {
-        expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`,
+        expression: `min(a, ${preview.frames})`,
         'values.a': ['46:19', 1],
       },
       class_type: 'ComfyMathExpression',
-      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: `Превью: до ${preview.frames} кадров, ${preview.fps} fps` },
     },
+    } : {}),
 
     // Low-res resolution is computed server-side (selectResolution) and fed
     // to the H3 node as plain ints — no ResolutionSelector node needed
@@ -1477,6 +1586,25 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       class_type: 'ModelAttentionBackend',
       _meta: { title: 'Attention Backend' },
     },
+    // (правка 1131) Временные окна H3 (встроенный узел ядра, 0.33 и 0.44):
+    // сэмплер видит окно 17n+5 кадров, а не весь клип — пик attention/FFN и
+    // требование к VRAM падают пропорционально длине окна. Слияние — pyramid +
+    // FreeNoise, как в Refine «Части» (правка 1040). Ставится после backend и
+    // после sparse, чтобы патчить финальную модель.
+    ...(contextWindow ? {
+      '46:70': {
+        inputs: {
+          model: (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0],
+          context_length: contextWindow.length,
+          context_overlap: contextWindow.overlap,
+          fuse_method: 'pyramid',
+          freenoise: true,
+          split_conds_to_windows: false,
+        },
+        class_type: 'MiniMaxH3ContextWindows',
+        _meta: { title: `Context Windows (${contextWindow.length} кадров, низкий VRAM)` },
+      },
+    } : {}),
     // (правка 829) «Зациклено»: патч модели последним в цепочке.
     // pad_clips — клипов обёрнутого контекста с каждой стороны, views=2 —
     // второй вид со сдвигом на полцикла для звука (см. minimax_studio_loop).
@@ -1492,7 +1620,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         _meta: { title: `Loop: бесшовный цикл (pad ${loopPadClips}, views ${loopViews})` },
       },
     } : {}),
-    // Live Preview (attached to pass 1 only)
+    // Live Preview (attached to pass 1 only). (правка 1133) Выключено — узла нет.
+    ...(previewOn ? {
     '12': {
       inputs: {
         // (правка 829) хвост цепочки: патч цикла, иначе sparse-нода/backend
@@ -1503,11 +1632,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         jpeg_quality: 80,
         suppress_default_preview: true,
         preview_frames: ['46:19c', 1],
-        preview_fps: 6,
+        preview_fps: preview.fps,
       },
       class_type: 'ModelPreviewOverrideKJ',
       _meta: { title: 'Model Preview Override' },
     },
+    } : {}),
 
     // ═══════════════════════════════════════════════
     //  MAIN H3 NODE (Reference to Video)
@@ -1566,10 +1696,10 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         title: `Pass 1 Scheduler (${draft ? `${draftSteps} steps (draft)` : `${firstSteps} steps`}, ${pass1Scheduler})`,
       },
     },
-    // BasicGuider (pass 1 — uses Preview model)
+    // BasicGuider (pass 1 — Preview model или хвост цепочки, если превью выкл.)
     '46:29': {
       inputs: {
-        model: ['12', 0],
+        model: previewOn ? ['12', 0] : modelTail,
         conditioning: condSrc, // (правка 146) хвост цепочки аудио-гайдов в t2v/flf
       },
       class_type: 'BasicGuider',
@@ -1736,7 +1866,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
         class_type: 'ManualSigmas',
         _meta: { title: `Pass 2 Sigmas (${(p.sigmaVariant || '3step')}${p.latentUpscaler3D === false ? ', bypass' : ''})` },
       },
-      // Live Preview (attached to pass 2)
+      // Live Preview (attached to pass 2). (правка 1133) Выключено — узла нет.
+      ...(previewOn ? {
       '13': {
         inputs: {
           // (правка 829) хвост цепочки: патч цикла, иначе sparse-нода/backend
@@ -1747,15 +1878,16 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
           jpeg_quality: 80,
           suppress_default_preview: true,
           preview_frames: ['46:19c', 1],
-          preview_fps: 6,
+          preview_fps: preview.fps,
         },
         class_type: 'ModelPreviewOverrideKJ',
         _meta: { title: 'Model Preview Override (Pass 2)' },
       },
-      // BasicGuider (pass 2 — uses Preview model)
+      } : {}),
+      // BasicGuider (pass 2 — Preview model или хвост цепочки, если превью выкл.)
       '46:32': {
         inputs: {
-          model: ['13', 0],
+          model: previewOn ? ['13', 0] : modelTail,
           conditioning: condSrc, // (правка 146) хвост цепочки аудио-гайдов в t2v/flf
         },
         class_type: 'BasicGuider',
@@ -2059,10 +2191,15 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // качеству): pass 2 продления идёт по финальной канве, pass 1 — по окнам.
   const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
   const transients = h3TransientGB(final.genW, final.genH, framesForDuration(p.duration ?? 5))
-  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  // (правка 1131) На 8–12 ГБ число групп голов и чанков FFN подбирается по
+  // объёму карты (математика та же, меньше транзиентов). Пользовательское
+  // значение >0 по-прежнему главнее.
+  const headChunks = p.lowVramHeadChunks && p.lowVramHeadChunks > 0
+    ? Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks)))
+    : autoHeadChunks(chainVramGb, transients.seq)
   const tokenChunk = boundedTokenChunk(chainVramGb, transients.seq, p.boundedTokenChunk)
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
-  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks, chainVramGb)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
 
@@ -2187,6 +2324,17 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
   // Длительность для ноды расчёта кадров превью (как '17'+'46:19' вкладки
   // «Генерация»): берём самый длинный клип — превью анимируется по максимуму.
   const maxClipDuration = clips.reduce((m, c) => Math.max(m, c.duration), 0) || 5
+  // (правка 1132) То же превью, что в «Генерации»: 8 fps реального времени,
+  // кадров не больше бюджета tiny-VAE.
+  const preview = h3PreviewParams(chainVramGb, maxClipDuration, final.genW, final.genH)
+  // (правка 1133) Живое превью в продлении: выключено — узлов extpv/extpv2 нет,
+  // гайдеры и лок берут модель напрямую.
+  const previewOn = p.previewEnabled !== false
+  const extBaseModel: [string, number] = (p.vedaAttention || p.sparseAttention === true)
+    ? ['46:44', 0]
+    : ['46:37', 0]
+  const extPreviewSrc: [string, number] = previewOn ? ['extpv', 0] : extBaseModel
+  const extPreview2Src: [string, number] = previewOn ? ['extpv2', 0] : extBaseModel
   // (правка 419) Окно контекста исходника = 2 с (56 кадров), как в эталоне
   // «V2V Extend Any Video (latent masking)» (нода OVERLAP/CONTEXT = 2 с).
   // Замена правилам 202/322 (хвост = самый длинный клип / минимум 5 с):
@@ -2334,21 +2482,23 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
         class_type: 'KSamplerSelect',
         _meta: { title: `KSampler клипов Pass 2 (${pass2Sampler})` },
       },
+      ...(previewOn ? {
       'extpv2': {
         inputs: {
           // (правка 422) хвост цепочки: sparse-нода, если включена, иначе backend
-          model: (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0],
+          model: extBaseModel,
           vae: ['46:3', 0],
           tiny_vae: 'taeh3.safetensors',
           max_resolution: 1024,
           jpeg_quality: 80,
           suppress_default_preview: true,
           preview_frames: ['46:19c', 1],
-          preview_fps: 6,
+          preview_fps: preview.fps,
         },
         class_type: 'ModelPreviewOverrideKJ',
         _meta: { title: 'Model Preview Override (Pass 2)' },
       },
+      } : {}),
     } : {}),
 
     // ═══════════════════════════════════════════════
@@ -2369,15 +2519,15 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     },
     // (правка 1045) KJ ModelPreviewOverrideKJ принимает максимум 1024 кадра.
     // Превью не должно валить длинную генерацию; сама генерация не ограничена.
-    // (правка 1089) В bounded-режиме tiny-VAE декодирует каждый кадр в полном
-    // разрешении в один GPU-тензор — держим 8 кадров, как на «Генерации».
+    // (правка 1132) Как в «Генерации»: 8 кадров/с времени клипа, скорость
+    // воспроизведения — реальная (см. h3PreviewParams).
     '46:19c': {
       inputs: {
-        expression: `min(a, ${boundedAttn ? 8 : PREVIEW_MAX_FRAMES})`,
+        expression: `min(a, ${preview.frames})`,
         'values.a': ['46:19', 1],
       },
       class_type: 'ComfyMathExpression',
-      _meta: { title: boundedAttn ? 'Превью: 8 кадров (bounded)' : `Превью: не больше ${PREVIEW_MAX_FRAMES} кадров` },
+      _meta: { title: `Превью: до ${preview.frames} кадров, ${preview.fps} fps` },
     },
 
     // ═══════════════════════════════════════════════
@@ -2385,21 +2535,23 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
     //  ВАЖНО: обёрнутая модель должна идти В сэмплер (Extender),
     //  иначе превью не срабатывает.
     // ═══════════════════════════════════════════════
+    ...(previewOn ? {
     'extpv': {
       inputs: {
         // (правка 422) хвост цепочки: sparse-нода, если включена, иначе backend
-        model: (p.vedaAttention || p.sparseAttention === true) ? ['46:44', 0] : ['46:37', 0],
+        model: extBaseModel,
         vae: ['46:3', 0],
         tiny_vae: 'taeh3.safetensors',
         max_resolution: 1024,
         jpeg_quality: 80,
         suppress_default_preview: true,
         preview_frames: ['46:19c', 1],
-        preview_fps: 6,
+        preview_fps: preview.fps,
       },
       class_type: 'ModelPreviewOverrideKJ',
       _meta: { title: 'Model Preview Override' },
     },
+    } : {}),
 
     // ═══════════════════════════════════════════════
     //  SOURCE VIDEO CHAIN — выходы GetVideoComponents:
@@ -2887,7 +3039,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           // вписанным хвостом): размеры совпадают с выходом модели.
           nodes[`ext_lock_${i}`] = {
             inputs: {
-              model: ['extpv', 0],
+              model: extPreviewSrc,
               lock_video: [`ext_vtrim_${i}`, 0],
               video_tokens_locked: oTok,
               video_tokens_total: tTok,
@@ -3009,7 +3161,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
           // над KJ-превью extpv), conditioning — через keyframe-якорь
           // (ext_kf_i добавляет minimax_keyframes к ext_cond_i).
           inputs: {
-            model: useOld ? [`ext_lock_${i}`, 0] : ['extpv', 0],
+            model: useOld ? [`ext_lock_${i}`, 0] : extPreviewSrc,
             conditioning: useOld ? [`ext_kf_${i}`, 0] : [`ext_cond_${i}`, 0],
           },
           class_type: 'BasicGuider',
@@ -3133,7 +3285,7 @@ function buildExtendWorkflow(p: MiniMaxH3Params): Record<string, unknown> {
             _meta: { title: `Pass 2 Sigmas клип ${i + 1} (${p.sigmaVariant || '3step'}${p.latentUpscaler3D === false ? ', bypass' : ''})` },
           }
           nodes[`ext_g2_${i}`] = {
-            inputs: { model: ['extpv2', 0], conditioning: [`ext_cond_${i}`, 0] },
+            inputs: { model: extPreview2Src, conditioning: [`ext_cond_${i}`, 0] },
             class_type: 'BasicGuider',
             _meta: { title: `Guider клип ${i + 1} (pass 2)` },
           }

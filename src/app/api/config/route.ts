@@ -158,6 +158,8 @@ export async function GET() {
       llm_frequency_penalty: config.llmFrequencyPenalty,
       llm_repeat_penalty: config.llmRepeatPenalty,
       sound_on: config.soundOn,
+      // (правка 1133) живое превью шагов во всех режимах
+      live_preview: config.livePreview,
       // (правка 65) голосовой ввод — whisper STT (CPU)
       stt_enabled: config.sttEnabled,
       stt_dir: config.sttDir,
@@ -174,8 +176,9 @@ export async function GET() {
     // (правка 135b) сэмплинг — override выкл, значения модель-осознанные
     // (правка 316) llm_bonsai_dir/llm_custom_*/model_extra_paths — дефолты,
     // чтобы контракт GET при ошибке совпадал с обычным ответом.
-    // (правка 803) reserve_gb 3→1, vram_headroom 2→1 (см. app-config.ts).
-    return NextResponse.json({ reserve_gb: 4, dynamic_vram: true, vram_headroom: 0, fast_disk: false, llm_device: 'auto', llm_context_size: 25600, llm_max_output_tokens: 4096, comfy_dir: '', diffusion_model: '', llm_model: '', llm_bonsai_dir: '', llm_custom_model: '', llm_custom_mmproj: '', model_extra_paths: [], llm_video_vision: false, llm_kv_cache: 'q4_0', llm_sampling_override: false, llm_temperature: 0.7, llm_top_p: 0.95, llm_top_k: 40, llm_min_p: 0.05, llm_presence_penalty: 0.0, llm_frequency_penalty: 0.0, llm_repeat_penalty: 1.0, sound_on: true, stt_enabled: true, stt_dir: '', stt_model: '', stt_language: 'ru', stt_threads: 0, video_codec: 'h264', video_crf: 12, video_nvenc_bitrate: 16 })
+    // (правка 1131) reserve 1 / headroom 0 — единый дефолт под 8–12 ГБ
+    // (см. app-config.ts). Headroom складывается с reserve в DynamicVRAM.
+    return NextResponse.json({ reserve_gb: 2, dynamic_vram: true, vram_headroom: 1, fast_disk: false, llm_device: 'auto', llm_context_size: 25600, llm_max_output_tokens: 4096, comfy_dir: '', diffusion_model: '', llm_model: '', llm_bonsai_dir: '', llm_custom_model: '', llm_custom_mmproj: '', model_extra_paths: [], llm_video_vision: false, llm_kv_cache: 'q4_0', llm_sampling_override: false, llm_temperature: 0.7, llm_top_p: 0.95, llm_top_k: 40, llm_min_p: 0.05, llm_presence_penalty: 0.0, llm_frequency_penalty: 0.0, llm_repeat_penalty: 1.0, sound_on: true, live_preview: true, stt_enabled: true, stt_dir: '', stt_model: '', stt_language: 'ru', stt_threads: 0, video_codec: 'h264', video_crf: 12, video_nvenc_bitrate: 16 })
   }
 }
 
@@ -487,6 +490,12 @@ export async function POST(request: Request) {
       setConfigValue('ui', 'sound_on', body.sound_on ? '1' : '0')
     }
 
+    // (правка 1133) Живое превью во всех режимах: 0 — узлы превью не ставятся
+    // в граф (экономия VRAM/времени), 1 — как раньше.
+    if (typeof body.live_preview === 'boolean') {
+      setConfigValue('ui', 'live_preview', body.live_preview ? '1' : '0')
+    }
+
     // (правка 65) Голосовой ввод (whisper STT). Изменения применяются со
     // следующего диктата: запущенный сервис останавливаем (перезапустится
     // сам при первом же использовании с новыми параметрами).
@@ -548,6 +557,8 @@ export async function POST(request: Request) {
       llm_frequency_penalty: config.llmFrequencyPenalty,
       llm_repeat_penalty: config.llmRepeatPenalty,
       sound_on: config.soundOn,
+      // (правка 1133) живое превью шагов во всех режимах
+      live_preview: config.livePreview,
       stt_enabled: config.sttEnabled,
       stt_dir: config.sttDir,
       stt_model: config.sttModel,

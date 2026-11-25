@@ -269,7 +269,20 @@ export async function POST(req: NextRequest) {
     )
     // (правка 1095) длина последовательности для авторешения: в «Частях» это окно,
     // в «Целом» — весь клип.
-    const windowFrames = windowedH3Geometry(Number(body.chunkSeconds) || 5).context_length
+    // (правка 1144) Жёсткий потолок куска по VRAM: на 8–12 ГБ окно 1080p/5 с
+    // (~5.8 ГБ) + DiT не влезает даже с резервом 2+1 — карта уходит в shared
+    // memory, и глючит весь ПК. Верхний предел: <10 ГБ — 2 с, <13 ГБ — 3 с,
+    // иначе выбор пользователя (до 8 с). Меньше выбранного не поднимаем.
+    const requestedChunkSeconds = Math.max(2, Math.min(8, Number(body.chunkSeconds) || 5))
+    const maxChunkSeconds = vramGb === null ? 8 : vramGb < 10 ? 2 : vramGb < 13 ? 3 : 8
+    const chunkSeconds = Math.min(requestedChunkSeconds, maxChunkSeconds)
+    if (chunkSeconds !== requestedChunkSeconds) {
+      console.warn(
+        `[refine] кусок ${requestedChunkSeconds} с урезан до ${chunkSeconds} с: ` +
+        `на ${vramGb?.toFixed(1)} ГБ VRAM большее окно 1080p не помещается`,
+      )
+    }
+    const windowFrames = windowedH3Geometry(chunkSeconds).context_length
     const framesFor = (windowed: boolean, totalFrames: number) =>
       windowed ? windowFrames : Math.max(5, totalFrames)
 
@@ -357,7 +370,7 @@ export async function POST(req: NextRequest) {
     // что в шаблоне) — в воркфлоу и в сайдкар, чтобы по мете было видно,
     // с каким швом/контекстом считали ролик.
     const tesseraParams = body.tessera === true
-      ? resolveTesseraTiles(body.tesseraParams, Number(body.chunkSeconds) || 5)
+      ? resolveTesseraTiles(body.tesseraParams, chunkSeconds)
       : null
     const tesseraRequest = tesseraParams ? { tesseraParams } : {}
     const tesseraMeta = tesseraParams
@@ -467,7 +480,7 @@ export async function POST(req: NextRequest) {
 
       // Режим «Частями» — тот же воркфлоу, что и у галерейного пути.
       if (body.mode === 'chunks') {
-        const windows = planChunkWindows(probe.frames, Number(body.chunkSeconds) || 5)
+        const windows = planChunkWindows(probe.frames, chunkSeconds)
         const run = await runGeneration(() =>
           submitWorkflowJson(
             buildChunkedRefineWorkflow({
@@ -479,7 +492,7 @@ export async function POST(req: NextRequest) {
               sourceHeight: srcH,
               sourceFrames: probe.frames,
               targetShortSide: target,
-              chunkSeconds: Number(body.chunkSeconds) || 5,
+              chunkSeconds: chunkSeconds,
               prompt: userPrompt,
               seed: body.seed,
               steps: body.steps,
@@ -494,6 +507,7 @@ export async function POST(req: NextRequest) {
               lowVramHeadChunks: body.lowVramHeadChunks,
               boundedTokenChunk: body.boundedTokenChunk,
               vramTotalGb: vramGb,
+              previewEnabled: cfg.livePreview, // (правка 1133)
               outputSubfolder: '',
               ...veda, // (правка 408)
               ...sparse, // (правка 466)
@@ -501,7 +515,7 @@ export async function POST(req: NextRequest) {
               // (правка 509) Референсы от пользователя (файл с диска)
               ...(userRefImages.length > 0 && { refImages: userRefImages }),
             }),
-            refineChunkStages(probe.frames, Number(body.chunkSeconds) || 5),
+            refineChunkStages(probe.frames, chunkSeconds),
           ),
         )
         if (!run.ok) {
@@ -522,7 +536,7 @@ export async function POST(req: NextRequest) {
             sigma_start: body.sigmaStart,
             seed: body.seed ?? -1,
             chunks: windows.length,
-            chunk_seconds: Number(body.chunkSeconds) || 5,
+            chunk_seconds: chunkSeconds,
             prompt_source: 'user',
             input_source: true,
             minimax_h3_reference_detail: refImageSize, // (правка 317)
@@ -560,7 +574,7 @@ export async function POST(req: NextRequest) {
           boundedAttention: boundedFor(dims, framesFor(body.windowed === true, probe.frames)), // (правки 1088, 1092, 1095)
           windowed: body.windowed === true,
           // (правка 1056) «Частями»: длина части → геометрия окон H3
-          chunkSeconds: Number(body.chunkSeconds) || 5,
+          chunkSeconds: chunkSeconds,
           // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
           tessera: body.tessera === true,
           ...tesseraRequest, // (правка 1058) ручки тайлового режима
@@ -582,6 +596,7 @@ export async function POST(req: NextRequest) {
               lowVramHeadChunks: body.lowVramHeadChunks,
               boundedTokenChunk: body.boundedTokenChunk,
               vramTotalGb: vramGb,
+              previewEnabled: cfg.livePreview, // (правка 1133)
           ...veda, // (правка 408)
           ...sparse, // (правка 466)
           ...loraParams, // (правка 483)
@@ -813,7 +828,7 @@ export async function POST(req: NextRequest) {
     // сшивает жёсткой конкатенацией. (правка 315) Картинки-рефы из меты
     // подаются якорем идентичности на все окна (<Picture 1..k>). ───
     if (body.mode === 'chunks') {
-      const windows = planChunkWindows(probe.frames, Number(body.chunkSeconds) || 5)
+      const windows = planChunkWindows(probe.frames, chunkSeconds)
       // Сюжетный промпт — только первый элемент цепочки (промпт исходника):
       // билдер даёт его окну 0, окна 1+ идут с якорными подписью рефов без
       // сюжетного текста — промпт цепочки описывает сцены, которых в поздних
@@ -835,7 +850,7 @@ export async function POST(req: NextRequest) {
             sourceHeight: srcH,
             sourceFrames: probe.frames,
             targetShortSide: targetEff,
-            chunkSeconds: Number(body.chunkSeconds) || 5,
+            chunkSeconds: chunkSeconds,
             // Теги <Picture N> промпта меты сохранены sanitizeDraftPrompt
             // (правка 310) и валидны: билдер (правка 315) держит исходную
             // нумерацию; подписи слотов добавляет билдер (правка 316).
@@ -854,6 +869,7 @@ export async function POST(req: NextRequest) {
               lowVramHeadChunks: body.lowVramHeadChunks,
               boundedTokenChunk: body.boundedTokenChunk,
               vramTotalGb: vramGb,
+              previewEnabled: cfg.livePreview, // (правка 1133)
             ...veda, // (правка 408)
             ...sparse, // (правка 466)
             ...loraParams, // (правка 483)
@@ -861,7 +877,7 @@ export async function POST(req: NextRequest) {
             ...(metaRefImages.length > 0 && { refImages: metaRefImages }),
           }),
           // (правка 255) стадии = окна цепочки → прогресс 0–100 по кускам
-          refineChunkStages(probe.frames, Number(body.chunkSeconds) || 5),
+          refineChunkStages(probe.frames, chunkSeconds),
         ),
       )
       if (!run.ok) {
@@ -887,7 +903,7 @@ export async function POST(req: NextRequest) {
           sigma_start: body.sigmaStart,
           seed: body.seed ?? -1,
           chunks: windows.length,
-          chunk_seconds: Number(body.chunkSeconds) || 5,
+          chunk_seconds: chunkSeconds,
           prompt_source: promptSource,
           minimax_h3_reference_detail: refImageSize, // (правка 317)
           ...refineCommonMeta, // (правка 722) пайплайн/шаги/сэмплер/LoRA/внимание
@@ -932,7 +948,7 @@ export async function POST(req: NextRequest) {
         boundedAttention: boundedFor(dims, framesFor(body.windowed === true, probe.frames)), // (правки 1088, 1092, 1095)
         windowed: body.windowed === true,
         // (правка 1056) «Частями»: длина части → геометрия окон H3
-        chunkSeconds: Number(body.chunkSeconds) || 5,
+        chunkSeconds: chunkSeconds,
         // (правка 1057) «Частями по тайлам» (Tessera) — экономичный тракт для 8 ГБ
         tessera: body.tessera === true,
         ...tesseraRequest, // (правка 1058) ручки тайлового режима
@@ -962,6 +978,7 @@ export async function POST(req: NextRequest) {
               lowVramHeadChunks: body.lowVramHeadChunks,
               boundedTokenChunk: body.boundedTokenChunk,
               vramTotalGb: vramGb,
+              previewEnabled: cfg.livePreview, // (правка 1133)
         ...veda, // (правка 408)
         ...sparse, // (правка 466)
         ...loraParams, // (правка 483)

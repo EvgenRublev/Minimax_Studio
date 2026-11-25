@@ -880,6 +880,9 @@ export function GenerateView() {
       chunkFFChunks: v.chunkFFChunks,
       chunkFFThreshold: v.chunkFFThreshold,
       boundedAttention: v.boundedAttention, // (правка 1089)
+      lowVramHeadChunks: v.lowVramHeadChunks, // (правка 1131) 0 = авто по VRAM
+      boundedTokenChunk: v.boundedTokenChunk,
+      autoContextWindows: v.autoContextWindows !== false, // (правка 1131)
       // (правка 829) «Зациклено»: не в продлении — там шаблон собирает клипы.
       loop: v.mode !== 'extend' && v.loop === true,
       loopPadClips: v.loopPadClips,

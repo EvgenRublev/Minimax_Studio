@@ -381,7 +381,10 @@ REM игнорировалось — ComfyUI всегда стартовал с 
 REM Паттерн и валидация — как в scripts\start_comfy.bat (правки 357/490):
 REM findstr /b /c: матчит только строки, НАЧИНАЮЩИЕСЯ с ключа (не комментарии),
 REM первый матч выигрывает, мусорные значения → безопасный дефолт.
-REM (правка 803) Дефолты снижены: reserve 3→1, headroom 2→1.
+REM (правки 1131, 1141, 1143) Дефолты под 8-12 ГБ: reserve 2, headroom 1.
+REM Headroom больше не дублируется в простой бюджет aimdo (уходит только
+REM per-device), поэтому 2+1 - это 3 ГБ, а не 4; меньше 1 headroom нельзя -
+REM без него Refine "Частями" забивает VRAM до предела и aimdo зависает.
 set "RESERVE_VRAM="
 set "DYNAMIC_VRAM="
 set "ASYNC_OFFLOAD="
@@ -404,10 +407,10 @@ if exist config\config.ini (
     REM (правка 1029) fast_disk=auto|1|0 — авто/принудительно вкл/выкл
     for /f "tokens=2 delims==" %%a in ('findstr /i /b /c:"fast_disk" config\config.ini 2^>nul') do if not defined FAST_DISK set "FAST_DISK=%%a"
 )
-if not defined RESERVE_VRAM set "RESERVE_VRAM=1"
+if not defined RESERVE_VRAM set "RESERVE_VRAM=2"
 if not defined DYNAMIC_VRAM set "DYNAMIC_VRAM=1"
 if not defined ASYNC_OFFLOAD set "ASYNC_OFFLOAD=0"
-if not defined PINNED_MEMORY set "PINNED_MEMORY=1"
+if not defined PINNED_MEMORY set "PINNED_MEMORY=0"
 if not defined NVML_PRESSURE set "NVML_PRESSURE=1"
 if not defined VRAM_HEADROOM set "VRAM_HEADROOM=1"
 if not defined FAST_DISK set "FAST_DISK=auto"
@@ -418,10 +421,10 @@ set "PINNED_MEMORY=%PINNED_MEMORY:"=%"
 set "NVML_PRESSURE=%NVML_PRESSURE:"=%"
 set "VRAM_HEADROOM=%VRAM_HEADROOM:"=%"
 set "FAST_DISK=%FAST_DISK:"=%"
-echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=1"
+echo %RESERVE_VRAM%| findstr /r "^[0-9][0-9.]*$" >nul || set "RESERVE_VRAM=2"
 echo %DYNAMIC_VRAM%| findstr /r "^[01]$" >nul || set "DYNAMIC_VRAM=1"
 echo %ASYNC_OFFLOAD%| findstr /r "^[01]$" >nul || set "ASYNC_OFFLOAD=0"
-echo %PINNED_MEMORY%| findstr /r "^[01]$" >nul || set "PINNED_MEMORY=1"
+echo %PINNED_MEMORY%| findstr /r "^[01]$" >nul || set "PINNED_MEMORY=0"
 echo %NVML_PRESSURE%| findstr /r "^[01]$" >nul || set "NVML_PRESSURE=1"
 echo %VRAM_HEADROOM%| findstr /r "^[0-9][0-9.]*$" >nul || set "VRAM_HEADROOM=1"
 set "FAST_DISK_VALID="

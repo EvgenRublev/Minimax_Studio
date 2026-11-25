@@ -159,7 +159,95 @@ function syncStudioNodes(appRoot, comfyRoot) {
   }
   // (правка 1129) сторонняя нода KJNodes: совместимость с ядром 0.44
   patchKjnodesLowmemCompat(comfyRoot)
+  // (правка 1135) Tile Upscale: сброс watermark/prefetch между тайлами
+  patchMmh3TileVram(comfyRoot)
   return synced
+}
+
+
+/**
+ * (правка 1135) Tile Upscale зависал на 100% при забитой VRAM и простое GPU.
+ *
+ * MMH3UltimateUpscale — монолитная нода: внутри одного execute она проходит
+ * «чанк → 3D-апскейл → тайлы», то есть несколько сегментов модели. Ядро делает
+ * `cleanup_prefetch_queues` / `reset_cast_buffers` / `vbars_reset_watermark_limits`
+ * только ПОСЛЕ ноды. Между сегментами очереди пре-фетча пиннят страницы VBAR,
+ * watermark дренируется, и первый re-fault следующего тайла возвращает OOM
+ * (comfy-aimdo #117) — снаружи это «VRAM переполнена, GPU 60 Вт, прогресс стоит».
+ *
+ * Правим установленную ноду на диске: перед каждым sample_piece (тайлом) зовём
+ * те же три очистки. Идемпотентно: повторный запуск находит маркер и ничего не
+ * делает; чужая/новая версия без ожидаемого анкора просто пропускается.
+ */
+function patchMmh3TileVram(comfyRoot) {
+  const file = path.join(
+    resolveComfyCore(comfyRoot),
+    'custom_nodes',
+    'Comfyui-MMH3-UltimateUpscale',
+    'nodes',
+    'nodes.py',
+  )
+  if (!existsSync(file)) return false
+  let text
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch {
+    return false
+  }
+  if (text.includes('_minimax_studio_tile_cleanup')) return false
+  const anchor = 'latent = dict(piece)'
+  const i = text.indexOf(anchor)
+  if (i < 0) {
+    console.warn('[mmh3-tile] sample_piece: анкор не найден — патч VRAM-очистки пропущен')
+    return false
+  }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lineStart = text.lastIndexOf('\n', i) + 1
+  const helper = `
+
+def _minimax_studio_tile_cleanup():
+    """(правка 1135) Очистки ядра между тайлами/чанками MMH3UltimateUpscale.
+
+    Ядро делает их только после ноды; без этого очереди пре-фетча пиннят
+    страницы VBAR, watermark дренируется и следующий fault даёт OOM/дедлок
+    (comfy-aimdo #117) — «VRAM полна, GPU 60 Вт, прогресс стоит».
+    """
+    try:
+        import comfy.model_prefetch as _mp
+        fn = getattr(_mp, "cleanup_prefetch_queues", None)
+        if fn is not None:
+            fn()
+    except Exception:
+        pass
+    try:
+        import comfy.model_management as _mm
+        fn = getattr(_mm, "reset_cast_buffers", None)
+        if fn is not None:
+            fn()
+    except Exception:
+        pass
+    try:
+        import comfy.memory_management as _mem
+        if getattr(_mem, "aimdo_enabled", False):
+            import comfy_aimdo.model_vbar as _vbar
+            fn = getattr(_vbar, "vbars_reset_watermark_limits", None)
+            if fn is not None:
+                fn()
+    except Exception:
+        pass
+`
+  const patched = text.slice(0, lineStart) +
+    '    _minimax_studio_tile_cleanup()' + eol +
+    text.slice(lineStart) +
+    (eol === '\r\n' ? helper.replace(/\n/g, '\r\n') : helper)
+  try {
+    require('node:fs').writeFileSync(file, patched, 'utf8')
+    console.log('[mmh3-tile] nodes.py: VRAM-очистка между тайлами (правка 1135)')
+    return true
+  } catch (err) {
+    console.error(`[mmh3-tile] не удалось записать nodes.py: ${err && err.message ? err.message : err}`)
+    return false
+  }
 }
 
 
@@ -461,7 +549,7 @@ function syncVhsPatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { patchKjnodesLowmemCompat, syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
+module.exports = { patchKjnodesLowmemCompat, patchMmh3TileVram, syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

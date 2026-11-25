@@ -90,6 +90,10 @@ interface MetaJson {
    *  (0 = авторазмер по VRAM). */
   low_vram_head_chunks?: number
   bounded_token_chunk?: number
+  /** (правка 1131) авто-временные окна и фактическое окно прогона. */
+  auto_context_windows?: boolean
+  context_window_frames?: number
+  context_window_overlap?: number
   /** (правка 829) «Зациклено»: режим, клипы контекста и число видов. */
   loop?: boolean
   /** (правка 829) Длина самого цикла в кадрах (17k) — в mp4, а video_length
@@ -288,11 +292,17 @@ export async function restoreFromMeta(filePath: string): Promise<boolean> {
     }
     // (правка 1095) размеры кусков: head_chunks и token_chunk (0 = авторазмер)
     if (typeof params.low_vram_head_chunks === 'number') {
-      patch.lowVramHeadChunks = Math.max(1, Math.min(56, Math.round(params.low_vram_head_chunks)))
+      patch.lowVramHeadChunks = params.low_vram_head_chunks >= 1
+        ? Math.min(56, Math.round(params.low_vram_head_chunks))
+        : 0
     }
     if (typeof params.bounded_token_chunk === 'number') {
       patch.boundedTokenChunk =
         params.bounded_token_chunk >= 512 ? Math.min(32768, Math.round(params.bounded_token_chunk)) : 0
+    }
+    // (правка 1131) авто-окна — из сайдкара, чтобы «Повторить» не терял настройку
+    if (typeof params.auto_context_windows === 'boolean') {
+      patch.autoContextWindows = params.auto_context_windows
     }
     // (правка 829) «Зациклено»: повтор того же ролика должен снова быть
     // циклом с теми же pad/views — иначе mp4 выйдет на 5 кадров длиннее

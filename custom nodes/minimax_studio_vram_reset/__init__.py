@@ -117,6 +117,11 @@ class MiniMaxStudioVRAMReset:
             "optional": {
                 "label": ("STRING", {"default": "", "multiline": False,
                                      "tooltip": "Метка в лог (например 'clip 2') - пусто = без метки."}),
+                # (правка 1140) Барьер порядка: нода не выполнится, пока не
+                # готов этот вход. Нужен, чтобы сброс шёл ПОСЛЕ загрузки
+                # текстового энкодера (tu_cond) и ПЕРЕД 3D-апскейлером, а не
+                # наоборот — иначе TE остаётся в VRAM и апскейлер встаёт.
+                "gate": ("CONDITIONING", {"tooltip": "Вход-барьер: сброс ждёт его готовности (значение не используется)."}),
             },
         }
 
@@ -129,7 +134,7 @@ class MiniMaxStudioVRAMReset:
                    "link after each sampler pass / between extend clips to avoid the "
                    "DynamicVRAM residency stalls (comfy-aimdo #117/#118/#133).")
 
-    def reset(self, flow, label=""):
+    def reset(self, flow, label="", gate=None):
         dev = mm.get_torch_device()
         try:
             free_before = mm.get_free_memory(dev)

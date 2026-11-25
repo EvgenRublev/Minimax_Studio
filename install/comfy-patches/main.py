@@ -81,12 +81,18 @@ import comfy_aimdo.control
 if enables_dynamic_vram():
     # (правка 967) --vram-headroom в ядре 0.44 только парсился и нигде не
     # применялся: DynamicVRAM (comfy-aimdo) получал лишь reserve_vram. Теперь
-    # запас складывается с резервом — ползунок «Запас свободной VRAM» реально
-    # держит эту память свободной (с учётом чужих приложений по NVML).
+    # ползунок «Запас свободной VRAM» реально держит эту память свободной
+    # (с учётом чужих приложений по NVML).
+    #
+    # (правка 1131) Здесь только reserve_vram. vram_headroom передаётся
+    # отдельно как per-device extra_vram_headroom в init_devices() ниже, и
+    # aimdo складывает оба значения. Раньше сумма reserve+headroom попадала
+    # ещё и в простой бюджет — на 8 ГБ с reserve=3+headroom=1 это держало
+    # свободными ~5 ГБ (4 в простом бюджете + 1 per-device) и оставляло
+    # генерации 3 ГБ, то есть OOM был гарантирован. Теперь каждое значение
+    # учитывается ровно один раз.
     _reserve_gb = args.reserve_vram or 0
-    _headroom_gb = getattr(args, "vram_headroom", 0) or 0
-    _keep_free_gb = _reserve_gb + _headroom_gb
-    simple_vram_headroom = int(_keep_free_gb * 1024 ** 3) if _keep_free_gb > 0 else None
+    simple_vram_headroom = int(_reserve_gb * 1024 ** 3) if _reserve_gb > 0 else None
     comfy_aimdo.control.init(simple_vram_headroom=simple_vram_headroom, nvml_pressure=not args.disable_nvml_pressure)
 
 if os.name == "nt":

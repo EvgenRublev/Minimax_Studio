@@ -77,10 +77,26 @@ export async function POST(req: NextRequest) {
 
     // (правка 1089) Bounded attention — общее авторешение по VRAM + настройка
     // auto/on/off. Veda/Sparse в этом режиме не задействованы.
+    // (правка 1132) VRAM нужна и шаблону — от неё бюджет кадров превью.
+    const vramGb = await gpuVramTotalGb()
     const boundedAttention = resolveBoundedAttention(
       normalizeBoundedAttentionMode(body.boundedAttentionMode),
-      await gpuVramTotalGb(),
+      vramGb,
     )
+
+    // (правка 1135) 3D-апскейлер на GPU — главный пик VRAM в тайловом тракте:
+    // его активации растут площадью кадра, а не числом тайлов. На 8–12 ГБ
+    // цель 2160p (и 1440p на 8 ГБ) роняет прогон в WDDM-переполнение, поэтому
+    // такие цели считаем на CPU: медленнее, но без OOM. 16 ГБ+ — всё на GPU.
+    const upscaleTargetPx = Number(body.targetResolution) || 1080
+    const upscaleCapPx = vramGb === null ? 1080 : vramGb < 10 ? 1080 : vramGb < 16 ? 1440 : 2160
+    const upscaleDevice: 'cuda' | 'cpu' = upscaleTargetPx > upscaleCapPx ? 'cpu' : 'cuda'
+    if (upscaleDevice === 'cpu') {
+      console.warn(
+        `[tile-upscale] цель ${upscaleTargetPx}p при ${vramGb?.toFixed(1) ?? '?'} ГБ VRAM: ` +
+        '3D-апскейлер переведён на CPU (GPU-вариант не влезает; быстрее — снизить цель)',
+      )
+    }
 
     // (правка 483) LoRA из настроек — как в /api/comfy/generate: модель
     // получает их цепочкой customLoras (турбо-лора — обычная запись, ON по
@@ -160,6 +176,8 @@ export async function POST(req: NextRequest) {
         steps: body.steps,
         sourceFrames: probe.frames,
       })
+      // (правка 1134) Без живого превью шаги тайлов считаются по progress-событиям.
+      if (tuGeom) tuGeom.previewEnabled = cfg.livePreview
       const run = await runGeneration(() =>
         submitWorkflowJson(
           buildTileUpscaleWorkflow({
@@ -183,6 +201,9 @@ export async function POST(req: NextRequest) {
             syncTiles: body.syncTiles,
             ...(customLoras ? { customLoras } : {}), // (правка 483)
             boundedAttention, // (правка 1089)
+            vramTotalGb: vramGb, // (правка 1132)
+            previewEnabled: cfg.livePreview, // (правка 1133)
+            upscaleDevice, // (правка 1135)
           // (правка 1095) token_chunk из настроек (0 = 4096)
           boundedTokenChunk: body.boundedTokenChunk,
           }),
@@ -280,14 +301,28 @@ export async function POST(req: NextRequest) {
     let sourceLatent: string | undefined
     let latentW = probe.width
     let latentH = probe.height
-    if (tileTarget >= Math.min(latentW, latentH)) {
+    // (правка 1138) Канва латента H3 кратна 32 и обычно на 8–16 px больше
+    // «номинала» (1088 против 1080). Раньше tileTarget 1080 < 1088 отключал
+    // lossless-ветку, и тайловый апскейл 1080p заново кодировал mp4 через VAE
+    // (полторы минуты CPU/GPU) — при том что готовый латент лежит рядом.
+    // Допускаем разницу до 32 px и поднимаем цель до канвы латента: формат
+    // выхода тот же 1080p-класс, апскейлер при этом не нужен вовсе.
+    if (tileTarget + 32 >= Math.min(latentW, latentH)) {
       const resolved = resolveSourceLatent(sub, safeName, probe, (reason) =>
         console.warn(`[tile-upscale] lossless-ветка отключена (${safeName}): ${reason}`),
       )
-      if (resolved && tileTarget >= Math.min(resolved.width, resolved.height)) {
+      if (resolved && tileTarget + 32 >= Math.min(resolved.width, resolved.height)) {
         sourceLatent = resolved.file
         latentW = resolved.width
         latentH = resolved.height
+        const effTarget = Math.max(tileTarget, Math.min(latentW, latentH))
+        if (effTarget !== tileTarget) {
+          console.warn(
+            `[tile-upscale] цель ${tileTarget}p ниже канвы латента ${latentW}x${latentH}: ` +
+            `lossless-ветка, цель поднята до ${effTarget}p (без VAE-перекодирования)`,
+          )
+          body.targetResolution = effTarget
+        }
       }
     }
 
@@ -306,6 +341,8 @@ export async function POST(req: NextRequest) {
       steps: body.steps,
       sourceFrames: probe.frames,
     })
+    // (правка 1134) Без живого превью шаги тайлов считаются по progress-событиям.
+    if (tuGeom) tuGeom.previewEnabled = cfg.livePreview
     const run = await runGeneration(() =>
       submitWorkflowJson(
         buildTileUpscaleWorkflow({
@@ -333,6 +370,9 @@ export async function POST(req: NextRequest) {
           syncTiles: body.syncTiles,
           ...(customLoras ? { customLoras } : {}), // (правка 483)
           boundedAttention, // (правка 1089)
+          vramTotalGb: vramGb, // (правка 1132)
+          previewEnabled: cfg.livePreview, // (правка 1133)
+          upscaleDevice, // (правка 1135)
           // (правка 1095) token_chunk из настроек (0 = 4096)
           boundedTokenChunk: body.boundedTokenChunk,
         }),

@@ -2,14 +2,17 @@ import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (
 import { chainLatentCut } from './latent-cut' // (правка 392)
 import {
   autoChunkFFChunks,
+  autoHeadChunks,
   boundedTokenChunk,
+  h3PreviewParams,
   h3TransientGB,
-} from './minimax-h3-template' // (правка 1095: авторазмеры head_chunks / token_chunk / FFN-чанков)
+  h3WindowGeometry,
+} from './minimax-h3-template' // (правка 1095: авторазмеры head_chunks / token_chunk / FFN-чанков; 1121 — общая геометрия окон; 1132 — превью)
 import { clampVedaSparsity, sanitizeVedaIndexList, buildCustomLoraNodes, getLastLoraOutput } from './minimax-h3-template' // (правка 399; хелперы LoRA — правка 483)
 // (правка 723) Лестница сигм/пресет Pass 2 вынесены в отдельный модуль без импортов,
 // чтобы вкладка Refine могла их импортировать, не таща в клиентский бандл весь шаблон.
 import { refineSigmaLadder } from './refine-sigmas'
-import { clampPreviewFrames, PREVIEW_MAX_FRAMES } from './preview-limit'
+import { clampPreviewFrames } from './preview-limit'
 // (правка 1058) Ручки тайлового режима: типы/дефолты/климпы — в отдельном
 // модуле без импортов (его же использует клиентская вкладка Refine).
 import { resolveTesseraTiles, type TesseraTileParams } from './tessera-params'
@@ -168,6 +171,8 @@ export interface RefineParams {
   lowVramHeadChunks?: number
   boundedTokenChunk?: number
   vramTotalGb?: number | null
+  /** (правка 1133) Живое превью шагов (false — узла превью в графе нет). */
+  previewEnabled?: boolean
   /** MiniMaxSparseAttention / Sol-Attn (default true). */
   sparseAttention?: boolean
   /** (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params). */
@@ -248,16 +253,14 @@ export function refineDimensions(
  *   2 с → 56/22, 3 с → 73/22, 5 с → 124/39, 8 с → 192/56.
  * Шаг окна (длина − нахлёст) в латент-токенах кратен 5 — фазовый график
  * правки 1052 остаётся корректным для любой из этих пар.
+ * (правка 1131) Формула переехала в minimax-h3-template — её использует и
+ * «Генерация»; здесь оставлен прежний экспорт для роутов и UI.
  */
 export function windowedH3Geometry(chunkSeconds?: number): {
   context_length: number
   context_overlap: number
 } {
-  const sec = Math.max(2, Math.min(15, Number(chunkSeconds) || 5))
-  const length = 17 * Math.max(1, Math.round((sec * 24 - 5) / 17)) + 5
-  const overlap = 17 * Math.max(0, Math.round((0.315 * length - 5) / 17)) + 5
-  // Нахлёст не может съедать окно целиком: минимум один клип нового содержимого.
-  return { context_length: length, context_overlap: Math.min(overlap, length - 17) }
+  return h3WindowGeometry(chunkSeconds)
 }
 
 /* (правка 1057) Канвас тайлового режима «Частями (Tessera)». Ноды Tessera
@@ -401,6 +404,9 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     : p.windowed && !tesseraOn
       ? ['46:70', 0]
       : ['46:37', 0]
+  // (правка 1133) Живое превью можно выключить совсем: узла превью нет,
+  // гайдеры и Tessera берут modelTail напрямую.
+  const previewOn = p.previewEnabled !== false
 
   // (правка 1045) Превью не должно ломать длинную генерацию: KJ-нода
   // принимает preview_frames только 1..1024. Числовое значение клампим,
@@ -410,9 +416,23 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     : latentMode
       ? framesGrid
       : ['r_cap', 1]
-  // (правка 1088) В bounded-режиме tiny-VAE декодирует каждый кадр в полном
-  // разрешении: 124 кадра 1080p — 3,1 ГБ GPU на каждом шаге. 8 кадров хватает.
-  const previewCap = p.boundedAttention === true ? 8 : PREVIEW_MAX_FRAMES
+  // (правка 1132) Превью — 8 кадров/с времени клипа и реальная скорость
+  // воспроизведения. Раньше bounded-режим отдавал 8 кадров на 6 fps (ускорение
+  // в 5–7 раз), а без bounded — все кадры на 6 fps (slow-motion).
+  // (правка 1136) В «Частями» превью видит ОКНО, а не весь клип: длительность
+  // для fps берём из геометрии окна, иначе 2-секундное окно играло бы 5 секунд.
+  const windowedSeconds = p.windowed === true && !tesseraOn && !loopOn
+    ? windowedH3Geometry(p.chunkSeconds).context_length / 24
+    : null
+  const previewSeconds = windowedSeconds ??
+    (typeof previewFramesSrc === 'number' ? Math.max(1, previewFramesSrc / 24) : 5)
+  const preview = h3PreviewParams(
+    typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null,
+    previewSeconds,
+    final.genW,
+    final.genH,
+  )
+  const previewCap = preview.frames
   const previewFrames: number | [string, number] =
     typeof previewFramesSrc === 'number'
       ? Math.min(previewCap, clampPreviewFrames(previewFramesSrc))
@@ -430,12 +450,14 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
   // выключил бы узел (он отдаёт управление, когда S ≤ chunk).
   const chainVramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
   const transients = h3TransientGB(final.genW, final.genH, framesGrid)
-  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
+  const headChunks = p.lowVramHeadChunks && p.lowVramHeadChunks > 0
+    ? Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks)))
+    : autoHeadChunks(chainVramGb, transients.seq)
   const wholeGrid = p.windowed !== true
   const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0)
     || (wholeGrid ? boundedTokenChunk(chainVramGb, transients.seq, undefined) : 4096)))
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
-  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks)
+  const ffChunks = autoChunkFFChunks(transients.ffnGb, p.chunkFFChunks, chainVramGb)
   const modelNodes: Record<string, unknown> = {}
   let modelSrc: [string, number] = ['46:30', 0]
   if (lowVram) {
@@ -1028,7 +1050,15 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     // сэмплера поднимает watermark заново через prioritize при загрузке.
     // Латент проходит насквозь без изменений.
     'r_rst_pre': {
-      inputs: { flow: samplerSeedLatent, label: 'рефайн, перед сэмплом' },
+      inputs: {
+        flow: samplerSeedLatent,
+        // (правка 1142) Барьер: сброс выполняется ПОСЛЕ загрузки текстового
+        // энкодера (conditioning) и ПЕРЕД первым fault'ом модели. Без него
+        // сброс шёл раньше cond, TE загружался уже после и висел в VRAM всё
+        // сэмплирование — окна «Частями» упирались в 97% и ползли минутами.
+        gate: [p.chunkJob ? condNodeId : 'r_ag', 0],
+        label: 'рефайн, перед сэмплом',
+      },
       class_type: 'MiniMaxStudioVRAMReset',
       _meta: { title: 'VRAM Reset (перед Refine-сэмплом)' },
     },
@@ -1053,13 +1083,14 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
           class_type: 'ManualSigmas',
           _meta: { title: `Pass 2 Sigmas (${ladder.split(',').length - 1} шагов)` },
         },
-    ...(needsPreviewClampNode ? {
+    ...(previewOn && needsPreviewClampNode ? {
       'prev_clamp': {
         inputs: { expression: `min(a, ${previewCap})`, 'values.a': previewFramesSrc },
         class_type: 'ComfyMathExpression',
         _meta: { title: `Превью: не больше ${previewCap} кадров` },
       },
     } : {}),
+    ...(previewOn ? {
     '12': {
       inputs: {
         model: modelTail,
@@ -1070,13 +1101,14 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
         suppress_default_preview: true,
         // Как на вкладке «Генерация» ('46:19'): превью покрывает всё видео
         // (кадры по сетке 17k+5; (правка 376) в latent-ветке — от сервера;
-        // (правка 829) в цикле — 17k+5 ('r_len')), playback 6 fps.
+        // (правка 829) в цикле — 17k+5 ('r_len')), скорость — реальная (1132).
         preview_frames: previewFrames,
-        preview_fps: 6,
+        preview_fps: preview.fps,
       },
       class_type: 'ModelPreviewOverrideKJ',
       _meta: { title: 'Model Preview Override' },
     },
+    } : {}),
     ...(tesseraOn ? {
       // (правка 1057) Тайловый тракт: negative через ZeroOut, геометрия — из
       // TesseraPlan (его `settings` в 't_ref.plan'), весь прогон внутри
@@ -1113,7 +1145,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
       },
       't_ref': {
         inputs: {
-          model: ['12', 0],
+          model: previewOn ? ['12', 0] : modelTail,
           // (правка 1058) геометрия — из панели «Параметры тайлов»; при
           // подключённом plan эти же значения всё равно перекрывает план.
           spatial_tile: tiles.spatialTile,
@@ -1149,7 +1181,7 @@ export function buildRefineWorkflow(p: RefineParams): Record<string, unknown> {
     } : {
     '46:29': {
       inputs: {
-        model: ['12', 0],
+        model: previewOn ? ['12', 0] : modelTail,
         // (правка 736, 737) Audio Guide — conditioning с якорем дорожки
         // исходника (в legacy chunkJob гайда нет — см. блок 'r_ag').
         conditioning: [p.chunkJob ? condNodeId : 'r_ag', 0],
@@ -1368,6 +1400,8 @@ export interface ChunkedRefineParams {
   boundedTokenChunk?: number
   /** (правка 1095) VRAM карты (для авторазмера token_chunk в «Целом»). */
   vramTotalGb?: number | null
+  /** (правка 1133) Живое превью шагов (false — узла превью в графе нет). */
+  previewEnabled?: boolean
   sparseAttention?: boolean
   // (правка 466) Sol-Attn: настройки ноды (см. MiniMaxH3Params)
   sparseTau?: number
@@ -1657,9 +1691,17 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
   // (правка 1095) head_chunks и FFN-чанки поднимаем автоматически (математика не
   // меняется), token_chunk — из настроек, по умолчанию 4096: последовательность
   // окна короче канвы, крупный кусок выключил бы узел.
-  const headChunks = Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks ?? 4)))
   const windowFrames = windowedH3Geometry(p.chunkSeconds).context_length
-  const ffChunks = autoChunkFFChunks(h3TransientGB(final.genW, final.genH, windowFrames).ffnGb, p.chunkFFChunks)
+  const windowTransients = h3TransientGB(final.genW, final.genH, windowFrames)
+  const vramGb = typeof p.vramTotalGb === 'number' ? p.vramTotalGb : null
+  // (правка 1132) Превью окна — с реальной скоростью (кадров в бюджет).
+  const preview = h3PreviewParams(vramGb, windowFrames / 24, final.genW, final.genH)
+  // (правка 1133) Живое превью выключено — узла '12' нет, гайдеры берут backend.
+  const previewOn = p.previewEnabled !== false
+  const headChunks = p.lowVramHeadChunks && p.lowVramHeadChunks > 0
+    ? Math.max(1, Math.min(56, Math.round(p.lowVramHeadChunks)))
+    : autoHeadChunks(vramGb, windowTransients.seq)
+  const ffChunks = autoChunkFFChunks(windowTransients.ffnGb, p.chunkFFChunks, vramGb)
   const tokenChunk = Math.max(512, Math.min(32768, Math.round(p.boundedTokenChunk ?? 0) || 4096))
   const chunkFF = p.chunkFeedForward !== false || boundedAttn
   const modelNodes: Record<string, unknown> = {}
@@ -1762,6 +1804,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
           class_type: 'ManualSigmas',
           _meta: { title: `Pass 2 Sigmas (${ladder.split(',').length - 1} шагов)` },
         },
+    ...(previewOn ? {
     '12': {
       inputs: {
         model: ['46:37', 0],
@@ -1771,17 +1814,17 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         jpeg_quality: 80,
         suppress_default_preview: true,
         // Как на вкладке «Генерация»: превью покрывает весь кусок (у более
-        // коротких окон лишний лимит безвреден — сабсэмплинга нет), 6 fps.
-        // (правка 382) latent-ветка: от эффективных длин окон.
-        // (правка 1088) bounded: 8 кадров вместо всего окна (tiny-VAE decode).
+        // коротких окон лишний лимит безвреден — сабсэмплинга нет), скорость
+        // реальная (1132). (правка 382) latent-ветка: от эффективных длин окон.
         preview_frames: Math.min(
-          p.boundedAttention === true ? 8 : PREVIEW_MAX_FRAMES,
+          preview.frames,
           clampPreviewFrames(Math.max(...winGeo.map((g) => g.effCap)))),
-        preview_fps: 6,
+        preview_fps: preview.fps,
       },
       class_type: 'ModelPreviewOverrideKJ',
       _meta: { title: 'Model Preview Override' },
     },
+    } : {}),
     // ─── (правка 315, заменяет раскладку правки 305) Якорь идентичности:
     // мета-рефы (<Picture 1..k>, исходная нумерация оригинальной генерации) +
     // первый кадр ПОСЛЕДНИМ (<Picture k+1>; без меты — <Picture 1>) —
@@ -2238,7 +2281,7 @@ export function buildChunkedRefineWorkflow(p: ChunkedRefineParams): Record<strin
         }
         nodes[`cg_${k}`] = {
           inputs: {
-            model: ['12', 0],
+            model: previewOn ? ['12', 0] : ['46:37', 0],
             // (правка 736, 737) Audio Guide окна — хвост цепочки conditioning-а.
             conditioning: [`cag_${k}`, 0],
           },

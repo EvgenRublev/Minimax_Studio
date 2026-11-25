@@ -105,18 +105,34 @@ const nodePatch = join(patchDir, 'comfy_extras', 'nodes_minimax_h3.py')
 expect(existsSync(nodePatch), 'патч comfy_extras/nodes_minimax_h3.py на месте')
 // (правка 967) без патча main.py ползунок «Запас свободной VRAM» мёртв:
 // ядро 0.44 парсит --vram-headroom, но в comfy-aimdo передаёт только reserve.
+// (правка 1131) headroom идёт ТОЛЬКО per-device extra_vram_headroom
+// (init_devices), а простой бюджет получает один reserve: иначе память
+// удерживалась дважды, и на 8 ГБ генерации оставалось 3 ГБ.
 const mainPatch = join(patchDir, 'main.py')
 expect(existsSync(mainPatch), 'патч main.py (vram-headroom) на месте')
 if (existsSync(mainPatch)) {
   const py = readFileSync(mainPatch, 'utf-8')
-  expect(/vram_headroom/.test(py) && /_keep_free_gb/.test(py),
-    'main.py передаёт reserve+headroom в comfy-aimdo')
+  expect(/simple_vram_headroom = int\(_reserve_gb \* 1024 \*\* 3\)/.test(py) &&
+    !/_keep_free_gb = _reserve_gb \+ _headroom_gb/.test(py),
+    'main.py не дублирует headroom (reserve — в простой бюджет, headroom — per-device)')
 }
 if (existsSync(nodePatch)) {
   const py = readFileSync(nodePatch, 'utf-8')
   expect(/node_id\s*=\s*["']MiniMaxH3AddGuide["']/.test(py), 'патч содержит MiniMaxH3AddGuide')
   expect(/io\.Latent\.Output\(display_name=["']latent["']\)/.test(py),
     'MiniMaxH3AddGuide отдаёт выход latent (иначе аудио-гайд падает на av_latent)')
+}
+// (правка 1137) между окнами контекста чистим aimdo (#117): без колбэка второе
+// окно Refine «Частями» ловит OOM/дедлок при полной VRAM.
+const cwPatch = join(patchDir, 'comfy_extras', 'nodes_context_windows.py')
+expect(existsSync(cwPatch), 'патч comfy_extras/nodes_context_windows.py на месте')
+if (existsSync(cwPatch)) {
+  const py = readFileSync(cwPatch, 'utf-8')
+  expect(/_studio_window_vram_cleanup\(\)/.test(py) &&
+    /window_vram_cleanup = True/.test(py) &&
+    /EVALUATE_CONTEXT_WINDOWS/.test(py) &&
+    /minimax_context_window/.test(py),
+    'context windows: очистка VRAM между окнами + статус окна (правки 1137/1145)')
 }
 
 // 6. (правки 904, 951) Ядро 0.44 пиновано. Режим «Изображение» удалён вместе с
@@ -163,8 +179,10 @@ expect(/function\s+pickCorePatchSet\s*\(/.test(sync),
     expect(/def pause_malloc_graph/.test(mp),
       'comfy-patches-0.33: model_prefetch.py содержит shim pause_malloc_graph')
     const main033 = readFileSync(join(rb, 'main.py'), 'utf-8')
-    expect(/_keep_free_gb = _reserve_gb \+ _headroom_gb/.test(main033),
-      'comfy-patches-0.33: main.py несёт патч 967 (headroom применяется)',)
+    expect(/_reserve_gb = args\.reserve_vram or 0/.test(main033) &&
+      /simple_vram_headroom = int\(_reserve_gb \* 1024 \*\* 3\)/.test(main033) &&
+      !/_keep_free_gb = _reserve_gb \+ _headroom_gb/.test(main033),
+      'comfy-patches-0.33: main.py не дублирует headroom (патч 967 + правка 1131)')
     // (правка 1116) keyframe-гиды в context windows: без методов 0.44 якорь
     // головы продления остаётся на абсолютной позиции в каждом окне, и первые
     // кадры клипа пересвечиваются (видно только на откатном ядре).
@@ -543,8 +561,9 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   expect(rq.includes('lowVramHeadChunks: task.lowVramHeadChunks') && rq.includes('boundedTokenChunk: task.boundedTokenChunk'),
     'refine-queue: размеры кусков прокидываются в очередь Refine')
   const store = read('src/lib/gen-store.ts')
-  expect(store.includes('lowVramHeadChunks: 4') && store.includes('boundedTokenChunk: 0'),
-    'gen-store: дефолты новых настроек (4 головы / авто-кусок)')
+  expect(store.includes('lowVramHeadChunks: 0') && store.includes('boundedTokenChunk: 0') &&
+    store.includes("boundedAttention: 'auto'") && store.includes('autoContextWindows: true'),
+    'gen-store: дефолты (auto-группы / авто-кусок / bounded auto / авто-окна)')
   // (правка 1095) auto на малых картах больше не ставит узел вслепую: роуты
   // передают длину последовательности, а порог живёт в gpu-vram.ts.
   const gv = read('src/lib/comfy/gpu-vram.ts')

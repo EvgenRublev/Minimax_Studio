@@ -506,8 +506,14 @@ function bodyToMetaParams(body: MiniMaxH3Params): Record<string, unknown> {
     bounded_attention: body.boundedAttention === true,
     // (правка 1095) размеры кусков attention-цепочки из настроек: head_chunks и
     // token_chunk (0 = авторазмер по VRAM, который знает только сервер).
-    low_vram_head_chunks: body.lowVramHeadChunks ?? 4,
+    low_vram_head_chunks: body.lowVramHeadChunks ?? 0,
     bounded_token_chunk: body.boundedTokenChunk ?? 0,
+    // (правка 1131) Авто-окна: сохраняем и фактическое окно, выбранное планом, —
+    // по сайдкару видно, почему прогон шёл окнами.
+    auto_context_windows: (body as { autoContextWindows?: boolean }).autoContextWindows !== false,
+    ...(body.contextWindow
+      ? { context_window_frames: body.contextWindow.length, context_window_overlap: body.contextWindow.overlap }
+      : {}),
     latent_upscaler_3d: body.latentUpscaler3D !== false, // (правка 806)
     ...(body.chunkFeedForward !== false
       ? {

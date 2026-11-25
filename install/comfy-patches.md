@@ -8,7 +8,7 @@ ComfyUI при каждом запуске (шаг 4, идемпотентно).
 
 | Файл | Что меняет |
 | --- | --- |
-| `main.py` | (правка 967) `--vram-headroom` в 0.44 только парсился и нигде не применялся: DynamicVRAM (`comfy-aimdo`) получал только `--reserve-vram`. Теперь к `simple_vram_headroom` добавляется и headroom — ползунок «Запас свободной VRAM» реально держит память свободной |
+| `main.py` | (правки 967, 1131) `--vram-headroom` в 0.44 только парсился и нигде не применялся: DynamicVRAM (`comfy-aimdo`) получал только `--reserve-vram`. Теперь headroom доходит до aimdo per-device (`init_devices`), а простой бюджет получает один `reserve_vram` — иначе запас учитывался дважды и на 8 ГБ съедал 2–3 ГБ у генерации |
 | `comfy_extras/nodes_minimax_h3.py` | Наши правки поверх файла 0.44: второй выход `latent` у `MiniMaxH3AddGuide` и сидинг гайд-аудио в аудио-стрим латента с AV-маской 0 (правка 888); ноды `MiniMaxH3AudioOrSilent` и `MiniMaxH3AudioSliceFrom` (правки 313/885); flf-фикс keyframe-латентов при смене разрешения (правки 146/149); `first_frame` через cover-crop `center` (правка 154); сохранение aspect ratio референсов (правка 693) |
 | `utils/extra_config.py` | принимает списки путей в `extra_model_paths.yaml` (студия пишет их списками) |
 

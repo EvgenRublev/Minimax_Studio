@@ -238,9 +238,15 @@ export async function POST(req: NextRequest) {
             ])
             const pp = await probeVideoFile(paddedPath)
             if (pp.frames >= probe.frames + pad) {
-              console.log(`[face-refine] сетка H3: ${probe.frames} → ${aligned} кадров (клон хвоста), итог обрежется до ${probe.frames}`)
+              // (правка 1146) Итог режем ВНИЗ до ближайшей валидной сетки
+              // 17k+5, а не до исходной off-grid длины: иначе сохранённый
+              // .latent получается вне сетки, и следующий lossless-рефайн его
+              // отвергает (resolveSourceLatent: tokens%5 != 2). Потеря — до
+              // 16 кадров хвоста, зато mp4 и латент совпадают и валидны.
+              const outGrid = 5 + 17 * Math.floor((probe.frames - 5) / 17)
+              trimFrames = outGrid >= 5 ? outGrid : probe.frames
+              console.log(`[face-refine] сетка H3: ${probe.frames} → ${aligned} кадров (клон хвоста), итог обрежется до ${trimFrames}`)
               inName = paddedName
-              trimFrames = probe.frames
             } else {
               await fs.unlink(paddedPath).catch(() => {})
               console.warn(`[face-refine] паддинг не дал нужную длину (${pp.frames}), работаю без него`)
@@ -310,9 +316,11 @@ export async function POST(req: NextRequest) {
 
     // (правка 1089) Bounded attention — общее авторешение по VRAM + настройка
     // auto/on/off (Face Refine не использует Veda, поэтому исключение не нужно).
+    // (правка 1133) VRAM нужна шаблону: бюджет кадров живого превью.
+    const vramGb = await gpuVramTotalGb()
     const boundedAttention = resolveBoundedAttention(
       normalizeBoundedAttentionMode(body.boundedAttentionMode),
-      await gpuVramTotalGb(),
+      vramGb,
     )
 
     // (правка 722) Детекторы берём из комбо живого ComfyUI: после регистрации
@@ -334,6 +342,9 @@ export async function POST(req: NextRequest) {
       boundedAttention, // (правка 1089)
       // (правка 1095) token_chunk из настроек (0 = 4096)
       boundedTokenChunk: body.boundedTokenChunk,
+      sourceFrames: probe.frames, // (правка 1132) длительность превью
+      vramTotalGb: vramGb, // (правка 1133)
+      previewEnabled: cfg.livePreview, // (правка 1133)
       prompt,
       seed,
       canvas,

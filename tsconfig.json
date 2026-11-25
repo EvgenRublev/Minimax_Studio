@@ -44,6 +44,7 @@
   "exclude": [
     "node_modules",
     "ComfyUI",
-    "ComfyUI-Easy-Install"
+    "ComfyUI-Easy-Install",
+    "scratchpad"
   ]
 }

@@ -1,6 +1,6 @@
 {
   "note": "Контрольные суммы офлайн-бандла установщика (install/cache). Нужны, чтобы битый архив в кэше или в самом установщике обнаруживался до распаковки. Заполняется скриптом scripts/make-installer-cache.mjs.",
-  "generatedAt": "2026-11-12T09:00:24Z",
+  "generatedAt": "2026-11-25T15:42:39Z",
   "pinnedMeaning": "pinned=true — артефакт неизменяем (nodejs.org, python.org, релизный ассет GitHub), сумму сверяем и для скачанного из сети; pinned=false — архив тега GitHub, сумма проверяется только для бандла.",
   "files": {
     "ComfyUI-v0.33.0.zip": {

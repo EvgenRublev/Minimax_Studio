@@ -362,9 +362,10 @@ function killPortListeners(port) {
 const { comfyCoreVersion, comfyFlags } = require('../scripts/comfy-launch-args')
 
 function parseIniVram() {
-  // (правка 814) Заводские значения 1/1 — те же, что в app-config.ts и
-  // config.ini. Здесь они используются только если файла конфига нет вовсе.
-  const v = { reserveGb: '1', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '1', fastDisk: 'auto' }
+  // (правки 1131, 1141, 1143) Заводские значения 2/1 — те же, что в
+  // app-config.ts и config.ini. Здесь они используются только если файла
+  // конфига нет вовсе.
+  const v = { reserveGb: '2', dynamicVram: '1', asyncOffload: '0', vramHeadroom: '1', fastDisk: 'auto' }
   if (!existsSync(CONFIG_INI)) return v
   let text = ''
   try {
@@ -380,11 +381,14 @@ function parseIniVram() {
   }
   // первый матч выигрывает (дубли ключей от старых конфигов), /b-семантика bat
   const num = (raw, dflt, re) => (raw !== undefined && re.test(raw) ? raw : dflt)
-  // (правка 814) Заводские значения — 1/1, как в app-config.ts и config.ini.
+  // (правка 814) Заводские значения — 1/0, как в app-config.ts и config.ini.
   // Раньше здесь стояли старые дефолты 3 и 2: ключа нет → Electron запускал
   // ComfyUI с завышенными резервами, и поведение расходилось с интерфейсом
   // (в настройках показывалось 1, а генерация резервировала больше).
-  v.reserveGb = num(grab('reserve_gb'), '1', /^[0-9][0-9.]*$/)
+  // (правка 1141) headroom 1: без него Refine «Частями» забивает VRAM до
+  // предела и aimdo зависает. В простом бюджете он больше не дублируется.
+  // «1+1» отнимал у генерации лишний гигабайт.
+  v.reserveGb = num(grab('reserve_gb'), '2', /^[0-9][0-9.]*$/)
   v.dynamicVram = num(grab('dynamic_vram'), '1', /^[01]$/)
   v.asyncOffload = num(grab('async_offload'), '0', /^[01]$/)
   // (правка 1073) pinned memory — отдельный ключ, больше не выключается вместе
@@ -392,7 +396,10 @@ function parseIniVram() {
   // весов: comfy/model_management.pinned_hostbuf_size() при
   // --disable-pinned-memory даёт 0, и модель (w6a8 = 14,8 ГБ) при каждом шаге
   // перечитывается с диска.
-  v.pinnedMemory = num(grab('pinned_memory'), '1', /^[01]$/)
+  // (правка 1119) pinned_memory=0 по умолчанию, как в config.ini: меньше
+  // занятой RAM и без падений 1450/1453 на pinned-аллокациях. 1 включают
+  // осознанно, если модель не грузится.
+  v.pinnedMemory = num(grab('pinned_memory'), '0', /^[01]$/)
   // (правка 1077) nvml_pressure=1|0 — учитывать ли aimdo чужие процессы в VRAM
   // (флаг ядра --disable-nvml-pressure). На 12 ГБ это второй по влиянию рычаг
   // после pinned: с pressure aimdo отдаёт весам меньше половины карты.

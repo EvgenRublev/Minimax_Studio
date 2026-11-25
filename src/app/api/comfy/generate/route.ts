@@ -21,6 +21,7 @@ import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
 import { framesForDuration, finalDimsFromMegapixels, h3TransientGB, FREE_MAX_MP, EXTEND_CLIP_MAX_SECONDS } from '@/lib/comfy/minimax-h3-template' // (правка 1047, 1092, 1095, 1096)
 import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1088, 1089)
+import { planH3Vram, formatH3VramPlan } from '@/lib/comfy/h3-vram-plan' // (правка 1131)
 import { st } from '@/lib/i18n/server'
 
 const execFileAsync = promisify(execFile)
@@ -69,6 +70,8 @@ export async function POST(req: NextRequest) {
       boundedTokenChunk?: number
       /** (правка 1095) Сервер подставляет фактическую VRAM карты. */
       vramTotalGb?: number | null
+      /** (правка 1131) Авто-временные окна в «Генерации» (default true). */
+      autoContextWindows?: boolean
     }) | null
 
     if (!body) {
@@ -547,6 +550,38 @@ export async function POST(req: NextRequest) {
     // bounded attention (на больших картах крупнее кусок = меньше прогонов
     // qkv_proj = быстрее при той же математике).
     body.vramTotalGb = vramGb
+    // (правка 1133) Живое превью — общая настройка из config.ini ([ui] live_preview).
+    // false: шаблон не ставит узлы превью, сэмплеры берут модель напрямую.
+    body.previewEnabled = cfg.livePreview
+
+    // (правка 1131) VRAM-план: прогноз пика pass 2 и, если клип не влезает,
+    // авто-временные окна. Раньше длинный/крупный клип просто уходил в OOM
+    // через несколько минут; окна режут пик пропорционально длине окна.
+    // Не для «Продления» (там свои клипы и сэмплеры), не для «Зациклено»
+    // (своя обёртка латента) и не для «Кадров» (keyframe-условия привязаны к
+    // номерам кадров — окна их не проверяли).
+    const allowAutoWindow = body.mode !== 'extend' && body.mode !== 'flf'
+      && body.loop !== true && body.autoContextWindows !== false
+    const vramPlan = planH3Vram({
+      width: genCanvas.w,
+      height: genCanvas.h,
+      seconds: genDurSec,
+      vramGb,
+      reserveGb: cfg.reserveGb,
+      headroomGb: cfg.vramHeadroom,
+      bounded: body.boundedAttention === true,
+      headChunks: body.lowVramHeadChunks,
+      tokenChunk: body.boundedTokenChunk,
+      ffChunks: body.chunkFFChunks,
+      autoWindow: allowAutoWindow,
+    })
+    console.log(formatH3VramPlan(vramPlan))
+    if (vramPlan.window) {
+      body.contextWindow = {
+        length: vramPlan.window.length,
+        overlap: vramPlan.window.overlap,
+      }
+    }
 
     // VRAM arbitration: LLM должен ПОЛНОСТЬЮ покинуть VRAM до загрузки MiniMax.
     // Mutex держится и на submit — окно для гонки с чатом исключено.
@@ -592,7 +627,20 @@ export async function POST(req: NextRequest) {
         recordInflight(clientToken, result.prompt_id)
       }
     }
-    return NextResponse.json({ ...result, staged_transfers: transfers })
+    return NextResponse.json({
+      ...result,
+      staged_transfers: transfers,
+      // (правка 1131) Короткая сводка плана — клиент пишет её в консоль, чтобы
+      // решение по окнам/пику было видно без чтения серверного лога.
+      vramPlan: {
+        frames: vramPlan.frames,
+        peakGb: Number(vramPlan.peakGb.toFixed(2)),
+        budgetGb: Number(vramPlan.budgetGb.toFixed(2)),
+        window: vramPlan.window,
+        overBudget: vramPlan.overBudget,
+        notes: vramPlan.notes,
+      },
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

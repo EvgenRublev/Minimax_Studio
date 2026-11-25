@@ -661,5 +661,9 @@
   "Scale (качество)": "Scale (quality)",
   "Sigma-профиль (шаги)": "Sigma profile (steps)",
   "simple (по умолчанию)": "simple (default)",
-  "SyncTile (швы без мерцания)": "SyncTile (seamless blending)"
+  "SyncTile (швы без мерцания)": "SyncTile (seamless blending)",
+  "Окно": "Window",
+  "кадры": "frames",
+  "из": "of",
+  "Первый запуск после старта студии: 1–2 минуты грузится текстовый энкодер — 0% в это время нормально, не отменяйте. Каждый тайл × шаг считается моделью заново: на 12 ГБ это ~30 с на шаг (веса стримятся с диска), а после 100% ещё несколько минут идёт декодирование и сборка видео. Отмена срабатывает после текущего шага или загрузки — до минуты. На 2K и 4K это нормальное время. На 8–12 ГБ цель 2160p (и 1440p на 8 ГБ) считается 3D-апскейлером на CPU — без переполнения VRAM, но заметно дольше; быстрее — выбрать 1440p. Для 1080p ставьте 2 шага: 4 шага — это вдвое дольше при небольшой разнице.": "First run after the studio starts: the text encoder loads for 1–2 minutes — 0% during that time is normal, do not cancel. Every tile × step is recomputed by the model: on 12 GB that is about 30 s per step (weights stream from disk), and after 100% decoding and assembling the video takes a few more minutes. Cancellation applies after the current step or load — up to a minute. For 2K and 4K this is normal run time. On 8–12 GB the 2160p target (and 1440p on 8 GB) is computed by the 3D upscaler on the CPU — no VRAM overflow, but noticeably slower; 1440p is faster. For 1080p choose 2 steps: 4 steps take twice as long for a small difference."
 }

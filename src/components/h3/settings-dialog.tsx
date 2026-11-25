@@ -201,15 +201,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const { t: tt } = useTranslation() // (правка 955)
 
   const [tab, setTab] = useState<TabId>('general')
+  // (правка 1139) Оптимизация: пресеты сверху, остальное — в двух свёрнутых
+  // разделах («Дополнительные настройки» и «Ускорители»).
+  const [showAdvancedOptim, setShowAdvancedOptim] = useState(false)
+  const [showAccelerators, setShowAccelerators] = useState(false)
   // (правка 1067) При смене раздела прокрутка возвращается наверх: раньше
   // контейнер сохранял scrollTop, и «Оптимизация» могла открыться с середины.
   const scrollRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [connected, setConnected] = useState<boolean | null>(null)
-  // (правка 803) Дефолты reserve/headroom снижены до 1/1 ГБ.
-  const [reserveVram, setReserveVram] = useState(1)
+  // (правка 1131) Дефолты reserve/headroom — 1/0 ГБ: headroom складывается с
+  // reserve в DynamicVRAM, поэтому каждый гигабайт здесь отнимается у генерации.
+  const [reserveVram, setReserveVram] = useState(2)
   const [dynamicVram, setDynamicVram] = useState(true)
-  // (правка 490) Доп. запас свободной VRAM (--vram-headroom), 0 = выкл
+  // (правка 490) Доп. запас свободной VRAM (--vram-headroom).
+  // (правка 1141) 1 ГБ по умолчанию: без него полная VRAM вешает aimdo.
   const [vramHeadroom, setVramHeadroom] = useState(1)
   // (правка 1029) Принудительный --fast-disk; по умолчанию выкл (auto).
   const [fastDisk, setFastDisk] = useState(false)
@@ -245,6 +251,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [confirmAction, setConfirmAction] = useState<'reset' | 'clean' | 'delete' | 'factory' | null>(null)
   const [executing, setExecuting] = useState(false)
   const [soundOn, setSoundOn] = useState(true)
+  // (правка 1133) Живое превью шагов во всех режимах (config.ini [ui] live_preview).
+  const [livePreview, setLivePreview] = useState(true)
   // (правка 386) формат сохранения видео ([video] в config.ini)
   const [videoCodec, setVideoCodec] = useState<'h264' | 'h265' | 'nvenc_h264' | 'nvenc_h265'>('h264')
   const [videoCrf, setVideoCrf] = useState(12)
@@ -254,6 +262,74 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
      zustand-сторе, что и раньше в «Доп. параметрах»; генерация читает их оттуда. */
   const video = useGenStore((s) => s.video)
   const patchVideo = useGenStore((s) => s.patchVideo)
+
+  /**
+   * (правка 1131, 1139) Три пресета памяти — согласованный набор рычагов,
+   * вместо ручной сборки. Резерв/headroom живут в config.ini и действуют
+   * после перезапуска ComfyUI; остальное — сразу, без перезапуска.
+   *
+   *   • Слабые (8–12 ГБ): резерв 2 + headroom 1 (3 ГБ не отдаются моделям),
+   *     bounded auto, head_chunks авто (16/8), мелкие чанки FFN (мин. 4),
+   *     авто-окна включены.
+   *   • Средние (16–24 ГБ): резерв 2, те же авто-рычаги, но FFN-чанков
+   *     меньше (2): память уже позволяет.
+   *   • Мощные (24+ ГБ): резерв 4 (браузер/рабочий стол), без агрессивного
+   *     дробления — авто-размеры сами выберут 4 группы голов и 2 чанка.
+   */
+  const applyMemoryPreset = useCallback(async (kind: 'weak' | 'medium' | 'strong') => {
+    const preset = kind === 'weak'
+      ? { reserve: 2, headroom: 1, ff: 4 }
+      : kind === 'medium'
+        ? { reserve: 2, headroom: 1, ff: 2 }
+        : { reserve: 4, headroom: 1, ff: 2 }
+    patchVideo({
+      lowVramAttention: true,
+      chunkFeedForward: true,
+      lowVramHeadChunks: 0, // авто по VRAM
+      boundedTokenChunk: 0, // авто
+      chunkFFChunks: preset.ff,
+      boundedAttention: 'auto',
+      autoContextWindows: true,
+    })
+    flushMirror()
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reserve_gb: preset.reserve, dynamic_vram: true, vram_headroom: preset.headroom }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setReserveVram(preset.reserve)
+      setDynamicVram(true)
+      setVramHeadroom(preset.headroom)
+      const name = kind === 'weak' ? 'Слабые (8–12 ГБ)'
+        : kind === 'medium' ? 'Средние (16–24 ГБ)' : 'Мощные (24+ ГБ)'
+      toast.success(tt("Пресет «{{p1}}» включён. Новые генерации — сразу; резерв VRAM — после перезапуска ComfyUI.", { p1: tt(name) }))
+    } catch (err) {
+      toast.error(tt("Настройки генерации применены, но сохранить резерв VRAM не удалось: {{p1}}", { p1: String(err) }))
+    }
+  }, [patchVideo, tt])
+
+  /** (правка 1133) Живое превью: сохраняем в config.ini сразу — сервер читает
+   *  настройку на каждый запрос, так что она действует со следующей задачи,
+   *  без перезапуска ComfyUI. */
+  const persistLivePreview = useCallback(async (next: boolean) => {
+    setLivePreview(next)
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live_preview: next }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      toast.success(next
+        ? tt("Живое превью включено.")
+        : tt("Живое превью выключено: узлы превью не ставятся в граф, прогресс — только полосой."))
+    } catch (err) {
+      setLivePreview(!next)
+      toast.error(tt("Не удалось сохранить настройку превью: {{p1}}", { p1: String(err) }))
+    }
+  }, [tt])
   // (правка 1115) Какие настройки вообще имеют смысл на текущем ядре.
   // Veda требует ComfyUI >= 0.38: на откатном 0.33 её блок не показываем.
   const { info: coreInfo } = useCoreVersion(5000)
@@ -279,10 +355,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         .then((d) => {
           // сервер клампит в 1–16 (правка 315): `|| 3`
           // превращал сохранённый 0 в 3 при каждом открытии диалога
-          // (правка 803) fallback — новые дефолты 1/1.
-          setReserveVram(typeof d.reserve_gb === 'number' ? d.reserve_gb : 1)
+          // (правка 1131) fallback — новые дефолты 1/0.
+          setReserveVram(typeof d.reserve_gb === 'number' ? d.reserve_gb : 2)
           setDynamicVram(d.dynamic_vram !== false)
-          setVramHeadroom(typeof d.vram_headroom === 'number' ? d.vram_headroom : 1) // (правка 490)
+          setVramHeadroom(typeof d.vram_headroom === 'number' ? d.vram_headroom : 1) // (правка 1141)
           setFastDisk(d.fast_disk === true) // (правка 1029)
           if (['auto', 'gpu', 'cpu'].includes(d.llm_device)) setLlmDevice(d.llm_device)
           if (typeof d.llm_context_size === 'number') setLlmCtxSize(d.llm_context_size)
@@ -295,6 +371,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           setLlmCustomMmproj(d.llm_custom_mmproj || '')
           setLlmModelCurrent(d.llm_model || '') // (правка 467)
           if (typeof d.sound_on === 'boolean') setSoundOn(d.sound_on)
+          // (правка 1133)
+          if (typeof d.live_preview === 'boolean') setLivePreview(d.live_preview)
           // (правка 386)
           if (['h264', 'h265', 'nvenc_h264', 'nvenc_h265'].includes(d.video_codec)) setVideoCodec(d.video_codec)
           if (typeof d.video_crf === 'number') setVideoCrf(d.video_crf)
@@ -536,10 +614,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            // (правка 803) заводские значения: reserve 1, headroom 1.
-            reserve_gb: 1,
+            // (правка 1131) заводские значения: reserve 1, headroom 0 — под 8–12 ГБ.
+            reserve_gb: 2,
             dynamic_vram: true,
-            vram_headroom: 1, // (правка 490) заводской запас VRAM
+            vram_headroom: 1, // (правка 1141) 1 ГБ — минимальный запас для aimdo
             llm_device: 'auto',
             llm_context_size: 25600,       // (правка 119) дефолт контекста — 25K
             llm_max_output_tokens: 4096,
@@ -549,6 +627,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             // (правка 140) сэмплинг — всегда модель-осознанные значения
             llm_sampling_override: false,
             sound_on: true,          // звук → вкл
+            live_preview: true,      // (правка 1133) живое превью → вкл
             llm_model: 'Qwen3.5-9B-Q4_K_M.gguf', // модель ассистента по умолчанию
             diffusion_model: '',     // базовая модель → дефолтная
             // (правка 311) своя LLM и внешние папки моделей — тоже сбрасываются
@@ -998,7 +1077,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   className="h-7 w-full justify-start gap-1.5 text-xs font-normal"
                   onClick={async () => {
                     try {
-                      // (правка 1121) Выбираем ФАЙЛ, а не папку: при нескольких
+                      // (правка 1131) Выбираем ФАЙЛ, а не папку: при нескольких
                       // .gguf в папке сервер брал первый попавшийся. И сразу
                       // сохраняем — раньше путь жил только в состоянии формы до
                       // нажатия «Сохранить» на вкладке LLM.
@@ -1071,6 +1150,45 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         {/* ─────────── Optimization ─────────── */}
         {tab === 'optimization' && (
           <div className="space-y-3">
+            {/* (правка 1139) Пресеты памяти — первое, что видит пользователь.
+                Остальные рычаги спрятаны в двух свёрнутых разделах ниже. */}
+            <SettingsCard
+              icon={<CpuIcon className="w-4 h-4" />}
+              title={tt("Пресеты памяти")}
+              description={tt("Готовый набор рычагов под объём видеопамяти. Резерв применяется после перезапуска ComfyUI, остальное — сразу.")}
+            >
+              <div className="grid gap-2 px-3.5 py-3 sm:grid-cols-3">
+                {([
+                  ['weak', 'Слабые', '8–12 ГБ', 'Резерв 2 ГБ + headroom 1 ГБ, Bounded Attention = Авто, 16/8 групп голов, FFN 4 чанка, авто-окна'],
+                  ['medium', 'Средние', '16–24 ГБ', 'Резерв 2 ГБ + headroom 1 ГБ, авто-размеры attention, FFN 2 чанка'],
+                  ['strong', 'Мощные', '24+ ГБ', 'Резерв 4 ГБ + headroom 1 ГБ, без мелкого дробления, FFN 2 чанка'],
+                ] as const).map(([kind, name, vram, hint]) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => { void applyMemoryPreset(kind) }}
+                    className="rounded-lg border border-border bg-[var(--surface-1)] p-2.5 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/5"
+                  >
+                    <p className="text-xs font-medium text-foreground">{tt(name)}</p>
+                    <p className="text-[10px] text-cyan-300/90">{vram}</p>
+                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{tt(hint)}</p>
+                  </button>
+                ))}
+              </div>
+            </SettingsCard>
+
+            {/* (правка 1139) Всё, кроме ускорителей, — в свёрнутом разделе. */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedOptim((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-cyan-500/30 transition-all text-left"
+              >
+                <span className="text-xs font-medium text-muted-foreground">{tt("Дополнительные настройки")}</span>
+                <span className={cn('text-[10px] text-muted-foreground transition-transform', showAdvancedOptim && 'rotate-180')}>▼</span>
+              </button>
+              {showAdvancedOptim && (
+              <div className="space-y-3">
             {/* ── Память GPU: применяется при перезапуске ComfyUI ── */}
             <SettingsCard
               icon={<CpuIcon className="w-4 h-4" />}
@@ -1106,7 +1224,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               {/* (правка 490) Доп. запас свободной VRAM (--vram-headroom) */}
               <SettingsField
                 label={tt("Запас свободной VRAM (headroom)")}
-                description={tt("Дополнительный запас для нативного слоя DynamicVRAM (comfy-aimdo): учитывает и чужие приложения. Гарантированный рычаг — «Резерв VRAM».")}
+                description={tt("Держит эту память свободной сверх резерва. 1 ГБ — минимум: без него Refine «Частями» и тайловый апскейл забивают VRAM до предела, и aimdo зависает. Меньше 1 не ставьте.")}
                 value={vramHeadroom > 0 ? `${vramHeadroom} GB` : tt("Выкл")}
               >
                 <div>
@@ -1162,170 +1280,6 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               title={tt("Экономия VRAM при генерации")}
               description={tt("Применяется ко всем новым генерациям сразу — без перезапуска ComfyUI.")}
             >
-              {/* (правка 168) Sparse Attention (Sol-Attn) */}
-              <SettingsRow
-                label={tt("Разреженное внимание (Sol-Attn)")}
-                description={tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически. На актуальном ядре работает через узел ядра BlockSparseAttention — строки текста, звука и референсов остаются в точном внимании, а генерируемый звук идёт плотно и не деградирует")}
-                right={
-                  <SettingsToggle
-                    checked={video.sparseAttention}
-                    label={tt("Разреженное внимание (Sol-Attn)")}
-                    // (правка 813) Sol-Attn сохраняем сразу: patchVideo пишет в
-                    // localStorage и ставит зеркало в очередь на 800 мс. Если
-                    // приложение закрыть/убить в этом окне, последнее значение
-                    // могло не дойти до data/settings — flushMirror отправляет
-                    // накопленное немедленно.
-                    onChange={(next) => {
-                      patchVideo({ sparseAttention: next })
-                      flushMirror()
-                    }}
-                  />
-                }
-              />
-
-              {/* (правка 466) Настройки ноды Sol-Attn — видны при включённом
-                  тоггле (как блок Veda, правка 406). */}
-              {video.sparseAttention && (
-                <div className="bg-[var(--surface-1)] px-3.5 py-3">
-                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
-                    <SettingSlider
-                      label={tt("Порог разреженности (tau)")}
-                      labelTitle="Насколько смело пропускать часть вычислений внимания. Больше — быстрее, но картинка может стать грубее. Стандартно 1.3."
-                      value={video.sparseTau}
-                      onChange={(v) => patchVideo({ sparseTau: v })}
-                      min={0}
-                      max={4}
-                      step={0.1}
-                      inputMin={0}
-                      inputMax={4}
-                    />
-                    <SettingSlider
-                      label={tt("Включать с начала генерации")}
-                      labelTitle="Первые шаги генерации задают композицию — их лучше считать точно. 20% — стандарт: первые пять шагов полные, дальше ускорение."
-                      value={Math.round(video.sparseStartPercent * 100)}
-                      onChange={(v) => patchVideo({ sparseStartPercent: v / 100 })}
-                      min={0}
-                      max={90}
-                      step={5}
-                      formatValue={(v) => `${Math.round(v)}%`}
-                    />
-                    <SettingSlider
-                      label={tt("Работать до конца генерации")}
-                      labelTitle="До какого момента применять ускорение. 100% — до последнего шага (быстрее всего). Если финал выглядит мыльным — уменьшите."
-                      value={Math.round(video.sparseEndPercent * 100)}
-                      onChange={(v) => patchVideo({ sparseEndPercent: v / 100 })}
-                      min={10}
-                      max={100}
-                      step={5}
-                      formatValue={(v) => `${Math.round(v)}%`}
-                    />
-                    <SettingSlider
-                      label={tt("Минимальная длина видео (токены)")}
-                      labelTitle="Короткие видео Sol-Attn не ускоряет — они всегда считаются точно. Уменьшите значение, чтобы ускорение включалось и на более коротких роликах."
-                      value={video.sparseMinTokens}
-                      onChange={(v) => patchVideo({ sparseMinTokens: Math.round(v) })}
-                      min={1024}
-                      max={65536}
-                      step={1024}
-                      inputMin={1024}
-                      inputMax={131072}
-                    />
-                    <SettingSlider
-                      label={tt("Дополнительный контекст (токены)")}
-                      labelTitle="Запас токенов сверх основной длины — помогает не терять мелкие детали при ускорении. Стандартно 256."
-                      value={video.sparseExtraTokens}
-                      onChange={(v) => patchVideo({ sparseExtraTokens: Math.round(v) })}
-                      min={0}
-                      max={2048}
-                      step={128}
-                      inputMin={0}
-                      inputMax={8192}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* (правка 1115) Veda скрыта на ядре < 0.38 */}
-              {vedaSupported && (<>
-              {/* (правка 301) Veda Sparse Attention */}
-              <SettingsRow
-                label="Veda Sparse Attention"
-                description={tt("Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn")}
-                right={
-                  <SettingsToggle
-                    checked={video.vedaAttention}
-                    onChange={(next) => patchVideo({ vedaAttention: next })}
-                    label="Veda Sparse Attention"
-                  />
-                }
-              />
-
-              {/* (правка 406) Расширенные настройки Veda — видны при включённом тоггле */}
-              {video.vedaAttention && (
-                <div className="bg-[var(--surface-1)] px-3.5 py-3">
-                  <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
-                    <SettingSlider
-                      label={tt("Спарсити генерации, %")}
-                      value={(() => { const n = Number.parseFloat(video.vedaGeneratedSparsity); return Number.isFinite(n) ? n : 90 })()}
-                      onChange={(v) => patchVideo({ vedaGeneratedSparsity: `${Math.round(v)}%` })}
-                      min={50}
-                      max={95}
-                      step={5}
-                    />
-                    <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
-                      {tt("Сколько key-тайлов пропускать в генерации. Выше % = быстрее, но грубее картинка.")}
-                    </p>
-                    <SettingSlider
-                      label={tt("Спарсити референсов, %")}
-                      value={(() => { const n = Number.parseFloat(video.vedaReferenceSparsity); return Number.isFinite(n) ? n : 90 })()}
-                      onChange={(v) => patchVideo({ vedaReferenceSparsity: `${Math.round(v)}%` })}
-                      min={0}
-                      max={95}
-                      step={5}
-                    />
-                    <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
-                      {tt("То же для референсов. 0% = полное внимание к референсам — точнее лицо персонажа, но медленнее.")}
-                    </p>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground">{tt("Слои с полным вниманием")}</span>
-                      <input
-                        type="text"
-                        value={video.vedaFullAttentionLayers}
-                        onChange={(e) => patchVideo({ vedaFullAttentionLayers: e.target.value })}
-                        placeholder="0, 1, 47-49"
-                        className={SETTINGS_INPUT_CLASS}
-                      />
-                      <p className="text-[11px] leading-snug text-muted-foreground">
-                        {tt("0-based номера блоков DiT, которые всегда считаются плотно. Пусто = все слои sparse.")}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground">{tt("Шаги с полным вниманием")}</span>
-                      <input
-                        type="text"
-                        value={video.vedaFullAttentionSteps}
-                        onChange={(e) => patchVideo({ vedaFullAttentionSteps: e.target.value })}
-                        placeholder="0, 1"
-                        className={SETTINGS_INPUT_CLASS}
-                      />
-                      <p className="text-[11px] leading-snug text-muted-foreground">
-                        {tt("0-based номера шагов сэмплера с полным вниманием. Пусто = все шаги sparse.")}
-                      </p>
-                    </div>
-                    <label className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">{tt("Подробный лог (verbose)")}</span>
-                      <SettingsToggle
-                        checked={video.vedaVerbose}
-                        onChange={(next) => patchVideo({ vedaVerbose: next })}
-                        label={tt("Подробный лог (verbose)")}
-                      />
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              </>)}
-
               {/* Low VRAM Attention */}
               <SettingsRow
                 label="Low VRAM Attention"
@@ -1346,12 +1300,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
                     <SettingSlider
                       label={tt("Low VRAM: групп голов")}
-                      labelTitle={tt("На сколько групп делить головы (head_chunks). Математика та же: головы независимы. Больше групп — меньше пик VRAM, но больше запусков ядра. 4 — как раньше; 8–16 стоит попробовать на картах 8–12 ГБ.")}
-                      value={typeof video.lowVramHeadChunks === 'number' ? video.lowVramHeadChunks : 4}
+                      labelTitle={tt("На сколько групп делить головы (head_chunks). Математика та же: головы независимы. Больше групп — меньше пик VRAM, но больше запусков ядра. 0 = авто по объёму карты: 16 групп на 8 ГБ, 8 на 12 ГБ, 6 на 16 ГБ, 4 на 24+. Вручную: 8–16 стоит попробовать на картах 8–12 ГБ.")}
+                      value={typeof video.lowVramHeadChunks === 'number' ? video.lowVramHeadChunks : 0}
                       onChange={(v) => patchVideo({ lowVramHeadChunks: Math.round(v) })}
-                      min={1}
+                      min={0}
                       max={56}
                       step={1}
+                      formatValue={(v) => (v <= 0 ? tt("Авто") : String(Math.round(v)))}
                     />
                   </div>
                 </div>
@@ -1434,6 +1389,34 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </div>
               )}
 
+              {/* (правка 1131) Авто-временные окна: главный способ провести
+                  длинный клип на слабой карте — пик зависит от окна, а не длины. */}
+              <SettingsRow
+                label={tt("Авто-временные окна")}
+                description={tt("Если клип не влезает в бюджет VRAM одним проходом, модель считает его окнами по 17n+5 кадров (слияние pyramid + FreeNoise, как в Refine «Частями»). Открывает 10+ секунд и 2K на 8–12 ГБ. Выключите, если нужен строго один проход.")}
+                right={
+                  <SettingsToggle
+                    checked={video.autoContextWindows !== false}
+                    onChange={(next) => patchVideo({ autoContextWindows: next })}
+                    label={tt("Авто-временные окна")}
+                  />
+                }
+              />
+
+              {/* (правка 1133) Живое превью: общая настройка для всех режимов.
+                  Выключено — узлы превью не ставятся в граф совсем. */}
+              <SettingsRow
+                label={tt("Живое превью шагов")}
+                description={tt("Анимированный предпросмотр во время генерации (все режимы: Генерация, Продление, Refine, Tile, Face). Идёт с реальной скоростью: 8 кадров на секунду времени клипа. Выключите, чтобы вообще не тратить VRAM и время на tiny-VAE: прогресс останется полосой и счётчиком шагов. Действует со следующей задачи, без перезапуска ComfyUI.")}
+                right={
+                  <SettingsToggle
+                    checked={livePreview}
+                    onChange={(next) => { void persistLivePreview(next) }}
+                    label={tt("Живое превью шагов")}
+                  />
+                }
+              />
+
               {/* 3D-апскейлер латентов (правка 806) */}
               <SettingsRow
                 label={tt("3D-апскейлер латентов")}
@@ -1447,6 +1430,180 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 }
               />
             </SettingsCard>
+              </div>
+              )}
+            </div>
+
+            {/* (правка 1139) Ускорители — отдельный свёрнутый раздел. */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowAccelerators((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-border hover:border-cyan-500/30 transition-all text-left"
+              >
+                <span className="text-xs font-medium text-muted-foreground">{tt("Ускорители")}</span>
+                <span className={cn('text-[10px] text-muted-foreground transition-transform', showAccelerators && 'rotate-180')}>▼</span>
+              </button>
+              {showAccelerators && (
+              <SettingsCard
+                icon={<SparklesIcon className="w-4 h-4" />}
+                title={tt("Ускорение генерации")}
+                description={tt("Sparse attention ускоряет длинные последовательности; на коротких сценах включается сама. Sol-Attn и Veda взаимоисключающие.")}
+              >
+                {/* (правка 168) Sparse Attention (Sol-Attn) */}
+                <SettingsRow
+                  label={tt("Разреженное внимание (Sol-Attn)")}
+                  description={tt("Ускоряет длинные последовательности (~1.2–2.5×); короткие остаются плотными автоматически. На актуальном ядре работает через узел ядра BlockSparseAttention — строки текста, звука и референсов остаются в точном внимании, а генерируемый звук идёт плотно и не деградирует")}
+                  right={
+                    <SettingsToggle
+                      checked={video.sparseAttention}
+                      label={tt("Разреженное внимание (Sol-Attn)")}
+                      onChange={(next) => {
+                        patchVideo({ sparseAttention: next })
+                        flushMirror()
+                      }}
+                    />
+                  }
+                />
+
+                {video.sparseAttention && (
+                  <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                    <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
+                      <SettingSlider
+                        label={tt("Порог разреженности (tau)")}
+                        labelTitle="Насколько смело пропускать часть вычислений внимания. Больше — быстрее, но картинка может стать грубее. Стандартно 1.3."
+                        value={video.sparseTau}
+                        onChange={(v) => patchVideo({ sparseTau: v })}
+                        min={0}
+                        max={4}
+                        step={0.1}
+                        inputMin={0}
+                        inputMax={4}
+                      />
+                      <SettingSlider
+                        label={tt("Включать с начала генерации")}
+                        labelTitle="Первые шаги генерации задают композицию — их лучше считать точно. 20% — стандарт: первые пять шагов полные, дальше ускорение."
+                        value={Math.round(video.sparseStartPercent * 100)}
+                        onChange={(v) => patchVideo({ sparseStartPercent: v / 100 })}
+                        min={0}
+                        max={90}
+                        step={5}
+                        formatValue={(v) => `${Math.round(v)}%`}
+                      />
+                      <SettingSlider
+                        label={tt("Работать до конца генерации")}
+                        labelTitle="До какого момента применять ускорение. 100% — до последнего шага (быстрее всего). Если финал выглядит мыльным — уменьшите."
+                        value={Math.round(video.sparseEndPercent * 100)}
+                        onChange={(v) => patchVideo({ sparseEndPercent: v / 100 })}
+                        min={10}
+                        max={100}
+                        step={5}
+                        formatValue={(v) => `${Math.round(v)}%`}
+                      />
+                      <SettingSlider
+                        label={tt("Минимальная длина видео (токены)")}
+                        labelTitle="Короткие видео Sol-Attn не ускоряет — они всегда считаются точно. Уменьшите значение, чтобы ускорение включалось и на более коротких роликах."
+                        value={video.sparseMinTokens}
+                        onChange={(v) => patchVideo({ sparseMinTokens: Math.round(v) })}
+                        min={1024}
+                        max={65536}
+                        step={1024}
+                        inputMin={1024}
+                        inputMax={131072}
+                      />
+                      <SettingSlider
+                        label={tt("Дополнительный контекст (токены)")}
+                        labelTitle="Запас токенов сверх основной длины — помогает не терять мелкие детали при ускорении. Стандартно 256."
+                        value={video.sparseExtraTokens}
+                        onChange={(v) => patchVideo({ sparseExtraTokens: Math.round(v) })}
+                        min={0}
+                        max={2048}
+                        step={128}
+                        inputMin={0}
+                        inputMax={8192}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {vedaSupported && (<>
+                <SettingsRow
+                  label="Veda Sparse Attention"
+                  description={tt("Для длинных видео (10+ сек) / 8+ шагов; заменяет Sol-Attn")}
+                  right={
+                    <SettingsToggle
+                      checked={video.vedaAttention}
+                      onChange={(next) => patchVideo({ vedaAttention: next })}
+                      label="Veda Sparse Attention"
+                    />
+                  }
+                />
+                {video.vedaAttention && (
+                  <div className="bg-[var(--surface-1)] px-3.5 py-3">
+                    <div className="max-w-[440px] space-y-3 border-l-2 border-cyan-500/20 pl-3">
+                      <SettingSlider
+                        label={tt("Спарсити генерации, %")}
+                        value={(() => { const n = Number.parseFloat(video.vedaGeneratedSparsity); return Number.isFinite(n) ? n : 90 })()}
+                        onChange={(v) => patchVideo({ vedaGeneratedSparsity: `${Math.round(v)}%` })}
+                        min={50}
+                        max={95}
+                        step={5}
+                      />
+                      <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                        {tt("Сколько key-тайлов пропускать в генерации. Выше % = быстрее, но грубее картинка.")}
+                      </p>
+                      <SettingSlider
+                        label={tt("Спарсити референсов, %")}
+                        value={(() => { const n = Number.parseFloat(video.vedaReferenceSparsity); return Number.isFinite(n) ? n : 90 })()}
+                        onChange={(v) => patchVideo({ vedaReferenceSparsity: `${Math.round(v)}%` })}
+                        min={0}
+                        max={95}
+                        step={5}
+                      />
+                      <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                        {tt("То же для референсов. 0% = полное внимание к референсам — точнее лицо персонажа, но медленнее.")}
+                      </p>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground">{tt("Слои с полным вниманием")}</span>
+                        <input
+                          type="text"
+                          value={video.vedaFullAttentionLayers}
+                          onChange={(e) => patchVideo({ vedaFullAttentionLayers: e.target.value })}
+                          placeholder="0, 1, 47-49"
+                          className={SETTINGS_INPUT_CLASS}
+                        />
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          {tt("0-based номера блоков DiT, которые всегда считаются плотно. Пусто = все слои sparse.")}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground">{tt("Шаги с полным вниманием")}</span>
+                        <input
+                          type="text"
+                          value={video.vedaFullAttentionSteps}
+                          onChange={(e) => patchVideo({ vedaFullAttentionSteps: e.target.value })}
+                          placeholder="0, 1"
+                          className={SETTINGS_INPUT_CLASS}
+                        />
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          {tt("0-based номера шагов сэмплера с полным вниманием. Пусто = все шаги sparse.")}
+                        </p>
+                      </div>
+                      <label className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-muted-foreground">{tt("Подробный лог (verbose)")}</span>
+                        <SettingsToggle
+                          checked={video.vedaVerbose}
+                          onChange={(next) => patchVideo({ vedaVerbose: next })}
+                          label={tt("Подробный лог (verbose)")}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+                </>)}
+              </SettingsCard>
+              )}
+            </div>
           </div>
         )}
 
@@ -1785,7 +1942,7 @@ function ExtraModelPathsPanel() {
       .catch(() => setEntries([]))
   }, [])
 
-  /** (правка 1121) Любая правка списка (удаление, смена категории, путь)
+  /** (правка 1131) Любая правка списка (удаление, смена категории, путь)
    *  сохраняется сама через 0.9 с — чтобы «Сохранить папки» не была
    *  обязательным шагом, который легко пропустить. */
   useEffect(() => {
@@ -1823,7 +1980,7 @@ function ExtraModelPathsPanel() {
       setEntries(nextEntries)
       setNewPath('')
       setDirty(true)
-      // (правка 1121) Сохраняем СРАЗУ после добавления: кнопка «Сохранить папки»
+      // (правка 1131) Сохраняем СРАЗУ после добавления: кнопка «Сохранить папки»
       // стояла внизу карточки и терялась (юзер выбирал папку, видел список
       // моделей, перезапускал — и всё пропадало). Теперь добавление = сохранение.
       void save(nextEntries)
@@ -1985,7 +2142,7 @@ function ExtraModelPathsPanel() {
           <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || !dirty} className="h-8 w-fit text-xs">
             {saving ? tt("Сохранение…") : tt("Сохранить папки")}
           </Button>
-          {/* (правка 1121) Сохранение происходит само; кнопка перезапуска нужна,
+          {/* (правка 1131) Сохранение происходит само; кнопка перезапуска нужна,
               потому что ComfyUI читает extra_model_paths.yaml только на старте. */}
           {savedOnce && canRestart && (
             <Button
