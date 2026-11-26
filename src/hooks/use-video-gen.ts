@@ -1203,6 +1203,9 @@ export function useVideoGen() {
           firstSamplerTotalSteps: Math.max(MIN_FIRST_PASS_STEPS, params.firstSamplerTotalSteps ?? params.firstSamplerSteps ?? 6),
           sigmaVariant: params.sigmaVariant || '3step',
           pass2Sampler: params.pass2Sampler || 'euler', // (правка 69)
+          // (правка 1153) refiner-LoRA (ползунок «Детализация») — сервер
+          // применит её только к Pass 2 двухпроходного режима.
+          refinerDetail: genMode === 'extend' ? undefined : params.refinerDetail,
           pass1Sampler: params.pass1Sampler || 'euler', // (правка 70)
           pass1Scheduler: params.pass1Scheduler || 'simple', // (правка 70)
           refImageSize: params.referenceDetail || 'match', // (правка 58)

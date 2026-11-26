@@ -897,5 +897,14 @@
   "Ускорители": "Accelerators",
   "Ускорение генерации": "Generation speed-ups",
   "Sparse attention ускоряет длинные последовательности; на коротких сценах включается сама. Sol-Attn и Veda взаимоисключающие.": "Sparse attention speeds up long sequences; on short scenes it switches on by itself. Sol-Attn and Veda are mutually exclusive.",
-  "CRF": "CRF"
+  "CRF": "CRF",
+  "Сейчас:": "Current:",
+  "настроено вручную": "custom (manual)",
+  "Выбрано": "Selected",
+  "карта {{p1}} ГБ": "GPU {{p1}} GB",
+  "Детализация": "Detail",
+  "Сила refiner-LoRA Open-Regenerate 2K на втором проходе: выше — больше микродетализации и резкости, ниже — мягче. Pass 1 не затрагивает; в однопроходном режиме недоступна.": "Open-Regenerate 2K refiner LoRA strength on pass 2: higher adds micro-detail and sharpness, lower is softer. Does not affect pass 1; unavailable in single-pass mode.",
+  "Сила refiner-LoRA Open-Regenerate 2K: выше — больше микродетализации и резкости, ниже — мягче. Работает в Refine целиком и «Частями»; на обычную генерацию не влияет.": "Open-Regenerate 2K refiner LoRA strength: higher adds micro-detail and sharpness, lower is softer. Applies to Refine (whole and chunks); does not affect normal generation.",
+  "Доступно только в двухпроходном режиме": "Available only in two-pass mode",
+  "Refiner-LoRA Open-Regenerate 2K не в списке: ею управляет ползунок «Детализация» — в Refine и в Pass 2 двухпроходной генерации.": "Open-Regenerate 2K refiner LoRA is not listed here: it is controlled by the \"Detail\" slider in Refine and pass 2 of two-pass generation."
 }

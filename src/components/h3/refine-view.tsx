@@ -125,7 +125,7 @@ export function RefineView() {
   // (правка 1058) Ручки тайлового режима — отдельный объект в сторе.
   const patchTesseraParams = useRefineTarget((s) => s.patchTesseraParams)
   const resetTesseraParams = useRefineTarget((s) => s.resetTesseraParams)
-  const { target, steps, strength, mode, chunkSec, tessera, tesseraParams, refDetail, targetMp } = params
+  const { target, steps, strength, mode, chunkSec, tessera, tesseraParams, refDetail, targetMp, detail } = params // (правка 1153) detail — refiner-LoRA
   // (правка 1058) «Параметры тайлов» свёрнуты: дефолты = рецепт 1057.
   const [showTesseraAdvanced, setShowTesseraAdvanced] = useState(false)
 
@@ -404,6 +404,7 @@ export function RefineView() {
       ...(target === 'free' ? { targetMp } : {}), // (правка 494)
       steps: parseInt(steps, 10),
       sigmaStart: strength,
+      refinerDetail: detail, // (правка 1153) сила refiner-LoRA (ползунок «Детализация»)
       seed: -1, // всегда случайный (правка: поле Seed убрано из UI)
       prompt: prompt.trim() ? prompt.trim() : '',
       // (правка 509) Референсы от пользователя (актуальны для источника
@@ -444,7 +445,7 @@ export function RefineView() {
     }
     enqueueRefine(task)
     toast.info(t("Refine поставлен в очередь: {{p1}}", { p1: src.filename }))
-  }, [mode, target, targetMp, steps, strength, prompt, chunkSec, tessera, tesseraParams, uploadingSrc, refDetail, userRefs])
+  }, [mode, target, targetMp, steps, strength, detail, prompt, chunkSec, tessera, tesseraParams, uploadingSrc, refDetail, userRefs])
 
   const cancel = useCallback(async () => {
     await cancelActiveRefines()
@@ -1356,6 +1357,25 @@ export function RefineView() {
                 Pass 2
               </button>
             </div>
+          </div>
+
+          {/* (правка 1153) Детализация — сила refiner-LoRA Open-Regenerate 2K.
+              Работает в Refine целиком и «Частями» (в т.ч. по тайлам): на
+              Pass 2 двухпроходной генерации — отдельный ползунок во вкладке
+              «Генерация», а в других режимах LoRA не подключается вовсе. */}
+          <div className="space-y-1.5">
+            <SettingSlider
+              label={t("Детализация")}
+              labelTitle={t(
+                "Сила refiner-LoRA Open-Regenerate 2K: выше — больше микродетализации и резкости, ниже — мягче. Работает в Refine целиком и «Частями»; на обычную генерацию не влияет.",
+              )}
+              value={Math.round(detail * 100)}
+              min={0}
+              max={200}
+              step={5}
+              onChange={(v) => patchParams({ detail: v / 100 })}
+              formatValue={() => `${Math.round(detail * 100)}%`}
+            />
           </div>
 
         </div>

@@ -16,6 +16,8 @@ import { readPromptChain, readPromptChainParts, readMetaImageRefs, readMetaLoop,
 import { probeVideoFile } from '@/lib/video-probe'
 import { getVideoFormatSettings } from '@/lib/video-format-server' // (правка 386)
 import { enabledCustomLoras, loraTriggerSuffix } from '@/lib/loras-config'
+import { REFINER_LORA_NAME, clampRefinerStrength } from '@/lib/comfy/refiner-lora'
+import { modelExists } from '@/lib/model-downloader'
 // (правка 1058) Ручки тайлового режима Tessera: климпы/дефолты — и для
 // воркфлоу, и для сайдкара (по мете видно, с какими настройками считали).
 import { resolveTesseraTiles, type TesseraTileParams } from '@/lib/comfy/tessera-params'
@@ -169,6 +171,8 @@ export async function POST(req: NextRequest) {
       steps?: number
       /** σ_start лестницы (0.1–0.95) — ползунок «сколько шума убирать». */
       sigmaStart?: number
+      /** (правка 1153) Сила refiner-LoRA Open-Regenerate 2K (0..2). */
+      refinerDetail?: number
       skipFrames?: number
       frameCap?: number
       chunkJob?: boolean
@@ -292,9 +296,17 @@ export async function POST(req: NextRequest) {
     // В мету промпт пишется БЕЗ триггеров — «Повторить» добавит их заново
     // по актуальному списку, иначе бы они накапливались (правка 89).
     const customLoraEntries = enabledCustomLoras()
-    const customLoras = customLoraEntries.length > 0
-      ? customLoraEntries.map((e) => ({ name: e.name, strength: e.strength }))
-      : undefined
+    // (правка 1153) Refiner-LoRA Open-Regenerate 2K — ползунок «Детализация».
+    // Работает ТОЛЬКО в Refine (целиком, «Частями», тайлы): в других режимах
+    // её не подключаем. Файл обязательный (реестр 1151); если его нет на
+    // диске — молча пропускаем, чтобы не сломать прогон.
+    const refinerStrength = clampRefinerStrength(body.refinerDetail)
+    const refinerOn = refinerStrength > 0 && modelExists('lora_open_regenerate_2k')
+    const loraList = [
+      ...customLoraEntries.map((e) => ({ name: e.name, strength: e.strength })),
+      ...(refinerOn ? [{ name: REFINER_LORA_NAME, strength: refinerStrength }] : []),
+    ]
+    const customLoras = loraList.length > 0 ? loraList : undefined
     const loraSuffix = loraTriggerSuffix(customLoraEntries)
     const loraParams = {
       ...(customLoras ? { customLoras } : {}),

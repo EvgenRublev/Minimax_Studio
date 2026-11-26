@@ -41,6 +41,8 @@ export interface RefineTask {
   steps: number
   /** σ_start лестницы (0.1–0.95) — ползунок «сколько шума убирать». */
   sigmaStart?: number
+  /** (правка 1153) Сила refiner-LoRA Open-Regenerate 2K («Детализация»). */
+  refinerDetail?: number
   seed: number
   prompt: string
   chunkSeconds: number
@@ -247,6 +249,8 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
       ...(task.target === 'free' && task.targetMp ? { targetMp: task.targetMp } : {}),
       steps: task.steps,
       ...(task.sigmaStart ? { sigmaStart: task.sigmaStart } : {}),
+      // (правка 1153) refiner-LoRA — только в рефайне
+      ...(task.refinerDetail != null ? { refinerDetail: task.refinerDetail } : {}),
       seed: task.seed,
       prompt: task.prompt.trim() ? task.prompt.trim() : undefined,
       refImageSize: task.refImageSize ?? 'match', // (правка 1117) дефолт Match
@@ -440,6 +444,7 @@ async function runTask(id: string, task: RefineTask): Promise<void> {
             source_video: { filename: task.source.filename, subfolder: task.source.subfolder },
             steps: task.steps,
             sigma_start: task.sigmaStart,
+    refiner_detail: task.refinerDetail, // (правка 1153)
             seed: task.seed,
             chunks: parts.length,
             // (правка 407) veda-настройки — «Повторить» восстанавливает

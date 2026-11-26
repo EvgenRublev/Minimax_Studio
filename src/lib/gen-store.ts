@@ -165,6 +165,10 @@ export interface VideoGenState {
   pass1Scheduler: string
   /** (правка 70) Влияние турбо-лоры (default 1.0). */
   turboLoraStrength: number
+  /** (правка 1153) Сила refiner-LoRA Open-Regenerate 2K — ползунок
+   *  «Детализация» (0..2, default 1). Действует ТОЛЬКО в Pass 2
+   *  двухпроходной генерации (pipeline 'full'); в draft не применяется. */
+  refinerDetail: number
   /** (правка 168) Разреженное внимание (Sol-Attn): ускоряет длинные последовательности. */
   sparseAttention: boolean
   /** (правка 466) Sol-Attn: порог разреженности tau (0–4, default 1.3). */
@@ -269,6 +273,7 @@ export const DEFAULT_VIDEO_STATE: VideoGenState = {
   pass1Sampler: 'euler',
   pass1Scheduler: 'simple',
   turboLoraStrength: 1.0,
+  refinerDetail: 1, // (правка 1153) ползунок «Детализация», 100%
   // (правка 809) SOL-Attn по умолчанию ВЫКЛЮЧЕН (раньше был ON — правка 575).
   // Заводской сброс тоже возвращает OFF; шаблоны уже трактуют «не true» как OFF.
   sparseAttention: false,
@@ -568,6 +573,10 @@ export const useGenStore = create<GenStoreState>()(
           }
           if (typeof result.video.turboLoraStrength !== 'number' || isNaN(result.video.turboLoraStrength)) {
             result.video.turboLoraStrength = DEFAULT_VIDEO_STATE.turboLoraStrength
+          }
+          // (правка 1153) поле появилось в 7.3.1 — у старых снимков его нет
+          if (typeof result.video.refinerDetail !== 'number' || isNaN(result.video.refinerDetail)) {
+            result.video.refinerDetail = DEFAULT_VIDEO_STATE.refinerDetail
           }
           if (typeof result.video.sparseAttention !== 'boolean') {
             result.video.sparseAttention = DEFAULT_VIDEO_STATE.sparseAttention

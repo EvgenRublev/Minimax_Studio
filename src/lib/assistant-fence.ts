@@ -136,17 +136,58 @@ export function parseAllFences(raw: string): FenceParse[] {
 export function parseClipMarker(fenceContent: string): number | null {
   if (!fenceContent) return null
   const firstLine = fenceContent.split('\n', 1)[0].trim()
-  const m = firstLine.match(/^clip\s*:\s*(\d+)\s*$/i)
+  // (правка 1149) Модель иногда ставит маркер НЕ отдельной строкой:
+  // `clip: 1 integrated_multimodal_description: ...`. Номер читаем и в этом
+  // случае — хвост строки остаётся частью промпта (см. stripClipMarker).
+  const m = firstLine.match(/^clip\s*:\s*(\d+)(?![0-9])/i)
   if (!m) return null
   const n = parseInt(m[1], 10)
   return Number.isFinite(n) && n >= 1 ? n : null
 }
 
-/** (правка 427) Промпт клипа без маркерной строки `clip: N` — то, что
- *  реально вставляется в карточку клипа. Маркера нет → контент как есть. */
+/** (правка 427, 1149) Промпт клипа без маркера `clip: N` — то, что реально
+ *  вставляется в карточку клипа. Если маркер слит с первым полем
+ *  (`clip: 1 integrated_multimodal_description: ...`), вырезаем ТОЛЬКО
+ *  префикс `clip: N`, остаток строки сохраняем. */
 export function stripClipMarker(fenceContent: string): string {
-  if (parseClipMarker(fenceContent) === null) return fenceContent.trim()
-  return fenceContent.split('\n').slice(1).join('\n').trim()
+  const lines = fenceContent.split('\n')
+  const first = (lines[0] ?? '').trim()
+  const m = first.match(/^clip\s*:\s*(\d+)(?![0-9])\s*/i)
+  if (!m) return fenceContent.trim()
+  const rest = first.slice(m[0].length).trim()
+  const tail = lines.slice(1).join('\n').trim()
+  return [rest, tail].filter(Boolean).join('\n').trim()
+}
+
+/**
+ * (правка 1149) Ассистент иногда отвечает в extend-чате БЕЗ ```text-fence —
+ * просто текстом с маркерами `clip: N` (так случилось на реальном отчёте:
+ * промпты были верные, а кнопок «В клип N» не было, потому что fence-парсер
+ * находил ноль блоков). Возвращаем те же секции, что и fence-парсер:
+ * промпт на каждый маркер; без маркеров — весь текст одним промптом
+ * (только если он похож на H3-промпт).
+ */
+export function parsePlainClipSections(raw: string): Array<{ clip: number | null; prompt: string }> {
+  if (!raw) return []
+  const text = raw.replace(/^\s*```[a-zA-Z0-9_-]*\s*$/gm, '').trim()
+  if (!text) return []
+  const lines = text.split('\n')
+  const starts: Array<{ line: number; clip: number }> = []
+  lines.forEach((l, i) => {
+    const m = l.trim().match(/^clip\s*:\s*(\d+)(?![0-9])/i)
+    if (m) starts.push({ line: i, clip: parseInt(m[1], 10) })
+  })
+  if (!starts.length) {
+    if (!/integrated_multimodal_description|subject_definitions/i.test(text)) return []
+    return [{ clip: null, prompt: text }]
+  }
+  const out: Array<{ clip: number | null; prompt: string }> = []
+  starts.forEach((s, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1].line : lines.length
+    const prompt = stripClipMarker(lines.slice(s.line, end).join('\n'))
+    if (prompt) out.push({ clip: s.clip, prompt })
+  })
+  return out
 }
 
 function stripDecorativeQuotes(t: string): string {

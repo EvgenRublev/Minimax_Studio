@@ -217,6 +217,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   // (правка 490) Доп. запас свободной VRAM (--vram-headroom).
   // (правка 1141) 1 ГБ по умолчанию: без него полная VRAM вешает aimdo.
   const [vramHeadroom, setVramHeadroom] = useState(1)
+  /** (правка 1152) Объём VRAM карты — чтобы подсветить «Слабые» на 8–12 ГБ,
+   *  даже когда штатные значения совпадают со «Средними» математически. */
+  const [vramTotalGb, setVramTotalGb] = useState<number | null>(null)
   // (правка 1029) Принудительный --fast-disk; по умолчанию выкл (auto).
   const [fastDisk, setFastDisk] = useState(false)
   const [llmDevice, setLlmDevice] = useState<'auto' | 'gpu' | 'cpu'>('auto')
@@ -310,6 +313,48 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     }
   }, [patchVideo, tt])
 
+  /**
+   * (правка 1150) Какой пресет действует СЕЙЧАС. Раньше три кнопки были
+   * «выстрелил и забыл»: после применения нельзя было понять, какой режим
+   * включён, и пользователь жал их повторно. Сравниваем ровно те рычаги,
+   * которые ставит пресет; ручные правки → «настроено вручную».
+   */
+  /** 8–12 ГБ карты: штатные значения (FFN 2 чанка) на них — это «Слабые». */
+  const weakCardByVram = vramTotalGb !== null && vramTotalGb <= 12.5
+  const memoryPresetMatches = useCallback((kind: 'weak' | 'medium' | 'strong'): boolean => {
+    const v = video
+    const shared =
+      v.lowVramAttention === true &&
+      v.chunkFeedForward === true &&
+      (v.lowVramHeadChunks ?? 0) === 0 &&
+      (v.boundedTokenChunk ?? 0) === 0 &&
+      (v.boundedAttention ?? 'auto') === 'auto' &&
+      v.autoContextWindows !== false
+    // headroom намеренно не сравниваем: у старых установок он 0 (профиль
+    // 7.2.x), а пресеты ставят 1 — иначе у обновившихся всегда было бы
+    // «настроено вручную». Различаем пресеты по резерву и FFN-чанкам.
+    if (!shared) return false
+    const ff = v.chunkFFChunks ?? 2
+    if (kind === 'strong') return reserveVram >= 3 && ff <= 2
+    // (правка 1152) «Слабые» и «Средние» ставят одинаковые резерв/headroom и
+    // авто-размеры; отличаются только FFN-чанками (4 против 2). Штатный
+    // профиль (2 чанка) на 8–12 ГБ — это «Слабые»: так и подсвечиваем.
+    if (kind === 'weak') return reserveVram <= 2 && (ff >= 4 || (ff === 2 && weakCardByVram))
+    return reserveVram <= 2 && ff === 2 && !weakCardByVram
+  }, [video, reserveVram, weakCardByVram])
+
+  const activeMemoryPreset: 'weak' | 'medium' | 'strong' | null =
+    memoryPresetMatches('weak')
+      ? 'weak'
+      : memoryPresetMatches('medium')
+        ? 'medium'
+        : memoryPresetMatches('strong')
+          ? 'strong'
+          : null
+  const activeMemoryPresetTitle = activeMemoryPreset === 'weak'
+    ? 'Слабые'
+    : activeMemoryPreset === 'medium' ? 'Средние' : activeMemoryPreset === 'strong' ? 'Мощные' : ''
+
   /** (правка 1133) Живое превью: сохраняем в config.ini сразу — сервер читает
    *  настройку на каждый запрос, так что она действует со следующей задачи,
    *  без перезапуска ComfyUI. */
@@ -346,6 +391,26 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       setLoading(false)
     }
   }, [])
+
+  // (правка 1152) Объём VRAM карты: нужен, чтобы подсветить «Слабые» на
+  // 8–12 ГБ, когда штатные значения совпадают со «Средними» математически.
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    fetch('/api/comfy/system-stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d) return
+        const gb = Number(d.vram_total_gb)
+        if (Number.isFinite(gb) && gb > 0) setVramTotalGb(gb)
+      })
+      .catch(() => {
+        /* ComfyUI ещё не поднялся — объём узнаем при следующем открытии */
+      })
+    return () => {
+      alive = false
+    }
+  }, [open])
 
   useEffect(() => {
     if (open) {
@@ -1157,23 +1222,48 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               title={tt("Пресеты памяти")}
               description={tt("Готовый набор рычагов под объём видеопамяти. Резерв применяется после перезапуска ComfyUI, остальное — сразу.")}
             >
+              <div className="px-3.5 pt-3 text-[11px] text-muted-foreground">
+                {tt("Сейчас:")}{' '}
+                <span className={cn('font-medium', activeMemoryPreset ? 'text-cyan-300' : 'text-foreground/90')}>
+                  {activeMemoryPreset ? tt(activeMemoryPresetTitle) : tt("настроено вручную")}
+                </span>
+                {activeMemoryPreset && vramTotalGb !== null && (
+                  <span className="text-muted-foreground/70">
+                    {' '}· {tt("карта {{p1}} ГБ", { p1: Math.round(vramTotalGb) })}
+                  </span>
+                )}
+              </div>
               <div className="grid gap-2 px-3.5 py-3 sm:grid-cols-3">
                 {([
                   ['weak', 'Слабые', '8–12 ГБ', 'Резерв 2 ГБ + headroom 1 ГБ, Bounded Attention = Авто, 16/8 групп голов, FFN 4 чанка, авто-окна'],
                   ['medium', 'Средние', '16–24 ГБ', 'Резерв 2 ГБ + headroom 1 ГБ, авто-размеры attention, FFN 2 чанка'],
                   ['strong', 'Мощные', '24+ ГБ', 'Резерв 4 ГБ + headroom 1 ГБ, без мелкого дробления, FFN 2 чанка'],
-                ] as const).map(([kind, name, vram, hint]) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    onClick={() => { void applyMemoryPreset(kind) }}
-                    className="rounded-lg border border-border bg-[var(--surface-1)] p-2.5 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/5"
-                  >
-                    <p className="text-xs font-medium text-foreground">{tt(name)}</p>
-                    <p className="text-[10px] text-cyan-300/90">{vram}</p>
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{tt(hint)}</p>
-                  </button>
-                ))}
+                ] as const).map(([kind, name, vram, hint]) => {
+                  const selected = activeMemoryPreset === kind
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => { void applyMemoryPreset(kind) }}
+                      aria-pressed={selected}
+                      className={cn(
+                        'relative rounded-lg border p-2.5 text-left transition-colors',
+                        selected
+                          ? 'border-cyan-400/70 bg-cyan-500/10 ring-1 ring-cyan-400/30'
+                          : 'border-border bg-[var(--surface-1)] hover:border-cyan-500/40 hover:bg-cyan-500/5',
+                      )}
+                    >
+                      {selected && (
+                        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-medium text-cyan-200">
+                          <CheckCircleIcon className="w-2.5 h-2.5" />{' '}{tt("Выбрано")}
+                        </span>
+                      )}
+                      <p className="pr-12 text-xs font-medium text-foreground">{tt(name)}</p>
+                      <p className="text-[10px] text-cyan-300/90">{vram}</p>
+                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{tt(hint)}</p>
+                    </button>
+                  )
+                })}
               </div>
             </SettingsCard>
 

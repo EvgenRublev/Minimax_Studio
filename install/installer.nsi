@@ -52,7 +52,7 @@ ${StrStr}
 ; имени файла-архива (OutFile) и в package.json — переезжать из-за релиза на
 ; новую папку юзеру незачем (8+ ГБ зависимостей лежат внутри).
 Name "MiniMax H3 Studio"
-OutFile "Minimax_H3_Studio_7.3.0_setup.exe"
+OutFile "Minimax_H3_Studio_7.3.1_setup.exe"
 Unicode True
 
 ; (правка 833) LZMA без /SOLID: солидный блок на 1.63 ГБ ломается при
@@ -111,8 +111,8 @@ InstallDir "$PROFILE\Minimax Studio"
 ; версии. VIProductVersion даёт числовую версию (её читает Windows),
 ; VIAddVersionKey — текстовые поля во вкладке «Подробно».
 ; При выпуске новой версии менять APP_VERSION здесь и OutFile выше.
-!define APP_VERSION "7.3.0"
-!define APP_VERSION4 "7.3.0.0"
+!define APP_VERSION "7.3.1"
+!define APP_VERSION4 "7.3.1.0"
 VIProductVersion "${APP_VERSION4}"
 VIFileVersion "${APP_VERSION4}"
 VIAddVersionKey /LANG=${LANG_RUSSIAN} "ProductName" "MiniMax H3 Studio"

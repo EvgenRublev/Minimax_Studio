@@ -12,6 +12,17 @@ import fs from 'fs'
 import path from 'path'
 import { getAppConfig } from './app-config'
 import { listExternalModels } from './extra-model-paths'
+import { REFINER_LORA_NAME } from './comfy/refiner-lora'
+
+/**
+ * (правка 1153) Refiner-LoRA Open-Regenerate 2K не участвует в обычном списке
+ * LoRA: ей управляет ползунок «Детализация» (Refine и Pass 2 генерации).
+ * Запись в loras.json могла бы включить её в Tile/Extend/Face, где её быть
+ * не должно, поэтому такие записи вычищаем.
+ */
+export function isRefinerLoraName(name: string): boolean {
+  return name === REFINER_LORA_NAME
+}
 
 export interface LoraEntry {
   /** Filename in ComfyUI models/loras/ (e.g. "my_lora.safetensors") */
@@ -37,7 +48,7 @@ export function loadLoras(): LoraEntry[] {
     const raw = fs.readFileSync(lorasFile(), 'utf-8')
     const arr = JSON.parse(raw)
     if (Array.isArray(arr)) {
-      entries = arr.filter((e) => e && typeof e.name === 'string')
+      entries = arr.filter((e) => e && typeof e.name === 'string' && !isRefinerLoraName(e.name))
     }
   } catch {
     entries = []
@@ -71,7 +82,7 @@ export function saveLoras(entries: LoraEntry[]): void {
 export function resetLorasToDefaults(): LoraEntry[] {
   const files = listLoraFiles()
   // Встроенная турбо-лора — ON по умолчанию, пользовательские — OFF.
-  const defaults: LoraEntry[] = files.map((name) => ({
+  const defaults: LoraEntry[] = files.filter((n) => !isRefinerLoraName(n)).map((name) => ({
     name,
     strength: 1.0,
     enabled: name === TURBO_LORA_NAME,

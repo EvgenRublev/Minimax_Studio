@@ -690,6 +690,86 @@ expect(/^COMFY_ROOT=\.\/ComfyUI$/m.test(read('.env')),
   }
 }
 
+
+// 13g. (правка 1148) Битая БД ассетов ComfyUI (user/comfyui.db) валит каждый
+//      запуск потоком sqlite3 disk I/O error. Синхронизатор обязан удалять
+//      такой файл ДО старта ComfyUI (апдейт не трогает ComfyUI), но валидную
+//      БД не трогать.
+{
+  const syncJs = read('scripts/sync_custom_nodes.js')
+  expect(/function\s+repairComfyDb\s*\(/.test(syncJs), 'sync_custom_nodes.js: есть repairComfyDb()')
+  expect(/repairComfyDb\(comfyRoot\)/.test(syncJs), 'sync_custom_nodes.js: repairComfyDb вызывается в syncStudioNodes')
+  expect(/SQLite format 3/.test(syncJs), 'sync_custom_nodes.js: проверяет заголовок SQLite')
+
+  const require2 = createRequire(import.meta.url)
+  const { repairComfyDb } = require2('./sync_custom_nodes.js')
+  const tmp = mkdtempSync(join(tmpdir(), 'comfydb-'))
+  try {
+    const userDir = join(tmp, 'user')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(join(tmp, 'main.py'), '')
+    const db = join(userDir, 'comfyui.db')
+
+    // 1) нулевой файл (как в реальном отчёте) + осиротевшие wal/shm/lock
+    writeFileSync(db, '')
+    writeFileSync(db + '-wal', '')
+    writeFileSync(db + '-shm', Buffer.alloc(32768))
+    writeFileSync(db + '.lock', '')
+    expect(repairComfyDb(tmp) === true, 'comfy-db: нулевая БД удаляется')
+    expect(!existsSync(db) && !existsSync(db + '-wal') && !existsSync(db + '-shm') && !existsSync(db + '.lock'),
+      'comfy-db: вместе с БД удаляются -wal/-shm/.lock')
+
+    // 2) валидная БД не трогается
+    const valid = Buffer.alloc(1024)
+    valid.write('SQLite format 3\u0000', 0, 'latin1')
+    writeFileSync(db, valid)
+    expect(repairComfyDb(tmp) === false, 'comfy-db: валидная БД не трогается')
+    expect(existsSync(db), 'comfy-db: валидный файл остался на месте')
+
+    // 3) битый заголовок удаляется
+    writeFileSync(db, Buffer.from('not a database at all, but long enough to pass size check'.repeat(20)))
+    expect(repairComfyDb(tmp) === true, 'comfy-db: битый заголовок удаляется')
+
+    // 4) нет файла — ничего не делает
+    expect(repairComfyDb(tmp) === false, 'comfy-db: отсутствие файла не ошибка')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+
+// 13h. (правка 1153) Refiner-LoRA Open-Regenerate 2K: только Refine (целиком и
+//      «Частями») и Pass 2 двухпроходной генерации. Если её случайно положат
+//      в общий customLoras-список или в шаблоны Tile/Face/Extend — LoRA начнёт
+//      влиять на обычную генерацию (там её быть не должно).
+{
+  const gen = read('src/lib/comfy/minimax-h3-template.ts')
+  expect(/REFINER_LORA_NAME/.test(gen), 'minimax-h3-template: импортирует REFINER_LORA_NAME')
+  expect(/const pass2ModelTail: \[string, number\] = !draft && refinerStrength > 0/.test(gen),
+    'minimax-h3-template: pass2ModelTail включается только в full-режиме и при силе > 0')
+  expect(/'46:39r': \{/.test(gen), 'minimax-h3-template: отдельный узел refiner-LoRA (46:39r)')
+  expect(/model: pass2ModelTail/.test(gen), 'minimax-h3-template: Pass 2 гуидер/превью берут цепочку с LoRA')
+  expect(/class_type: 'LoraLoaderModelOnly',\s*\n\s*_meta: \{ title: `Refiner LoRA/.test(gen),
+    'minimax-h3-template: узел refiner-LoRA — LoraLoaderModelOnly')
+
+  const refine = read('src/app/api/comfy/refine/route.ts')
+  expect(/REFINER_LORA_NAME/.test(refine) && /refinerOn/.test(refine),
+    'refine/route: refiner-LoRA добавляется в customLoras (Refine целиком и «Частями»)')
+  expect(/refinerDetail/.test(refine), 'refine/route: принимает refinerDetail')
+
+  const generate = read('src/app/api/comfy/generate/route.ts')
+  expect(/body\.refinerLoraStrength/.test(generate) && /body\.pipeline !== 'draft'/.test(generate),
+    'generate/route: refiner-LoRA только для pipeline !== draft')
+  expect(/refinerDetail/.test(generate), 'generate/route: принимает refinerDetail')
+
+  // Запрет: в остальных режимах refiner-LoRA быть не должно
+  for (const f of ['src/lib/comfy/tile-upscale-template.ts', 'src/lib/comfy/face-refine-template.ts', 'src/lib/comfy/controlnet-template.ts']) {
+    expect(!/REFINER_LORA_NAME|refinerLoraStrength/.test(read(f)), `${f}: refiner-LoRA не подключена (режим не поддерживает)`)
+  }
+  const tile = read('src/app/api/comfy/tile-upscale/route.ts')
+  expect(!/refinerDetail|REFINER_LORA_NAME/.test(tile), 'tile-upscale/route: refiner-LoRA не подключена')
+}
+
 if (problems.length) {
   console.error('\n[comfy-sync] ПРОВАЛ — связка обновления нод нарушена:')
   for (const p of problems) console.error('  FAIL  ' + p)

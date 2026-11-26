@@ -161,6 +161,8 @@ function syncStudioNodes(appRoot, comfyRoot) {
   patchKjnodesLowmemCompat(comfyRoot)
   // (правка 1135) Tile Upscale: сброс watermark/prefetch между тайлами
   patchMmh3TileVram(comfyRoot)
+  // (правка 1148) битая БД ассетов ComfyUI = поток disk I/O error в логах
+  repairComfyDb(comfyRoot)
   return synced
 }
 
@@ -324,6 +326,59 @@ function patchKjnodesLowmemCompat(comfyRoot) {
     console.error(`[kjnodes-compat] ${err && err.message ? err.message : err}`)
     return false
   }
+}
+
+
+/**
+ * (правка 1148) Самовосстановление БД ассетов ComfyUI.
+ *
+ * ComfyUI (0.44) держит индекс ассетов в `<core>/user/comfyui.db` (SQLite).
+ * Если файл остался после аварийного завершения/удаления на живой процесс
+ * нулевым или с битым заголовком, КАЖДЫЙ запуск сыплет
+ * `sqlite3.OperationalError: disk I/O error` во всех сканерах и регистрации
+ * выходов — индекс галереи не строится, лог забит трейсбеками.
+ *
+ * Перед стартом ComfyUI проверяем заголовок SQLite (`SQLite format 3\0`,
+ * размер >= 512 Б). Битый файл (вместе с -wal/-shm/.lock) удаляем — это кеш,
+ * ComfyUI создаст новую БД при старте; валидную БД не трогаем.
+ */
+function repairComfyDb(comfyRoot) {
+  const fs = require('node:fs')
+  const db = path.join(resolveComfyCore(comfyRoot), 'user', 'comfyui.db')
+  let st
+  try {
+    st = fs.statSync(db)
+  } catch {
+    return false // нет файла — ComfyUI создаст сам
+  }
+  let broken = !st.isFile() || st.size < 512
+  if (!broken) {
+    try {
+      const fd = fs.openSync(db, 'r')
+      const head = Buffer.alloc(16)
+      fs.readSync(fd, head, 0, 16, 0)
+      fs.closeSync(fd)
+      broken = head.toString('latin1') !== 'SQLite format 3\u0000'
+    } catch {
+      broken = true
+    }
+  }
+  if (!broken) return false
+  let removed = 0
+  for (const suffix of ['', '-wal', '-shm', '.lock']) {
+    try {
+      fs.unlinkSync(db + suffix)
+      removed++
+    } catch {
+      /* файла нет или держит запущенный ComfyUI */
+    }
+  }
+  if (removed === 0) {
+    console.warn('[comfy-db] БД ассетов повреждена, но файлы заняты (ComfyUI запущен?) — удалите user/comfyui.db* вручную')
+    return false
+  }
+  console.warn(`[comfy-db] БД ассетов повреждена (${st.size} Б) — удалено файлов: ${removed}; ComfyUI создаст новую при старте`)
+  return true
 }
 
 /** Собирает версии по схеме `<имя>-<версия>.(dist-)info` и возвращает высшую. */
@@ -549,7 +604,7 @@ function syncVhsPatches(appRoot, comfyRoot) {
   return synced
 }
 
-module.exports = { patchKjnodesLowmemCompat, patchMmh3TileVram, syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
+module.exports = { patchKjnodesLowmemCompat, patchMmh3TileVram, repairComfyDb, syncStudioNodes, syncCorePatches, syncVhsPatches, resolveComfyRoot, resolveComfyCore, readComfyVersion, compareVersions, pickCorePatchSet, readInstalledAimdoVersion, CORE_PATCH_SETS, CORE_MIN_VERSION }
 
 if (require.main === module) {
   const appRoot = path.resolve(__dirname, '..')

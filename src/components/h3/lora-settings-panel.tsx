@@ -256,6 +256,11 @@ export function LoraSettingsPanel() {
         </div>
       )}
 
+      {/* (правка 1153) Refiner-LoRA в списке нет намеренно: у неё свой ползунок */}
+      <p className="px-3.5 pb-2 text-[10px] leading-snug text-muted-foreground/80">
+        {t("Refiner-LoRA Open-Regenerate 2K не в списке: ею управляет ползунок «Детализация» — в Refine и в Pass 2 двухпроходной генерации.")}
+      </p>
+
       {/* LoRA list */}
       {loading ? (
         <div className="flex items-center justify-center py-4">

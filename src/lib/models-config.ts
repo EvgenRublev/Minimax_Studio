@@ -98,6 +98,22 @@ export const MODELS: ModelDef[] = [
     // и жёлтый баннер «модели не скачаны» требует её наравне с ними.
   },
   {
+    // (правка 1151) Open-H3-Regenerate-2K Refiner LoRA — обязательная модель:
+    // она в «Скачать все» и в жёлтом баннере «не скачаны модели», как turbo.
+    // НО по умолчанию НЕ включена: файл просто лежит в models/loras, а LoRA
+    // пользователя стартуют с enabled=false (loadLoras/resetLorasToDefaults
+    // включают только TURBO_LORA_NAME) — включить можно в списке LoRA вручную.
+    // Взят лёгкий вариант rank 16 (155 МБ) из репозитория Kijai; rank 384
+    // весит 5.9 ГБ и для обязательного скачивания слишком тяжёл.
+    id: 'lora_open_regenerate_2k',
+    label: 'Open-Regenerate 2K Refiner LoRA (rank 16, bf16)',
+    relPath: 'loras/minimax_h3_open_regenerate_2k_refiner_rank_16_bf16.safetensors',
+    url: 'https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/loras/minimax_h3_open_regenerate_2k_refiner_rank_16_bf16.safetensors?download=true',
+    sizeBytes: 155133472,
+    sizeLabel: '~148 MB',
+    category: 'lora',
+  },
+  {
     id: 'upscaler',
     label: 'Latent Upscaler 3D (FP16)',
     relPath: 'latent_upscale_models/minimax_h3_latent_upscaler_3d_fp16.safetensors',

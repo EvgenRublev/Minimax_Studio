@@ -60,7 +60,7 @@ import { MentionTagWithPreview } from '@/components/h3/mention-preview'
 import { VoiceInputButton } from '@/components/h3/voice-input-button'
 // (правка 719) Превью вложения с полноэкранным просмотром — как на «Генерации».
 import { RefPreviewThumb } from '@/components/h3/ref-preview-thumb'
-import { parseAllFences, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags, danglingRefTags, unusedRefTags } from '@/lib/assistant-fence'
+import { parseAllFences, parsePlainClipSections, parseClipMarker, stripClipMarker, hasH3Field, hasCompleteFence, isTruncatedAnswer, extractInsertablePrompt, hasRefTags, hasExtendDeadTags, hasDanglingPictureTags, danglingRefTags, unusedRefTags } from '@/lib/assistant-fence'
 import { MarkdownText } from '@/components/h3/assistant/markdown-text'
 // (правка 719) Просмотр референса по клику на тег — как на «Генерации».
 import { RefViewerDialog, type RefViewerData } from '@/components/h3/ref-viewer-dialog'
@@ -1294,10 +1294,23 @@ export function AssistantView({
                       </div>
                     )}
                     {m.role === 'assistant' && !streaming && isExtendChat && (() => {
-                      const msgFences = parseAllFences(m.content)
+                      let msgFences = parseAllFences(m.content)
                         // (правка 823) Незакрытый fence = обрывок (лимит/«Стоп»):
                         // его промпт НЕ предлагаем вставлять в клип.
                         .filter((f) => !f.streaming)
+                      if (!msgFences.length) {
+                        // (правка 1149) Модель иногда выдаёт промпты клипов БЕЗ
+                        // ```text-fence — просто текстом с маркерами `clip: N`.
+                        // Раньше в этом случае кнопок «В клип N» не было вовсе.
+                        // Разбираем такой ответ сами и подсовываем те же секции,
+                        // что дал бы fence-парсер (с маркером первой строкой).
+                        msgFences = parsePlainClipSections(m.content).map((s) => ({
+                          preamble: '',
+                          prompt: s.clip !== null ? `clip: ${s.clip}\n${s.prompt}` : s.prompt,
+                          trailing: '',
+                          streaming: false,
+                        }))
+                      }
                       if (!msgFences.length) return null
                       // (правка 428) Fence с валидным маркером `clip: N`
                       // собираем в пары; если их 2+ — ОДНА кнопка «Вставить

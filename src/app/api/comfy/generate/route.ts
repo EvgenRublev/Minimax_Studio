@@ -19,6 +19,8 @@ import { probeVideoFile, probeHasAudio } from '@/lib/video-probe'
 import { compressRefVideo480 } from '@/lib/ref-video-compress' // (правка 493)
 import { runGeneration, assertGenerationAllowed } from '@/lib/vram-arbiter'
 import type { MiniMaxH3Params } from '@/lib/comfy/minimax-h3-template'
+import { clampRefinerStrength } from '@/lib/comfy/refiner-lora'
+import { modelExists } from '@/lib/model-downloader'
 import { framesForDuration, finalDimsFromMegapixels, h3TransientGB, FREE_MAX_MP, EXTEND_CLIP_MAX_SECONDS } from '@/lib/comfy/minimax-h3-template' // (правка 1047, 1092, 1095, 1096)
 import { gpuVramTotalGb, resolveBoundedAttention, normalizeBoundedAttentionMode } from '@/lib/comfy/gpu-vram' // (правка 1088, 1089)
 import { planH3Vram, formatH3VramPlan } from '@/lib/comfy/h3-vram-plan' // (правка 1131)
@@ -53,6 +55,8 @@ export async function POST(req: NextRequest) {
     }
     // (правка 1047) Битый JSON — это 400, а не «неожиданный конец ввода» в 500.
     const body = (await req.json().catch(() => null)) as (MiniMaxH3Params & {
+      /** (правка 1153) Сила refiner-LoRA (ползунок «Детализация», 0..2). */
+      refinerDetail?: number
       refImagesBase64?: string[]
       extendRefsBase64?: string[]
       /** (правка 385, ОТКАЧЕНА правкой 417; возвращено правкой 420 в новом
@@ -477,6 +481,14 @@ export async function POST(req: NextRequest) {
     body.customLoras = loraEntries.length > 0
       ? loraEntries.map((e) => ({ name: e.name, strength: e.strength }))
       : undefined
+    // (правка 1153) Refiner-LoRA Open-Regenerate 2K — ТОЛЬКО Pass 2
+    // двухпроходной генерации (pipeline 'full'); в draft её нет. Файл
+    // обязательный (реестр 1151); нет на диске — молча выключаем.
+    const refinerStrength = clampRefinerStrength(body.refinerDetail)
+    body.refinerLoraStrength =
+      body.pipeline !== 'draft' && refinerStrength > 0 && modelExists('lora_open_regenerate_2k')
+        ? refinerStrength
+        : 0
     if (loraEntries.length > 0) {
       // Append trigger words to the prompt (правка 46)
       const triggers = loraEntries

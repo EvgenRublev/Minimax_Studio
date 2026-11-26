@@ -2098,7 +2098,32 @@ export function GenerateView() {
                   )}
                 </div>
                 )}
+
+              {/* (правка 1153) Детализация — сила refiner-LoRA Open-Regenerate 2K.
+                  Ползунок виден всегда, но активен только в двухпроходном
+                  режиме: в однопроходном LoRA не подключается (Pass 2 нет). */}
+              <div className={cn(!isDraft ? 'space-y-1' : 'space-y-1 opacity-60')}>
+                <SettingSlider
+                  label={tt("Детализация")}
+                  labelTitle={tt(
+                    "Сила refiner-LoRA Open-Regenerate 2K на втором проходе: выше — больше микродетализации и резкости, ниже — мягче. Pass 1 не затрагивает; в однопроходном режиме недоступна.",
+                  )}
+                  value={Math.round((video.refinerDetail ?? 1) * 100)}
+                  min={0}
+                  max={200}
+                  step={5}
+                  disabled={isDraft}
+                  onChange={(v) => patchVideo({ refinerDetail: v / 100 })}
+                  formatValue={() => `${Math.round((video.refinerDetail ?? 1) * 100)}%`}
+                />
+                {isDraft && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {tt("Доступно только в двухпроходном режиме")}
+                  </p>
+                )}
+              </div>
               </>
+
                   )
                 })()}
               </motion.div>

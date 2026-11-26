@@ -1,5 +1,6 @@
 import { vhsEncodeInputs, type VideoFormatSettings } from '../video-format' // (правка 386)
 import { PREVIEW_MAX_FRAMES } from './preview-limit'
+import { REFINER_LORA_NAME, clampRefinerStrength } from './refiner-lora'
 /**
  * MiniMax H3 Reference-to-Video — Two-Pass Latent Upscaler workflow.
  *
@@ -314,6 +315,15 @@ export interface MiniMaxH3Params {
   refAudioVolumes?: Array<number | undefined>
   /* ── Custom LoRAs (chained after turbo LoRA) ── */
   /** Custom LoRAs to apply after the built-in turbo LoRA. */
+  /**
+   * (правка 1153) Сила refiner-LoRA Open-Regenerate 2K для Pass 2
+   * двухпроходной генерации (0 = выключена). Патчим ТОЛЬКО pass 2:
+   * pass 1 должен рисовать затравку без неё.
+   */
+  refinerLoraStrength?: number
+  /** (правка 1153) Значение ползунка «Детализация» из UI (0..2); сервер
+   *  превращает его в refinerLoraStrength, если режим это поддерживает. */
+  refinerDetail?: number
   customLoras?: Array<{ name: string; strength: number }>
   /** Diffusion model filename (default: minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors). */
   diffusionModel?: string
@@ -1437,6 +1447,12 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
   // «Зациклено»: патч цикла — ПОСЛЕДНИМ в цепочке, чтобы сэмплер, гайдер и
   // превью получили модель с уже навешенной обёрткой.
   const modelTail: [string, number] = loopOn ? ['46:60', 0] : modelChainTail
+  // (правка 1153) Refiner-LoRA Open-Regenerate 2K — ТОЛЬКО Pass 2 (догенерация):
+  // pass 1 рисует затравку без неё, поэтому цепочка модели для pass 2 и его
+  // превью/гайдера идёт через отдельный LoraLoaderModelOnly. В draft-режиме
+  // (одного прохода) узла нет вовсе.
+  const refinerStrength = clampRefinerStrength(p.refinerLoraStrength)
+  const pass2ModelTail: [string, number] = !draft && refinerStrength > 0 ? ['46:39r', 0] : modelTail
   // Источники кадров/звука для кропа и VHS: обычный декод или Loop Decode.
   const decodeImageSrc: [string, number] = loopOn ? ['46:60:dec', 0] : ['46:25', 0]
   const decodeAudioSrc: [string, number] = loopOn ? ['46:60:dec', 1] : ['46:14', 0]
@@ -1525,6 +1541,19 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
     // ═══════════════════════════════════════════════
 
     ...modelNodes,
+
+    // (правка 1153) Refiner-LoRA — отдельный узел, только для Pass 2.
+    ...(!draft && refinerStrength > 0 ? {
+      '46:39r': {
+        inputs: {
+          model: modelTail,
+          lora_name: REFINER_LORA_NAME,
+          strength_model: refinerStrength,
+        },
+        class_type: 'LoraLoaderModelOnly',
+        _meta: { title: `Refiner LoRA (Open-Regenerate 2K · ${refinerStrength.toFixed(2)})` },
+      },
+    } : {}),
 
     // Турбо-лора — обычная запись customLoras (ON по умолчанию), как и
     // пользовательские LoRA; порядок задаёт loras.json.
@@ -1870,8 +1899,8 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       ...(previewOn ? {
       '13': {
         inputs: {
-          // (правка 829) хвост цепочки: патч цикла, иначе sparse-нода/backend
-          model: modelTail,
+          // (правка 829, 1153) хвост цепочки + refiner-LoRA (только Pass 2)
+          model: pass2ModelTail,
           vae: ['46:3', 0],
           tiny_vae: 'taeh3.safetensors',
           max_resolution: 1024,
@@ -1887,7 +1916,7 @@ export function buildMiniMaxH3Workflow(p: MiniMaxH3Params): Record<string, unkno
       // BasicGuider (pass 2 — Preview model или хвост цепочки, если превью выкл.)
       '46:32': {
         inputs: {
-          model: previewOn ? ['13', 0] : modelTail,
+          model: previewOn ? ['13', 0] : pass2ModelTail,
           conditioning: condSrc, // (правка 146) хвост цепочки аудио-гайдов в t2v/flf
         },
         class_type: 'BasicGuider',

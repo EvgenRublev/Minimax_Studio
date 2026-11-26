@@ -17,6 +17,7 @@
 import { create } from 'zustand'
 import type { CropRect } from '@/lib/crop' // (правка 908)
 import { REFINE_PASS2_SIGMA, REFINE_PASS2_STEPS } from '@/lib/comfy/refine-sigmas' // (правка 1111)
+import { REFINER_LORA_STRENGTH_DEFAULT } from '@/lib/comfy/refiner-lora' // (правка 1153)
 // (правка 1058) Ручки тайлового режима Tessera (только тип/дефолты —
 // модуль без импортов, в клиентский бандл не тянет шаблон воркфлоу).
 import { DEFAULT_TESSERA_TILES, type TesseraTileParams } from '@/lib/comfy/tessera-params'
@@ -48,6 +49,9 @@ export interface RefineUiParams {
   steps: '2' | '3' | '4' | '5' | '6' | '7'
   /** σ_start лестницы («Влияние Refine» в UI), 0.3–0.95. */
   strength: number
+  /** (правка 1153) Сила refiner-LoRA Open-Regenerate 2K — ползунок
+   *  «Детализация» (0..2, 1 = 100%). Работает в Refine целиком и «Частями». */
+  detail: number
   /** (правка 1) Режим размера референсов: 'match' — без апскейла рефа
    *  (дешевле), 'max' — полное разрешение (точнее идентичность). */
   refDetail: 'match' | 'max'
@@ -78,6 +82,7 @@ const DEFAULT_PARAMS: RefineUiParams = {
   // двухпроходной генерации (σ 0.9035 → 0.6316 → 0.3158 → 0). Раньше стояло
   // «просто 0.9 влияние», и лестница чуть отличалась от эталонной.
   strength: REFINE_PASS2_SIGMA,
+  detail: REFINER_LORA_STRENGTH_DEFAULT, // (правка 1153) 100%
   refDetail: 'match', // (правка 1117) дефолт Match, как в генерации
   targetMp: 2.0, // (правка 494)
   tessera: false, // (правка 1057) по умолчанию — обычный оконный «Частями»

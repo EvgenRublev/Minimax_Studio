@@ -91,6 +91,11 @@ if (!run('dlss runtime check', process.execPath, ['scripts/check-dlss-runtime.mj
 // режет тело по 10 МБ и LoRA/модели сохраняются битыми.
 if (!run('upload guard check', process.execPath, ['scripts/check-upload-guard.mjs'])) process.exit(1);
 
+// (правка 1149) Разбор промптов клипов в extend-чате ассистента: ответ БЕЗ
+// ```text-fence или со склеенным маркером (`clip: 1 поле: …`) не должен
+// лишать пользователя кнопок «В клип N». На реальном отчёте кнопок не было.
+if (!run('assistant fence check', process.execPath, ['scripts/check-assistant-fence.mjs'])) process.exit(1);
+
 // (правка 939) Целостность установщика: офлайн-бандл (install/cache) сверяется по
 // sha256 с install/checksums.json, версии в install.ps1/package.json — с именами
 // файлов бандла, и на месте вся механика проверки загрузок. Битый архив внутри

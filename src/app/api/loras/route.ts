@@ -9,6 +9,7 @@ import {
   checkSafetensorsFile,
   checkLoraFile,
   TURBO_LORA_NAME,
+  isRefinerLoraName,
 } from '@/lib/loras-config'
 import { comfyBusy } from '@/lib/vram-arbiter'
 import {
@@ -30,7 +31,8 @@ export async function GET(req: NextRequest) {
     // Турбо-лора в общем списке: включена по умолчанию, как и остальные
     // файлы, приходит из loras.json (loadLoras добавляет запись, если её нет).
     void req
-    const files = listLoraFiles()
+    // (правка 1153) refiner-LoRA управляется ползунком «Детализация», не списком
+    const files = listLoraFiles().filter((n) => !isRefinerLoraName(n))
     const settings = loadLoras()
     const settingsMap = new Map(settings.map((e) => [e.name, e]))
 
