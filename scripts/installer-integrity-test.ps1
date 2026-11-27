@@ -1,4 +1,4 @@
-# (pravka 939) Local test of the installer integrity helpers. No network, no GPU.
+﻿# (pravka 939) Local test of the installer integrity helpers. No network, no GPU.
 # It extracts the real code from install\install.ps1 (pins loading + helper
 # functions) and runs it against synthetic files: a good zip, a truncated zip,
 # an HTML page named .zip, stale .part/segment leftovers.

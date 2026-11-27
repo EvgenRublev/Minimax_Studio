@@ -384,6 +384,28 @@ for (const e of readdirSync(join(ROOT, 'install'), { withFileTypes: true })) {
   }
   ok(!(crlf > 0 && loneLF > 0), `install/${e.name}: смешанные переносы строк (CRLF=${crlf}, LF=${loneLF})`)
 }
+// (правка 1157) Поведенческие тесты установщика в scripts\*.ps1: их тоже гоняет
+// PowerShell 5.1. Если в файле есть не-ASCII (кириллица в сообщениях/комментариях),
+// обязателен UTF-8 BOM — без него PowerShell 5.1 читает файл как ANSI и русские
+// строки превращает в кракозябры, а сравнения в тесте перестают совпадать с
+// install.ps1. Полностью ASCII-файлы можно без BOM.
+for (const e of readdirSync(join(ROOT, 'scripts'), { withFileTypes: true })) {
+  if (!e.isFile() || !/^installer-.*\.ps1$/.test(e.name)) continue
+  const b = readFileSync(join(ROOT, 'scripts', e.name))
+  const nonAscii = Array.from(b).filter((x) => x > 127).length
+  if (nonAscii) {
+    ok(b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf,
+      `scripts/${e.name}: ${nonAscii} не-ASCII байт без UTF-8 BOM — PowerShell 5.1 прочитает кириллицу как ANSI`)
+  }
+  let crlf = 0
+  let loneLF = 0
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] !== 0x0a) continue
+    if (i > 0 && b[i - 1] === 0x0d) crlf++
+    else loneLF++
+  }
+  ok(!(crlf > 0 && loneLF > 0), `scripts/${e.name}: смешанные переносы строк (CRLF=${crlf}, LF=${loneLF})`)
+}
 
 // ─── 7) правка 944: доводка ревью установщика ──────────────────────────────
 // Обрыв закачки, HTML вместо скрипта, «папка = нода», удаление докачки в trap,
@@ -426,6 +448,76 @@ ok(!/Fail \(\$node\.name/.test(inst), 'недоступная нода по-пр
 ok(/\$nodesFailed\+\+/.test(inst), 'нет счётчика неустановленных внешних нод')
 ok(/ни одна внешняя нода не установилась/.test(inst), 'нет подсказки «проверь сеть/прокси», если не встала ни одна нода')
 ok(/остатки оборванной установки ядра/.test(inst) && /ComfyUI\.keep\.old-\*/.test(inst), 'самодиагностика не видит брошенные ComfyUI.keep/ComfyUI.old')
+
+// ─── 9) правка 1156/1157: пины ядра вызывались до появления python_embeded ───
+// Чистая установка: ядро распаковано на шаге [4/9], переносной Python появится
+// только на [5/9]. Проверка comfy-aimdo звала Install-ComfyCorePins, тот звал
+// & $script:Python, которого ещё нет: PowerShell ронял установщик
+// «НЕПРЕДВЗЯТАЯ ОШИБКА: Имя "...python_embeded\python.exe" не распознано как
+// имя командлета», и повторные запуски повторяли то же самое (ядро-то уже
+// на месте, версия совпала - ветка замены ядра пропускалась).
+{
+  const pinsFn = inst.match(/function Install-ComfyCorePins \{[\s\S]*?\n\}/)?.[0] ?? ''
+  ok(pinsFn.length > 0, 'install.ps1: нет функции Install-ComfyCorePins')
+  // комментарий внутри функции тоже поминает & $script:Python - ищем по коду
+  const pinsCode = pinsFn.replace(/^[ \t]*#.*$/gm, '')
+  // каноническая форма guard-а: сразу и на $null (Test-Path с $null = ошибка),
+  // и на отсутствующий файл
+  const GUARD = 'if (-not $script:Python -or -not (Test-Path -LiteralPath $script:Python)) {'
+  const iGuard = pinsCode.indexOf(GUARD)
+  const iCall = pinsCode.indexOf('& $script:Python')
+  ok(iGuard >= 0 && iCall >= 0 && iGuard < iCall,
+    'Install-ComfyCorePins зовёт python_embeded без проверки (чистая установка падает на шаге 4/9)')
+  ok(/python_embeded ещё не установлен - пины ядра поставит шаг Python/.test(pinsFn),
+    'Install-ComfyCorePins молча пропускает пины, когда Python ещё не установлен')
+  ok(/return \$false/.test(pinsCode) && /return \$true/.test(pinsCode),
+    'Install-ComfyCorePins не возвращает результат (нельзя проверить, удалось ли поставить пины после Python)')
+  const confFn = inst.match(/function Confirm-ComfyAimdoPins \{[\s\S]*?\n\}/)?.[0] ?? ''
+  ok(confFn.length > 0, 'install.ps1: нет Confirm-ComfyAimdoPins (общая проверка comfy-aimdo)')
+  ok(confFn.includes('python_embeded'),
+    'Confirm-ComfyAimdoPins не учитывает, что Python ещё не установлен')
+  ok(confFn.replace(/^[ \t]*#.*$/gm, '').includes(GUARD),
+    'Confirm-ComfyAimdoPins без null-safe guard-а по $script:Python (Test-Path от $null = terminating error)')
+  ok((inst.match(/Fail \('comfy-aimdo /g) || []).length === 1,
+    'проверка comfy-aimdo дублируется в теле install.ps1 (старый инлайн-блок не убран)')
+  const calls = (inst.match(/Confirm-ComfyAimdoPins -App \$comfyApp -CoreVersion \$ComfyVersion/g) || []).length
+  ok(calls >= 2, 'соответствие comfy-aimdo проверяется только до шага Python — после Python не проверится')
+  const iPyStep = inst.indexOf("Step 5 9 'Библиотеки Python")
+  const iConfAfter = inst.indexOf('Confirm-ComfyAimdoPins -App $comfyApp -CoreVersion $ComfyVersion', iPyStep)
+  const iNodesStep = inst.indexOf('Step 6 9')
+  ok(iPyStep > 0 && iConfAfter > iPyStep && iConfAfter < iNodesStep,
+    'после шага Python+библиотеки нет проверки comfy-aimdo (битый канал пинов пройдёт незамеченным)')
+  // любой вызов пинов/aimdo ДО создания python_embeded (шаг [4/9]) безопасен
+  // только благодаря guard-у внутри функций — следим, чтобы ядро и Python по
+  // порядку не поменялись местами, и чтобы guard не выдумывал себе другой путь
+  const iPyCreate = inst.indexOf("'python-3.12.10-embed-amd64.zip'")
+  const iCorePinsCall = inst.indexOf('Install-ComfyCorePins $comfyApp')
+  const iConfCall = inst.indexOf('Confirm-ComfyAimdoPins -App $comfyApp -CoreVersion $ComfyVersion')
+  ok(iCorePinsCall > 0 && iPyCreate > 0 && iCorePinsCall < iPyCreate,
+    'первый вызов пинов ядра ожидается ДО скачивания python_embeded (ветка [4/9])')
+  ok(iConfCall > 0 && iConfCall < iPyCreate,
+    'первый вызов проверки comfy-aimdo ожидается ДО скачивания python_embeded')
+  ok(pinsCode.includes('Test-Path -LiteralPath $script:Python'),
+    'guard Install-ComfyCorePins должен проверять именно $script:Python')
+  ok(confFn.includes('Test-Path -LiteralPath $script:Python'),
+    'guard Confirm-ComfyAimdoPins должен проверять именно $script:Python')
+  // функции теперь что-то возвращают ($true/$false + строки Ok/Warn) — вызовы
+  // обязаны глушить конвейер, иначе в install.log полезут лишние строки
+  ok((inst.match(/Install-ComfyCorePins \$comfyApp \| Out-Null/g) || []).length >= 2,
+    'вызов Install-ComfyCorePins не глушит вывод (в лог поедут $true/$false и ok/warn)')
+  ok((inst.match(/Confirm-ComfyAimdoPins -App \$comfyApp -CoreVersion \$ComfyVersion \| Out-Null/g) || []).length >= 2,
+    'вызов Confirm-ComfyAimdoPins не глушит вывод')
+  // вызовы на шаге [4/9] обязаны быть в try: trap роняет весь установщик из
+  // любой непойманной ошибки, а пины всё равно переставляются на [5/9]
+  ok(/\r?\n\s*try \{\r?\n\s*Install-ComfyCorePins \$comfyApp \| Out-Null/.test(inst),
+    'Install-ComfyCorePins на шаге [4/9] не обёрнут в try (любая ошибка = смерть установки)')
+  ok(/try \{\r?\n\s*Confirm-ComfyAimdoPins -App \$comfyApp -CoreVersion \$ComfyVersion \| Out-Null/.test(inst),
+    'Confirm-ComfyAimdoPins на шаге [4/9] не обёрнут в try (любая ошибка = смерть установки)')
+  ok(/переносного Python ещё нет \(он на шаге \[5\/9\]\)/.test(inst),
+    'статус шага [4/9] не объясняет, что пины отложены до шага Python (заставка врёт)')
+  ok(/\$script:Python -and \(Test-Path -LiteralPath \$script:Python\)/.test(inst),
+    'статус шага [4/9] зовёт Test-Path без проверки $script:Python на $null')
+}
 
 console.log(`\nPASS=${pass} FAIL=${fails.length}`)
 for (const f of fails) console.log('FAIL:', f)

@@ -1311,31 +1311,80 @@ function Install-RequirementsUv {
 # диапазоны (av>=16) уже удовлетворены установленным.
 function Install-ComfyCorePins {
     param([string]$App)
+    # (правка 1156) Переносной Python появляется только на шаге [5/9], а пины
+    # дёргаются уже на [4/9] (сразу после ядра). Без проверки здесь зовётся
+    # & $script:Python, которого ещё нет, и PowerShell ронял весь установщик:
+    # «НЕПРЕДВЗЯТАЯ ОШИБКА: Имя "...\ComfyUI\python_embeded\python.exe" не
+    # распознано как имя командлета» - повторные запуски давали то же самое,
+    # и установка никогда не доходила до Python.
+    if (-not $script:Python -or -not (Test-Path -LiteralPath $script:Python)) {
+        Info 'python_embeded ещё не установлен - пины ядра поставит шаг Python+библиотеки'
+        return $false
+    }
     $req = Join-Path $App 'requirements.txt'
     if (-not (Test-Path -LiteralPath $req)) {
         Warn 'в ядре ComfyUI нет requirements.txt - пины ядра не проверялись'
-        return
+        return $false
     }
     $pins = @(Get-Content -LiteralPath $req -Encoding UTF8 |
         ForEach-Object { $_.Trim() } |
         Where-Object { $_ -and -not $_.StartsWith('#') -and $_ -match '==' })
     if ($pins.Count -eq 0) {
         Info 'в requirements.txt ядра нет точных пинов - ставить нечего'
-        return
+        return $false
     }
     Info ('пины ядра ComfyUI: ' + ($pins -join ', '))
     $bf = Join-Path $Cache 'core-pins.txt'
     [IO.File]::WriteAllLines($bf, $pins, (New-Object Text.ASCIIEncoding))
     if ($script:UvExe -and (Invoke-Uv @('pip', 'install', '--python', $script:Python, '--no-deps', '--no-progress', '-r', $bf))) {
         Ok ('пины ядра установлены (uv): ' + $pins.Count + ' пакет(ов)')
-        return
+        return $true
     }
     & $script:Python -m pip install --quiet --no-deps --no-warn-script-location --disable-pip-version-check -r $bf
     if ($LASTEXITCODE -ne 0) {
         Warn ('не удалось поставить пины ядра (код ' + $LASTEXITCODE + ') - ComfyUI может запросить их сам при первом запуске')
-    } else {
-        Ok ('пины ядра установлены (pip): ' + $pins.Count + ' пакет(ов)')
+        return $false
     }
+    Ok ('пины ядра установлены (pip): ' + $pins.Count + ' пакет(ов)')
+    return $true
+}
+
+# (правка 1156) Соответствие comfy-aimdo поколению ядра + дозаписка пинов.
+# Вызывается и после ядра [4/9], и после Python+библиотек [5/9]: до Python
+# проверка бессмысленна (пакетов ещё нет), поэтому здесь она просто сообщает
+# об этом и не считает ошибкой.
+function Confirm-ComfyAimdoPins {
+    param([string]$App, [string]$CoreVersion)
+    # Порог берётся из $script:CoreRollback (параметр установщика -CoreRollback):
+    # у откатного ядра comfy-aimdo обязан быть < 0.5.0, у актуального - >= 0.5.0
+    if (-not $script:Python -or -not (Test-Path -LiteralPath $script:Python)) {
+        Info 'python_embeded ещё не установлен - соответствие comfy-aimdo проверю после шага Python+библиотеки'
+        return $true
+    }
+    $aimdo = Get-InstalledAimdoVersion $Root $App
+    $aimdoOk = if ($CoreRollback) {
+        $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
+    } else {
+        $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
+    }
+    if (-not $aimdoOk) {
+        Warn ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не найден' }) + ' не соответствует ядру ' + $CoreVersion + ' - ставлю пины ядра')
+        # результат глушим: Ok/Warn внутри пишут в конвейер, и он примешался бы
+        # к нашему возвращаемому значению
+        $null = Install-ComfyCorePins $App
+        $aimdo = Get-InstalledAimdoVersion $Root $App
+        $aimdoOk = if ($CoreRollback) {
+            $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
+        } else {
+            $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
+        }
+    }
+    if (-not $aimdoOk) {
+        Fail ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не установлен' }) + ' несовместим с ядром ' + $CoreVersion + ' - ComfyUI не запустится; проверьте сеть и повторите смену ядра')
+        return $false
+    }
+    Ok ('comfy-aimdo ' + $aimdo + ' соответствует ядру ' + $CoreVersion)
+    return $true
 }
 
 # (правка 1080) Какой набор патчей ядра соответствует версии ComfyUI. Та же
@@ -2397,8 +2446,16 @@ if (-not $SkipComfy) {
         # comfyui-frontend-package, workflow-templates и embedded-docs. Ставим их
         # из requirements.txt нового ядра (только строки с точным пином `==`:
         # голые имена вроде torch тянули бы свежий torch и ломали CUDA-сборку).
-        Write-SetupStatus 'running' 4 9 ('Python-пины ядра ' + $ComfyVersion) 'comfy-aimdo, comfy-kitchen и frontend ставятся из requirements.txt нового ядра: 1-3 минуты, нужна сеть'
-        Install-ComfyCorePins $comfyApp
+        Write-SetupStatus 'running' 4 9 ('Python-пины ядра ' + $ComfyVersion) $(if ($script:Python -and (Test-Path -LiteralPath $script:Python)) { 'comfy-aimdo, comfy-kitchen и frontend ставятся из requirements.txt нового ядра: 1-3 минуты, нужна сеть' } else { 'переносного Python ещё нет (он на шаге [5/9]) - пины ядра встанут там же' })
+        # (правка 1156) результат глушим: возвращаемое $true/$false и строки
+        # Ok/Warn ('ok'/'warn') иначе печатались бы отдельными строками лога.
+        # Обёрнуто в try: шаг [4/9] не должен ронять всю установку - пины всё
+        # равно переставляются на шаге [5/9] после Python+библиотек.
+        try {
+            Install-ComfyCorePins $comfyApp | Out-Null
+        } catch {
+            Warn ('пины ядра на шаге [4/9] не поставились: ' + $_.Exception.Message + ' - переставлю на шаге [5/9]')
+        }
         # Выбор канала помечаем, чтобы обычный ремонт позже молча не вернул
         # прежнее поколение.
         try {
@@ -2411,27 +2468,14 @@ if (-not $SkipComfy) {
     # (правка 1088) Пины и канал проверяем даже когда ядро уже стоит: оборванная
     # смена (например, нет сети при скачивании пинов) оставляла 0.33 с aimdo 0.6,
     # а повторный запуск видел совпадение версии ядра и пропускал установку пинов.
+    # (правка 1156) Та же проверка - после шага Python+библиотеки: при чистой
+    # установке здесь python_embeded ещё нет, и проверка внутри сообщит об этом,
+    # а не уронит установщик.
     if ($hasCore) {
-        $aimdo = Get-InstalledAimdoVersion $Root $comfyApp
-        $aimdoOk = if ($CoreRollback) {
-            $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
-        } else {
-            $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
-        }
-        if (-not $aimdoOk) {
-            Warn ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не найден' }) + ' не соответствует ядру ' + $ComfyVersion + ' - ставлю пины ядра')
-            Install-ComfyCorePins $comfyApp
-            $aimdo = Get-InstalledAimdoVersion $Root $comfyApp
-            $aimdoOk = if ($CoreRollback) {
-                $aimdo -and -not (Test-VersionAtLeast $aimdo '0.5.0')
-            } else {
-                $aimdo -and (Test-VersionAtLeast $aimdo '0.5.0')
-            }
-        }
-        if (-not $aimdoOk) {
-            Fail ('comfy-aimdo ' + $(if ($aimdo) { $aimdo } else { 'не установлен' }) + ' несовместим с ядром ' + $ComfyVersion + ' - ComfyUI не запустится; проверьте сеть и повторите смену ядра')
-        } else {
-            Ok ('comfy-aimdo ' + $aimdo + ' соответствует ядру ' + $ComfyVersion)
+        try {
+            Confirm-ComfyAimdoPins -App $comfyApp -CoreVersion $ComfyVersion | Out-Null
+        } catch {
+            Warn ('проверка comfy-aimdo на шаге [4/9] не удалась: ' + $_.Exception.Message + ' - проверю после шага [5/9]')
         }
     }
 
@@ -2573,7 +2617,11 @@ if (-not $SkipComfy) {
     # откатном 0.33 они перетирали пины из шага 4 (comfy-aimdo 0.4.13 и др.),
     # и ComfyUI 0.33 не запускался с aimdo 0.6. Возвращаем пины выбранного
     # ядра после общей установки — для 0.44 это те же версии, идемпотентно.
-    Install-ComfyCorePins $comfyApp
+    Install-ComfyCorePins $comfyApp | Out-Null
+    # (правка 1156) Вот здесь python_embeded уже есть - здесь и честная
+    # проверка соответствия comfy-aimdo поколению ядра (на шаге [4/9] она была
+    # бессмысленной и только роняла установщик).
+    Confirm-ComfyAimdoPins -App $comfyApp -CoreVersion $ComfyVersion | Out-Null
 
     # --- 6. кастомные ноды ---
     Step 6 9 'Кастомные ноды (22 из GitHub + 5 локальных)' '22 архива с GitHub: 2-10 минут. Если отдельная нода не импортируется - студия всё равно работает, список ошибок будет в конце'

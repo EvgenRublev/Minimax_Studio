@@ -130,14 +130,24 @@ ComfyUI/            ← comfyRoot == comfyCore
    python.org, релизные ассеты GitHub); для архивов тегов GitHub (`codeload`,
    `archive/refs/tags`) сумма проверяется только у бандла — GitHub пересобирает их
    не байт-в-байт.
-3. **Проверка перед релизом:** `node scripts/check-installer.mjs` (177 проверок:
+3. **Проверка перед релизом:** `node scripts/check-installer.mjs` (323 проверки:
    sha256 всего бандла, версии из `install.ps1`/`package.json` против имён файлов
-   бандла, наличие всей механики целостности, кодировки `.ps1`). Уже вшит в
-   `scripts/release.mjs` как обязательный шаг verify.
-4. **Поведенческий тест:** `powershell -NoProfile -ExecutionPolicy Bypass -File
-   scripts/installer-integrity-test.ps1` — вытаскивает реальные блоки из
-   `install/install.ps1` и гоняет их на поддельных файлах (валидный zip,
-   обрезанный zip, HTML вместо архива, осколки докачки). Сеть и ГПУ не нужны.
+   бандла, наличие всей механики целостности, порядок шагов ядро→Python,
+   кодировки `.ps1`). Уже вшит в `scripts/release.mjs` как обязательный шаг verify.
+4. **Поведенческие тесты** (все три в `scripts/release.mjs`, сеть/ГПУ/админ не
+   нужны, каждый вытаскивает реальные блоки из `install/install.ps1`):
+   `scripts/installer-integrity-test.ps1` — валидный zip, обрезанный zip, HTML
+   вместо архива, осколки докачки; `scripts/installer-heartbeat-test.ps1` —
+   заставка не считает долгий шаг мёртвым; `scripts/installer-core-pins-test.ps1`
+   (правка 1157) — пины ядра/comfy-aimdo нельзя звать раньше `python_embeded`.
+   **Инвариант порядка шагов:** `python_embeded` появляется только на `[5/9]`;
+   любой вызов `Install-ComfyCorePins` / `Confirm-ComfyAimdoPins` / `Invoke-Pip`
+   на шаге `[4/9]` обязан иметь проверку `Test-Path $script:Python` внутри,
+   иначе `& $script:Python` = terminating error и `trap { exit 1 }` роняет
+   всю установку (правка 1156 — чистые установки валились на `[4/9]`).
+   Функции, что-то возвращающие, в установщике зовутся с `| Out-Null`, а вызовы
+   на `[4/9]` — ещё и в `try`. Поведенческие `.ps1` в `scripts\` с кириллицей
+   обязаны быть UTF-8 с BOM (проверяется тем же `check-installer.mjs`).
 5. **Осторожно с регистром имён в PowerShell:** параметр `$Kind` и локальная
    `$kind` — одна переменная (реальный баг правки 939: проверка типа архива
    always-pass). Локальные переменные не должны совпадать с параметрами.

@@ -110,12 +110,15 @@ if (!run('server i18n hooks check', process.execPath, ['scripts/check-server-i18
 
 // (правка 941) Поведенческие тесты установщика на реальном коде install.ps1:
 // распаковка битых архивов (обрезанный zip, HTML вместо архива, осколки докачки)
-// и heartbeat статуса (заставка не должна считать долгий шаг мёртвым). Сеть,
+// и heartbeat статуса (заставка не должна считать долгий шаг мёртвым).
+// (правка 1157) + тест порядка шагов: пины comfy-aimdo нельзя звать раньше, чем
+// установлен python_embeded (чистые установки валились на шаге [4/9]). Сеть,
 // ГПУ и администратор не нужны; heartbeat-тест идёт ~30 с.
 const powershell = process.env.SystemRoot
   ? join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   : 'powershell.exe';
-for (const t of ['scripts/installer-integrity-test.ps1', 'scripts/installer-heartbeat-test.ps1']) {
+for (const t of ['scripts/installer-integrity-test.ps1', 'scripts/installer-heartbeat-test.ps1',
+  'scripts/installer-core-pins-test.ps1']) {
   if (!existsSync(join(ROOT, t))) {
     console.error(`[release] нет ${t} — нечего проверять`);
     process.exit(1);
